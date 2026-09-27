@@ -1,2 +1,6 @@
 # Local Pi runtime state
 .atl/
+
+# Node.js dependencies and generated output
+node_modules/
+dist/

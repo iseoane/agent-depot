@@ -1,0 +1,20 @@
+{
+  "name": "agent-depot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A cross-platform catalog for reusable coding-agent skills.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build && node --test \"dist/**/*.test.js\"",
+    "test:single": "pnpm build && node -e \"const { spawnSync } = require('node:child_process'); const input = process.argv[1] || 'tests/version.test.ts'; const file = input.replace(/^tests[\\\\/]/, 'dist/tests/').replace(/\\\\.ts$/i, '.js'); process.exit(spawnSync(process.execPath, ['--test', file], { stdio: 'inherit' }).status ?? 1);\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.10",
+    "typescript": "^5.7.2"
+  }
+}
