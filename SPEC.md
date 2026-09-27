@@ -1,8 +1,8 @@
 # Agent Depot — Product Specification
 
-**Status:** Draft — product scope and delivery constraints captured; technical design remains open.
+**Status:** Functional V1 specification closed; technical implementation details remain open.
 
-Agent Depot is a cross-platform CLI for discovering, selecting, installing, updating, and removing reusable coding-agent resources and applications. It manages resources from user-owned or external sources across projects and user-global installations.
+Agent Depot is a cross-platform CLI for discovering, selecting, installing, updating, and removing portable directory-based skills across supported coding-agent hosts and project or user-global scopes.
 
 ## V1 at a glance
 
@@ -13,82 +13,102 @@ Agent Depot is a cross-platform CLI for discovering, selecting, installing, upda
 | Package workflow | pnpm preferred; retain npm compatibility. |
 | Invocation | Support `pnpm dlx` and `npx`, plus persistent global installation. |
 | Platforms | Linux and Windows. |
-| Hosts | Pi, Claude Code, Codex, and OpenCode. The user chooses compatible hosts for each operation. |
-| Source catalog | Sources are registered globally and reusable across projects. |
-| Project selection | A versionable project manifest records selected resources and version policies. It contains enough source and resource identity to resolve on a fresh machine. |
+| Hosts | Pi, Claude Code, Codex, and OpenCode. The user chooses compatible hosts for each operation involving skills. |
+| Confirmed V1 resource scope | Portable directory-based skills only. CLI applications, agent definitions, plugins/extensions, and MCP servers are deferred and not committed to V1. |
+| Selected V1 skill format | “Solo SKILL.md portable”: a managed skill is a portable directory containing `SKILL.md` with required `name` and `description` metadata. Pi-only standalone Markdown skill files are not managed in V1. |
+| Canonical skill paths | New project-scoped skill installations use `.agents/skills`; new user-global installations use `~/.agents/skills`, including when Claude Code is the only selected host. For Claude Code, create a symlink entry under `.claude/skills` or `~/.claude/skills` pointing to the canonical skill directory. A matching pre-existing skill is adopted in place and its actual location is tracked; later exposure at an additional host location requires explicit confirmation. If symlink creation fails, including on Windows, stop that target operation with actionable guidance; do not create a duplicate managed copy. |
+| Built-in resources | The built-in first-party collection is available without external registration and is selectable as a Source. It is read-only through the app and package-owned: package releases expose newer content, while users can select/install/update its Skills and Agent Depot changes installed copies only through the normal update batch. |
+| Source catalog | External Sources can be added by URL, listed, and refreshed at the same stable URL. Sources are registered globally and reusable across projects; no external Sources are preconfigured by Agent Depot. The catalog and user-global installation state live in one per-user JSON file. |
+| Project selection | A versionable `agent-depot.json` at the project root records selected skills and version policies. It contains enough source and skill identity to resolve on a fresh machine. |
 | Install scopes | Project and user-global installations are independent, including their installed-version state. |
+
+## Design principle
+
+Keep the V1 architecture as small as possible while satisfying the agreed requirements. Prefer direct, explicit handling over general-purpose extension frameworks; add abstractions only when concrete supported cases require them.
 
 ## Core concepts
 
-- **Source:** An upstream repository or location from which resources can be discovered. Registering a source does not select every resource it contains.
-- **Managed resource:** A selected item that Agent Depot tracks for installation and updates. Initial categories are skills, agents, plugins/extensions, MCP servers, and CLI applications.
-- **Resource category:** A resource classification that informs host compatibility and the appropriate management method. Use clear upstream metadata; ask the user when category information is absent or ambiguous.
-- **Installation method:** The official upstream method or a user-provided method for installing or updating a resource.
-- **Project manifest:** A versionable project file identifying selected resources, their source URLs/resource identities, and version policies. It must be usable without first registering those sources in the current user's global catalog.
-- **User catalog:** The user's globally reusable source list and managed-resource records. `pnpm dlx`, `npx`, and the globally installed CLI share this state.
-- **Installation scope:** Either project-scoped or user-global. The same resource installed in both scopes is tracked as two independent installations.
+- **Source:** An upstream repository or location from which skills can be discovered. This includes Agent Depot's built-in first-party collection and external Sources. Users can add external Sources by URL, list registered Sources, and refresh a Source at the same stable URL. Changing the URL/ref creates a new Source identity rather than editing in place; existing selections must be explicitly migrated before the old Source is removed. The built-in collection is selectable as a Source without external registration.
+- **Built-in resource:** A first-party skill in the package-owned, read-only-through-the-app built-in catalog, available without external Source registration. Users can select, install, and update its Skills; package releases change the catalog, and Agent Depot changes installed copies only through the normal update batch. In V1, its version is the Agent Depot package version.
+- **Managed resource:** A selected skill that Agent Depot tracks for installation and updates. Other resource categories are deferred and not committed to V1.
+- **Resource category:** A resource classification that informs skill discovery and host compatibility. Skill is the only confirmed V1 category; CLI applications, agent definitions, plugins/extensions, and MCP servers are deferred.
+- **Skill:** A portable directory containing `SKILL.md` with required `name` and `description` metadata, optionally accompanied by supporting files. Pi-only standalone Markdown skill files are not managed in V1.
+- **Skill target mapping:** The shared canonical skill directory is used for project and user-global installations. When Claude Code is selected, a symlink entry exposes that canonical directory through Claude Code's documented skill location; this may also expose the skill to Pi, Codex, or OpenCode even when only Claude Code was selected.
+- **Installation method:** The official upstream method or a user-provided method for installing or updating a skill.
+- **Project manifest:** The versionable `agent-depot.json` file at a project's root, identifying selected project skills by source and skill/path, with a version policy and optional user-provided install/update commands when no upstream method is available. Command fields must not contain secrets. V1 allows one custom command per method, with no OS-specific variants; commands must work on both Linux and Windows. The manifest must be usable without first registering its sources in the current user's global catalog.
+- **Global state file:** One JSON file in the standard per-user configuration location. It holds globally reusable sources, user-global managed-skill records, and any user-provided methods for user-global installations. `pnpm dlx`, `npx`, and the globally installed CLI share this state.
+- **Installation scope:** Either project-scoped or user-global. The same skill installed in both scopes is tracked as two independent installations.
 
 ## Requirements
 
 ### Discover and select
 
-1. Users can register an upstream source by URL and discover resources within it, or add a specific resource directly. Both paths may be used together.
-2. Users can manage resources from this project's own collection as well as external sources.
-3. Registering a source alone does not enroll all of its resources in `all`; only resources selected for management are eligible.
-4. The initial managed-resource categories are skills, agents, plugins/extensions, MCP servers, and CLI applications.
-5. When category or resource identity cannot be determined reliably from source metadata, Agent Depot asks the user rather than silently guessing.
+1. Before discovery, users choose which registered external and/or built-in Sources to scan. Discovery scans only the chosen Sources; registering or refreshing a Source does not auto-select or install Skills. Users can discover skills within a chosen Source or add a specific skill directly. Both paths may be used together. Agent Depot discovers only recognized resource formats; for V1 skills, discovery recursively scans the source repository for valid portable skill directories, recognized only when a candidate directory contains `SKILL.md` with required `name` and `description` metadata. Automatic discovery excludes explicitly lifecycle-marked subtrees from ordinary candidate results, with examples including `in-progress`, `beta`, `deprecated`, and `retired`; it does not delete or modify source content. Pi-only standalone Markdown skill files are not managed. When a repository is unrecognized, the user can specify the skill/path explicitly; this manual fallback does not make an unsupported file format a supported skill. The exact lifecycle marker set and whether explicit path addition overrides the scan filter remain implementation details; source-scan exclusion must not silently select or install anything.
+2. Users can add external Sources by URL, list registered Sources, and refresh a Source at the same stable URL. Changing a Source URL/ref creates a new Source identity rather than editing in place; existing selections must be explicitly migrated before the old Source is removed. Users can manage Skills from this project's built-in first-party collection and external Sources. The built-in collection is available without external registration and is selectable as a Source. Its catalog is read-only through the app and package-owned; users may select, install, and update its Skills, package releases change its content, and Agent Depot changes installed copies only through the normal update batch.
+3. Registering or refreshing a Source alone does not select or install Skills or enroll all of its Skills in `all`; only Skills selected for management are eligible.
+4. Portable directory-based skills are the only confirmed V1 managed-resource category. CLI applications, agent definitions, plugins/extensions, and MCP servers are deferred and not committed to V1.
+5. When a source does not identify a supported skill reliably, Agent Depot asks the user rather than silently guessing or treating a deferred category as a V1 skill.
 
 ### Install and track
 
-6. Users can install selected resources for an explicitly chosen host set and either project or user-global scope. Automation requires an explicit scope; interactive operation may prompt for it.
-7. `all` means all selected resources compatible with the chosen hosts and scope; it never means all content in every registered repository.
-8. A project manifest stores the selected resources and their version policies, including enough source URL and resource identity to resolve them after cloning on a machine with an empty global catalog.
-9. Project and user-global installations maintain independent state and installed versions.
-10. Agent Depot uses each resource's applicable upstream installation method when available and allows a user-provided method as an alternative.
-11. Before executing an external command supplied by a user or resource source, Agent Depot shows what will run and requires explicit confirmation.
+6. Users can install selected skills for an explicitly chosen compatible host set, in either project or user-global scope. Automation requires an explicit scope; interactive operation may prompt for it. New skill installations use the canonical shared directory for the selected scope; when Claude Code is selected, Agent Depot creates the corresponding Claude Code symlink entry. If symlink creation fails, including on Windows, Agent Depot stops that target operation with actionable guidance and does not create a duplicate managed copy. This shared-path choice may expose a Claude-only selection to Pi, Codex, or OpenCode. A matching pre-existing skill is adopted in place regardless of its location, with that actual location tracked; moving it or creating an additional host-location link or copy later requires explicit confirmation.
+7. `all` means all selected skills compatible with the chosen hosts and scope; it never means all content in every registered repository.
+8. A skill incompatible with a selected host remains visible with the incompatibility reason and is excluded from `all`; Agent Depot must not install it for that host.
+9. The project's root `agent-depot.json` stores selected skills, each skill's source and resource/path identity, version policy, and optional user-provided install/update commands. It contains enough information to resolve skills after cloning on a machine with an empty global catalog.
+10. Project and user-global installations maintain independent state and installed versions. An already installed skill may be adopted into tracking without reinstalling when its content exactly matches the selected source, including when it is already installed at a noncanonical location; adoption tracks its actual location and does not replace or move it. If later host exposure requires another location, Agent Depot asks for explicit confirmation before moving the skill or creating an additional link or copy. A same-name skill with different content is a conflict and must not be overwritten without explicit confirmation.
+11. Agent Depot uses the skill's applicable upstream installation method when available. If a user-provided method is needed, store it alongside the skill in `agent-depot.json` for project scope or the global state file for user-global scope. V1 allows one custom command per method, with no OS-specific variants; commands must work on both Linux and Windows and must not contain secrets.
+12. Before executing an external command supplied by a user or skill source, Agent Depot shows what will run and requires explicit confirmation.
 
 ### Check and apply updates
 
-12. Users can select a fixed version or `latest` as the version policy for a resource installation.
-13. Agent Depot checks installed resources for a newer version and presents available updates together, rather than prompting one resource at a time. If version status cannot be determined, it reports the status as unknown and does not present the resource as an available update.
-14. From that batch, users can choose to update all available resources or a selected subset. Updates use each resource's applicable method and respect its configured version policy. If an independent resource update fails, Agent Depot continues with the remaining selected resources and summarizes successes and failures.
-15. `pnpm dlx`, `npx`, and a persistent global installation use the same user catalog/configuration, so changing invocation mode does not create a second inventory.
-16. Updating or removing Agent Depot itself is delegated to the package manager used to install the persistent CLI; Agent Depot does not require a separate self-updater.
+13. Users can select a fixed version or `latest` as the version policy for a skill installation.
+14. Agent Depot checks installed skills for a newer version and presents available updates together, rather than prompting one skill at a time. If version status cannot be determined, it reports the status as unknown and does not present the skill as an available update. For built-in skills, the V1 version is the Agent Depot package version: a package release exposes newer built-in content, but the package-owned catalog is read-only through the app and Agent Depot changes installed copies only through the normal update batch.
+15. From that batch, users can choose to update all available skills or a selected subset. Updates use each skill's applicable method and respect its configured version policy. If an independent skill update fails, Agent Depot continues with the remaining selected skills and summarizes successes and failures.
+16. `pnpm dlx`, `npx`, and a persistent global installation use the same single per-user JSON catalog/configuration file, so changing invocation mode does not create a second inventory.
+17. Updating or removing Agent Depot itself is delegated to the package manager used to install the persistent CLI; Agent Depot does not require a separate self-updater.
 
-### Remove sources, resources, and Agent Depot
+### Remove sources, skills, and Agent Depot
 
-17. Removing a registered source does not uninstall its resources automatically.
-18. When removing a source, Agent Depot lists dependent resources that remain installed and lets the user keep all, uninstall selected resources, or uninstall all. Installed resources kept after source removal remain tracked in the catalog; updates can resume if the source is registered again or another method is configured.
-19. Resource uninstallation requires explicit confirmation.
-20. When uninstalling Agent Depot, the user can independently choose whether to remove the persistent CLI, managed resources, and catalog/configuration data. The default is to preserve managed resources and catalog/configuration data.
+18. Removing a registered source does not uninstall its skills automatically.
+19. When removing a source, Agent Depot lists dependent skills that remain installed and lets the user keep all, uninstall selected skills, or uninstall all. Installed skills kept after source removal remain tracked in the catalog; updates can resume if the source is registered again or another method is configured.
+20. Skill uninstallation requires explicit confirmation.
+21. When uninstalling Agent Depot, the user can independently choose whether to remove the persistent CLI, managed skills, and catalog/configuration data. The default is to preserve managed skills and catalog/configuration data.
 
 ## Acceptance checks
 
-- Registering a repository exposes its discoverable resources without silently selecting all of them.
-- A selected resource can be installed for a chosen compatible host and project/global scope.
-- A project manifest can resolve its selected resources on another machine without pre-registering its source URLs globally.
-- `all` affects only selected resources compatible with the chosen hosts and scope.
-- An update check presents all available newer versions together and allows all-or-subset selection; resources whose version status is unknown are identified separately, not treated as updateable.
+- After the user chooses one or more registered external and/or built-in Sources, discovery scans only those Sources and exposes skills in recognized formats without silently selecting all of them; portable skills are recognized only when their directory contains `SKILL.md` with required `name` and `description` metadata, and Pi-only standalone Markdown skill files are excluded. Automatic discovery excludes explicitly lifecycle-marked subtrees, such as `in-progress`, `beta`, `deprecated`, or `retired`, without deleting or modifying source content. If none are recognized, the user can specify a skill/path explicitly, without making an unsupported file format a supported skill; the exact marker set and whether explicit path addition overrides the scan filter remain open, and exclusion never silently selects or installs anything.
+- External Sources can be added by URL, listed, and refreshed at the same stable URL. Changing a URL/ref creates a new Source identity rather than an in-place edit; existing selections must be explicitly migrated before the old Source is removed. Registering or refreshing a Source does not auto-select or install Skills.
+- Agent Depot preconfigures no external Sources. The built-in catalog is available without external registration and is selectable as a Source; it is read-only through the app and package-owned. Users can select, install, and update its Skills, package releases change its content, and Agent Depot changes installed copies only through the normal update batch.
+- A selected skill can be newly installed for a chosen compatible host and project/global scope, using `.agents/skills` or `~/.agents/skills` as the canonical path; when Claude Code is selected, its `.claude/skills` or `~/.claude/skills` entry is a symlink to that canonical directory, without implying that Claude Code natively scans `.agents/skills`. If symlink creation fails, including on Windows, the target operation stops with actionable guidance and no duplicate managed copy is created.
+- An already installed skill is adopted in place without reinstalling when its content exactly matches the selected source, including at a noncanonical location, and its actual location is tracked. Moving it or creating an additional host-location link or copy requires explicit confirmation; a same-name, different-content installation is surfaced as a conflict and is not overwritten without explicit confirmation.
+- A project's root `agent-depot.json` can resolve its selected skills and optional user-provided install/update methods on another machine without pre-registering its source URLs globally; custom commands are portable across Linux and Windows, and commands are previewed and require confirmation before execution.
+- `all` affects only selected skills compatible with their hosts and scope; incompatible skills remain visible with a reason and are not installed.
+- An update check presents all available newer skill versions together and allows all-or-subset selection; skills whose version status is unknown are identified separately, not treated as updateable.
+- A package update exposes a newer version of each applicable built-in skill without silently changing installed copies; the normal skill update batch is required to update them.
 - Removing a source preserves installed dependents unless the user selects them for uninstall.
-- If one selected resource fails to update, independent selected updates still proceed and the final summary identifies the failures.
+- If one selected skill fails to update, independent selected updates still proceed and the final summary identifies the failures.
 - Invocations via `pnpm dlx`, `npx`, and the global CLI observe the same user catalog/configuration.
-- Uninstalling Agent Depot preserves resources and user data by default and asks separately about each removal category.
-- The CLI works on Linux and Windows for the supported V1 resource/host combinations.
+- Uninstalling Agent Depot preserves skills and user data by default and asks separately about each removal category.
+- The CLI works on Linux and Windows for the supported V1 skill/host combinations.
 
 ## Explicitly later or out of scope for V1
 
 - A TUI; the initial interface is a CLI.
+- CLI applications, agent definitions, plugins/extensions, and MCP servers; these categories are deferred and not committed to V1 pending future scope decisions.
+- Pi-only standalone Markdown skill files; V1 manages only portable skill directories containing `SKILL.md`.
 - Silent execution of third-party commands.
-- Automatically enrolling every resource from a registered source in `all`.
+- Automatically enrolling every skill from a registered source in `all`.
 - Agent Depot implementing its own update mechanism instead of relying on the package manager.
 
 ## Open design decisions
 
-These do not block the functional direction above, but must be resolved before implementation:
+These do not block the closed functional V1 direction, but must be resolved before implementation:
 
 1. Minimum supported Node.js version and package name/registry publication details.
-2. Project manifest filename, schema, and how it represents resource identity and version targets.
-3. Per-user catalog/configuration paths on Linux and Windows, plus data migration and purge behavior.
-4. Per-host and per-category compatibility detection and installation/update adapters.
-5. How version availability is determined for resources whose upstream methods do not expose a standard version.
-6. CLI command grammar, prompts, error handling, and behavior when a batch partially fails.
+2. `agent-depot.json` and global state JSON schemas, including skill identity, version targets, and optional command fields.
+3. The exact standard per-user configuration paths on Linux and Windows, plus data migration and purge behavior.
+4. The recursive source-tree scan for portable skills and exclusion of explicitly lifecycle-marked subtrees (for example, `in-progress`, `beta`, `deprecated`, or `retired`) are established. The exact lifecycle marker set, whether explicit path addition overrides the scan filter, other scan exclusions (including ignored, generated, or vendor directories and symlinks), duplicate skill-name handling, collision behavior, and edge validation rules for required `SKILL.md` metadata/frontmatter remain open. Exclusion must not silently select or install anything.
+5. The exact Windows mechanics for creating the Claude Code symlink and the required Windows runtime validation remain implementation/check prerequisites; the failure policy is fixed: if symlink creation fails, including on Windows, stop that target operation with actionable guidance and do not create a duplicate managed copy. The exact content-comparison method for adoption, the user interaction used to resolve same-name content conflicts, and the user interaction used to approve later additional host locations remain open.
+6. Per-host skill compatibility detection and installation/update methods.
+7. Which upstream metadata or checks provide comparable version signals for skills; when no reliable signal exists, status is unknown and the skill is not treated as updateable.
+8. CLI command grammar, prompts, and user-facing error/reporting format beyond the established rule to continue independent batch updates after a failure.
