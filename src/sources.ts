@@ -241,6 +241,11 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
     },
 
     async addUserGlobalInstallation(selection: ProjectSkillSelection): Promise<void> {
+      if (selection.installation === undefined) {
+        throw new SourceSelectionError(
+          `User-global Skill ${JSON.stringify(selection.path)} must include an installation location`,
+        );
+      }
       await stateStore.update((state) => {
         const identity = JSON.stringify([selection.source, selection.path]);
         if (state.userGlobalInstallations.some((candidate) => JSON.stringify([candidate.source, candidate.path]) === identity)) {

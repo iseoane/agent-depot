@@ -217,6 +217,46 @@ test("loads legacy Source state and persists user-global installations in the sh
   });
 });
 
+test("rejects persisted user-global installations without an installation location", async () => {
+  await withState(async (statePath, gitAccess) => {
+    const contents = JSON.stringify({
+      version: 1,
+      gitSources: [],
+      userGlobalInstallations: [{
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: "portable/demo",
+        version: { policy: "latest" },
+        hosts: ["pi"],
+      }],
+    });
+    await writeFile(statePath, contents, "utf8");
+    const operations = createSourceOperations({ statePath, gitAccess });
+
+    await assert.rejects(
+      operations.listUserGlobalInstallations!(),
+      (error: unknown) => error instanceof SourceStateError && error.message.includes("installation location"),
+    );
+    assert.equal(await readFile(statePath, "utf8"), contents);
+  });
+});
+
+test("rejects adding a user-global installation without an installation location", async () => {
+  await withState(async (statePath, gitAccess) => {
+    const operations = createSourceOperations({ statePath, gitAccess });
+
+    await assert.rejects(
+      operations.addUserGlobalInstallation!({
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: "portable/demo",
+        version: { policy: "latest" },
+        hosts: ["pi"],
+      }),
+      (error: unknown) => error instanceof SourceSelectionError && error.message.includes("installation location"),
+    );
+    assert.equal(await readFile(statePath).catch(() => undefined), undefined);
+  });
+});
+
 test("uses portable per-user state locations on Linux and Windows", () => {
   assert.equal(
     defaultSourceStatePath({ XDG_STATE_HOME: "/state" }, "linux", "/home/alice"),

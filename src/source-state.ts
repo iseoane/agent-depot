@@ -105,6 +105,9 @@ function parseState(value: unknown, statePath: string): PersistedSourceState {
       if (!parsed) {
         throw new Error("the installation record is missing");
       }
+      if (parsed.installation === undefined) {
+        throw new Error("the installation record must include an installation location");
+      }
       const identity = JSON.stringify([parsed.source, parsed.path]);
       if (installationIdentities.has(identity)) {
         throw new Error("the installation duplicates another user-global Skill");
