@@ -3,6 +3,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import type { SkillCandidate } from "./skill-discovery.js";
 import {
   BuiltInSourceError,
   createSourceOperations,
@@ -22,7 +23,9 @@ const USAGE = [
   "  agent-depot source list",
   "  agent-depot source add <url>",
   "  agent-depot source refresh <id> [--yes]",
+  "  agent-depot discover <source-id> [source-id...]",
 ].join("\n");
+const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 
 /** Runs the CLI application and returns a process exit code. */
 export async function runCli(argv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
@@ -31,6 +34,26 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
   const operations = dependencies.operations ?? createSourceOperations();
 
   try {
+    if (argv[0] === "discover") {
+      const sourceIds = argv.slice(1);
+      requireSourceIds(sourceIds);
+      const discoverSkills = operations.discoverSkills;
+      if (!discoverSkills) {
+        throw new CliUsageError("Discovery is unavailable in the configured Source operations");
+      }
+
+      let candidates: readonly SkillCandidate[];
+      try {
+        candidates = await discoverSkills(sourceIds);
+      } catch (error) {
+        throw new Error(formatDiscoveryError(error));
+      }
+      for (const candidate of candidates) {
+        output(formatCandidate(candidate));
+      }
+      return 0;
+    }
+
     if (argv[0] !== "source") {
       throw new CliUsageError(USAGE);
     }
@@ -87,6 +110,22 @@ function formatSource(source: Source): string {
   return `${source.id}\tgit\t${source.url}`;
 }
 
+function formatCandidate(candidate: SkillCandidate): string {
+  const description = candidate.description.replace(/[\r\n]+/gu, "\\n");
+  return `Candidate: ${candidate.sourceId}\t${candidate.path}\t${candidate.name}\t${description}`;
+}
+
+function formatDiscoveryError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "unknown discovery error";
+  if (error instanceof SourceNotFoundError) {
+    return `${message}. Run \`agent-depot source list\` and pass a registered Source ID`;
+  }
+  if (message.startsWith("Git Source mirror is not available:")) {
+    return `${message}. Refresh the selected Git Source with \`agent-depot source refresh <source-id> --yes\` before discovering`;
+  }
+  return message;
+}
+
 async function findSource(operations: SourceOperations, sourceId: string): Promise<Source> {
   const source = (await operations.listSources()).find((candidate) => candidate.id === sourceId);
   if (!source) {
@@ -98,6 +137,12 @@ async function findSource(operations: SourceOperations, sourceId: string): Promi
 function requireArgumentCount(values: readonly string[], expected: number, usage: string): void {
   if (values.length !== expected) {
     throw new CliUsageError(`Usage: agent-depot ${usage}`);
+  }
+}
+
+function requireSourceIds(sourceIds: readonly string[]): void {
+  if (sourceIds.length === 0) {
+    throw new CliUsageError(DISCOVER_USAGE);
   }
 }
 

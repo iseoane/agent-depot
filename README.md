@@ -12,6 +12,7 @@ node dist/src/cli.js source list
 node dist/src/cli.js source add https://github.com/example/skills.git
 node dist/src/cli.js source refresh git:<source-id>
 node dist/src/cli.js source refresh git:<source-id> --yes
+node dist/src/cli.js discover builtin:agent-depot git:<source-id>
 ```
 
 Refresh first prints the registered URL as a preview. It requires explicit
@@ -19,10 +20,18 @@ Refresh first prints the registered URL as a preview. It requires explicit
 package-owned `builtin:agent-depot` Source is listed as read-only and cannot be
 refreshed.
 
-Source choice is an application operation, not a CLI discovery command:
-`selectSources([sourceId, ...])` receives explicit IDs for one future discovery
-call and does not persist a default or perform discovery. The discovery CLI is
-planned for ticket 02.
+`discover` requires one or more Source IDs on every invocation. Use
+`source list` to find registered IDs. It reads the current cached Git mirror
+HEAD without refreshing it, so run `source refresh <id> --yes` first when a
+mirror is unavailable or stale. It prints one tab-separated `Candidate:` line
+per recognized Skill in this format:
+
+```text
+Candidate: <source-id>\t<skill-path>\t<name>\t<description>
+```
+
+Discovery only presents candidates. It does not persist Source selection,
+select candidates, or install anything automatically.
 
 ## Configuration and cache
 

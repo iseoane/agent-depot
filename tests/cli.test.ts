@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
+import { BUILT_IN_SOURCE, SourceNotFoundError, type SourceOperations } from "../src/sources.js";
 import { runCli } from "../src/cli.js";
 
 const external = {
@@ -128,7 +128,78 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
+  ]);
+});
+
+test("discovers candidates from the explicitly supplied Source IDs", async () => {
+  const output: string[] = [];
+  const calls: string[][] = [];
+  const operations = fakeOperations({
+    async listSources() {
+      throw new Error("discover must not select Sources through the CLI");
+    },
+    async discoverSkills(sourceIds) {
+      calls.push([...sourceIds]);
+      return [{
+        sourceId: external.id,
+        path: "chosen",
+        name: "Chosen",
+        description: "Chosen skill",
+      }];
+    },
+  });
+
+  const exitCode = await runCli(["discover", BUILT_IN_SOURCE.id, external.id], {
+    operations,
+    stdout: (line) => output.push(line),
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(calls, [[BUILT_IN_SOURCE.id, external.id]]);
+  assert.deepEqual(output, [
+    `Candidate: ${external.id}\tchosen\tChosen\tChosen skill`,
+  ]);
+});
+
+test("requires at least one explicit Source ID for discovery", async () => {
+  const errors: string[] = [];
+  let called = false;
+  const operations = fakeOperations({
+    async discoverSkills() {
+      called = true;
+      return [];
+    },
+  });
+
+  const exitCode = await runCli(["discover"], {
+    operations,
+    stderr: (line) => errors.push(line),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(called, false);
+  assert.deepEqual(errors, [
+    "Error: Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources",
+  ]);
+});
+
+test("reports how to recover when a selected Source is not registered", async () => {
+  const errors: string[] = [];
+  const operations = fakeOperations({
+    async discoverSkills() {
+      throw new SourceNotFoundError("git:missing");
+    },
+  });
+
+  const exitCode = await runCli(["discover", "git:missing"], {
+    operations,
+    stderr: (line) => errors.push(line),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(errors, [
+    "Error: Source is not registered: git:missing. Run `agent-depot source list` and pass a registered Source ID",
   ]);
 });
