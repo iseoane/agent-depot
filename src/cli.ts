@@ -31,6 +31,7 @@ import {
 import {
   installProjectSkillTransaction,
   type ProjectInstallationOptions,
+  type ProjectSkillInstallationResult,
   type ProjectSkillInstallationTransaction,
   type ProjectSkillTreeAccess,
 } from "./project-installation.js";
@@ -52,10 +53,10 @@ const USAGE = [
   "  agent-depot source add <url>",
   "  agent-depot source refresh <id> [--yes]",
   "  agent-depot discover <source-id> [source-id...]",
-  "  agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes]",
-  "  agent-depot install --scope project --manifest --portable-v1 [--yes]",
+  "  agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]",
+  "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
 ].join("\n");
-const INSTALL_USAGE = "Usage: agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes]";
+const INSTALL_USAGE = "Usage: agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 
 /** Runs the CLI application and returns a process exit code. */
@@ -168,13 +169,23 @@ async function runInstall(
     requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
 
     const transactions: ProjectSkillInstallationTransaction[] = [];
+    const installed: Array<{ readonly item: ResolvedManifestSelection; readonly result: ProjectSkillInstallationResult }> = [];
     let methodFailed = false;
     try {
       for (const item of resolved) {
-        const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files);
+        const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, options.confirmAdditionalHostExposure);
         if (transaction) {
           transactions.push(transaction);
+          installed.push({ item, result: transaction.result });
         }
+      }
+      const nextManifest = parseProjectManifest({
+        version: 1,
+        skills: installed.map(({ item, result }) => selectionWithInstallation(item.selection, result, projectRoot)),
+      });
+      await manifestStore.save(nextManifest);
+      for (const { item, result } of installed) {
+        outputInstallationResult(result, projectRoot, output);
         try {
           await executeOrRejectMethod(item, operations, projectRoot);
         } catch (error) {
@@ -223,14 +234,14 @@ async function runInstall(
       : resolveProjectSource(projectSource);
   await refreshResolvedSource(operations, projectSource, resolvedSource, options.confirmed);
   const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
-  const nextManifest = parseProjectManifest({
-    version: 1,
-    skills: [...existing.skills, selection],
-  });
   outputInstallPreview(selection, source, projectRoot, output, resolved.files, resolved.method);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
 
-  const transaction = await installOne(selection, resolvedSource, sourceAccess, projectRoot, dependencies, resolved.method, options.portableV1, resolved.files);
+  const transaction = await installOne(selection, resolvedSource, sourceAccess, projectRoot, dependencies, resolved.method, options.portableV1, resolved.files, options.confirmAdditionalHostExposure);
+  const nextManifest = parseProjectManifest({
+    version: 1,
+    skills: [...existing.skills, selectionWithInstallation(selection, transaction.result, projectRoot)],
+  });
   try {
     await manifestStore.save(nextManifest);
   } catch (error) {
@@ -239,6 +250,7 @@ async function runInstall(
     }
     throw error;
   }
+  outputInstallationResult(transaction.result, projectRoot, output);
   try {
     await executeOrRejectMethod(resolved, operations, projectRoot);
   } catch (error) {
@@ -256,6 +268,7 @@ interface InstallOptions {
   readonly ref?: string;
   readonly portableV1: boolean;
   readonly confirmed: boolean;
+  readonly confirmAdditionalHostExposure: boolean;
 }
 
 function parseInstallOptions(argv: readonly string[]): InstallOptions {
@@ -267,6 +280,7 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
   let fromManifest = false;
   let portableV1 = false;
   let confirmed = false;
+  let confirmAdditionalHostExposure = false;
   const hosts: ProjectHost[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -304,6 +318,9 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
       case "--yes":
         confirmed = true;
         break;
+      case "--confirm-additional-host":
+        confirmAdditionalHostExposure = true;
+        break;
       default:
         throw new CliUsageError(INSTALL_USAGE);
     }
@@ -330,6 +347,7 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
     ref,
     portableV1,
     confirmed,
+    confirmAdditionalHostExposure,
   };
 }
 
@@ -461,10 +479,10 @@ function outputInstallPreview(
   output(`  scope: project; hosts: ${selection.hosts.join(",")}; version policy: ${formatVersionPolicy(selection.version)}`);
   for (const file of files) {
     const destination = path.join(canonicalPath, ...file.path.slice(`${selection.path}/`.length).split("/"));
-    output(`  create: ${destination} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""})`);
+    output(`  reconcile: ${destination} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""}; adopt if identical, create if missing)`);
   }
   if (selection.hosts.includes("claude")) {
-    output(`  create symlink: ${path.join(projectRoot, ".claude", "skills", skillName)}`);
+    output(`  reconcile symlink: ${path.join(projectRoot, ".claude", "skills", skillName)} (retain if already canonical; create only with explicit additional-host confirmation)`);
   }
   if (method) {
     const cwd = path.resolve(projectRoot, method.cwd ?? ".");
@@ -476,6 +494,45 @@ function formatVersionPolicy(version: VersionPolicy): string {
   return version.policy === "latest" ? "latest" : `fixed:${version.version}`;
 }
 
+function selectionWithInstallation(
+  selection: ProjectSkillSelection,
+  result: ProjectSkillInstallationResult,
+  projectRoot: string,
+): ProjectSkillSelection {
+  return parseProjectManifest({
+    version: 1,
+    skills: [{
+      ...selection,
+      installation: {
+        path: relativeProjectPath(projectRoot, result.canonicalPath),
+        adopted: result.adopted,
+      },
+    }],
+  }).skills[0]!;
+}
+
+function relativeProjectPath(projectRoot: string, candidate: string): string {
+  const root = path.resolve(projectRoot);
+  const resolved = path.resolve(candidate);
+  const relative = path.relative(root, resolved);
+  if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`Installed Skill location escapes the project root: ${candidate}`);
+  }
+  return relative.split(path.sep).join("/");
+}
+
+function outputInstallationResult(
+  result: ProjectSkillInstallationResult,
+  projectRoot: string,
+  output: (line: string) => void,
+): void {
+  const locations = result.adopted
+    ? result.adoptedPaths
+    : [result.canonicalPath];
+  const rendered = locations.map((location) => relativeProjectPath(projectRoot, location)).join(", ");
+  output(`${result.adopted ? "Adopted" : "Installed"} Skill ${JSON.stringify(result.skillName)} at ${rendered}`);
+}
+
 async function installOne(
   selection: ProjectSkillSelection,
   source: Source,
@@ -485,12 +542,14 @@ async function installOne(
   method: SourceInstallationMethod | undefined,
   portableV1: boolean,
   files: readonly SkillTreeFile[],
-): Promise<ProjectSkillInstallationTransaction | undefined> {
+  confirmAdditionalHostExposure: boolean,
+): Promise<ProjectSkillInstallationTransaction> {
   return installProjectSkillTransaction({
     selection,
     source,
     previewTree: files,
     portableV1,
+    confirmAdditionalHostExposure,
   }, {
     projectRoot,
     sourceAccess,

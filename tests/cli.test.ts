@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -137,7 +137,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes]\n  agent-depot install --scope project --manifest --portable-v1 [--yes]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -256,9 +256,56 @@ test("previews project selection before confirmation, then installs and persists
       path: "portable/demo",
       version: { policy: "latest" },
       hosts: ["pi", "claude"],
+      installation: { path: ".agents/skills/demo", adopted: false },
     });
     assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
     assert.equal(errors.length, 1);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("requires separate adoption confirmation and persists the actual adopted location", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-adoption-"));
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  const errors: string[] = [];
+  const output: string[] = [];
+  try {
+    await mkdir(canonicalPath, { recursive: true });
+    for (const file of cliTree) {
+      const relativePath = file.path.slice("portable/demo/".length);
+      const destination = path.join(canonicalPath, ...relativePath.split("/"));
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, Buffer.from(file.content));
+    }
+
+    const baseArgs = [
+      "install", "--scope", "project", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi,claude", "--version", "latest", "--portable-v1", "--yes",
+    ];
+    const dependencies = {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(baseArgs, dependencies), 1);
+    assert.match(errors[0] ?? "", /missing Claude exposure requires explicit confirmation/i);
+    assert.ok(output.some((line) => /adopt if identical/i.test(line)));
+    assert.equal(output.some((line) => /^\s+create(?: symlink)?:/u.test(line)), false);
+    await assert.rejects(readFile(path.join(projectRoot, ".claude", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
+
+    assert.equal(await runCli([...baseArgs, "--confirm-additional-host"], dependencies), 0);
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as {
+      skills: Array<{ installation?: { path: string; adopted: boolean } }>;
+    };
+    assert.deepEqual(manifest.skills[0]?.installation, {
+      path: ".agents/skills/demo",
+      adopted: true,
+    });
+    assert.match(output.join("\\n"), /Adopted Skill.*\.agents[\\\\/]skills[\\\\/]demo/);
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -424,6 +471,61 @@ test("rolls back installed files when the manifest transaction cannot be committ
     }), 1);
     assert.match(errors[0] ?? "", /manifest storage unavailable/);
     await assert.rejects(readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rolls back a newly created Claude symlink while preserving an adopted canonical Skill", async (t) => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-adoption-rollback-"));
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  try {
+    try {
+      await symlink(canonicalPath, path.join(projectRoot, "symlink-capability-check"), "dir");
+      await rm(path.join(projectRoot, "symlink-capability-check"));
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    await mkdir(canonicalPath, { recursive: true });
+    for (const file of cliTree) {
+      const relativePath = file.path.slice("portable/demo/".length);
+      const destination = path.join(canonicalPath, ...relativePath.split("/"));
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, Buffer.from(file.content));
+    }
+    const canonicalBefore = await lstat(canonicalPath);
+    const store = {
+      path: path.join(projectRoot, "agent-depot.json"),
+      async load() {
+        return { version: 1 as const, skills: [] as const };
+      },
+      async save() {
+        throw new Error("manifest storage unavailable");
+      },
+    };
+    const errors: string[] = [];
+
+    assert.equal(await runCli([
+      "install", "--scope", "project", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi,claude", "--version", "latest", "--portable-v1", "--yes", "--confirm-additional-host",
+    ], {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      projectManifestStore: store,
+      stderr: (line) => errors.push(line),
+    }), 1);
+
+    assert.match(errors[0] ?? "", /manifest storage unavailable/);
+    assert.equal((await lstat(canonicalPath)).ino, canonicalBefore.ino);
+    assert.equal(await readFile(path.join(canonicalPath, "SKILL.md"), "utf8"), "## D");
+    await assert.rejects(lstat(claudePath), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }

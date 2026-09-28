@@ -66,6 +66,29 @@ test("validates a self-contained manifest for built-in and URL Sources", () => {
   assert.equal("id" in (manifest.skills[1]?.source ?? {}), false);
 });
 
+test("accepts an optional actual installation record while preserving older manifests", () => {
+  const manifest = parseProjectManifest({
+    version: 1,
+    skills: [{
+      ...validManifest().skills[0],
+      installation: { path: ".claude/skills/architecture", adopted: true },
+    }],
+  });
+
+  assert.deepEqual(manifest.skills[0]?.installation, {
+    path: ".claude/skills/architecture",
+    adopted: true,
+  });
+  assert.equal(validManifest().skills[0]?.installation, undefined);
+  assert.throws(
+    () => parseProjectManifest({
+      version: 1,
+      skills: [{ ...validManifest().skills[0], installation: { path: "../outside", adopted: true } }],
+    }),
+    /installation\.path must stay within the project/i,
+  );
+});
+
 test("requires an explicit non-empty supported Host set", () => {
   const base = {
     version: 1,

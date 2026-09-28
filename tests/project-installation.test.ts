@@ -307,7 +307,7 @@ test("never overwrites an existing canonical target", async () => {
     await writeFile(path.join(existing, "SKILL.md"), "keep me");
     await assert.rejects(
       installProjectSkill({ selection, source, portableV1: true }, { projectRoot, sourceAccess: accessFor() }),
-      /already exists.*never overwritten/i,
+      /already exists.*explicit confirmation.*no overwrite operation.*no path was changed/i,
     );
     assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "keep me");
   } finally {
@@ -565,6 +565,42 @@ test("rejects an unrelated Claude Skill symlink during adoption", async (t) => {
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
     await rm(unrelatedTarget, { recursive: true, force: true });
+  }
+});
+
+test("adds a missing Claude exposure only with separate explicit confirmation", async (t) => {
+  const projectRoot = await makeProject();
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  try {
+    try {
+      await mkdir(canonicalPath, { recursive: true });
+      for (const file of tree) {
+        const relativePath = file.path.slice("portable/demo/".length);
+        const destination = path.join(canonicalPath, ...relativePath.split("/"));
+        await mkdir(path.dirname(destination), { recursive: true });
+        await writeFile(destination, Buffer.from(file.content));
+      }
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    const result = await installProjectSkill({
+      selection,
+      source,
+      portableV1: true,
+      confirmAdditionalHostExposure: true,
+    }, { projectRoot, sourceAccess: accessFor() });
+
+    assert.equal(result.adopted, true);
+    assert.deepEqual(result.adoptedPaths, [canonicalPath, claudePath]);
+    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
   }
 });
 

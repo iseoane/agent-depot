@@ -45,12 +45,21 @@ export interface FixedVersionPolicy {
 
 export type VersionPolicy = LatestVersionPolicy | FixedVersionPolicy;
 
+export interface ProjectSkillInstallation {
+  /** POSIX path relative to the project root where the Skill is actually installed. */
+  readonly path: string;
+  /** True when the existing project tree was adopted without writing it. */
+  readonly adopted: boolean;
+}
+
 export interface ProjectSkillSelection {
   readonly source: ProjectSource;
   /** POSIX path to the selected skill directory within the Source. */
   readonly path: string;
   readonly version: VersionPolicy;
   readonly hosts: readonly ProjectHost[];
+  /** Actual project installation location, when this selection has been installed. */
+  readonly installation?: ProjectSkillInstallation;
 }
 
 export interface ProjectManifest {
@@ -95,14 +104,14 @@ function nonEmptyString(value: unknown, label: string, manifestPath: string): st
   return value;
 }
 
-function normalizeRelativePath(value: unknown, label: string, manifestPath: string): string {
+function normalizeRelativePath(value: unknown, label: string, manifestPath: string, boundary = "its Source"): string {
   const candidate = nonEmptyString(value, label, manifestPath);
   if (candidate.includes("\\")) {
     throw new ProjectManifestError(manifestPath, `${label} must use POSIX separators`);
   }
   const normalized = path.posix.normalize(candidate);
   if (normalized.startsWith("/") || normalized === ".." || normalized.startsWith("../")) {
-    throw new ProjectManifestError(manifestPath, `${label} must stay within its Source`);
+    throw new ProjectManifestError(manifestPath, `${label} must stay within ${boundary}`);
   }
   return normalized;
 }
@@ -219,12 +228,28 @@ function parseHosts(value: unknown, manifestPath: string, index: number): readon
   return Object.freeze(hosts);
 }
 
+function parseInstallation(value: unknown, manifestPath: string, index: number): ProjectSkillInstallation {
+  const label = `skills[${index}].installation`;
+  if (!isRecord(value)) {
+    throw new ProjectManifestError(manifestPath, `${label} must be an object`);
+  }
+  assertKeys(value, ["path", "adopted"], label, manifestPath);
+  if (typeof value.adopted !== "boolean") {
+    throw new ProjectManifestError(manifestPath, `${label}.adopted must be a boolean`);
+  }
+  const pathValue = normalizeRelativePath(value.path, `${label}.path`, manifestPath, "the project");
+  if (pathValue === ".") {
+    throw new ProjectManifestError(manifestPath, `${label}.path must identify a location within the project`);
+  }
+  return Object.freeze({ path: pathValue, adopted: value.adopted });
+}
+
 function parseSelection(value: unknown, manifestPath: string, index: number): ProjectSkillSelection {
   const label = `skills[${index}]`;
   if (!isRecord(value)) {
     throw new ProjectManifestError(manifestPath, `${label} must be an object`);
   }
-  assertKeys(value, ["source", "path", "version", "hosts"], label, manifestPath);
+  assertKeys(value, ["source", "path", "version", "hosts", "installation"], label, manifestPath);
   const source = parseSource(value.source, manifestPath, index);
   const version = parseVersionPolicy(value.version, source, manifestPath, index);
   if (version.policy === "latest" && source.kind === "external" && "url" in source && source.ref !== undefined && isCommitId(source.ref)) {
@@ -239,11 +264,15 @@ function parseSelection(value: unknown, manifestPath: string, index: number): Pr
       `${label}.version must match source.ref so a fixed policy pins the selected commit`,
     );
   }
+  const installation = value.installation === undefined
+    ? undefined
+    : parseInstallation(value.installation, manifestPath, index);
   return Object.freeze({
     source,
     path: normalizeSkillPath(value.path, `${label}.path`, manifestPath),
     version,
     hosts: parseHosts(value.hosts, manifestPath, index),
+    ...(installation === undefined ? {} : { installation }),
   });
 }
 
