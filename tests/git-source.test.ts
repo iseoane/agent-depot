@@ -9,9 +9,35 @@ import {
   defaultGitSourceCachePath,
   GitSourceAccessAdapter,
   GitSourceAccessError,
+  GitSourceSnapshotAccess,
   sourceIdForUrl,
   type GitCommandRunner,
 } from "../src/git-source.js";
+
+class FakeSnapshotRunner {
+  readonly calls: Array<{ command: string; args: readonly string[] }> = [];
+
+  async run(command: string, args: readonly string[]): Promise<string> {
+    this.calls.push({ command, args: [...args] });
+    if (args[args.length - 1] === "HEAD^{commit}") {
+      return "abc123\n";
+    }
+    if (args.includes("ls-tree")) {
+      return [
+        "100644 blob one\tgood/SKILL.md\0",
+        "120000 blob two\tlinked/SKILL.md\0",
+        "100644 blob three\tdeprecated/SKILL.md\0",
+      ].join("");
+    }
+    if (args[args.length - 1] === "abc123:good/SKILL.md") {
+      return "---\nname: Good\ndescription: Good skill\n---\n";
+    }
+    if (args[args.length - 1] === "abc123:deprecated/SKILL.md") {
+      return "---\nname: Deprecated\ndescription: Deprecated skill\n---\n";
+    }
+    throw new Error(`unexpected git snapshot command: ${args.join(" ")}`);
+  }
+}
 
 class FakeGitRunner implements GitCommandRunner {
   readonly calls: Array<{ command: string; args: readonly string[]; cwd?: string }> = [];
@@ -149,6 +175,33 @@ test("reports Git failures through a clean Source access error", async () => {
         && error.message.includes("network unavailable")
         && error.message.includes(source.url),
     );
+  });
+});
+
+test("reads the cached bare mirror HEAD without refreshing and ignores Git symlink entries", async () => {
+  await withCache(async (cachePath) => {
+    const source = {
+      id: sourceIdForUrl("https://github.com/example/skills.git"),
+      kind: "git" as const,
+      url: "https://github.com/example/skills.git",
+    };
+    await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
+    const runner = new FakeSnapshotRunner();
+    const access = new GitSourceSnapshotAccess({ cachePath, runner });
+
+    assert.deepEqual(await access.readSnapshot(source), [{
+      path: "good/SKILL.md",
+      content: "---\nname: Good\ndescription: Good skill\n---\n",
+    }, {
+      path: "deprecated/SKILL.md",
+      content: "---\nname: Deprecated\ndescription: Deprecated skill\n---\n",
+    }]);
+    assert.deepEqual(runner.calls.map((call) => call.args[call.args.length - 1]), [
+      "HEAD^{commit}",
+      "abc123",
+      "abc123:good/SKILL.md",
+      "abc123:deprecated/SKILL.md",
+    ]);
   });
 });
 

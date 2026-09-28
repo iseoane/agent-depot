@@ -13,6 +13,7 @@ import {
 } from "../src/sources.js";
 import { defaultSourceStatePath, SourceStateError, SourceStateStore } from "../src/source-state.js";
 import type { GitSource, GitSourceAccess } from "../src/git-source.js";
+import type { SourceContentAccess } from "../src/skill-discovery.js";
 
 class FakeGitAccess implements GitSourceAccess {
   readonly refreshed: GitSource[] = [];
@@ -158,6 +159,35 @@ test("fails closed on corrupt or unsupported state and preserves bytes when addi
       );
       assert.equal(await readFile(statePath, "utf8"), before);
     }
+  });
+});
+
+test("discovers only explicitly selected Source snapshots without refreshing or persisting selection", async () => {
+  await withState(async (statePath, gitAccess) => {
+    const externalUrl = "https://github.com/example/skills.git";
+    let selectedExternal: GitSource | undefined;
+    const contentAccess: SourceContentAccess = {
+      async readSnapshot(source) {
+        assert.equal(source.id, selectedExternal?.id);
+        return [{
+          path: "chosen/SKILL.md",
+          content: "---\nname: Chosen\ndescription: Chosen skill\n---\n",
+        }];
+      },
+    };
+    const operations = createSourceOperations({ statePath, gitAccess, sourceContentAccess: contentAccess });
+    selectedExternal = await operations.addGitSource(externalUrl);
+    const before = await readFile(statePath, "utf8");
+
+    assert.deepEqual(await operations.discoverSkills([selectedExternal.id]), [{
+      sourceId: selectedExternal.id,
+      path: "chosen",
+      name: "Chosen",
+      description: "Chosen skill",
+    }]);
+    assert.equal(await readFile(statePath, "utf8"), before);
+    assert.deepEqual(gitAccess.refreshed, []);
+    await assert.rejects(operations.discoverSkills([]), SourceSelectionError);
   });
 });
 

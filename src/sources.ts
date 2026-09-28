@@ -6,6 +6,12 @@ import {
   type GitSourceAccess,
 } from "./git-source.js";
 import { SourceStateStore } from "./source-state.js";
+import {
+  createSourceContentAccess,
+  discoverSkillsFromSources,
+  type SkillCandidate,
+  type SourceContentAccess,
+} from "./skill-discovery.js";
 
 export interface BuiltInSource {
   readonly id: "builtin:agent-depot";
@@ -27,6 +33,9 @@ export interface SourceOperationsOptions {
   readonly stateStore?: SourceStateStore;
   readonly statePath?: string;
   readonly gitAccess?: GitSourceAccess;
+  readonly sourceContentAccess?: SourceContentAccess;
+  readonly builtInRoot?: string;
+  readonly gitCachePath?: string;
 }
 
 export class SourceNotFoundError extends Error {
@@ -55,11 +64,21 @@ export interface SourceOperations {
   listSources(): Promise<readonly Source[]>;
   refreshSource(sourceId: string): Promise<GitSource>;
   selectSources(sourceIds: readonly string[]): Promise<readonly Source[]>;
+  /** Optional for embedders that only expose source management. */
+  discoverSkills?: (sourceIds: readonly string[]) => Promise<readonly SkillCandidate[]>;
 }
 
-export function createSourceOperations(options: SourceOperationsOptions = {}): SourceOperations {
+export interface SourceDiscoveryOperations extends SourceOperations {
+  discoverSkills(sourceIds: readonly string[]): Promise<readonly SkillCandidate[]>;
+}
+
+export function createSourceOperations(options: SourceOperationsOptions = {}): SourceDiscoveryOperations {
   const stateStore = options.stateStore ?? new SourceStateStore(options.statePath);
   const gitAccess = options.gitAccess ?? new GitSourceAccessAdapter();
+  const sourceContentAccess = options.sourceContentAccess ?? createSourceContentAccess({
+    builtInRoot: options.builtInRoot,
+    gitCachePath: options.gitCachePath ?? (gitAccess instanceof GitSourceAccessAdapter ? gitAccess.cachePath : undefined),
+  });
 
   return {
     async addGitSource(url: string): Promise<GitSource> {
@@ -124,6 +143,11 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
         throw new SourceSelectionError("At least one valid Source must be selected explicitly");
       }
       return Object.freeze(selected);
+    },
+
+    async discoverSkills(sourceIds: readonly string[]): Promise<readonly SkillCandidate[]> {
+      const sources = await this.selectSources(sourceIds);
+      return discoverSkillsFromSources(sources, sourceContentAccess);
     },
   };
 }

@@ -24,6 +24,15 @@ export interface GitCommandRunner {
   run(command: string, args: readonly string[], options?: GitCommandRunnerOptions): Promise<void>;
 }
 
+export interface GitSnapshotCommandRunner {
+  run(command: string, args: readonly string[]): Promise<string>;
+}
+
+export interface GitSourceSnapshotFile {
+  readonly path: string;
+  readonly content: string;
+}
+
 export class GitSourceAccessError extends Error {
   constructor(source: GitSource, reason: string) {
     super(`Unable to refresh Git Source ${JSON.stringify(source.id)} from ${JSON.stringify(source.url)}: ${reason}`);
@@ -48,6 +57,36 @@ class NodeGitCommandRunner implements GitCommandRunner {
       child.on("close", (code, signal) => {
         if (code === 0) {
           resolve();
+          return;
+        }
+        const detail = stderr.trim() || (signal ? `terminated by ${signal}` : `exited with code ${code ?? "unknown"}`);
+        reject(new Error(`git command failed: ${detail}`));
+      });
+    });
+  }
+}
+
+class NodeGitSnapshotCommandRunner implements GitSnapshotCommandRunner {
+  run(command: string, args: readonly string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(command, [...args], {
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.setEncoding("utf8");
+      child.stderr?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stderr?.on("data", (chunk: string) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) => reject(error));
+      child.on("close", (code, signal) => {
+        if (code === 0) {
+          resolve(stdout);
           return;
         }
         const detail = stderr.trim() || (signal ? `terminated by ${signal}` : `exited with code ${code ?? "unknown"}`);
@@ -140,6 +179,58 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
     } finally {
       await rm(temporaryDestination, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+}
+
+/** Reads the current HEAD from an existing bare mirror without refreshing it. */
+export class GitSourceSnapshotAccess {
+  private readonly cachePath: string;
+  private readonly runner: GitSnapshotCommandRunner;
+
+  constructor(options: { readonly cachePath?: string; readonly runner?: GitSnapshotCommandRunner } = {}) {
+    this.cachePath = options.cachePath ?? defaultGitSourceCachePath();
+    this.runner = options.runner ?? new NodeGitSnapshotCommandRunner();
+  }
+
+  async readSnapshot(source: GitSource): Promise<readonly GitSourceSnapshotFile[]> {
+    const destination = cachePathForSource(this.cachePath, source);
+    if ((await pathType(destination)) !== "directory") {
+      throw new Error(`Git Source mirror is not available: ${destination}`);
+    }
+    await assertNoSymlinkPath(destination);
+
+    const commit = (await this.runner.run("git", [
+      "--git-dir",
+      destination,
+      "rev-parse",
+      "--verify",
+      "HEAD^{commit}",
+    ])).trim();
+    if (!commit) {
+      throw new Error(`Git Source mirror has no HEAD snapshot: ${source.id}`);
+    }
+
+    const tree = await this.runner.run("git", ["--git-dir", destination, "ls-tree", "-r", "-z", commit]);
+    const files: GitSourceSnapshotFile[] = [];
+    for (const record of tree.split("\0")) {
+      if (!record) {
+        continue;
+      }
+      const separator = record.indexOf("\t");
+      if (separator < 0) {
+        continue;
+      }
+      const metadata = record.slice(0, separator).split(" ");
+      const relativePath = record.slice(separator + 1);
+      if (metadata[0] === "120000" || metadata[1] !== "blob" || !relativePath) {
+        continue;
+      }
+      files.push({
+        path: relativePath,
+        content: await this.runner.run("git", ["--git-dir", destination, "show", `${commit}:${relativePath}`]),
+      });
+    }
+    return Object.freeze(files);
   }
 }
 
