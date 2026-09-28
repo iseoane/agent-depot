@@ -116,6 +116,9 @@ export async function installProjectSkillTransaction(
 ): Promise<ProjectSkillInstallationTransaction> {
   const fileSystem = options.fileSystem ?? nodeFileSystem;
   const skillName = skillNameFromSelection(request.selection);
+  const projectRoot = path.resolve(options.projectRoot);
+  await assertNoSymlinkComponents(projectRoot, fileSystem);
+  await assertDirectory(projectRoot, fileSystem, "project root");
   // Explicit host evidence can reject before reading source bytes. The portable
   // baseline is different: its evidence is the validated tree itself, never a
   // caller's assertion alone.
@@ -129,8 +132,6 @@ export async function installProjectSkillTransaction(
       : validateCompatibility(request, skillName, undefined);
   const files = await readAndValidateTree(request, skillName, options.sourceAccess);
   const hosts = earlyHosts ?? validateCompatibility(request, skillName, files);
-  const projectRoot = path.resolve(options.projectRoot);
-  await assertDirectory(projectRoot, fileSystem, "project root");
 
   const canonicalSkillsPath = path.join(projectRoot, ".agents", "skills");
   const canonicalPath = path.join(canonicalSkillsPath, skillName);
@@ -320,6 +321,34 @@ function validateCompatibility(
     );
   }
   return Object.freeze([...request.selection.hosts]);
+}
+
+async function assertNoSymlinkComponents(
+  candidate: string,
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<void> {
+  const parsed = path.parse(candidate);
+  const relative = path.relative(parsed.root, candidate);
+  const segments = relative === "" ? [] : relative.split(path.sep);
+  let current = parsed.root;
+
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    try {
+      const information = await fileSystem.lstat(current);
+      if (information.isSymbolicLink()) {
+        throw new ProjectInstallationError(
+          "unsafe-project-root",
+          `The project root contains a symbolic-link ancestor: ${current}`,
+        );
+      }
+    } catch (error) {
+      if (isMissing(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
 }
 
 async function assertDirectory(

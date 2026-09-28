@@ -215,6 +215,47 @@ test("rejects a symlinked project subpath ancestor before writing outside the pr
   }
 });
 
+test("rejects a symlinked project root ancestor before reading or writing outside the project", async (t) => {
+  const projectContainer = await makeProject();
+  const outsideRoot = await makeProject();
+  const outsideProject = path.join(outsideRoot, "subproject");
+  const sentinel = path.join(outsideProject, "sentinel.txt");
+  let reads = 0;
+  try {
+    await mkdir(outsideProject);
+    await writeFile(sentinel, "outside root remains unchanged");
+    try {
+      await symlink(outsideRoot, path.join(projectContainer, "link"), "dir");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    await assert.rejects(
+      installProjectSkill({ selection, source, portableV1: true }, {
+        projectRoot: path.join(projectContainer, "link", "subproject"),
+        sourceAccess: {
+          async readSkillTree() {
+            reads += 1;
+            return tree;
+          },
+        },
+      }),
+      /symbolic-link ancestor/i,
+    );
+    assert.equal(reads, 0);
+    assert.equal(await readFile(sentinel, "utf8"), "outside root remains unchanged");
+    await assert.rejects(lstat(path.join(outsideProject, ".agents")), { code: "ENOENT" });
+    await assert.rejects(lstat(path.join(outsideProject, ".claude")), { code: "ENOENT" });
+  } finally {
+    await rm(projectContainer, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
 test("rejects Windows-invalid Skill names and tree segments before writing", async () => {
   for (const invalidName of ["CON", "demo:stream", "demo.", "demo "]) {
     const projectRoot = await makeProject();
