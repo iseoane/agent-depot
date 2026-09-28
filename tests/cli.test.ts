@@ -172,6 +172,42 @@ test("discovers candidates from the explicitly supplied Source IDs", async () =>
   ]);
 });
 
+test("discovers built-in candidates through the CLI using real Source operations", async () => {
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-discover-state-"));
+  const builtInRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-discover-builtin-"));
+  const output: string[] = [];
+  try {
+    const skillDirectory = path.join(builtInRoot, "portable", "demo");
+    await mkdir(skillDirectory, { recursive: true });
+    await writeFile(path.join(skillDirectory, "SKILL.md"), [
+      "---",
+      "name: Demo",
+      "description: Demo skill",
+      "---",
+      "",
+      "# Demo",
+      "",
+    ].join("\n"), "utf8");
+
+    const operations = createSourceOperations({
+      statePath: path.join(stateDirectory, "sources.json"),
+      builtInRoot,
+    });
+    const exitCode = await runCli(["discover", BUILT_IN_SOURCE.id], {
+      operations,
+      stdout: (line) => output.push(line),
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(output, [
+      `Candidate: ${BUILT_IN_SOURCE.id}\tportable/demo\tDemo\tDemo skill`,
+    ]);
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true });
+    await rm(builtInRoot, { recursive: true, force: true });
+  }
+});
+
 test("requires at least one explicit Source ID for discovery", async () => {
   const errors: string[] = [];
   let called = false;

@@ -84,7 +84,7 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
 
       let candidates: readonly SkillCandidate[];
       try {
-        candidates = await discoverSkills(sourceIds);
+        candidates = await discoverSkills.call(operations, sourceIds);
       } catch (error) {
         throw new Error(formatDiscoveryError(error));
       }
