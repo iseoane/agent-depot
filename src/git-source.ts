@@ -84,7 +84,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
       throw new GitSourceAccessError(source, "the Source identity does not match its registered URL");
     }
 
-    const destination = cachePathForSource(this.cachePath, source);
+    const destination = cachePathForValidatedSource(this.cachePath, source);
     try {
       await assertNoSymlinkPath(this.cachePath);
       await mkdir(this.cachePath, { recursive: true });
@@ -143,10 +143,6 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
   }
 }
 
-/** Compatibility aliases for callers that used the transport boundary name. */
-export const RealGitSourceAccess = GitSourceAccessAdapter;
-export const DeferredGitSourceAccess = GitSourceAccessAdapter;
-
 export function defaultGitSourceCachePath(
   environment: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
@@ -171,7 +167,11 @@ export function cachePathForSource(cachePath: string, source: GitSource): string
   if (source.kind !== "git" || source.id !== expectedId) {
     throw new GitSourceAccessError(source, "the Source identity does not match its registered URL");
   }
-  return path.join(cachePath, expectedId.slice("git:".length));
+  return cachePathForValidatedSource(cachePath, source);
+}
+
+function cachePathForValidatedSource(cachePath: string, source: GitSource): string {
+  return path.join(cachePath, source.id.slice("git:".length));
 }
 
 type PathKind = "directory" | "file" | "missing" | "symlink";
