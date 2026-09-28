@@ -1,6 +1,6 @@
 import {
   canonicalizeGitSourceUrl,
-  DeferredGitSourceAccess,
+  GitSourceAccessAdapter,
   sourceIdForUrl,
   type GitSource,
   type GitSourceAccess,
@@ -59,7 +59,7 @@ export interface SourceOperations {
 
 export function createSourceOperations(options: SourceOperationsOptions = {}): SourceOperations {
   const stateStore = options.stateStore ?? new SourceStateStore(options.statePath);
-  const gitAccess = options.gitAccess ?? new DeferredGitSourceAccess();
+  const gitAccess = options.gitAccess ?? new GitSourceAccessAdapter();
 
   return {
     async addGitSource(url: string): Promise<GitSource> {

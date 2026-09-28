@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "A cross-platform catalog for reusable coding-agent skills.",
+  "bin": {
+    "agent-depot": "dist/src/cli.js"
+  },
   "type": "module",
   "engines": {
     "node": ">=20"
