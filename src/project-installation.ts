@@ -25,11 +25,17 @@ export interface ProjectSkillInstallationRequest {
   readonly selection: ProjectSkillSelection;
   /** The resolved Source used by the full Skill tree reader. */
   readonly source: Source;
+  /**
+   * The immutable tree shown in the caller's preview. When supplied, the
+   * installer never reads the Source again, so installation cannot drift from
+   * the bytes the user confirmed.
+   */
+  readonly previewTree?: readonly SkillTreeFile[];
   /** Explicit compatibility evidence for the selected Skill. */
   readonly compatibleHosts?: readonly ProjectHost[];
   /**
-   * Explicit caller assertion, based on the Skill's documented portability,
-   * that it supports the portable V1 baseline on every V1 Host.
+   * Require the portable V1 format rule. Compatibility is derived from the
+   * validated tree and its exclusions, not trusted from this flag alone.
    */
   readonly portableV1?: boolean;
   /** Optional per-host incompatibility details supplied by the compatibility adapter. */
@@ -48,6 +54,12 @@ export interface ProjectSkillInstallationResult {
   readonly claudePath?: string;
   readonly hosts: readonly ProjectHost[];
   readonly files: readonly string[];
+}
+
+/** A successful install that can be reversed if a later transaction step fails. */
+export interface ProjectSkillInstallationTransaction {
+  readonly result: ProjectSkillInstallationResult;
+  rollback(): Promise<void>;
 }
 
 export class ProjectInstallationError extends Error {
@@ -89,10 +101,34 @@ export async function installProjectSkill(
   request: ProjectSkillInstallationRequest,
   options: ProjectInstallationOptions,
 ): Promise<ProjectSkillInstallationResult> {
+  const transaction = await installProjectSkillTransaction(request, options);
+  return transaction.result;
+}
+
+/**
+ * Installs one Skill and retains the created-path receipt for a surrounding
+ * manifest/batch transaction. Existing paths are never included in the
+ * receipt and are therefore never removed by rollback.
+ */
+export async function installProjectSkillTransaction(
+  request: ProjectSkillInstallationRequest,
+  options: ProjectInstallationOptions,
+): Promise<ProjectSkillInstallationTransaction> {
   const fileSystem = options.fileSystem ?? nodeFileSystem;
   const skillName = skillNameFromSelection(request.selection);
-  const hosts = validateCompatibility(request, skillName);
+  // Explicit host evidence can reject before reading source bytes. The portable
+  // baseline is different: its evidence is the validated tree itself, never a
+  // caller's assertion alone.
+  const hasDeclaredIncompatibility = Object.values(request.compatibility ?? {}).some((value) => value === false || typeof value === "string");
+  const hasUnsupportedSelectedHost = request.compatibleHosts !== undefined &&
+    request.selection.hosts.some((host) => !request.compatibleHosts?.includes(host));
+  const earlyHosts = hasUnsupportedSelectedHost || hasDeclaredIncompatibility
+    ? validateCompatibility(request, skillName, undefined)
+    : request.portableV1 === true
+      ? undefined
+      : validateCompatibility(request, skillName, undefined);
   const files = await readAndValidateTree(request, skillName, options.sourceAccess);
+  const hosts = earlyHosts ?? validateCompatibility(request, skillName, files);
   const projectRoot = path.resolve(options.projectRoot);
   await assertDirectory(projectRoot, fileSystem, "project root");
 
@@ -159,12 +195,24 @@ export async function installProjectSkill(
       uncertainCreates.delete(claudePath);
     }
 
-    return Object.freeze({
+    const result = Object.freeze({
       skillName,
       canonicalPath,
       ...(hosts.includes("claude") ? { claudePath } : {}),
       hosts: Object.freeze([...hosts]),
       files: Object.freeze(files.map((file) => file.relativePath)),
+    });
+    return Object.freeze({
+      result,
+      rollback: async () => {
+        const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
+        if (cleanupErrors.length > 0) {
+          throw new ProjectInstallationError(
+            "rollback-failed",
+            `Rollback was incomplete: ${cleanupErrors.join("; ")}`,
+          );
+        }
+      },
     });
   } catch (error) {
     const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
@@ -189,12 +237,7 @@ async function readAndValidateTree(
   skillName: string,
   sourceAccess: ProjectSkillTreeAccess,
 ): Promise<readonly ValidatedTreeFile[]> {
-  let tree: readonly SkillTreeFile[];
-  try {
-    tree = await sourceAccess.readSkillTree(request.source, request.selection.path);
-  } catch (error) {
-    throw error;
-  }
+  const tree = request.previewTree ?? await sourceAccess.readSkillTree(request.source, request.selection.path);
 
   const prefix = `${request.selection.path}/`;
   const seen = new Set<string>();
@@ -214,7 +257,14 @@ async function readAndValidateTree(
       );
     }
     seen.add(relativePath);
-    validated.push({ relativePath, source: file });
+    validated.push({
+      relativePath,
+      source: Object.freeze({
+        path: file.path,
+        content: Uint8Array.from(file.content),
+        executable: file.executable,
+      }),
+    });
   }
   if (!seen.has("SKILL.md")) {
     throw new ProjectInstallationError(
@@ -239,10 +289,16 @@ function skillNameFromSelection(selection: ProjectSkillSelection): string {
 function validateCompatibility(
   request: ProjectSkillInstallationRequest,
   skillName: string,
+  files: readonly ValidatedTreeFile[] | undefined,
 ): readonly ProjectHost[] {
+  const formatSupported = request.portableV1 === true
+    ? files === undefined
+      ? new Set(request.selection.hosts)
+      : isPortableV1Tree(files) ? new Set(V1_HOSTS) : new Set<ProjectHost>()
+    : new Set<ProjectHost>();
   const supported = request.compatibleHosts === undefined
-    ? request.portableV1 === true ? new Set(V1_HOSTS) : new Set<ProjectHost>()
-    : new Set(request.compatibleHosts);
+    ? formatSupported
+    : new Set(V1_HOSTS.filter((host) => formatSupported.has(host) && request.compatibleHosts?.includes(host)));
   const incompatible = request.selection.hosts.filter((host) => {
     const declared = request.compatibility?.[host];
     return !supported.has(host) || declared === false || typeof declared === "string";
@@ -254,7 +310,9 @@ function validateCompatibility(
       ? declared
       : request.compatibleHosts === undefined && request.portableV1 !== true
         ? "no compatibility evidence or explicit portable V1 baseline was supplied"
-        : `this Skill does not support the selected Host ${JSON.stringify(host)}`;
+        : request.compatibleHosts === undefined
+          ? "the Skill tree does not satisfy the portable V1 format rules"
+          : `this Skill does not support the selected Host ${JSON.stringify(host)}`;
     throw new ProjectInstallationError(
       "incompatible-host",
       `Skill ${JSON.stringify(skillName)} is incompatible with Host ${JSON.stringify(host)}: ${reason}. ` +
@@ -471,6 +529,14 @@ function isSafeRelativePath(candidate: string): boolean {
     return false;
   }
   return normalized.split("/").every(isSafeSegment);
+}
+
+function isPortableV1Tree(files: readonly ValidatedTreeFile[]): boolean {
+  const excludedTopLevelDirectories = new Set([".claude", ".codex", ".opencode", ".pi", "agents", "extensions", "plugins", "mcp"]);
+  return files.every((file) => {
+    const firstSegment = file.relativePath.split("/", 1)[0];
+    return !excludedTopLevelDirectories.has(firstSegment ?? "");
+  });
 }
 
 function isSafeSegment(candidate: string): boolean {

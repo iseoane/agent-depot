@@ -7,6 +7,7 @@ import { test } from "node:test";
 import type { ProjectSkillSelection } from "../src/project-manifest.js";
 import {
   installProjectSkill,
+  installProjectSkillTransaction,
   type ProjectInstallationFileSystem,
   type ProjectSkillTreeAccess,
 } from "../src/project-installation.js";
@@ -23,7 +24,7 @@ const source: Source = {
 const selection: ProjectSkillSelection = {
   source: { kind: "builtin", id: "builtin:agent-depot" },
   path: "portable/demo",
-  version: { policy: "fixed", version: "1.0.0" },
+  version: { policy: "fixed", version: "a".repeat(40) },
   hosts: ["pi", "claude", "codex", "opencode"],
 };
 
@@ -78,6 +79,35 @@ test("installs a full project Skill tree at the canonical path and exposes Claud
     assert.equal((await lstat(path.join(canonicalPath, "SKILL.md"))).mode & 0o777, 0o644);
     assert.equal((await lstat(path.join(canonicalPath, "scripts", "run.sh"))).mode & 0o111, 0o111);
     assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("installs the exact preview tree without rereading a mutable Source", async () => {
+  const projectRoot = await makeProject();
+  let reads = 0;
+  const mutableTree = [...tree];
+  try {
+    const transaction = await installProjectSkillTransaction({
+      selection,
+      source,
+      portableV1: true,
+      previewTree: mutableTree,
+    }, {
+      projectRoot,
+      sourceAccess: {
+        async readSkillTree() {
+          reads += 1;
+          return [{ ...tree[0], content: Uint8Array.from([0x6e, 0x6f, 0x74, 0x2d, 0x75, 0x73, 0x65, 0x64]) }];
+        },
+      },
+    });
+    mutableTree[0] = { ...mutableTree[0], content: Uint8Array.from([0x63, 0x68, 0x61, 0x6e, 0x67, 0x65, 0x64]) };
+    assert.equal(reads, 0);
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "SKILL");
+    await transaction.rollback();
+    await assert.rejects(lstat(path.join(projectRoot, ".agents", "skills", "demo")), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }

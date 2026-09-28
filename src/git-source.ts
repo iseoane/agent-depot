@@ -9,6 +9,8 @@ export interface GitSource {
   readonly id: string;
   readonly kind: "git";
   readonly url: string;
+  /** Optional immutable project selection ref (for example refs/tags/v1.2.3). */
+  readonly ref?: string;
 }
 
 export interface GitSourceAccess {
@@ -311,12 +313,13 @@ export class GitSourceSnapshotAccess {
   }
 
   private async readHeadCommit(destination: string, source: GitSource): Promise<string> {
+    const revision = source.ref === undefined ? "HEAD" : validateGitRef(source.ref);
     const commit = (await this.runner.run("git", [
       "--git-dir",
       destination,
       "rev-parse",
       "--verify",
-      "HEAD^{commit}",
+      `${revision}^{commit}`,
     ], { maxOutputBytes: 128 })).trim();
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(commit)) {
       throw new Error(`Git Source mirror has no safe HEAD snapshot: ${source.id}`);
@@ -331,15 +334,16 @@ export class GitSourceSnapshotAccess {
     }
     await assertNoSymlinkPath(destination);
 
+    const revision = source.ref === undefined ? "HEAD" : validateGitRef(source.ref);
     const commit = (await this.runner.run("git", [
       "--git-dir",
       destination,
       "rev-parse",
       "--verify",
-      "HEAD^{commit}",
+      `${revision}^{commit}`,
     ])).trim();
-    if (!commit) {
-      throw new Error(`Git Source mirror has no HEAD snapshot: ${source.id}`);
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(commit)) {
+      throw new Error(`Git Source mirror has no safe HEAD snapshot: ${source.id}`);
     }
 
     const tree = await this.runner.run("git", ["--git-dir", destination, "ls-tree", "-r", "-z", commit]);
@@ -461,6 +465,18 @@ async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>>
       await delay(SOURCE_LOCK_RETRY_MS);
     }
   }
+}
+
+export function validateGitRef(candidate: string): string {
+  if (typeof candidate !== "string" || candidate.length === 0 || candidate.trim() !== candidate ||
+    /[\u0000-\u0020~^:?*[\\]/u.test(candidate) || candidate.includes("..") || candidate.includes("@{")) {
+    throw new Error("Git Source ref contains unsafe characters");
+  }
+  const segments = candidate.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment.endsWith(".") || segment.startsWith("."))) {
+    throw new Error("Git Source ref contains an unsafe path segment");
+  }
+  return candidate;
 }
 
 export function validateSkillDirectoryPath(candidate: string): string {

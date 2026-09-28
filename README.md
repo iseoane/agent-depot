@@ -13,6 +13,8 @@ node dist/src/cli.js source add https://github.com/example/skills.git
 node dist/src/cli.js source refresh git:<source-id>
 node dist/src/cli.js source refresh git:<source-id> --yes
 node dist/src/cli.js discover builtin:agent-depot git:<source-id>
+node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
+node dist/src/cli.js install --scope project --manifest --portable-v1 --yes
 ```
 
 Refresh first prints the registered URL as a preview. It requires explicit
@@ -32,6 +34,58 @@ Candidate: <source-id>\t<skill-path>\t<name>\t<description>
 
 Discovery only presents candidates. It does not persist Source selection,
 select candidates, or install anything automatically.
+
+## Project installation
+
+Project installation requires an explicit `--scope project`, Source ID, Skill
+path, one or more `--host` values (`pi`, `claude`, `codex`, or `opencode`), and
+a version policy (`--version latest` or `--version fixed:<value>`). External
+Sources require a fixed 40- or 64-character Git commit. For the built-in
+Source, `latest` tracks the installed Agent Depot package, while a fixed policy
+is accepted only when its value exactly equals that package's current version;
+other values fail closed because the requested package version cannot be
+reproduced. The built-in Source does not support `--ref`, and the CLI rejects it
+explicitly. External `latest` may track an explicit mutable safe ref, but an
+immutable commit ref must use a fixed policy matching that commit. The
+`--portable-v1` flag requires the validated portable format rule; compatibility
+is derived from source bytes and exclusions rather than trusted from a caller
+assertion. It previews every file and the Claude symlink, then requires `--yes`
+before writing.
+
+A confirmed installation writes `agent-depot.json` in the project root. The
+manifest stores built-in identity or an external canonical URL, Skill path,
+version policy, and Hosts, so `install --scope project --manifest` can resolve
+it without the global Source catalog. Portable manifests reject local path
+Sources because their identity is not independently resolvable. External Git
+Sources are refreshed only
+after confirmation.
+
+The complete Skill tree is copied byte-for-byte and existing paths are never
+overwritten. Claude is exposed through a symlink to the canonical
+`.agents/skills/<skill>` installation.
+
+A Source may declare an installation method only through an explicit JSON
+metadata file inside the selected Skill (`.agent-depot.json`,
+`agent-depot-method.json`, or `installation-method.json`), never from
+`SKILL.md` prose. The file may contain either the method object or
+`{ "method": { "kind": "command", "argv": ["executable", "arg", ...],
+"cwd": "optional/project-relative-directory" } }`. The executable must be a
+bare safe command name, `cwd` must remain below the project root after realpath
+resolution, and shell syntax, control characters, unsupported fields, and OS-
+specific shell interpreters are refused. Metadata is read from the same
+immutable tree snapshot as the preview; confirmation never triggers a mutable
+latest re-read. The exact executable, argument array, working directory, and
+complete file list are previewed before `--yes`; execution uses a child process
+with `shell: false` and never interpolates a shell command. Commands are not
+inferred from `SKILL.md` prose. A confirmed method still goes through
+compatibility validation, canonical installation, and the Claude symlink path.
+The manifest is persisted before an external method runs. If that method fails,
+its side effects cannot be rolled back, so the installed files and manifest are
+retained and the failure does not claim rollback. Method-containing batch
+installs are refused because arbitrary child-process side effects are
+non-rollbackable. Manifest entries that identify an external local path are
+refused by the Git-only resolver with an actionable unsupported-source error;
+URL Sources remain self-contained and resolvable on a fresh machine.
 
 ## Configuration and cache
 

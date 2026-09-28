@@ -22,7 +22,7 @@ class FakeSnapshotRunner {
   async run(command: string, args: readonly string[]): Promise<string> {
     this.calls.push({ command, args: [...args] });
     if (args[args.length - 1] === "HEAD^{commit}") {
-      return "abc123\n";
+      return `${"a".repeat(40)}\n`;
     }
     if (args.includes("ls-tree")) {
       return [
@@ -34,10 +34,10 @@ class FakeSnapshotRunner {
         "100644 blob three\tdeprecated/SKILL.md\0",
       ].join("");
     }
-    if (args[args.length - 1] === "abc123:good/SKILL.md") {
+    if (args[args.length - 1] === `${"a".repeat(40)}:good/SKILL.md`) {
       return "---\nname: Good\ndescription: Good skill\n---\n";
     }
-    if (args[args.length - 1] === "abc123:deprecated/SKILL.md") {
+    if (args[args.length - 1] === `${"a".repeat(40)}:deprecated/SKILL.md`) {
       return "---\nname: Deprecated\ndescription: Deprecated skill\n---\n";
     }
     throw new Error(`unexpected git snapshot command: ${args.join(" ")}`);
@@ -58,7 +58,7 @@ class FakeSelectedSnapshotRunner implements GitSnapshotCommandRunner {
 
   async run(command: string, args: readonly string[]): Promise<string> {
     this.calls.push({ command, args: [...args] });
-    if (args[args.length - 1] === "HEAD^{commit}") {
+    if (args[args.length - 1]?.endsWith("^{commit}")) {
       return `${this.commit}\n`;
     }
     if (args.includes("ls-tree")) {
@@ -240,8 +240,8 @@ test("reads the cached bare mirror HEAD without refreshing and ignores Git symli
     }]);
     assert.deepEqual(runner.calls.map((call) => call.args[call.args.length - 1]), [
       "HEAD^{commit}",
-      "abc123",
-      "abc123:good/SKILL.md",
+      "a".repeat(40),
+      `${"a".repeat(40)}:good/SKILL.md`,
     ]);
   });
 });
@@ -295,6 +295,25 @@ test("reads a selected Git Skill tree with supporting files using blob object ID
       assetObject,
     ]);
     assert.equal(catFileCalls.some((call) => call.args.some((argument) => argument.includes("selected/"))), false);
+  });
+});
+
+test("reads the manifest-selected Git ref instead of silently falling back to HEAD", async () => {
+  await withCache(async (cachePath) => {
+    const source = {
+      id: sourceIdForUrl("https://github.com/example/skills.git"),
+      kind: "git" as const,
+      url: "https://github.com/example/skills.git",
+      ref: "refs/tags/v1.2.3",
+    };
+    await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
+    const objectId = "a".repeat(40);
+    const runner = new FakeSelectedSnapshotRunner(
+      `100644 blob ${objectId}\tselected/SKILL.md\0`,
+      new Map([[objectId, "skill"]]),
+    );
+    await new GitSourceSnapshotAccess({ cachePath, runner }).readSkillTree(source, "selected");
+    assert.equal(runner.calls[0]?.args.at(-1), "refs/tags/v1.2.3^{commit}");
   });
 });
 

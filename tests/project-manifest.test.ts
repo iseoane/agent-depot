@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  AGENT_DEPOT_PACKAGE_VERSION,
   defaultProjectManifestPath,
   parseProjectManifest,
   ProjectManifestError,
@@ -28,17 +29,11 @@ function validManifest(): ProjectManifest {
         source: {
           kind: "external",
           url: "https://github.com/example/skills/",
-          ref: "refs/tags/v2.0.0",
+          ref: "a".repeat(40),
         },
         path: "review/code-review",
-        version: { policy: "fixed", version: "2.0.0" },
+        version: { policy: "fixed", version: "a".repeat(40) },
         hosts: ["codex", "opencode"],
-      },
-      {
-        source: { kind: "external", path: "vendor/skills", ref: "main" },
-        path: "local-skill",
-        version: { policy: "fixed", version: "2025-01-15" },
-        hosts: ["pi"],
       },
     ],
   });
@@ -53,7 +48,7 @@ async function withManifestDirectory<T>(run: (directory: string) => Promise<T>):
   }
 }
 
-test("validates a self-contained manifest for built-in, URL, and path Sources", () => {
+test("validates a self-contained manifest for built-in and URL Sources", () => {
   const manifest = validManifest();
 
   assert.equal(manifest.version, 1);
@@ -66,12 +61,7 @@ test("validates a self-contained manifest for built-in, URL, and path Sources", 
   assert.deepEqual(manifest.skills[1]?.source, {
     kind: "external",
     url: "https://github.com/example/skills",
-    ref: "refs/tags/v2.0.0",
-  });
-  assert.deepEqual(manifest.skills[2]?.source, {
-    kind: "external",
-    path: "vendor/skills",
-    ref: "main",
+    ref: "a".repeat(40),
   });
   assert.equal("id" in (manifest.skills[1]?.source ?? {}), false);
 });
@@ -97,12 +87,12 @@ test("requires an explicit non-empty supported Host set", () => {
 
 test("validates fixed/latest policies and rejects ambiguous versions", () => {
   const base = validManifest();
-  const selection = base.skills[0];
+  const selection = base.skills[1];
 
   assert.deepEqual(parseProjectManifest({
     version: 1,
-    skills: [{ ...selection, version: { policy: "fixed", version: "1.2.3" } }],
-  }).skills[0]?.version, { policy: "fixed", version: "1.2.3" });
+    skills: [{ ...selection, version: { policy: "fixed", version: "a".repeat(40) } }],
+  }).skills[0]?.version, { policy: "fixed", version: "a".repeat(40) });
   assert.throws(
     () => parseProjectManifest({
       version: 1,
@@ -113,9 +103,26 @@ test("validates fixed/latest policies and rejects ambiguous versions", () => {
   assert.throws(
     () => parseProjectManifest({
       version: 1,
-      skills: [{ ...selection, version: "latest" }],
+      skills: [{ ...selection, version: { policy: "latest" } }],
     }),
-    ProjectManifestError,
+    /latest with an immutable commit Source ref/i,
+  );
+  assert.deepEqual(parseProjectManifest({
+    version: 1,
+    skills: [{
+      ...base.skills[0],
+      version: { policy: "fixed", version: AGENT_DEPOT_PACKAGE_VERSION },
+    }],
+  }).skills[0]?.version, { policy: "fixed", version: AGENT_DEPOT_PACKAGE_VERSION });
+  assert.throws(
+    () => parseProjectManifest({
+      version: 1,
+      skills: [{
+        ...base.skills[0],
+        version: { policy: "fixed", version: `${AGENT_DEPOT_PACKAGE_VERSION}-unavailable` },
+      }],
+    }),
+    /must equal the current Agent Depot package version.*cannot be reproduced by this package/i,
   );
 });
 
@@ -125,6 +132,7 @@ test("fails closed on unsafe Source and skill identities", () => {
   const invalidSelections = [
     { ...selection, source: { kind: "builtin", id: "wrong" } },
     { ...selection, source: { kind: "external", url: "https://example.com/skills?token=secret" } },
+    { ...selection, source: { kind: "external", path: "vendor/skills" } },
     { ...selection, source: { kind: "external", path: "../outside" } },
     { ...selection, path: "." },
     { ...selection, path: "skill/.." },
@@ -152,6 +160,18 @@ test("rejects unsupported root fields and duplicate Source/path selections", () 
   assert.throws(
     () => parseProjectManifest({ version: 1, skills: [], globalSources: [] }),
     ProjectManifestError,
+  );
+  assert.throws(
+    () => parseProjectManifest({
+      version: 1,
+      skills: [{
+        source: { kind: "external", url: "https://example.com/skills", ref: "main" },
+        path: "skill",
+        version: { policy: "fixed", version: "c".repeat(40) },
+        hosts: ["pi"],
+      }],
+    }),
+    /must match source\.ref.*fixed policy pins/i,
   );
   assert.throws(
     () => parseProjectManifest({ version: 2, skills: [] }),

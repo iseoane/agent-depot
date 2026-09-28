@@ -2,20 +2,48 @@
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-import type { SkillCandidate } from "./skill-discovery.js";
+import { createSourceContentAccess, type SkillCandidate, type SkillTreeFile } from "./skill-discovery.js";
 import {
   BuiltInSourceError,
   createSourceOperations,
+  executeSourceInstallationMethod,
+  parseSourceInstallationMethod,
+  resolveProjectSource,
+  SourceMetadataError,
   SourceNotFoundError,
   type Source,
+  type SourceInstallationMethod,
   type SourceOperations,
 } from "./sources.js";
+import {
+  defaultProjectManifestPath,
+  parseProjectManifest,
+  ProjectManifestStore,
+  PROJECT_HOSTS,
+  type ProjectHost,
+  type ProjectManifest,
+  type ProjectSkillSelection,
+  type ProjectSource,
+  type VersionPolicy,
+} from "./project-manifest.js";
+import {
+  installProjectSkillTransaction,
+  type ProjectInstallationOptions,
+  type ProjectSkillInstallationTransaction,
+  type ProjectSkillTreeAccess,
+} from "./project-installation.js";
 
 export interface CliDependencies {
   readonly operations?: SourceOperations;
   readonly stdout?: (line: string) => void;
   readonly stderr?: (line: string) => void;
+  readonly projectRoot?: string;
+  readonly sourceAccess?: ProjectSkillTreeAccess;
+  readonly installationOptions?: Omit<ProjectInstallationOptions, "projectRoot" | "sourceAccess">;
+  /** Test/embedding seam for the manifest transaction boundary. */
+  readonly projectManifestStore?: ProjectManifestStore;
 }
 
 const USAGE = [
@@ -24,7 +52,10 @@ const USAGE = [
   "  agent-depot source add <url>",
   "  agent-depot source refresh <id> [--yes]",
   "  agent-depot discover <source-id> [source-id...]",
+  "  agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes]",
+  "  agent-depot install --scope project --manifest --portable-v1 [--yes]",
 ].join("\n");
+const INSTALL_USAGE = "Usage: agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 
 /** Runs the CLI application and returns a process exit code. */
@@ -34,6 +65,11 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
   const operations = dependencies.operations ?? createSourceOperations();
 
   try {
+    if (argv[0] === "install") {
+      await runInstall(argv.slice(1), operations, dependencies, output);
+      return 0;
+    }
+
     if (argv[0] === "discover") {
       const sourceIds = argv.slice(1);
       requireSourceIds(sourceIds);
@@ -102,6 +138,435 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
 
 /** Alias retained as a discoverable public CLI seam for embedding and tests. */
 export const main = runCli;
+
+async function runInstall(
+  argv: readonly string[],
+  operations: SourceOperations,
+  dependencies: CliDependencies,
+  output: (line: string) => void,
+): Promise<void> {
+  const options = parseInstallOptions(argv);
+  const projectRoot = path.resolve(dependencies.projectRoot ?? process.cwd());
+  const manifestStore = dependencies.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot));
+  const sourceAccess = dependencies.sourceAccess ?? defaultProjectSkillTreeAccess();
+
+  if (options.fromManifest) {
+    const manifest = await manifestStore.load();
+    if (manifest.skills.length === 0) {
+      throw new CliUsageError("The project manifest contains no selected Skills");
+    }
+    if (!options.portableV1) {
+      throw new CliUsageError("Compatibility is not known for a manifest install; rerun with --portable-v1 after reviewing the Skill");
+    }
+    const resolved = await resolveManifestSelections(manifest, operations, sourceAccess, options.confirmed);
+    if (resolved.some((item) => item.method !== undefined) && resolved.length > 1) {
+      throw new SourceMetadataError("A batch install containing an external method is refused because command side effects cannot be rolled back safely; install that Skill separately");
+    }
+    for (const item of resolved) {
+      outputInstallPreview(item.selection, item.source, projectRoot, output, item.files, item.method);
+    }
+    requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
+
+    const transactions: ProjectSkillInstallationTransaction[] = [];
+    let methodFailed = false;
+    try {
+      for (const item of resolved) {
+        const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files);
+        if (transaction) {
+          transactions.push(transaction);
+        }
+        try {
+          await executeOrRejectMethod(item, operations, projectRoot);
+        } catch (error) {
+          methodFailed = true;
+          throw externalMethodFailure(error);
+        }
+      }
+    } catch (error) {
+      if (methodFailed) {
+        throw error;
+      }
+      await rollbackTransactions(transactions, error);
+    }
+    return;
+  }
+
+  if (!options.sourceId || !options.skillPath || !options.version || options.hosts.length === 0) {
+    throw new CliUsageError(INSTALL_USAGE);
+  }
+  const source = await findSource(operations, options.sourceId);
+  const projectSource = projectSourceFromSource(source, options.ref, options.version);
+  const selection = parseProjectManifest({
+    version: 1,
+    skills: [{
+      source: projectSource,
+      path: options.skillPath,
+      version: options.version,
+      hosts: options.hosts,
+    }],
+  }).skills[0];
+  if (!selection) {
+    throw new CliUsageError(INSTALL_USAGE);
+  }
+  if (!options.portableV1) {
+    throw new CliUsageError("Compatibility is not known; rerun with --portable-v1 after reviewing the Skill");
+  }
+
+  const existing = await manifestStore.load();
+  if (existing.skills.some((candidate) => JSON.stringify(candidate.source) === JSON.stringify(selection.source) && candidate.path === selection.path)) {
+    throw new CliUsageError(`Skill selection ${JSON.stringify(selection.path)} is already recorded in ${manifestStore.path}; repeat installs never overwrite existing paths`);
+  }
+  const resolvedSource = projectSource.kind === "builtin"
+    ? source
+    : operations.resolveProjectSource
+      ? await operations.resolveProjectSource(projectSource)
+      : resolveProjectSource(projectSource);
+  await refreshResolvedSource(operations, projectSource, resolvedSource, options.confirmed);
+  const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
+  const nextManifest = parseProjectManifest({
+    version: 1,
+    skills: [...existing.skills, selection],
+  });
+  outputInstallPreview(selection, source, projectRoot, output, resolved.files, resolved.method);
+  requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
+
+  const transaction = await installOne(selection, resolvedSource, sourceAccess, projectRoot, dependencies, resolved.method, options.portableV1, resolved.files);
+  try {
+    await manifestStore.save(nextManifest);
+  } catch (error) {
+    if (transaction) {
+      await rollbackTransactions([transaction], error);
+    }
+    throw error;
+  }
+  try {
+    await executeOrRejectMethod(resolved, operations, projectRoot);
+  } catch (error) {
+    throw externalMethodFailure(error);
+  }
+  output(`Saved project manifest: ${manifestStore.path}`);
+}
+
+interface InstallOptions {
+  readonly fromManifest: boolean;
+  readonly sourceId?: string;
+  readonly skillPath?: string;
+  readonly hosts: readonly ProjectHost[];
+  readonly version?: VersionPolicy;
+  readonly ref?: string;
+  readonly portableV1: boolean;
+  readonly confirmed: boolean;
+}
+
+function parseInstallOptions(argv: readonly string[]): InstallOptions {
+  let scope: string | undefined;
+  let sourceId: string | undefined;
+  let skillPath: string | undefined;
+  let versionValue: string | undefined;
+  let ref: string | undefined;
+  let fromManifest = false;
+  let portableV1 = false;
+  let confirmed = false;
+  const hosts: ProjectHost[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    switch (argument) {
+      case "--scope":
+        scope = requireOptionValue(argv, ++index, "--scope");
+        break;
+      case "--source":
+        sourceId = requireOptionValue(argv, ++index, "--source");
+        break;
+      case "--skill":
+        skillPath = requireOptionValue(argv, ++index, "--skill");
+        break;
+      case "--host":
+        for (const host of requireOptionValue(argv, ++index, "--host").split(",")) {
+          if (!PROJECT_HOSTS.includes(host as ProjectHost) || hosts.includes(host as ProjectHost)) {
+            throw new CliUsageError(`Unsupported or duplicate Host ${JSON.stringify(host)}`);
+          }
+          hosts.push(host as ProjectHost);
+        }
+        break;
+      case "--version":
+        versionValue = requireOptionValue(argv, ++index, "--version");
+        break;
+      case "--ref":
+        ref = requireOptionValue(argv, ++index, "--ref");
+        break;
+      case "--manifest":
+        fromManifest = true;
+        break;
+      case "--portable-v1":
+        portableV1 = true;
+        break;
+      case "--yes":
+        confirmed = true;
+        break;
+      default:
+        throw new CliUsageError(INSTALL_USAGE);
+    }
+  }
+
+  if (scope !== "project") {
+    throw new CliUsageError("Installation scope must be explicit: use --scope project");
+  }
+  if (fromManifest && (sourceId !== undefined || skillPath !== undefined || versionValue !== undefined || ref !== undefined || hosts.length > 0)) {
+    throw new CliUsageError("--manifest cannot be combined with --source, --skill, --host, --version, or --ref");
+  }
+  if (!fromManifest && !versionValue && (sourceId || skillPath || ref || hosts.length > 0)) {
+    throw new CliUsageError("--version is required for a selected Skill");
+  }
+  if (!fromManifest && versionValue === undefined && sourceId === undefined && skillPath === undefined && ref === undefined && hosts.length === 0) {
+    throw new CliUsageError(INSTALL_USAGE);
+  }
+  return {
+    fromManifest,
+    sourceId,
+    skillPath,
+    hosts: Object.freeze(hosts),
+    version: versionValue === undefined ? undefined : parseVersionOption(versionValue),
+    ref,
+    portableV1,
+    confirmed,
+  };
+}
+
+function parseVersionOption(value: string): VersionPolicy {
+  if (value === "latest") {
+    return { policy: "latest" };
+  }
+  const version = value.startsWith("fixed:") ? value.slice("fixed:".length) : value;
+  if (!version || /\s|[\u0000-\u001f\u007f]/u.test(version)) {
+    throw new CliUsageError("--version fixed:<value> must provide a non-empty version without whitespace or control characters");
+  }
+  return { policy: "fixed", version };
+}
+
+function requireOptionValue(argv: readonly string[], index: number, option: string): string {
+  const value = argv[index];
+  if (!value || value.startsWith("--")) {
+    throw new CliUsageError(`Missing value for ${option}`);
+  }
+  return value;
+}
+
+interface ResolvedManifestSelection {
+  readonly selection: ProjectSkillSelection;
+  readonly source: Source;
+  readonly files: readonly SkillTreeFile[];
+  readonly method?: SourceInstallationMethod;
+}
+
+async function resolveManifestSelections(
+  manifest: ProjectManifest,
+  operations: SourceOperations,
+  sourceAccess: ProjectSkillTreeAccess,
+  confirmed: boolean,
+): Promise<readonly ResolvedManifestSelection[]> {
+  const resolved: ResolvedManifestSelection[] = [];
+  for (const selection of manifest.skills) {
+    const source = operations.resolveProjectSource
+      ? await operations.resolveProjectSource(selection.source)
+      : resolveProjectSource(selection.source);
+    await refreshResolvedSource(operations, selection.source, source, confirmed);
+    resolved.push(await resolveSelection(selection, source, operations, sourceAccess));
+  }
+  return Object.freeze(resolved);
+}
+
+async function resolveSelection(
+  selection: ProjectSkillSelection,
+  source: Source,
+  operations: SourceOperations,
+  sourceAccess: ProjectSkillTreeAccess,
+): Promise<ResolvedManifestSelection> {
+  const files = await readPreviewTree(sourceAccess, source, selection);
+  const method = await readStructuredMethod(operations, source, selection.path, files);
+  return Object.freeze({ selection, source, files, method });
+}
+
+async function refreshResolvedSource(
+  operations: SourceOperations,
+  projectSource: ProjectSource,
+  source: Source,
+  confirmed: boolean,
+): Promise<void> {
+  if (!confirmed || source.kind === "builtin" || !operations.refreshProjectSource) {
+    return;
+  }
+  await operations.refreshProjectSource(projectSource);
+}
+
+async function readPreviewTree(
+  sourceAccess: ProjectSkillTreeAccess,
+  source: Source,
+  selection: ProjectSkillSelection,
+): Promise<readonly SkillTreeFile[]> {
+  const files = await sourceAccess.readSkillTree(source, selection.path);
+  const prefix = `${selection.path}/`;
+  if (!files.some((file) => file.path === `${selection.path}/SKILL.md`)) {
+    throw new Error(`Selected Skill ${JSON.stringify(selection.path)} does not contain SKILL.md`);
+  }
+  const seen = new Set<string>();
+  const snapshot = files.map((file) => {
+    const relativePath = file.path.slice(prefix.length);
+    if (!file.path.startsWith(prefix) || !isSafePreviewPath(relativePath) || seen.has(relativePath)) {
+      throw new Error(`Selected Skill returned an unsafe or duplicate file path: ${JSON.stringify(file.path)}`);
+    }
+    seen.add(relativePath);
+    return Object.freeze({
+      path: file.path,
+      content: Uint8Array.from(file.content),
+      executable: file.executable,
+    });
+  });
+  return Object.freeze(snapshot);
+}
+
+function isSafePreviewPath(value: string): boolean {
+  if (!value || value.includes("\\") || path.posix.isAbsolute(value)) {
+    return false;
+  }
+  const normalized = path.posix.normalize(value);
+  return normalized === value && normalized !== "." && normalized !== ".." && !normalized.startsWith("../") &&
+    normalized.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+}
+
+async function readStructuredMethod(
+  operations: SourceOperations,
+  source: Source,
+  skillPath: string,
+  previewTree: readonly SkillTreeFile[],
+): Promise<SourceInstallationMethod | undefined> {
+  if (!operations.readInstallationMethod) {
+    return undefined;
+  }
+  const metadata = await operations.readInstallationMethod(source, skillPath, previewTree);
+  return metadata === undefined ? undefined : parseSourceInstallationMethod(metadata);
+}
+
+function outputInstallPreview(
+  selection: ProjectSkillSelection,
+  source: Source,
+  projectRoot: string,
+  output: (line: string) => void,
+  files: readonly SkillTreeFile[],
+  method: SourceInstallationMethod | undefined,
+): void {
+  const skillName = path.posix.basename(selection.path);
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
+  output(`Preview: install Skill ${JSON.stringify(skillName)} from ${source.id} at ${canonicalPath}`);
+  output(`  scope: project; hosts: ${selection.hosts.join(",")}; version policy: ${formatVersionPolicy(selection.version)}`);
+  for (const file of files) {
+    const destination = path.join(canonicalPath, ...file.path.slice(`${selection.path}/`.length).split("/"));
+    output(`  create: ${destination} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""})`);
+  }
+  if (selection.hosts.includes("claude")) {
+    output(`  create symlink: ${path.join(projectRoot, ".claude", "skills", skillName)}`);
+  }
+  if (method) {
+    const cwd = path.resolve(projectRoot, method.cwd ?? ".");
+    output(`  run external method: executable=${JSON.stringify(method.argv[0])} args=${JSON.stringify(method.argv.slice(1))} cwd=${JSON.stringify(cwd)}`);
+  }
+}
+
+function formatVersionPolicy(version: VersionPolicy): string {
+  return version.policy === "latest" ? "latest" : `fixed:${version.version}`;
+}
+
+async function installOne(
+  selection: ProjectSkillSelection,
+  source: Source,
+  sourceAccess: ProjectSkillTreeAccess,
+  projectRoot: string,
+  dependencies: CliDependencies,
+  method: SourceInstallationMethod | undefined,
+  portableV1: boolean,
+  files: readonly SkillTreeFile[],
+): Promise<ProjectSkillInstallationTransaction | undefined> {
+  return installProjectSkillTransaction({
+    selection,
+    source,
+    previewTree: files,
+    portableV1,
+  }, {
+    projectRoot,
+    sourceAccess,
+    ...dependencies.installationOptions,
+  });
+}
+
+async function executeOrRejectMethod(
+  item: ResolvedManifestSelection,
+  operations: SourceOperations,
+  projectRoot: string,
+): Promise<void> {
+  if (!item.method) {
+    return;
+  }
+  const executor = operations.executeInstallationMethod ?? executeSourceInstallationMethod;
+  await executor(item.method, {
+    source: item.source,
+    skillPath: item.selection.path,
+    projectRoot,
+  });
+}
+
+function externalMethodFailure(error: unknown): Error {
+  const detail = error instanceof Error ? error.message : String(error);
+  return new Error(
+    `External installation method failed after installation and manifest persistence; ` +
+    `installed files were retained because method side effects cannot be rolled back: ${detail}`,
+  );
+}
+
+async function rollbackTransactions(
+  transactions: readonly ProjectSkillInstallationTransaction[],
+  original: unknown,
+): Promise<never> {
+  const rollbackErrors: string[] = [];
+  for (const transaction of [...transactions].reverse()) {
+    try {
+      await transaction.rollback();
+    } catch (error) {
+      rollbackErrors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (rollbackErrors.length > 0) {
+    const message = original instanceof Error ? original.message : String(original);
+    throw new Error(`${message}; batch rollback failed: ${rollbackErrors.join("; ")}`);
+  }
+  throw original;
+}
+
+function defaultProjectSkillTreeAccess(): ProjectSkillTreeAccess {
+  const access = createSourceContentAccess();
+  if (!access.readSkillTree) {
+    throw new Error("Configured Source content access cannot read complete Skill trees");
+  }
+  return {
+    readSkillTree: (source, skillPath) => access.readSkillTree!(source, skillPath),
+  };
+}
+
+function projectSourceFromSource(source: Source, ref: string | undefined, version: VersionPolicy): ProjectSource {
+  if (source.kind === "builtin") {
+    if (ref !== undefined) {
+      throw new CliUsageError("The built-in Source does not support --ref; its version follows the Agent Depot package");
+    }
+    return { kind: "builtin", id: source.id };
+  }
+  const selectedRef = ref ?? (version.policy === "fixed" ? version.version : source.ref);
+  return { kind: "external", url: source.url, ...(selectedRef === undefined ? {} : { ref: selectedRef }) };
+}
+
+function requireConfirmation(confirmed: boolean, message: string): void {
+  if (!confirmed) {
+    throw new CliUsageError(message);
+  }
+}
 
 function formatSource(source: Source): string {
   if (source.kind === "builtin") {

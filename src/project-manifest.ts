@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { lstat, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 
-import { canonicalizeGitSourceUrl } from "./git-source.js";
+import { canonicalizeGitSourceUrl, validateGitRef } from "./git-source.js";
 
 export const PROJECT_MANIFEST_VERSION = 1 as const;
 export const PROJECT_MANIFEST_FILENAME = "agent-depot.json" as const;
+/** The package release that supplies the built-in Source, when it can be read. */
+export const AGENT_DEPOT_PACKAGE_VERSION = readAgentDepotPackageVersion();
 
 export const PROJECT_HOSTS = Object.freeze(["pi", "claude", "codex", "opencode"] as const);
 export type ProjectHost = (typeof PROJECT_HOSTS)[number];
@@ -30,6 +33,7 @@ export interface ExternalPathProjectSource {
 /** A manifest source is self-contained and does not refer to global Source state. */
 export type ProjectSource = BuiltInProjectSource | ExternalUrlProjectSource | ExternalPathProjectSource;
 
+/** For the built-in Source, latest follows the installed Agent Depot package. */
 export interface LatestVersionPolicy {
   readonly policy: "latest";
 }
@@ -136,31 +140,33 @@ function parseSource(value: unknown, manifestPath: string, index: number): Proje
       const reason = error instanceof Error ? error.message : "the URL is invalid";
       throw new ProjectManifestError(manifestPath, `${label}.url is invalid (${reason})`);
     }
-    const source: ExternalUrlProjectSource = value.ref === undefined
+    let ref: string | undefined;
+    if (value.ref !== undefined) {
+      ref = nonEmptyString(value.ref, `${label}.ref`, manifestPath);
+      try {
+        validateGitRef(ref);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "the ref is unsafe";
+        throw new ProjectManifestError(manifestPath, `${label}.ref is invalid (${reason})`);
+      }
+    }
+    const source: ExternalUrlProjectSource = ref === undefined
       ? { kind: "external", url }
-      : { kind: "external", url, ref: nonEmptyString(value.ref, `${label}.ref`, manifestPath) };
+      : { kind: "external", url, ref };
     return Object.freeze(source);
   }
 
   if (typeof value.path === "string") {
-    assertKeys(value, ["kind", "path", "ref"], label, manifestPath);
-    const source: ExternalPathProjectSource = value.ref === undefined
-      ? {
-        kind: "external",
-        path: normalizeRelativePath(value.path, `${label}.path`, manifestPath),
-      }
-      : {
-        kind: "external",
-        path: normalizeRelativePath(value.path, `${label}.path`, manifestPath),
-        ref: nonEmptyString(value.ref, `${label}.ref`, manifestPath),
-      };
-    return Object.freeze(source);
+    throw new ProjectManifestError(
+      manifestPath,
+      `${label}.path is not supported in portable manifests; use an external Git URL so the Source identity is resolvable on another machine`,
+    );
   }
 
   throw new ProjectManifestError(manifestPath, `${label} must define exactly one external url or path`);
 }
 
-function parseVersionPolicy(value: unknown, manifestPath: string, index: number): VersionPolicy {
+function parseVersionPolicy(value: unknown, source: ProjectSource, manifestPath: string, index: number): VersionPolicy {
   const label = `skills[${index}].version`;
   if (!isRecord(value)) {
     throw new ProjectManifestError(manifestPath, `${label} must be an object`);
@@ -172,8 +178,21 @@ function parseVersionPolicy(value: unknown, manifestPath: string, index: number)
   if (value.policy === "fixed") {
     assertKeys(value, ["policy", "version"], label, manifestPath);
     const version = nonEmptyString(value.version, `${label}.version`, manifestPath);
-    if (version === "latest") {
-      throw new ProjectManifestError(manifestPath, `${label}.version must not be \"latest\" for a fixed policy`);
+    if (source.kind === "builtin") {
+      if (AGENT_DEPOT_PACKAGE_VERSION === undefined) {
+        throw new ProjectManifestError(
+          manifestPath,
+          `${label}.version cannot be fixed because the current Agent Depot package version is unavailable`,
+        );
+      }
+      if (version !== AGENT_DEPOT_PACKAGE_VERSION) {
+        throw new ProjectManifestError(
+          manifestPath,
+          `${label}.version must equal the current Agent Depot package version ${JSON.stringify(AGENT_DEPOT_PACKAGE_VERSION)}; ${JSON.stringify(version)} cannot be reproduced by this package`,
+        );
+      }
+    } else if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(version)) {
+      throw new ProjectManifestError(manifestPath, `${label}.version must be a 40- or 64-character commit ID for a fixed policy`);
     }
     return Object.freeze({ policy: "fixed", version });
   }
@@ -206,10 +225,24 @@ function parseSelection(value: unknown, manifestPath: string, index: number): Pr
     throw new ProjectManifestError(manifestPath, `${label} must be an object`);
   }
   assertKeys(value, ["source", "path", "version", "hosts"], label, manifestPath);
+  const source = parseSource(value.source, manifestPath, index);
+  const version = parseVersionPolicy(value.version, source, manifestPath, index);
+  if (version.policy === "latest" && source.kind === "external" && "url" in source && source.ref !== undefined && isCommitId(source.ref)) {
+    throw new ProjectManifestError(
+      manifestPath,
+      `${label}.version cannot use latest with an immutable commit Source ref; use a fixed policy`,
+    );
+  }
+  if (version.policy === "fixed" && source.kind === "external" && "url" in source && source.ref !== version.version) {
+    throw new ProjectManifestError(
+      manifestPath,
+      `${label}.version must match source.ref so a fixed policy pins the selected commit`,
+    );
+  }
   return Object.freeze({
-    source: parseSource(value.source, manifestPath, index),
+    source,
     path: normalizeSkillPath(value.path, `${label}.path`, manifestPath),
-    version: parseVersionPolicy(value.version, manifestPath, index),
+    version,
     hosts: parseHosts(value.hosts, manifestPath, index),
   });
 }
@@ -269,12 +302,29 @@ export async function writeProjectManifest(manifestPath: string, manifest: Proje
   const contents = `${JSON.stringify(normalized, null, 2)}\n`;
   const temporaryPath = `${manifestPath}.${process.pid}.${randomUUID()}.tmp`;
 
+  let committed = false;
   try {
     await writeFile(temporaryPath, contents, { encoding: "utf8", flag: "wx" });
-    await rename(temporaryPath, manifestPath);
+    try {
+      await rename(temporaryPath, manifestPath);
+    } catch (error) {
+      // Windows may refuse an atomic replacement of an existing regular file.
+      // Never unlink a symlink or non-file as a fallback: that could redirect
+      // the replacement outside the project.
+      if (process.platform !== "win32" || !isWindowsRenameConflict(error)) {
+        throw error;
+      }
+      const existing = await lstat(manifestPath);
+      if (existing.isSymbolicLink() || !existing.isFile()) {
+        throw new ProjectManifestError(manifestPath, "refusing unsafe Windows manifest replacement target");
+      }
+      await unlink(manifestPath);
+      await rename(temporaryPath, manifestPath);
+    }
+    committed = true;
   } finally {
     await unlink(temporaryPath).catch((error: unknown) => {
-      if (!isMissingFile(error)) {
+      if (!isMissingFile(error) && !committed) {
         throw error;
       }
     });
@@ -297,6 +347,27 @@ export class ProjectManifestStore {
   }
 }
 
+function readAgentDepotPackageVersion(): string | undefined {
+  try {
+    const packageJson = createRequire(import.meta.url)("../../package.json") as unknown;
+    if (!isRecord(packageJson) || typeof packageJson.version !== "string" || packageJson.version.length === 0) {
+      return undefined;
+    }
+    return packageJson.version;
+  } catch {
+    return undefined;
+  }
+}
+
+function isCommitId(value: string): boolean {
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value);
+}
+
 function isMissingFile(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function isWindowsRenameConflict(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error &&
+    (error.code === "EEXIST" || error.code === "EPERM" || error.code === "ENOTEMPTY");
 }
