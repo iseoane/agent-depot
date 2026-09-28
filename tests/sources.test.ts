@@ -191,6 +191,32 @@ test("discovers only explicitly selected Source snapshots without refreshing or 
   });
 });
 
+test("loads legacy Source state and persists user-global installations in the shared catalog", async () => {
+  await withState(async (statePath, gitAccess) => {
+    await writeFile(statePath, JSON.stringify({ version: 1, gitSources: [] }), "utf8");
+    const operations = createSourceOperations({ statePath, gitAccess });
+
+    assert.ok(operations.listUserGlobalInstallations);
+    assert.ok(operations.addUserGlobalInstallation);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+    await operations.addUserGlobalInstallation!({
+      source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+      path: "portable/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    });
+
+    const state = JSON.parse(await readFile(statePath, "utf8")) as {
+      gitSources: unknown[];
+      userGlobalInstallations: unknown[];
+    };
+    assert.deepEqual(state.gitSources, []);
+    assert.equal(state.userGlobalInstallations.length, 1);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+  });
+});
+
 test("uses portable per-user state locations on Linux and Windows", () => {
   assert.equal(
     defaultSourceStatePath({ XDG_STATE_HOME: "/state" }, "linux", "/home/alice"),

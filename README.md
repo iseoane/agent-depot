@@ -14,6 +14,7 @@ node dist/src/cli.js source refresh git:<source-id>
 node dist/src/cli.js source refresh git:<source-id> --yes
 node dist/src/cli.js discover builtin:agent-depot git:<source-id>
 node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
+node dist/src/cli.js install --scope user-global --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
 node dist/src/cli.js install --scope project --manifest --portable-v1 --yes
 ```
 
@@ -34,6 +35,15 @@ Candidate: <source-id>\t<skill-path>\t<name>\t<description>
 
 Discovery only presents candidates. It does not persist Source selection,
 select candidates, or install anything automatically.
+
+## User-global installation
+
+User-global installations use the same canonical Host locations under the user
+home directory (`.agents/skills/<skill>` and, when requested, a Claude symlink
+at `.claude/skills/<skill>`). They are independent from project manifests and
+are recorded in the shared per-user Source state, so separate CLI invocations
+reuse the same installation records. The selected Source, Skill, Hosts, and
+actual adopted or installed location are previewed before `--yes` confirmation.
 
 ## Project installation
 
@@ -89,7 +99,7 @@ URL Sources remain self-contained and resolvable on a fresh machine.
 
 ## Configuration and cache
 
-The Source catalog is stored globally at:
+The Source catalog and user-global installation records are stored together at:
 
 - Linux and other Unix platforms: `$XDG_STATE_HOME/agent-depot/sources.json`,
   or `~/.local/state/agent-depot/sources.json` when `XDG_STATE_HOME` is unset.

@@ -5,15 +5,20 @@ import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 
 import { canonicalizeGitSourceUrl, sourceIdForUrl, type GitSource } from "./git-source.js";
+import { parseProjectManifest, type ProjectSkillSelection } from "./project-manifest.js";
+
+export type UserGlobalSkillInstallation = ProjectSkillSelection;
 
 export interface PersistedSourceState {
   readonly version: 1;
   readonly gitSources: readonly GitSource[];
+  readonly userGlobalInstallations: readonly UserGlobalSkillInstallation[];
 }
 
 const EMPTY_STATE: PersistedSourceState = Object.freeze({
   version: 1,
   gitSources: Object.freeze([]),
+  userGlobalInstallations: Object.freeze([]),
 });
 
 function isNonEmptyString(value: unknown): value is string {
@@ -42,9 +47,9 @@ function parseState(value: unknown, statePath: string): PersistedSourceState {
     throw new SourceStateError(statePath, "the root value must be an object");
   }
 
-  const candidate = value as { version?: unknown; gitSources?: unknown };
+  const candidate = value as { version?: unknown; gitSources?: unknown; userGlobalInstallations?: unknown };
   const keys = Object.keys(candidate);
-  if (keys.some((key) => key !== "version" && key !== "gitSources")) {
+  if (keys.some((key) => key !== "version" && key !== "gitSources" && key !== "userGlobalInstallations")) {
     throw new SourceStateError(statePath, "the state contains unsupported fields");
   }
   if (candidate.version !== 1) {
@@ -52,6 +57,9 @@ function parseState(value: unknown, statePath: string): PersistedSourceState {
   }
   if (!Array.isArray(candidate.gitSources)) {
     throw new SourceStateError(statePath, "gitSources must be an array");
+  }
+  if (candidate.userGlobalInstallations !== undefined && !Array.isArray(candidate.userGlobalInstallations)) {
+    throw new SourceStateError(statePath, "userGlobalInstallations must be an array");
   }
 
   const gitSources: GitSource[] = [];
@@ -89,7 +97,31 @@ function parseState(value: unknown, statePath: string): PersistedSourceState {
     gitSources.push(Object.freeze({ id, kind: "git", url }));
   }
 
-  return Object.freeze({ version: 1, gitSources: Object.freeze(gitSources) });
+  const userGlobalInstallations: UserGlobalSkillInstallation[] = [];
+  const installationIdentities = new Set<string>();
+  for (const [index, item] of (candidate.userGlobalInstallations ?? []).entries()) {
+    try {
+      const parsed = parseProjectManifest({ version: 1, skills: [item] }, statePath).skills[0];
+      if (!parsed) {
+        throw new Error("the installation record is missing");
+      }
+      const identity = JSON.stringify([parsed.source, parsed.path]);
+      if (installationIdentities.has(identity)) {
+        throw new Error("the installation duplicates another user-global Skill");
+      }
+      installationIdentities.add(identity);
+      userGlobalInstallations.push(parsed);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "the installation record is invalid";
+      throw new SourceStateError(statePath, `userGlobalInstallations[${index}] is invalid (${reason})`);
+    }
+  }
+
+  return Object.freeze({
+    version: 1,
+    gitSources: Object.freeze(gitSources),
+    userGlobalInstallations: Object.freeze(userGlobalInstallations),
+  });
 }
 
 export function defaultSourceStatePath(

@@ -137,7 +137,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -263,6 +263,100 @@ test("previews project selection before confirmation, then installs and persists
     assert.equal(errors.length, 1);
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("previews and installs a user-global Skill in the injected home while sharing Source state", async (t) => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-state-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    try {
+      await symlink(path.join(homeDirectory, "missing-target"), path.join(homeDirectory, "link-check"), "dir");
+      await rm(path.join(homeDirectory, "link-check"));
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const args = [
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi,claude", "--version", "latest", "--portable-v1",
+    ];
+    const dependencies = {
+      operations,
+      homeDirectory,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.ok(output.some((line) => line.includes("scope: user-global")));
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    await assert.rejects(readFile(path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
+
+    assert.equal(await runCli([...args, "--yes"], dependencies), 0);
+    assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
+    assert.equal(await readlink(path.join(homeDirectory, ".claude", "skills", "demo")), path.relative(
+      path.join(homeDirectory, ".claude", "skills"),
+      path.join(homeDirectory, ".agents", "skills", "demo"),
+    ));
+    await assert.rejects(readFile(path.join(homeDirectory, "agent-depot.json")), { code: "ENOENT" });
+    const state = JSON.parse(await readFile(path.join(stateDirectory, "sources.json"), "utf8")) as {
+      userGlobalInstallations: Array<{ path: string; installation?: { path: string; adopted: boolean } }>;
+    };
+    assert.deepEqual(state.userGlobalInstallations[0]?.installation, {
+      path: ".agents/skills/demo",
+      adopted: false,
+    });
+    const sharedOperations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    assert.ok(sharedOperations.listUserGlobalInstallations);
+    assert.equal((await sharedOperations.listUserGlobalInstallations()).length, 1);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("adopts an identical existing user-global Skill without replacing it", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-adoption-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-adoption-state-"));
+  const canonicalPath = path.join(homeDirectory, ".agents", "skills", "demo");
+  const output: string[] = [];
+  try {
+    await mkdir(canonicalPath, { recursive: true });
+    for (const file of cliTree) {
+      const relativePath = file.path.slice("portable/demo/".length);
+      const destination = path.join(canonicalPath, ...relativePath.split("/"));
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, Buffer.from(file.content));
+    }
+    const before = await lstat(canonicalPath);
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const exitCode = await runCli([
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1", "--yes",
+    ], {
+      operations,
+      homeDirectory,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line) => output.push(line),
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal((await lstat(canonicalPath)).ino, before.ino);
+    assert.ok(output.some((line) => /Adopted Skill.*\.agents[\\\\/]skills[\\\\/]demo/u.test(line)));
+    const records = operations.listUserGlobalInstallations;
+    assert.ok(records);
+    assert.equal((await records()).find((item) => item.path === "portable/demo")?.installation?.adopted, true);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
   }
 });
 

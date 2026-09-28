@@ -9,7 +9,7 @@ import {
   type GitSource,
   type GitSourceAccess,
 } from "./git-source.js";
-import { SourceStateStore } from "./source-state.js";
+import { defaultSourceStatePath, SourceStateStore } from "./source-state.js";
 import {
   createSourceContentAccess,
   discoverSkillsFromSources,
@@ -17,7 +17,8 @@ import {
   type SkillTreeFile,
   type SourceContentAccess,
 } from "./skill-discovery.js";
-import type { ProjectSource } from "./project-manifest.js";
+import type { ProjectSkillSelection, ProjectSource } from "./project-manifest.js";
+import type { UserGlobalSkillInstallation } from "./source-state.js";
 
 export interface BuiltInSource {
   readonly id: "builtin:agent-depot";
@@ -38,6 +39,8 @@ export const BUILT_IN_SOURCE: BuiltInSource = Object.freeze({
 export interface SourceOperationsOptions {
   readonly stateStore?: SourceStateStore;
   readonly statePath?: string;
+  /** Injectable home directory used when deriving the default per-user state path. */
+  readonly homeDirectory?: string;
   readonly gitAccess?: GitSourceAccess;
   readonly sourceContentAccess?: SourceContentAccess;
   readonly builtInRoot?: string;
@@ -117,6 +120,9 @@ export interface SourceOperations {
   ) => Promise<void>;
   /** Optional for embedders that only expose source management. */
   discoverSkills?: (sourceIds: readonly string[]) => Promise<readonly SkillCandidate[]>;
+  /** Shared per-user records for user-global Skill installations. */
+  listUserGlobalInstallations?: () => Promise<readonly UserGlobalSkillInstallation[]>;
+  addUserGlobalInstallation?: (selection: ProjectSkillSelection) => Promise<void>;
 }
 
 export interface SourceDiscoveryOperations extends SourceOperations {
@@ -124,7 +130,9 @@ export interface SourceDiscoveryOperations extends SourceOperations {
 }
 
 export function createSourceOperations(options: SourceOperationsOptions = {}): SourceDiscoveryOperations {
-  const stateStore = options.stateStore ?? new SourceStateStore(options.statePath);
+  const stateStore = options.stateStore ?? new SourceStateStore(
+    options.statePath ?? defaultSourceStatePath(process.env, process.platform, options.homeDirectory),
+  );
   const gitAccess = options.gitAccess ?? new GitSourceAccessAdapter();
   const sourceContentAccess = options.sourceContentAccess ?? createSourceContentAccess({
     builtInRoot: options.builtInRoot,
@@ -143,7 +151,11 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
 
         const source: GitSource = Object.freeze({ id, kind: "git", url: canonicalUrl });
         return {
-          state: { version: 1, gitSources: [...state.gitSources, source] },
+          state: {
+            version: 1,
+            gitSources: [...state.gitSources, source],
+            userGlobalInstallations: state.userGlobalInstallations,
+          },
           result: source,
         };
       });
@@ -222,6 +234,27 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
     async discoverSkills(sourceIds: readonly string[]): Promise<readonly SkillCandidate[]> {
       const sources = await this.selectSources(sourceIds);
       return discoverSkillsFromSources(sources, sourceContentAccess);
+    },
+
+    async listUserGlobalInstallations(): Promise<readonly UserGlobalSkillInstallation[]> {
+      return (await stateStore.load()).userGlobalInstallations;
+    },
+
+    async addUserGlobalInstallation(selection: ProjectSkillSelection): Promise<void> {
+      await stateStore.update((state) => {
+        const identity = JSON.stringify([selection.source, selection.path]);
+        if (state.userGlobalInstallations.some((candidate) => JSON.stringify([candidate.source, candidate.path]) === identity)) {
+          throw new SourceSelectionError(`User-global Skill ${JSON.stringify(selection.path)} is already recorded`);
+        }
+        return {
+          state: {
+            version: 1,
+            gitSources: state.gitSources,
+            userGlobalInstallations: [...state.userGlobalInstallations, selection],
+          },
+          result: undefined,
+        };
+      });
     },
   };
 }

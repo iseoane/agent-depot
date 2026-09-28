@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -45,6 +46,8 @@ export interface CliDependencies {
   readonly installationOptions?: Omit<ProjectInstallationOptions, "projectRoot" | "sourceAccess">;
   /** Test/embedding seam for the manifest transaction boundary. */
   readonly projectManifestStore?: ProjectManifestStore;
+  /** Home directory used by user-global installation; injectable for tests. */
+  readonly homeDirectory?: string;
 }
 
 const USAGE = [
@@ -53,17 +56,17 @@ const USAGE = [
   "  agent-depot source add <url>",
   "  agent-depot source refresh <id> [--yes]",
   "  agent-depot discover <source-id> [source-id...]",
-  "  agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]",
+  "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
 ].join("\n");
-const INSTALL_USAGE = "Usage: agent-depot install --scope project --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]";
+const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 
 /** Runs the CLI application and returns a process exit code. */
 export async function runCli(argv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
   const output = dependencies.stdout ?? ((line: string) => console.log(line));
   const errorOutput = dependencies.stderr ?? ((line: string) => console.error(line));
-  const operations = dependencies.operations ?? createSourceOperations();
+  const operations = dependencies.operations ?? createSourceOperations({ homeDirectory: dependencies.homeDirectory });
 
   try {
     if (argv[0] === "install") {
@@ -147,9 +150,14 @@ async function runInstall(
   output: (line: string) => void,
 ): Promise<void> {
   const options = parseInstallOptions(argv);
+  const sourceAccess = dependencies.sourceAccess ?? defaultProjectSkillTreeAccess();
+  if (options.scope === "user-global") {
+    await runUserGlobalInstall(options, operations, dependencies, sourceAccess, output);
+    return;
+  }
+
   const projectRoot = path.resolve(dependencies.projectRoot ?? process.cwd());
   const manifestStore = dependencies.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot));
-  const sourceAccess = dependencies.sourceAccess ?? defaultProjectSkillTreeAccess();
 
   if (options.fromManifest) {
     const manifest = await manifestStore.load();
@@ -164,7 +172,7 @@ async function runInstall(
       throw new SourceMetadataError("A batch install containing an external method is refused because command side effects cannot be rolled back safely; install that Skill separately");
     }
     for (const item of resolved) {
-      outputInstallPreview(item.selection, item.source, projectRoot, output, item.files, item.method);
+      outputInstallPreview(item.selection, item.source, projectRoot, output, item.files, item.method, "project");
     }
     requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
 
@@ -234,7 +242,7 @@ async function runInstall(
       : resolveProjectSource(projectSource);
   await refreshResolvedSource(operations, projectSource, resolvedSource, options.confirmed);
   const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
-  outputInstallPreview(selection, source, projectRoot, output, resolved.files, resolved.method);
+  outputInstallPreview(selection, source, projectRoot, output, resolved.files, resolved.method, "project");
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
 
   const transaction = await installOne(selection, resolvedSource, sourceAccess, projectRoot, dependencies, resolved.method, options.portableV1, resolved.files, options.confirmAdditionalHostExposure);
@@ -259,7 +267,81 @@ async function runInstall(
   output(`Saved project manifest: ${manifestStore.path}`);
 }
 
+async function runUserGlobalInstall(
+  options: InstallOptions,
+  operations: SourceOperations,
+  dependencies: CliDependencies,
+  sourceAccess: ProjectSkillTreeAccess,
+  output: (line: string) => void,
+): Promise<void> {
+  if (options.fromManifest || !options.sourceId || !options.skillPath || !options.version || options.hosts.length === 0) {
+    throw new CliUsageError(INSTALL_USAGE);
+  }
+  if (!operations.listUserGlobalInstallations || !operations.addUserGlobalInstallation) {
+    throw new Error("Configured Source operations cannot manage user-global installation state");
+  }
+
+  const homeDirectory = path.resolve(dependencies.homeDirectory ?? homedir());
+  const source = await findSource(operations, options.sourceId);
+  const projectSource = projectSourceFromSource(source, options.ref, options.version);
+  const selection = parseProjectManifest({
+    version: 1,
+    skills: [{
+      source: projectSource,
+      path: options.skillPath,
+      version: options.version,
+      hosts: options.hosts,
+    }],
+  }).skills[0];
+  if (!selection) {
+    throw new CliUsageError(INSTALL_USAGE);
+  }
+  if (!options.portableV1) {
+    throw new CliUsageError("Compatibility is not known; rerun with --portable-v1 after reviewing the Skill");
+  }
+
+  const existing = await operations.listUserGlobalInstallations();
+  if (existing.some((candidate) => JSON.stringify([candidate.source, candidate.path]) === JSON.stringify([selection.source, selection.path]))) {
+    throw new CliUsageError(`Skill selection ${JSON.stringify(selection.path)} is already recorded in user-global state`);
+  }
+  const resolvedSource = projectSource.kind === "builtin"
+    ? source
+    : operations.resolveProjectSource
+      ? await operations.resolveProjectSource(projectSource)
+      : resolveProjectSource(projectSource);
+  await refreshResolvedSource(operations, projectSource, resolvedSource, options.confirmed);
+  const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
+  outputInstallPreview(selection, source, homeDirectory, output, resolved.files, resolved.method, "user-global");
+  requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
+
+  const transaction = await installOne(
+    selection,
+    resolvedSource,
+    sourceAccess,
+    homeDirectory,
+    dependencies,
+    resolved.method,
+    options.portableV1,
+    resolved.files,
+    options.confirmAdditionalHostExposure,
+  );
+  const record = selectionWithInstallation(selection, transaction.result, homeDirectory);
+  try {
+    await operations.addUserGlobalInstallation(record);
+  } catch (error) {
+    await rollbackTransactions([transaction], error);
+  }
+  outputInstallationResult(transaction.result, homeDirectory, output);
+  try {
+    await executeOrRejectMethod(resolved, operations, homeDirectory);
+  } catch (error) {
+    throw externalMethodFailure(error);
+  }
+  output("Saved user-global installation state: shared Source state");
+}
+
 interface InstallOptions {
+  readonly scope: "project" | "user-global";
   readonly fromManifest: boolean;
   readonly sourceId?: string;
   readonly skillPath?: string;
@@ -326,8 +408,11 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
     }
   }
 
-  if (scope !== "project") {
-    throw new CliUsageError("Installation scope must be explicit: use --scope project");
+  if (scope !== "project" && scope !== "user-global") {
+    throw new CliUsageError("Installation scope must be explicit: use --scope project or --scope user-global");
+  }
+  if (fromManifest && scope !== "project") {
+    throw new CliUsageError("--manifest is only supported with --scope project");
   }
   if (fromManifest && (sourceId !== undefined || skillPath !== undefined || versionValue !== undefined || ref !== undefined || hosts.length > 0)) {
     throw new CliUsageError("--manifest cannot be combined with --source, --skill, --host, --version, or --ref");
@@ -339,6 +424,7 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
     throw new CliUsageError(INSTALL_USAGE);
   }
   return {
+    scope: scope as "project" | "user-global",
     fromManifest,
     sourceId,
     skillPath,
@@ -472,17 +558,18 @@ function outputInstallPreview(
   output: (line: string) => void,
   files: readonly SkillTreeFile[],
   method: SourceInstallationMethod | undefined,
+  scope: "project" | "user-global",
 ): void {
   const skillName = path.posix.basename(selection.path);
   const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
   const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
   output(`Preview: reconcile Skill ${JSON.stringify(skillName)} from ${source.id} (destination determined by safe inspection)`);
-  output(`  scope: project; hosts: ${selection.hosts.join(",")}; version policy: ${formatVersionPolicy(selection.version)}`);
+  output(`  scope: ${scope}; hosts: ${selection.hosts.join(",")}; version policy: ${formatVersionPolicy(selection.version)}`);
   output("  selected source files:");
   for (const file of files) {
     output(`    ${file.path} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""}; adopt if identical, create if missing)`);
   }
-  output("  possible project locations:");
+  output(`  possible ${scope} locations:`);
   output(`    ${canonicalPath} (canonical Host location; safe inspection determines whether this is used)`);
   if (selection.hosts.includes("claude")) {
     output(`    ${claudePath} (Claude Host location; fresh install exposes the canonical location by symlink with --yes)`);
