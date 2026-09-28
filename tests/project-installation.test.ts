@@ -1,0 +1,377 @@
+import assert from "node:assert/strict";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, rmdir, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+
+import type { ProjectSkillSelection } from "../src/project-manifest.js";
+import {
+  installProjectSkill,
+  type ProjectInstallationFileSystem,
+  type ProjectSkillTreeAccess,
+} from "../src/project-installation.js";
+import type { SkillTreeFile } from "../src/skill-discovery.js";
+import type { Source } from "../src/sources.js";
+
+const source: Source = {
+  id: "builtin:agent-depot",
+  kind: "builtin",
+  name: "Agent Depot",
+  packageOwned: true,
+};
+
+const selection: ProjectSkillSelection = {
+  source: { kind: "builtin", id: "builtin:agent-depot" },
+  path: "portable/demo",
+  version: { policy: "fixed", version: "1.0.0" },
+  hosts: ["pi", "claude", "codex", "opencode"],
+};
+
+const tree: readonly SkillTreeFile[] = [
+  { path: "portable/demo/SKILL.md", content: Uint8Array.from([0x53, 0x4b, 0x49, 0x4c, 0x4c]), executable: false },
+  { path: "portable/demo/assets/data.bin", content: Uint8Array.from([0x00, 0xff, 0x80]), executable: false },
+  { path: "portable/demo/scripts/run.sh", content: Uint8Array.from([0x23, 0x21, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68]), executable: true },
+];
+
+function accessFor(files: readonly SkillTreeFile[] = tree): ProjectSkillTreeAccess {
+  return {
+    async readSkillTree(requestedSource, requestedPath) {
+      assert.equal(requestedSource.id, source.id);
+      assert.equal(requestedPath, selection.path);
+      return files;
+    },
+  };
+}
+
+async function makeProject(): Promise<string> {
+  return mkdtemp(path.join(tmpdir(), "agent-depot-project-install-")).catch((error: unknown) => {
+    throw error;
+  });
+}
+
+test("installs a full project Skill tree at the canonical path and exposes Claude by symlink", async (t) => {
+  const projectRoot = await makeProject();
+  try {
+    try {
+      await symlink(path.join(projectRoot, "missing-target"), path.join(projectRoot, "link-check"), "dir");
+      await rm(path.join(projectRoot, "link-check"));
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    const result = await installProjectSkill({ selection, source, portableV1: true }, {
+      projectRoot,
+      sourceAccess: accessFor(),
+    });
+    const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+    const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+
+    assert.equal(result.canonicalPath, canonicalPath);
+    assert.equal(result.claudePath, claudePath);
+    assert.deepEqual(result.files, ["SKILL.md", "assets/data.bin", "scripts/run.sh"]);
+    assert.deepEqual([...result.hosts], ["pi", "claude", "codex", "opencode"]);
+    assert.deepEqual(await readFile(path.join(canonicalPath, "assets", "data.bin")), Buffer.from([0x00, 0xff, 0x80]));
+    assert.equal((await lstat(path.join(canonicalPath, "SKILL.md"))).mode & 0o777, 0o644);
+    assert.equal((await lstat(path.join(canonicalPath, "scripts", "run.sh"))).mode & 0o111, 0o111);
+    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("requires explicit compatibility evidence instead of claiming every Host by default", async () => {
+  const projectRoot = await makeProject();
+  let read = false;
+  try {
+    await assert.rejects(
+      installProjectSkill({ selection, source }, {
+        projectRoot,
+        sourceAccess: {
+          async readSkillTree() {
+            read = true;
+            return tree;
+          },
+        },
+      }),
+      /no compatibility evidence.*portable V1 baseline/i,
+    );
+    assert.equal(read, false);
+    await assert.rejects(lstat(path.join(projectRoot, ".agents")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects host-specific incompatibility metadata even with the portable V1 baseline", async () => {
+  const projectRoot = await makeProject();
+  let read = false;
+  try {
+    await assert.rejects(
+      installProjectSkill({
+        selection: { ...selection, hosts: ["claude"] },
+        source,
+        portableV1: true,
+        compatibility: { claude: "Claude requires a native extension" },
+      }, {
+        projectRoot,
+        sourceAccess: {
+          async readSkillTree() {
+            read = true;
+            return tree;
+          },
+        },
+      }),
+      /incompatible.*claude.*native extension/i,
+    );
+    assert.equal(read, false);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects an incompatible selected Host before reading or changing the project", async () => {
+  const projectRoot = await makeProject();
+  let read = false;
+  try {
+    await assert.rejects(
+      installProjectSkill({
+        selection: { ...selection, hosts: ["claude"] },
+        source,
+        compatibleHosts: ["pi", "codex", "opencode"],
+      }, {
+        projectRoot,
+        sourceAccess: {
+          async readSkillTree() {
+            read = true;
+            return tree;
+          },
+        },
+      }),
+      /incompatible.*claude.*nothing was installed/i,
+    );
+    assert.equal(read, false);
+    await assert.rejects(lstat(path.join(projectRoot, ".agents")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects a symlinked project subpath ancestor before writing outside the project", async (t) => {
+  const projectRoot = await makeProject();
+  const outsideRoot = await makeProject();
+  try {
+    try {
+      await symlink(outsideRoot, path.join(projectRoot, ".agents"), "dir");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    await assert.rejects(
+      installProjectSkill({ selection, source, portableV1: true }, { projectRoot, sourceAccess: accessFor() }),
+      /symbolic-link ancestor/i,
+    );
+    await assert.rejects(lstat(path.join(outsideRoot, "skills")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects Windows-invalid Skill names and tree segments before writing", async () => {
+  for (const invalidName of ["CON", "demo:stream", "demo.", "demo "]) {
+    const projectRoot = await makeProject();
+    let read = false;
+    try {
+      const invalidSelection = { ...selection, path: `portable/${invalidName}` };
+      await assert.rejects(
+        installProjectSkill({ selection: invalidSelection, source, portableV1: true }, {
+          projectRoot,
+          sourceAccess: {
+            async readSkillTree() {
+              read = true;
+              return [{ ...tree[0], path: `portable/${invalidName}/SKILL.md` }];
+            },
+          },
+        }),
+        /safe Skill directory name/i,
+      );
+      assert.equal(read, false);
+      await assert.rejects(lstat(path.join(projectRoot, ".agents")), { code: "ENOENT" });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  }
+
+  const projectRoot = await makeProject();
+  try {
+    await assert.rejects(
+      installProjectSkill({ selection, source, portableV1: true }, {
+        projectRoot,
+        sourceAccess: accessFor([
+          { ...tree[0] },
+          { ...tree[1], path: "portable/demo/unsafe:stream.bin" },
+        ]),
+      }),
+      /unsafe or duplicate file path/i,
+    );
+    await assert.rejects(lstat(path.join(projectRoot, ".agents")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("never overwrites an existing canonical target", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "keep me");
+    await assert.rejects(
+      installProjectSkill({ selection, source, portableV1: true }, { projectRoot, sourceAccess: accessFor() }),
+      /already exists.*never overwritten/i,
+    );
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "keep me");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rolls back the canonical target when Claude symlink creation fails", async () => {
+  const projectRoot = await makeProject();
+  const baseFileSystem: ProjectInstallationFileSystem = {
+    lstat,
+    mkdir: async (candidate) => { await mkdir(candidate); },
+    writeFile: async (candidate, content) => { await writeFile(candidate, content, { flag: "wx" }); },
+    chmod,
+    symlink: async () => { throw new Error("operation not permitted"); },
+    readlink,
+    rm: async (candidate) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+  };
+  try {
+    await assert.rejects(
+      installProjectSkill({ selection, source, portableV1: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: baseFileSystem,
+      }),
+      /Claude Skill symlink.*operation not permitted.*no duplicate managed copy.*rolled back/i,
+    );
+    await assert.rejects(lstat(path.join(projectRoot, ".agents", "skills", "demo")), { code: "ENOENT" });
+    await assert.rejects(lstat(path.join(projectRoot, ".claude", "skills", "demo")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("does not delete a concurrently replaced file during rollback and reports incomplete cleanup", async () => {
+  const projectRoot = await makeProject();
+  let writes = 0;
+  const baseFileSystem: ProjectInstallationFileSystem = {
+    lstat,
+    mkdir: async (candidate) => { await mkdir(candidate); },
+    writeFile: async (candidate, content) => {
+      writes += 1;
+      if (writes === 2) throw new Error("injected write failure");
+      await writeFile(candidate, content, { flag: "wx" });
+    },
+    chmod: async (candidate, mode) => {
+      await chmod(candidate, mode);
+      if (candidate.endsWith(path.join("demo", "SKILL.md"))) {
+        await rm(candidate);
+        await writeFile(candidate, "concurrent replacement");
+      }
+    },
+    symlink: async (target, candidate, type) => { await symlink(target, candidate, type); },
+    readlink,
+    rm: async (candidate) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+  };
+  try {
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi"] }, source, portableV1: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: baseFileSystem,
+      }),
+      /injected write failure.*rollback was incomplete.*concurrently replaced/i,
+    );
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "concurrent replacement");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("surfaces cleanup failures instead of hiding them", async () => {
+  const projectRoot = await makeProject();
+  let writes = 0;
+  const baseFileSystem: ProjectInstallationFileSystem = {
+    lstat,
+    mkdir: async (candidate) => { await mkdir(candidate); },
+    writeFile: async (candidate, content) => {
+      writes += 1;
+      if (writes === 2) throw new Error("injected write failure");
+      await writeFile(candidate, content, { flag: "wx" });
+    },
+    chmod,
+    symlink: async (target, candidate, type) => { await symlink(target, candidate, type); },
+    readlink,
+    rm: async (candidate) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir: async (candidate) => {
+      if (candidate.endsWith(path.join("skills", "demo"))) throw new Error("cleanup denied");
+      await rmdir(candidate);
+    },
+  };
+  try {
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi"] }, source, portableV1: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: baseFileSystem,
+      }),
+      /injected write failure.*rollback was incomplete.*cleanup denied/i,
+    );
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rolls back a partially written target after an injected file failure", async () => {
+  const projectRoot = await makeProject();
+  let writes = 0;
+  const baseFileSystem: ProjectInstallationFileSystem = {
+    lstat,
+    mkdir: async (candidate) => { await mkdir(candidate); },
+    writeFile: async (candidate, content) => {
+      writes += 1;
+      if (writes === 2) throw new Error("injected write failure");
+      await writeFile(candidate, content, { flag: "wx" });
+    },
+    chmod,
+    symlink: async (target, candidate, type) => { await symlink(target, candidate, type); },
+    readlink,
+    rm: async (candidate) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+  };
+  try {
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi"] }, source, portableV1: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: baseFileSystem,
+      }),
+      /injected write failure/,
+    );
+    await assert.rejects(lstat(path.join(projectRoot, ".agents", "skills", "demo")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
