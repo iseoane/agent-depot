@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -10,6 +10,7 @@ import {
   parseSkillFrontmatter,
   type SourceContentAccess,
 } from "../src/skill-discovery.js";
+import { SKILL_TREE_LIMITS } from "../src/git-source.js";
 import type { Source } from "../src/sources.js";
 
 const builtin: Source = {
@@ -108,6 +109,100 @@ test("reads only nested SKILL.md files and skips lifecycle subtrees before readi
       path.join(directory, "nested", "inner", "SKILL.md"),
       path.join(directory, "nested", "SKILL.md"),
     ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("reads a selected built-in Skill tree without changing discovery reads", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-selected-skill-"));
+  try {
+    await mkdir(path.join(directory, "docs", "nested"), { recursive: true });
+    await writeFile(path.join(directory, "docs", "SKILL.md"), "---\nname: Docs\ndescription: Docs skill\n---\n");
+    await writeFile(path.join(directory, "docs", "README.md"), "supporting reference");
+    await writeFile(path.join(directory, "docs", "nested", "example.txt"), "nested example");
+    await mkdir(path.join(directory, "docs", "assets"), { recursive: true });
+    await writeFile(path.join(directory, "docs", "assets", "image.bin"), Uint8Array.from([0x00, 0xff, 0x01, 0x80]));
+    await mkdir(path.join(directory, "docs", "scripts"), { recursive: true });
+    await writeFile(path.join(directory, "docs", "scripts", "check.sh"), Uint8Array.from([0x23, 0x21, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68, 0x0a, 0x00, 0xff]));
+    await chmod(path.join(directory, "docs", "scripts", "check.sh"), 0o755);
+    await writeFile(path.join(directory, "other", "SKILL.md"), "not selected").catch(async (error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        await mkdir(path.join(directory, "other"), { recursive: true });
+        await writeFile(path.join(directory, "other", "SKILL.md"), "not selected");
+        return;
+      }
+      throw error;
+    });
+
+    const readPaths: string[] = [];
+    const access = new NodeSourceContentAccess({
+      builtInRoot: directory,
+      readBinaryFile: async (filePath) => {
+        readPaths.push(filePath);
+        return readFile(filePath);
+      },
+    });
+
+    const files = await access.readSkillTree(builtin, "docs");
+    assert.deepEqual(files.map((file) => ({
+      path: file.path,
+      content: Buffer.from(file.content),
+      executable: file.executable,
+    })), [
+      { path: "docs/assets/image.bin", content: Buffer.from([0x00, 0xff, 0x01, 0x80]), executable: false },
+      { path: "docs/nested/example.txt", content: Buffer.from("nested example"), executable: false },
+      { path: "docs/README.md", content: Buffer.from("supporting reference"), executable: false },
+      { path: "docs/scripts/check.sh", content: Buffer.from([0x23, 0x21, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68, 0x0a, 0x00, 0xff]), executable: true },
+      { path: "docs/SKILL.md", content: Buffer.from("---\nname: Docs\ndescription: Docs skill\n---\n"), executable: false },
+    ]);
+    assert.deepEqual(readPaths, [
+      path.join(directory, "docs", "assets", "image.bin"),
+      path.join(directory, "docs", "nested", "example.txt"),
+      path.join(directory, "docs", "README.md"),
+      path.join(directory, "docs", "scripts", "check.sh"),
+      path.join(directory, "docs", "SKILL.md"),
+    ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("rejects targeted built-in paths that could escape the Source root", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-selected-skill-"));
+  try {
+    await mkdir(path.join(directory, "skill"), { recursive: true });
+    await writeFile(path.join(directory, "skill", "SKILL.md"), "skill");
+    const access = new NodeSourceContentAccess({ builtInRoot: directory });
+
+    await assert.rejects(access.readSkillTree(builtin, "../skill"), /traversal|unsafe/i);
+    await assert.rejects(access.readSkillTree(builtin, "skill/../outside"), /traversal|unsafe/i);
+    await assert.rejects(access.readSkillTree(builtin, "skill\\\\file"), /unsafe/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("rejects symbolic links and oversized files in a selected built-in Skill tree", async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-selected-skill-"));
+  try {
+    await mkdir(path.join(directory, "skill"), { recursive: true });
+    await writeFile(path.join(directory, "skill", "SKILL.md"), "skill");
+    try {
+      await symlink(path.join(directory, "skill", "SKILL.md"), path.join(directory, "skill", "linked.md"));
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+    const access = new NodeSourceContentAccess({ builtInRoot: directory });
+    await assert.rejects(access.readSkillTree(builtin, "skill"), /symbolic link/i);
+
+    await rm(path.join(directory, "skill", "linked.md"));
+    await writeFile(path.join(directory, "skill", "large.bin"), "x".repeat(SKILL_TREE_LIMITS.maxFileBytes + 1));
+    await assert.rejects(access.readSkillTree(builtin, "skill"), /size limit/i);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

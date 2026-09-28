@@ -24,14 +24,34 @@ export interface GitCommandRunner {
   run(command: string, args: readonly string[], options?: GitCommandRunnerOptions): Promise<void>;
 }
 
+export interface GitSnapshotCommandRunnerOptions {
+  readonly maxOutputBytes?: number;
+}
+
 export interface GitSnapshotCommandRunner {
-  run(command: string, args: readonly string[]): Promise<string>;
+  run(command: string, args: readonly string[], options?: GitSnapshotCommandRunnerOptions): Promise<string>;
+  runBinary(command: string, args: readonly string[], options?: GitSnapshotCommandRunnerOptions): Promise<Uint8Array>;
 }
 
 export interface GitSourceSnapshotFile {
   readonly path: string;
   readonly content: string;
 }
+
+export interface GitSourceSkillTreeFile {
+  readonly path: string;
+  readonly content: Uint8Array;
+  readonly executable: boolean;
+}
+
+export const SKILL_TREE_LIMITS = Object.freeze({
+  maxFiles: 256,
+  maxFileBytes: 1024 * 1024,
+  maxTotalBytes: 8 * 1024 * 1024,
+  maxPathBytes: 4096,
+  maxDepth: 32,
+  maxListingBytes: 16 * 1024 * 1024,
+});
 
 const EXCLUDED_LIFECYCLE_SEGMENTS = new Set([
   "in-progress",
@@ -74,26 +94,41 @@ class NodeGitCommandRunner implements GitCommandRunner {
 }
 
 class NodeGitSnapshotCommandRunner implements GitSnapshotCommandRunner {
-  run(command: string, args: readonly string[]): Promise<string> {
+  async run(command: string, args: readonly string[], options: GitSnapshotCommandRunnerOptions = {}): Promise<string> {
+    return Buffer.from(await this.runBinary(command, args, options)).toString("utf8");
+  }
+
+  runBinary(command: string, args: readonly string[], options: GitSnapshotCommandRunnerOptions = {}): Promise<Uint8Array> {
     return new Promise((resolve, reject) => {
       const child = spawn(command, [...args], {
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
       });
-      let stdout = "";
+      const stdout: Buffer[] = [];
+      let stdoutBytes = 0;
       let stderr = "";
-      child.stdout?.setEncoding("utf8");
-      child.stderr?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk: string) => {
-        stdout += chunk;
+      let outputTooLarge = false;
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdoutBytes += chunk.length;
+        if (options.maxOutputBytes !== undefined && stdoutBytes > options.maxOutputBytes) {
+          outputTooLarge = true;
+          child.kill();
+          return;
+        }
+        stdout.push(chunk);
       });
+      child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
         stderr += chunk;
       });
       child.on("error", (error) => reject(error));
       child.on("close", (code, signal) => {
+        if (outputTooLarge) {
+          reject(new Error("git command output exceeds the safe size limit"));
+          return;
+        }
         if (code === 0) {
-          resolve(stdout);
+          resolve(Buffer.concat(stdout));
           return;
         }
         const detail = stderr.trim() || (signal ? `terminated by ${signal}` : `exited with code ${code ?? "unknown"}`);
@@ -197,6 +232,96 @@ export class GitSourceSnapshotAccess {
   constructor(options: { readonly cachePath?: string; readonly runner?: GitSnapshotCommandRunner } = {}) {
     this.cachePath = options.cachePath ?? defaultGitSourceCachePath();
     this.runner = options.runner ?? new NodeGitSnapshotCommandRunner();
+  }
+
+  async readSkillTree(source: GitSource, skillPath: string): Promise<readonly GitSourceSkillTreeFile[]> {
+    const relativeSkillPath = validateSkillDirectoryPath(skillPath);
+    const destination = cachePathForSource(this.cachePath, source);
+    if ((await pathType(destination)) !== "directory") {
+      throw new Error(`Git Source mirror is not available: ${destination}`);
+    }
+    await assertNoSymlinkPath(destination);
+
+    const commit = await this.readHeadCommit(destination, source);
+    const tree = await this.runner.run("git", [
+      "--git-dir",
+      destination,
+      "ls-tree",
+      "-r",
+      "-z",
+      commit,
+      "--",
+      relativeSkillPath,
+    ], { maxOutputBytes: SKILL_TREE_LIMITS.maxListingBytes });
+    if (Buffer.byteLength(tree, "utf8") > SKILL_TREE_LIMITS.maxListingBytes) {
+      throw new Error("Selected Skill tree listing exceeds the safe size limit");
+    }
+
+    const prefix = `${relativeSkillPath}/`;
+    const files: GitSourceSkillTreeFile[] = [];
+    let totalBytes = 0;
+    let hasSkillManifest = false;
+    for (const record of tree.split("\0")) {
+      if (!record) {
+        continue;
+      }
+      if (files.length >= SKILL_TREE_LIMITS.maxFiles) {
+        throw new Error("Selected Skill tree contains too many files");
+      }
+      const separator = record.indexOf("\t");
+      if (separator < 0) {
+        throw new Error("Git Source returned a malformed Skill tree entry");
+      }
+      const metadata = record.slice(0, separator).split(" ");
+      const mode = metadata[0];
+      const objectType = metadata[1];
+      const objectId = metadata[2];
+      const relativePath = record.slice(separator + 1);
+      if (!relativePath.startsWith(prefix) || !isSafeSourcePath(relativePath) || relativePath === prefix.slice(0, -1)) {
+        throw new Error("Git Source returned a Skill tree path outside the selected directory");
+      }
+      if (mode === "120000" || objectType !== "blob" || (mode !== "100644" && mode !== "100755")) {
+        throw new Error(`Selected Skill tree contains an unsupported Git entry: ${relativePath}`);
+      }
+      if (!objectId || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(objectId)) {
+        throw new Error("Git Source returned an unsafe object reference");
+      }
+
+      const content = await this.runner.runBinary("git", ["--git-dir", destination, "cat-file", "blob", objectId], {
+        maxOutputBytes: SKILL_TREE_LIMITS.maxFileBytes,
+      });
+      const byteLength = content.byteLength;
+      if (byteLength > SKILL_TREE_LIMITS.maxFileBytes) {
+        throw new Error(`Selected Skill file exceeds the safe size limit: ${relativePath}`);
+      }
+      totalBytes += byteLength;
+      if (totalBytes > SKILL_TREE_LIMITS.maxTotalBytes) {
+        throw new Error("Selected Skill tree exceeds the safe total size limit");
+      }
+      if (relativePath === `${relativeSkillPath}/SKILL.md`) {
+        hasSkillManifest = true;
+      }
+      files.push({ path: relativePath, content, executable: mode === "100755" });
+    }
+
+    if (!hasSkillManifest) {
+      throw new Error(`Selected Skill directory does not contain ${relativeSkillPath}/SKILL.md`);
+    }
+    return Object.freeze(files);
+  }
+
+  private async readHeadCommit(destination: string, source: GitSource): Promise<string> {
+    const commit = (await this.runner.run("git", [
+      "--git-dir",
+      destination,
+      "rev-parse",
+      "--verify",
+      "HEAD^{commit}",
+    ], { maxOutputBytes: 128 })).trim();
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(commit)) {
+      throw new Error(`Git Source mirror has no safe HEAD snapshot: ${source.id}`);
+    }
+    return commit;
   }
 
   async readSnapshot(source: GitSource): Promise<readonly GitSourceSnapshotFile[]> {
@@ -335,6 +460,34 @@ async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>>
       }
       await delay(SOURCE_LOCK_RETRY_MS);
     }
+  }
+}
+
+export function validateSkillDirectoryPath(candidate: string): string {
+  if (typeof candidate !== "string" || candidate.length === 0) {
+    throw new Error("Selected Skill path must be a non-empty relative POSIX path");
+  }
+  if (Buffer.byteLength(candidate, "utf8") > SKILL_TREE_LIMITS.maxPathBytes
+    || candidate.includes("\\")
+    || /[\u0000-\u001f\u007f]/u.test(candidate)
+    || candidate.startsWith("/")
+    || candidate.endsWith("/")) {
+    throw new Error("Selected Skill path contains unsafe characters");
+  }
+
+  const segments = candidate.split("/");
+  if (segments.length > SKILL_TREE_LIMITS.maxDepth || segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    throw new Error("Selected Skill path must not contain traversal segments");
+  }
+  return candidate;
+}
+
+function isSafeSourcePath(candidate: string): boolean {
+  try {
+    validateSkillDirectoryPath(candidate);
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -5,6 +5,8 @@ import path from "node:path";
 import {
   defaultGitSourceCachePath,
   GitSourceSnapshotAccess,
+  SKILL_TREE_LIMITS,
+  validateSkillDirectoryPath,
 } from "./git-source.js";
 import type { Source } from "./sources.js";
 
@@ -31,15 +33,26 @@ export interface SourceContentFile {
   readonly content: string;
 }
 
+export interface SkillTreeFile {
+  /** POSIX path relative to the Source root. */
+  readonly path: string;
+  /** Exact file bytes; callers must not decode or normalize supporting files. */
+  readonly content: Uint8Array;
+  /** Whether the source marked this file executable. */
+  readonly executable: boolean;
+}
+
 /** Reads one immutable view of a Source without refreshing or changing it. */
 export interface SourceContentAccess {
   readSnapshot(source: Source): Promise<readonly SourceContentFile[]>;
+  readonly readSkillTree?: (source: Source, skillPath: string) => Promise<readonly SkillTreeFile[]>;
 }
 
 export interface SourceContentAccessOptions {
   readonly builtInRoot?: string;
   readonly gitCachePath?: string;
   readonly readFile?: (filePath: string) => Promise<string>;
+  readonly readBinaryFile?: (filePath: string) => Promise<Uint8Array>;
 }
 
 /**
@@ -54,11 +67,13 @@ export function defaultBuiltInSkillsRoot(): string {
 export class NodeSourceContentAccess implements SourceContentAccess {
   private readonly builtInRoot: string;
   private readonly readFile: (filePath: string) => Promise<string>;
+  private readonly readBinaryFile: (filePath: string) => Promise<Uint8Array>;
   private readonly gitSnapshots: GitSourceSnapshotAccess;
 
   constructor(options: SourceContentAccessOptions = {}) {
     this.builtInRoot = options.builtInRoot ?? defaultBuiltInSkillsRoot();
     this.readFile = options.readFile ?? ((filePath) => readFile(filePath, "utf8"));
+    this.readBinaryFile = options.readBinaryFile ?? ((filePath) => readFile(filePath));
     this.gitSnapshots = new GitSourceSnapshotAccess({
       cachePath: options.gitCachePath ?? defaultGitSourceCachePath(),
     });
@@ -69,6 +84,14 @@ export class NodeSourceContentAccess implements SourceContentAccess {
       return readDirectorySnapshot(this.builtInRoot, this.readFile);
     }
     return this.gitSnapshots.readSnapshot(source);
+  }
+
+  async readSkillTree(source: Source, skillPath: string): Promise<readonly SkillTreeFile[]> {
+    const selectedPath = validateSkillDirectoryPath(skillPath);
+    if (source.kind === "builtin") {
+      return readSelectedSkillDirectory(this.builtInRoot, selectedPath, this.readBinaryFile);
+    }
+    return this.gitSnapshots.readSkillTree(source, selectedPath);
   }
 }
 
@@ -177,6 +200,144 @@ export function parseSkillFrontmatter(content: string): { name: string; descript
   return { name, description };
 }
 
+async function readSelectedSkillDirectory(
+  root: string,
+  selectedPath: string,
+  readBinaryFile: (filePath: string) => Promise<Uint8Array>,
+): Promise<readonly SkillTreeFile[]> {
+  const rootKind = await safePathKind(root);
+  if (rootKind !== "directory") {
+    throw new Error(`Built-in Source root is not a directory: ${root}`);
+  }
+  await assertNoSymlinkPath(root);
+
+  const selectedDirectory = path.join(root, ...selectedPath.split("/"));
+  if ((await safePathKind(selectedDirectory)) !== "directory") {
+    throw new Error(`Selected Skill directory is not available: ${selectedPath}`);
+  }
+  await assertNoSymlinkPath(selectedDirectory);
+
+  const files: SkillTreeFile[] = [];
+  let totalBytes = 0;
+  let hasSkillManifest = false;
+  await walkSelectedSkillDirectory(
+    root,
+    selectedDirectory,
+    selectedPath,
+    files,
+    readBinaryFile,
+    (byteLength, relativePath) => {
+      if (byteLength > SKILL_TREE_LIMITS.maxFileBytes) {
+        throw new Error(`Selected Skill file exceeds the safe size limit: ${relativePath}`);
+      }
+    },
+    (byteLength) => {
+      totalBytes += byteLength;
+      if (totalBytes > SKILL_TREE_LIMITS.maxTotalBytes) {
+        throw new Error("Selected Skill tree exceeds the safe total size limit");
+      }
+    },
+    () => {
+      if (files.length >= SKILL_TREE_LIMITS.maxFiles) {
+        throw new Error("Selected Skill tree contains too many files");
+      }
+    },
+    (relativePath) => {
+      if (relativePath === `${selectedPath}/SKILL.md`) {
+        hasSkillManifest = true;
+      }
+    },
+  );
+
+  if (!hasSkillManifest) {
+    throw new Error(`Selected Skill directory does not contain ${selectedPath}/SKILL.md`);
+  }
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  return Object.freeze(files);
+}
+
+async function walkSelectedSkillDirectory(
+  root: string,
+  absoluteDirectory: string,
+  relativeDirectory: string,
+  files: SkillTreeFile[],
+  readBinaryFile: (filePath: string) => Promise<Uint8Array>,
+  assertFileSize: (byteLength: number, relativePath: string) => void,
+  assertTotalBytes: (byteLength: number) => void,
+  assertFileCount: () => void,
+  observeFile: (relativePath: string) => void,
+): Promise<void> {
+  await assertNoSymlinkPath(absoluteDirectory);
+  const entries = await readdir(absoluteDirectory, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const relativePath = `${relativeDirectory}/${entry.name}`;
+    try {
+      validateSkillDirectoryPath(relativePath);
+    } catch {
+      throw new Error(`Selected Skill tree contains an unsafe path: ${relativePath}`);
+    }
+    const absolutePath = path.join(root, ...relativePath.split("/"));
+    if (entry.isSymbolicLink()) {
+      throw new Error(`Selected Skill tree contains a symbolic link: ${relativePath}`);
+    }
+    if (entry.isDirectory()) {
+      if ((await safePathKind(absolutePath)) !== "directory") {
+        throw new Error(`Selected Skill tree entry changed while reading: ${relativePath}`);
+      }
+      await walkSelectedSkillDirectory(
+        root,
+        absolutePath,
+        relativePath,
+        files,
+        readBinaryFile,
+        assertFileSize,
+        assertTotalBytes,
+        assertFileCount,
+        observeFile,
+      );
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw new Error(`Selected Skill tree contains an unsupported file: ${relativePath}`);
+    }
+
+    assertFileCount();
+    await assertNoSymlinkPath(absolutePath);
+    const information = await lstat(absolutePath);
+    if (!information.isFile()) {
+      throw new Error(`Selected Skill tree entry changed while reading: ${relativePath}`);
+    }
+    assertFileSize(information.size, relativePath);
+    const content = await readBinaryFile(absolutePath);
+    const byteLength = content.byteLength;
+    assertFileSize(byteLength, relativePath);
+    assertTotalBytes(byteLength);
+    observeFile(relativePath);
+    files.push({ path: relativePath, content, executable: (information.mode & 0o111) !== 0 });
+  }
+}
+
+async function assertNoSymlinkPath(candidate: string): Promise<void> {
+  const absolute = path.resolve(candidate);
+  const root = path.parse(absolute).root;
+  let current = root;
+  const segments = path.relative(root, absolute).split(path.sep).filter(Boolean);
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`Selected Skill path contains a symbolic link: ${current}`);
+      }
+    } catch (error) {
+      if (isMissing(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+}
+
 async function readDirectorySnapshot(
   root: string,
   readTextFile: (filePath: string) => Promise<string>,
@@ -242,6 +403,10 @@ async function safePathKind(candidate: string): Promise<"directory" | "file" | "
     }
     throw error;
   }
+}
+
+function isMissing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 function normalizeSourcePath(candidate: string): string | undefined {
