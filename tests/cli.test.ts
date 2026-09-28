@@ -243,7 +243,8 @@ test("previews project selection before confirmation, then installs and persists
     const args = ["install", "--scope", "project", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo", "--host", "pi,claude", "--version", "latest", "--portable-v1"];
 
     assert.equal(await runCli(args, dependencies), 1);
-    assert.match(output[0] ?? "", /Preview: install Skill/);
+    assert.match(output[0] ?? "", /Preview: reconcile Skill/);
+    assert.ok(output.some((line) => /fresh install.*symlink.*--yes/i.test(line)));
     assert.match(errors[0] ?? "", /Installation not confirmed/);
     await assert.rejects(readFile(path.join(projectRoot, "agent-depot.json")), { code: "ENOENT" });
 
@@ -306,6 +307,60 @@ test("requires separate adoption confirmation and persists the actual adopted lo
       adopted: true,
     });
     assert.match(output.join("\\n"), /Adopted Skill.*\.agents[\\\\/]skills[\\\\/]demo/);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("previews selected source files and known locations before adopting a Claude-only Skill in place", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-claude-adoption-"));
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  const errors: string[] = [];
+  const output: string[] = [];
+  try {
+    await mkdir(claudePath, { recursive: true });
+    for (const file of cliTree) {
+      const relativePath = file.path.slice("portable/demo/".length);
+      const destination = path.join(claudePath, ...relativePath.split("/"));
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, Buffer.from(file.content));
+    }
+    const originalSkill = await readFile(path.join(claudePath, "SKILL.md"), "utf8");
+    const args = [
+      "install", "--scope", "project", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "claude", "--version", "latest", "--portable-v1",
+    ];
+    const dependencies = {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(args, dependencies), 1);
+    const preview = [...output];
+    assert.ok(preview.some((line) => /destination determined by safe inspection/i.test(line)));
+    assert.ok(preview.some((line) => line.includes("selected source files:")));
+    assert.ok(preview.some((line) => line.includes("portable/demo/SKILL.md")));
+    assert.ok(preview.some((line) => line.includes("possible project locations:")));
+    assert.ok(preview.some((line) => line.includes(path.join(projectRoot, ".claude", "skills", "demo"))));
+    assert.equal(preview.some((line) => /reconcile:.*\.agents[\\/]/u.test(line)), false);
+    output.length = 0;
+    errors.length = 0;
+
+    assert.equal(await runCli([...args, "--yes"], dependencies), 0);
+
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as {
+      skills: Array<{ installation?: { path: string; adopted: boolean } }>;
+    };
+    assert.deepEqual(manifest.skills[0]?.installation, {
+      path: ".claude/skills/demo",
+      adopted: true,
+    });
+    assert.equal(await readFile(path.join(claudePath, "SKILL.md"), "utf8"), originalSkill);
+    await assert.rejects(lstat(path.join(projectRoot, ".agents", "skills", "demo")), { code: "ENOENT" });
+    assert.deepEqual(errors, []);
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }

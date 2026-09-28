@@ -475,14 +475,17 @@ function outputInstallPreview(
 ): void {
   const skillName = path.posix.basename(selection.path);
   const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
-  output(`Preview: install Skill ${JSON.stringify(skillName)} from ${source.id} at ${canonicalPath}`);
+  const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
+  output(`Preview: reconcile Skill ${JSON.stringify(skillName)} from ${source.id} (destination determined by safe inspection)`);
   output(`  scope: project; hosts: ${selection.hosts.join(",")}; version policy: ${formatVersionPolicy(selection.version)}`);
+  output("  selected source files:");
   for (const file of files) {
-    const destination = path.join(canonicalPath, ...file.path.slice(`${selection.path}/`.length).split("/"));
-    output(`  reconcile: ${destination} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""}; adopt if identical, create if missing)`);
+    output(`    ${file.path} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""}; adopt if identical, create if missing)`);
   }
+  output("  possible project locations:");
+  output(`    ${canonicalPath} (canonical Host location; safe inspection determines whether this is used)`);
   if (selection.hosts.includes("claude")) {
-    output(`  reconcile symlink: ${path.join(projectRoot, ".claude", "skills", skillName)} (retain if already canonical; create only with explicit additional-host confirmation)`);
+    output(`    ${claudePath} (Claude Host location; fresh install exposes the canonical location by symlink with --yes)`);
   }
   if (method) {
     const cwd = path.resolve(projectRoot, method.cwd ?? ".");
