@@ -446,3 +446,147 @@ test("rolls back a partially written target after an injected file failure", asy
     await rm(projectRoot, { recursive: true, force: true });
   }
 });
+
+test("adopts an identical canonical Skill in place without writing it", async () => {
+  const projectRoot = await makeProject();
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  try {
+    await mkdir(canonicalPath, { recursive: true });
+    await mkdir(path.join(canonicalPath, "assets"));
+    await mkdir(path.join(canonicalPath, "scripts"));
+    await writeFile(path.join(canonicalPath, "SKILL.md"), Buffer.from(tree[0]!.content));
+    await writeFile(path.join(canonicalPath, "assets", "data.bin"), Buffer.from(tree[1]!.content));
+    await writeFile(path.join(canonicalPath, "scripts", "run.sh"), Buffer.from(tree[2]!.content));
+    const before = await lstat(canonicalPath);
+
+    const result = await installProjectSkill({
+      selection: { ...selection, hosts: ["pi"] },
+      source,
+      portableV1: true,
+    }, { projectRoot, sourceAccess: accessFor() });
+
+    assert.equal(result.adopted, true);
+    assert.deepEqual(result.adoptedPaths, [canonicalPath]);
+    assert.equal((await lstat(canonicalPath)).ino, before.ino);
+    assert.equal(await readFile(path.join(canonicalPath, "SKILL.md"), "utf8"), "SKILL");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("adopts an identical noncanonical Claude directory in place", async () => {
+  const projectRoot = await makeProject();
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  try {
+    await mkdir(claudePath, { recursive: true });
+    await mkdir(path.join(claudePath, "assets"));
+    await mkdir(path.join(claudePath, "scripts"));
+    await writeFile(path.join(claudePath, "SKILL.md"), Buffer.from(tree[0]!.content));
+    await writeFile(path.join(claudePath, "assets", "data.bin"), Buffer.from(tree[1]!.content));
+    await writeFile(path.join(claudePath, "scripts", "run.sh"), Buffer.from(tree[2]!.content));
+
+    const result = await installProjectSkill({
+      selection: { ...selection, hosts: ["claude"] },
+      source,
+      portableV1: true,
+    }, { projectRoot, sourceAccess: accessFor() });
+
+    assert.equal(result.adopted, true);
+    assert.equal(result.canonicalPath, claudePath);
+    assert.deepEqual(result.adoptedPaths, [claudePath]);
+    assert.equal((await lstat(claudePath)).isSymbolicLink(), false);
+    await assert.rejects(lstat(path.join(projectRoot, ".agents")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("adopts a canonical Skill and its Claude symlink on a repeat installation", async (t) => {
+  const projectRoot = await makeProject();
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  try {
+    try {
+      await mkdir(canonicalPath, { recursive: true });
+      for (const file of tree) {
+        const relativePath = file.path.slice("portable/demo/".length);
+        const destination = path.join(canonicalPath, ...relativePath.split("/"));
+        await mkdir(path.dirname(destination), { recursive: true });
+        await writeFile(destination, Buffer.from(file.content));
+      }
+      await mkdir(path.dirname(claudePath), { recursive: true });
+      await symlink(path.relative(path.dirname(claudePath), canonicalPath), claudePath, "dir");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    const result = await installProjectSkill({ selection, source, portableV1: true }, {
+      projectRoot,
+      sourceAccess: accessFor(),
+    });
+
+    assert.equal(result.adopted, true);
+    assert.equal(result.canonicalPath, canonicalPath);
+    assert.equal(result.claudePath, claudePath);
+    assert.deepEqual(result.adoptedPaths, [canonicalPath, claudePath]);
+    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects an unrelated Claude Skill symlink during adoption", async (t) => {
+  const projectRoot = await makeProject();
+  const unrelatedTarget = await makeProject();
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  try {
+    try {
+      await mkdir(path.dirname(claudePath), { recursive: true });
+      await symlink(unrelatedTarget, claudePath, "dir");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["claude"] }, source, portableV1: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+      }),
+      /does not point to the existing canonical Skill/i,
+    );
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(unrelatedTarget, { recursive: true, force: true });
+  }
+});
+
+test("does not add missing Claude exposure during adoption", async () => {
+  const projectRoot = await makeProject();
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  try {
+    await mkdir(canonicalPath, { recursive: true });
+    for (const file of tree) {
+      const relativePath = file.path.slice("portable/demo/".length);
+      const destination = path.join(canonicalPath, ...relativePath.split("/"));
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, Buffer.from(file.content));
+    }
+
+    await assert.rejects(
+      installProjectSkill({ selection, source, portableV1: true }, { projectRoot, sourceAccess: accessFor() }),
+      /missing Claude exposure.*explicit confirmation.*will not create/i,
+    );
+    await assert.rejects(lstat(path.join(projectRoot, ".claude")), { code: "ENOENT" });
+    assert.equal(await readFile(path.join(canonicalPath, "SKILL.md"), "utf8"), "SKILL");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
