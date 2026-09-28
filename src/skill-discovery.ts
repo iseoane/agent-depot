@@ -39,6 +39,7 @@ export interface SourceContentAccess {
 export interface SourceContentAccessOptions {
   readonly builtInRoot?: string;
   readonly gitCachePath?: string;
+  readonly readFile?: (filePath: string) => Promise<string>;
 }
 
 /**
@@ -52,10 +53,12 @@ export function defaultBuiltInSkillsRoot(): string {
 /** Default read-only Source access used by the application operation. */
 export class NodeSourceContentAccess implements SourceContentAccess {
   private readonly builtInRoot: string;
+  private readonly readFile: (filePath: string) => Promise<string>;
   private readonly gitSnapshots: GitSourceSnapshotAccess;
 
   constructor(options: SourceContentAccessOptions = {}) {
     this.builtInRoot = options.builtInRoot ?? defaultBuiltInSkillsRoot();
+    this.readFile = options.readFile ?? ((filePath) => readFile(filePath, "utf8"));
     this.gitSnapshots = new GitSourceSnapshotAccess({
       cachePath: options.gitCachePath ?? defaultGitSourceCachePath(),
     });
@@ -63,7 +66,7 @@ export class NodeSourceContentAccess implements SourceContentAccess {
 
   async readSnapshot(source: Source): Promise<readonly SourceContentFile[]> {
     if (source.kind === "builtin") {
-      return readDirectorySnapshot(this.builtInRoot);
+      return readDirectorySnapshot(this.builtInRoot, this.readFile);
     }
     return this.gitSnapshots.readSnapshot(source);
   }
@@ -174,7 +177,10 @@ export function parseSkillFrontmatter(content: string): { name: string; descript
   return { name, description };
 }
 
-async function readDirectorySnapshot(root: string): Promise<readonly SourceContentFile[]> {
+async function readDirectorySnapshot(
+  root: string,
+  readTextFile: (filePath: string) => Promise<string>,
+): Promise<readonly SourceContentFile[]> {
   const rootKind = await safePathKind(root);
   if (rootKind === "missing") {
     return Object.freeze([]);
@@ -184,11 +190,16 @@ async function readDirectorySnapshot(root: string): Promise<readonly SourceConte
   }
 
   const files: SourceContentFile[] = [];
-  await walkDirectory(root, "", files);
+  await walkDirectory(root, "", files, readTextFile);
   return Object.freeze(files);
 }
 
-async function walkDirectory(root: string, relativeDirectory: string, files: SourceContentFile[]): Promise<void> {
+async function walkDirectory(
+  root: string,
+  relativeDirectory: string,
+  files: SourceContentFile[],
+  readTextFile: (filePath: string) => Promise<string>,
+): Promise<void> {
   const absoluteDirectory = relativeDirectory ? path.join(root, relativeDirectory) : root;
   const entries = await readdir(absoluteDirectory, { withFileTypes: true });
   entries.sort((left, right) => left.name.localeCompare(right.name));
@@ -199,15 +210,18 @@ async function walkDirectory(root: string, relativeDirectory: string, files: Sou
       continue;
     }
     if (entry.isDirectory()) {
-      await walkDirectory(root, relativePath, files);
+      if (excludedLifecycleSegments.has(entry.name)) {
+        continue;
+      }
+      await walkDirectory(root, relativePath, files, readTextFile);
       continue;
     }
-    if (!entry.isFile() || (await safePathKind(absolutePath)) !== "file") {
+    if (!entry.isFile() || entry.name !== "SKILL.md" || (await safePathKind(absolutePath)) !== "file") {
       continue;
     }
     files.push({
       path: relativePath.split(path.sep).join("/"),
-      content: await readFile(absolutePath, "utf8"),
+      content: await readTextFile(absolutePath),
     });
   }
 }

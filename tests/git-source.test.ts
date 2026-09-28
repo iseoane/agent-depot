@@ -25,7 +25,10 @@ class FakeSnapshotRunner {
     if (args.includes("ls-tree")) {
       return [
         "100644 blob one\tgood/SKILL.md\0",
+        "100644 blob four\tgood/notes.txt\0",
+        "100644 blob five\tREADME.md\0",
         "120000 blob two\tlinked/SKILL.md\0",
+        "100644 blob six\tdeprecated/hidden/SKILL.md\0",
         "100644 blob three\tdeprecated/SKILL.md\0",
       ].join("");
     }
@@ -192,15 +195,11 @@ test("reads the cached bare mirror HEAD without refreshing and ignores Git symli
     assert.deepEqual(await access.readSnapshot(source), [{
       path: "good/SKILL.md",
       content: "---\nname: Good\ndescription: Good skill\n---\n",
-    }, {
-      path: "deprecated/SKILL.md",
-      content: "---\nname: Deprecated\ndescription: Deprecated skill\n---\n",
     }]);
     assert.deepEqual(runner.calls.map((call) => call.args[call.args.length - 1]), [
       "HEAD^{commit}",
       "abc123",
       "abc123:good/SKILL.md",
-      "abc123:deprecated/SKILL.md",
     ]);
   });
 });

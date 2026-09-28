@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -72,6 +72,45 @@ test("parses quoted and folded required frontmatter fields and rejects incomplet
   assert.equal(parseSkillFrontmatter("---\nname: only-name\n---\n"), undefined);
   assert.equal(parseSkillFrontmatter("---\nname: skill\ndescription: text"), undefined);
   assert.equal(parseSkillFrontmatter("---\n  name: indented\ndescription: text\n---\n"), undefined);
+});
+
+test("reads only nested SKILL.md files and skips lifecycle subtrees before reading", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-skills-"));
+  try {
+    await writeFile(path.join(directory, "README.md"), "not a skill");
+    await mkdir(path.join(directory, "nested", "inner"), { recursive: true });
+    await writeFile(path.join(directory, "nested", "notes.txt"), "not a skill");
+    await writeFile(path.join(directory, "nested", "SKILL.md"), "---\nname: Nested\ndescription: Nested skill\n---\n");
+    await writeFile(path.join(directory, "nested", "inner", "SKILL.md"), "---\nname: Inner\ndescription: Inner skill\n---\n");
+    await mkdir(path.join(directory, "deprecated", "hidden"), { recursive: true });
+    await writeFile(path.join(directory, "deprecated", "hidden", "SKILL.md"), "---\nname: Hidden\ndescription: Hidden skill\n---\n");
+
+    const readPaths: string[] = [];
+    const access = new NodeSourceContentAccess({
+      builtInRoot: directory,
+      readFile: async (filePath) => {
+        readPaths.push(filePath);
+        return readFile(filePath, "utf8");
+      },
+    });
+
+    assert.deepEqual(await access.readSnapshot(builtin), [
+      {
+        path: "nested/inner/SKILL.md",
+        content: "---\nname: Inner\ndescription: Inner skill\n---\n",
+      },
+      {
+        path: "nested/SKILL.md",
+        content: "---\nname: Nested\ndescription: Nested skill\n---\n",
+      },
+    ]);
+    assert.deepEqual(readPaths, [
+      path.join(directory, "nested", "inner", "SKILL.md"),
+      path.join(directory, "nested", "SKILL.md"),
+    ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("does not traverse symbolic links in a package-owned built-in root", async (t) => {

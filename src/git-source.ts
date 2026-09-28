@@ -33,6 +33,13 @@ export interface GitSourceSnapshotFile {
   readonly content: string;
 }
 
+const EXCLUDED_LIFECYCLE_SEGMENTS = new Set([
+  "in-progress",
+  "beta",
+  "deprecated",
+  "retired",
+]);
+
 export class GitSourceAccessError extends Error {
   constructor(source: GitSource, reason: string) {
     super(`Unable to refresh Git Source ${JSON.stringify(source.id)} from ${JSON.stringify(source.url)}: ${reason}`);
@@ -222,7 +229,13 @@ export class GitSourceSnapshotAccess {
       }
       const metadata = record.slice(0, separator).split(" ");
       const relativePath = record.slice(separator + 1);
-      if (metadata[0] === "120000" || metadata[1] !== "blob" || !relativePath) {
+      if (
+        metadata[0] === "120000"
+        || metadata[1] !== "blob"
+        || !relativePath
+        || path.posix.basename(relativePath) !== "SKILL.md"
+        || relativePath.split("/").slice(0, -1).some((segment) => EXCLUDED_LIFECYCLE_SEGMENTS.has(segment))
+      ) {
         continue;
       }
       files.push({
