@@ -1,6 +1,6 @@
 # Run user-provided methods safely
 
-Status: ready-for-agent
+Status: completed
 Blocked by: 03 Install project-scoped Skills and 05 Install user-global Skills
 
 ## What to build

@@ -1,6 +1,6 @@
 # Install project-scoped Skills
 
-Status: ready-for-agent
+Status: completed
 Blocked by: 02 Discover Skills from selected Sources
 
 ## What to build

@@ -1,6 +1,6 @@
 # Replace or remove Sources safely
 
-Status: ready-for-agent
+Status: completed
 Blocked by: 04 Adopt existing Skills safely, 05 Install user-global Skills, and 06 Run user-provided methods safely
 
 ## What to build

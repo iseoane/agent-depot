@@ -1,6 +1,6 @@
 # Discover Skills from selected Sources
 
-Status: ready-for-agent
+Status: completed
 Blocked by: 01 Manage Sources before discovery
 
 ## What to build

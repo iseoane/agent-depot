@@ -1,6 +1,6 @@
 # Manage Sources before discovery
 
-Status: ready-for-agent
+Status: completed
 Blocked by: None (can start immediately)
 
 ## What to build

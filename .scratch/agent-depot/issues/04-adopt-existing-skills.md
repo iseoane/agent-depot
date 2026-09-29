@@ -1,6 +1,6 @@
 # Adopt existing Skills safely
 
-Status: ready-for-agent
+Status: completed
 Blocked by: 03 Install project-scoped Skills
 
 ## What to build

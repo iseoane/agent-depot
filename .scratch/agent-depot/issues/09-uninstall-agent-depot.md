@@ -1,6 +1,6 @@
 # Uninstall Agent Depot with data choices
 
-Status: ready-for-agent
+Status: completed
 Blocked by: 08 Replace or remove Sources safely
 
 ## What to build

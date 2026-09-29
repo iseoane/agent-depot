@@ -1,6 +1,6 @@
 # Install user-global Skills
 
-Status: ready-for-agent
+Status: completed
 Blocked by: 03 Install project-scoped Skills and 04 Adopt existing Skills safely
 
 ## What to build
