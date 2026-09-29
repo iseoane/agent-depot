@@ -12,6 +12,8 @@ node dist/src/cli.js source list
 node dist/src/cli.js source add https://github.com/example/skills.git
 node dist/src/cli.js source refresh git:<source-id>
 node dist/src/cli.js source refresh git:<source-id> --yes
+node dist/src/cli.js source remove git:<source-id> --yes
+node dist/src/cli.js source remove git:<source-id> --skill <id|path> --yes
 node dist/src/cli.js discover builtin:agent-depot git:<source-id>
 node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
 node dist/src/cli.js install --scope user-global --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
@@ -25,6 +27,14 @@ Refresh first prints the registered URL as a preview. It requires explicit
 `--yes` confirmation before any network access and otherwise fails closed. The
 package-owned `builtin:agent-depot` Source is listed as read-only and cannot be
 refreshed.
+
+Source removal is user-global only and never reads project manifests or deletes
+Source caches. It previews every dependent user-global Skill and keeps all of them
+tracked by default. Pass `--skill <id|path>` for a selected subset or `--all` for
+every dependent Skill. Skill deletion always requires `--yes`; adopted content and
+content that is locally modified (or lacks a trusted baseline) receive warnings.
+Preflight rejects unsafe paths, unexpected links, missing installations, and other
+inspection failures before changing the Source state or deleting any Skill.
 
 ## Batch updates
 

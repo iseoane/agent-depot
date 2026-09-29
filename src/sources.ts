@@ -103,6 +103,8 @@ export interface SourceOperations {
   addGitSource(url: string): Promise<GitSource>;
   listSources(): Promise<readonly Source[]>;
   refreshSource(sourceId: string): Promise<GitSource>;
+  /** Removes a Git Source and, when requested, its selected user-global records. */
+  removeGitSource?: (sourceId: string, installations?: readonly UserGlobalSkillInstallation[]) => Promise<void>;
   selectSources(sourceIds: readonly string[]): Promise<readonly Source[]>;
   /** Resolves a self-contained project Source without consulting global state. */
   resolveProjectSource?: (source: ProjectSource) => Promise<Source>;
@@ -189,6 +191,38 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
 
       await gitAccess.refresh(source);
       return source;
+    },
+
+    async removeGitSource(sourceId: string, installations: readonly UserGlobalSkillInstallation[] = []): Promise<void> {
+      if (sourceId === BUILT_IN_SOURCE.id) {
+        throw new BuiltInSourceError();
+      }
+
+      await stateStore.update((state) => {
+        const source = state.gitSources.find((candidate) => candidate.id === sourceId);
+        if (!source) {
+          throw new SourceNotFoundError(sourceId);
+        }
+
+        const requested = new Set(installations.map(userGlobalInstallationIdentity));
+        for (const installation of installations) {
+          if (sourceIdForUserGlobalInstallation(installation) !== sourceId ||
+            !state.userGlobalInstallations.some((candidate) => userGlobalInstallationIdentity(candidate) === userGlobalInstallationIdentity(installation))) {
+            throw new SourceSelectionError(
+              `User-global Skill ${JSON.stringify(installation.path)} is not a dependent installation of Source ${JSON.stringify(sourceId)}`,
+            );
+          }
+        }
+
+        return {
+          state: {
+            version: 1,
+            gitSources: state.gitSources.filter((candidate) => candidate.id !== sourceId),
+            userGlobalInstallations: state.userGlobalInstallations.filter((candidate) => !requested.has(userGlobalInstallationIdentity(candidate))),
+          },
+          result: undefined,
+        };
+      });
     },
 
     async selectSources(sourceIds: readonly string[]): Promise<readonly Source[]> {
@@ -396,6 +430,18 @@ export async function executeSourceInstallationMethod(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function userGlobalInstallationIdentity(selection: UserGlobalSkillInstallation): string {
+  return JSON.stringify([selection.source, selection.path]);
+}
+
+function sourceIdForUserGlobalInstallation(selection: UserGlobalSkillInstallation): string {
+  return selection.source.kind === "builtin"
+    ? selection.source.id
+    : "url" in selection.source
+      ? sourceIdForUrl(selection.source.url)
+      : "";
 }
 
 async function readSourceInstallationMethod(

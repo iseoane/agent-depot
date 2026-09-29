@@ -32,10 +32,13 @@ import {
   type VersionPolicy,
 } from "./project-manifest.js";
 import {
+  inspectProjectSkillRemoval,
   installProjectSkillTransaction,
+  removeProjectSkill,
   type ProjectInstallationOptions,
   type ProjectSkillInstallationResult,
   type ProjectSkillInstallationTransaction,
+  type ProjectSkillRemovalInspection,
   type ProjectSkillTreeAccess,
 } from "./project-installation.js";
 import {
@@ -65,6 +68,7 @@ const USAGE = [
   "  agent-depot source list",
   "  agent-depot source add <url>",
   "  agent-depot source refresh <id> [--yes]",
+  "  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]",
   "  agent-depot discover <source-id> [source-id...]",
   "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
@@ -73,6 +77,7 @@ const USAGE = [
 ].join("\n");
 const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
+const REMOVE_SOURCE_USAGE = "Usage: agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]";
 
 /** Runs the CLI application and returns a process exit code. */
 export async function runCli(argv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
@@ -147,6 +152,9 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
           output(`Refreshed Git Source: ${refreshed.id}\t${refreshed.url}`);
         }
         return 0;
+      case "remove":
+        await runSourceRemoval(values, operations, dependencies, output);
+        return 0;
       default:
         throw new CliUsageError(USAGE);
     }
@@ -158,6 +166,123 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
 
 /** Alias retained as a discoverable public CLI seam for embedding and tests. */
 export const main = runCli;
+
+interface RemoveSourceOptions {
+  readonly sourceId: string;
+  readonly all: boolean;
+  readonly requested: readonly string[];
+  readonly confirmed: boolean;
+}
+
+async function runSourceRemoval(
+  argv: readonly string[],
+  operations: SourceOperations,
+  dependencies: CliDependencies,
+  output: (line: string) => void,
+): Promise<void> {
+  const options = parseRemoveSourceOptions(argv);
+  const source = await findSource(operations, options.sourceId);
+  if (source.kind === "builtin") {
+    throw new BuiltInSourceError();
+  }
+  if (!operations.listUserGlobalInstallations || !operations.removeGitSource) {
+    throw new Error("Configured Source operations cannot remove user-global Sources");
+  }
+
+  const installations = await operations.listUserGlobalInstallations();
+  const dependent = installations.filter((selection) =>
+    selection.source.kind === "external" && "url" in selection.source && selection.source.url === source.url,
+  );
+  const selected = options.all
+    ? dependent
+    : resolveRemovalSelections(dependent, options.requested);
+  const homeDirectory = path.resolve(dependencies.homeDirectory ?? homedir());
+  const inspections: ProjectSkillRemovalInspection[] = [];
+
+  output(`Preview: remove Git Source ${source.id} from ${source.url}`);
+  output(`Dependent user-global Skills (${dependent.length}):`);
+  for (const [index, selection] of dependent.entries()) {
+    const location = selection.installation?.path ?? "missing installation location";
+    output(`  [${index}] ${selection.path} -> ${location}${selected.includes(selection) ? " (selected for removal)" : " (kept)"}`);
+  }
+  output("  Default: keep all dependent Skills tracked by default after Source removal");
+
+  for (const selection of selected) {
+    const inspection = await inspectProjectSkillRemoval(selection, {
+      projectRoot: homeDirectory,
+      sourceAccess: { readSkillTree: async () => [] },
+      ...dependencies.installationOptions,
+    });
+    inspections.push(inspection);
+    output(`  remove Skill ${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`);
+    if (inspection.adopted) {
+      output("    WARNING: this Skill was adopted; removal deletes content that Agent Depot did not create");
+    }
+    if (inspection.modified) {
+      output("    WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes");
+    }
+  }
+
+  requireConfirmation(options.confirmed, "Removal not confirmed; rerun with --yes after reviewing every Source and Skill preview");
+  for (let index = 0; index < selected.length; index += 1) {
+    await removeProjectSkill(selected[index]!, inspections[index]!, {
+      projectRoot: homeDirectory,
+      sourceAccess: { readSkillTree: async () => [] },
+      ...dependencies.installationOptions,
+    });
+  }
+  await operations.removeGitSource(source.id, selected);
+  output(`Removed Git Source: ${source.id}`);
+  if (selected.length > 0) {
+    output(`Removed ${selected.length} dependent user-global Skill${selected.length === 1 ? "" : "s"}; other dependent Skills remain tracked`);
+  }
+}
+
+function parseRemoveSourceOptions(argv: readonly string[]): RemoveSourceOptions {
+  if (argv.length === 0 || argv[0]?.startsWith("--")) {
+    throw new CliUsageError(REMOVE_SOURCE_USAGE);
+  }
+  const sourceId = argv[0]!;
+  const requested: string[] = [];
+  let all = false;
+  let confirmed = false;
+  for (let index = 1; index < argv.length; index += 1) {
+    switch (argv[index]) {
+      case "--all":
+        if (all) throw new CliUsageError(REMOVE_SOURCE_USAGE);
+        all = true;
+        break;
+      case "--skill":
+        if (all) throw new CliUsageError("source remove cannot combine --all with --skill");
+        requested.push(requireOptionValue(argv, ++index, "--skill"));
+        break;
+      case "--yes":
+        confirmed = true;
+        break;
+      default:
+        throw new CliUsageError(REMOVE_SOURCE_USAGE);
+    }
+  }
+  return { sourceId, all, requested: Object.freeze(requested), confirmed };
+}
+
+function resolveRemovalSelections(
+  dependent: readonly ProjectSkillSelection[],
+  requested: readonly string[],
+): readonly ProjectSkillSelection[] {
+  const selected: ProjectSkillSelection[] = [];
+  for (const value of requested) {
+    const numeric = /^\\d+$/u.test(value) ? Number(value) : undefined;
+    const candidate = numeric !== undefined && Number.isSafeInteger(numeric)
+      ? dependent[numeric]
+      : dependent.find((selection) => selection.path === value);
+    if (!candidate) {
+      throw new CliUsageError(`Unknown dependent user-global Skill selection ${JSON.stringify(value)}`);
+    }
+    if (!selected.includes(candidate)) selected.push(candidate);
+  }
+  return Object.freeze(selected);
+}
 
 interface UpdateOptions {
   readonly action: "check" | "apply";

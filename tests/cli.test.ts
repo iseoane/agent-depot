@@ -138,9 +138,104 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
+});
+
+test("previews dependent user-global Skills, keeps them by default, and removes only confirmed selections", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-state-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const source = await operations.addGitSource(external.url);
+    const kept: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url },
+      path: "portable/kept",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/kept", adopted: false },
+    };
+    const removed: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url },
+      path: "portable/removed",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/removed", adopted: true },
+    };
+    await operations.addUserGlobalInstallation!(kept);
+    await operations.addUserGlobalInstallation!(removed);
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "kept"), { recursive: true });
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "removed"), { recursive: true });
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "kept", "SKILL.md"), "kept");
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "removed", "SKILL.md"), "removed");
+
+    const dependencies = {
+      operations,
+      homeDirectory,
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+    assert.equal(await runCli(["source", "remove", source.id, "--skill", "portable/removed"], dependencies), 1);
+    assert.match(output.join("\\n"), /Dependent user-global Skills \(2\)/);
+    assert.match(output.join("\\n"), /keep all dependent Skills tracked by default/i);
+    assert.match(errors[0] ?? "", /Removal not confirmed/);
+    assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), true);
+    assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "removed", "SKILL.md"), "utf8"), "removed");
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli(["source", "remove", source.id, "--skill", "portable/removed", "--yes"], dependencies), 0);
+    assert.match(output.join("\\n"), /adopted.*remov/i);
+    assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), false);
+    assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "kept", "SKILL.md"), "utf8"), "kept");
+    await assert.rejects(readFile(path.join(homeDirectory, ".agents", "skills", "removed", "SKILL.md")), { code: "ENOENT" });
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), [kept]);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("refuses Source removal when a dependent Skill path is unsafe without mutating state", async (t) => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-unsafe-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-unsafe-state-"));
+  const outsideDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-outside-"));
+  const errors: string[] = [];
+  try {
+    try {
+      await symlink(outsideDirectory, path.join(homeDirectory, ".agents"), "dir");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const source = await operations.addGitSource(external.url);
+    await operations.addUserGlobalInstallation!({
+      source: { kind: "external", url: source.url },
+      path: "portable/unsafe",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/unsafe", adopted: false },
+    });
+    assert.equal(await runCli(["source", "remove", source.id, "--all", "--yes"], {
+      operations,
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+    }), 1);
+    assert.match(errors[0] ?? "", /symbolic-link|unsafe/i);
+    assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), true);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+    await rm(outsideDirectory, { recursive: true, force: true });
+  }
 });
 
 test("discovers candidates from the explicitly supplied Source IDs", async () => {
