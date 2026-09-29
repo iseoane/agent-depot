@@ -296,6 +296,23 @@ test("loads legacy Source state and persists user-global installations in the sh
       update: { kind: "command", argv: ["npm", "exec", "--", "demo-skill", "update"] },
     });
     assert.equal((await operations.listUserGlobalInstallations!())[0]?.methods?.install?.argv[0], "pnpm");
+
+    await operations.updateUserGlobalInstallation!({
+      source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+      path: "portable/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: {
+        path: ".agents/skills/demo",
+        adopted: false,
+        resolvedVersion: { kind: "builtin-package", version: "0.2.0" },
+        baseline: { algorithm: "sha256", digest: "b".repeat(64) },
+      },
+    });
+    assert.deepEqual((await operations.listUserGlobalInstallations!())[0]?.installation?.resolvedVersion, {
+      kind: "builtin-package",
+      version: "0.2.0",
+    });
   });
 });
 

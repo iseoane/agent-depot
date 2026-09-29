@@ -38,11 +38,15 @@ export interface UpdateBatchAssessmentItem {
   readonly source?: Source;
   readonly status: UpdateBatchAssessmentStatus;
   readonly reason: string;
+  /** Immutable Source tree captured for the eventual update; never reread during apply. */
+  readonly currentSnapshot?: SourceSkillTreeSnapshot;
   /** Current content identity captured from the same snapshot as currentVersion. */
   readonly currentBaseline?: ReturnType<typeof skillTreeBaseline>;
   /** Current trustworthy Source version captured from the same snapshot as the tree. */
   readonly currentVersion?: ResolvedVersionEvidence;
 }
+
+const immutableAssessmentSnapshots = new WeakMap<UpdateBatchAssessmentItem, SourceSkillTreeSnapshot>();
 
 export interface UpdateBatchAssessment {
   readonly items: readonly UpdateBatchAssessmentItem[];
@@ -187,14 +191,19 @@ async function assessSelection(
     const currentVersion = trustworthyVersion(source, snapshot.resolvedVersion);
     const installedVersion = trustworthyVersionForSelection(source, selection.installation.resolvedVersion);
     const evidence = assessEvidence(selection, installedVersion, currentVersion, currentBaseline);
-    return Object.freeze({
+    const item = Object.freeze({
       ...base,
       source,
       status: evidence.status,
       reason: evidence.reason,
+      currentSnapshot: freezeSnapshot(snapshot),
       currentBaseline,
       ...(currentVersion === undefined ? {} : { currentVersion }),
     });
+    // Keep a second private copy because Uint8Array contents remain mutable
+    // even when their containing object is frozen.
+    immutableAssessmentSnapshots.set(item, freezeSnapshot(snapshot));
+    return item;
   } catch (error) {
     return Object.freeze({
       ...base,
@@ -322,7 +331,7 @@ function parseRuntimeSelection(
     if (!parsed) {
       return { reason: "the selection is missing" };
     }
-    return { selection: value as ProjectSkillSelection, reason: "" };
+    return { selection: parsed, reason: "" };
   } catch (error) {
     return { reason: errorMessage(error) };
   }
@@ -391,6 +400,24 @@ function sameVersion(left: ResolvedVersionEvidence, right: ResolvedVersionEviden
 export function updateBatchItemId(selection: Pick<ProjectSkillSelection, "source" | "path">): string {
   return JSON.stringify([selection.source, selection.path]);
 }
+
+export function immutableUpdateSnapshot(item: UpdateBatchAssessmentItem): SourceSkillTreeSnapshot | undefined {
+  const snapshot = immutableAssessmentSnapshots.get(item);
+  return snapshot === undefined ? undefined : freezeSnapshot(snapshot);
+}
+
+function freezeSnapshot(snapshot: SourceSkillTreeSnapshot): SourceSkillTreeSnapshot {
+  return Object.freeze({
+    files: Object.freeze(snapshot.files.map((file) => Object.freeze({
+      path: file.path,
+      content: Uint8Array.from(file.content),
+      executable: file.executable,
+    }))),
+    ...(snapshot.resolvedVersion === undefined ? {} : { resolvedVersion: Object.freeze({ ...snapshot.resolvedVersion }) }),
+  });
+}
+
+export { applyUpdateBatch, previewSkillUpdate, type UpdateBatchApplyOptions, type UpdateBatchResult } from "./skill-update.js";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

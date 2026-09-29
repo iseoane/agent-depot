@@ -1,4 +1,5 @@
-import { chmod, lstat, mkdir, readFile, readlink, readdir, rmdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readlink, readdir, rename, rmdir, rm, symlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import path from "node:path";
 
@@ -25,6 +26,8 @@ export interface ProjectInstallationFileSystem {
   readlink(candidate: string): Promise<string>;
   rm(candidate: string): Promise<void>;
   rmdir(candidate: string): Promise<void>;
+  /** Optional atomic move used by transactional updates. */
+  readonly rename?: (from: string, to: string) => Promise<void>;
   /** Optional read methods used only when adopting an existing Skill. */
   readdir?(candidate: string): Promise<readonly string[]>;
   readFile?(candidate: string): Promise<Uint8Array>;
@@ -77,6 +80,201 @@ export interface ProjectSkillInstallationResult {
   readonly resolvedVersion?: ResolvedVersionEvidence;
 }
 
+export interface ProjectSkillUpdateRequest {
+  readonly selection: ProjectSkillSelection;
+  /** The resolved Source used by the full Skill tree reader. */
+  readonly source: Source;
+  /** Immutable bytes captured during assessment; the Source is never reread. */
+  readonly previewTree: readonly SkillTreeFile[];
+  readonly resolvedVersion?: ResolvedVersionEvidence;
+  /** Required only when the installed content differs from its recorded baseline. */
+  readonly confirmOverwrite?: boolean;
+}
+
+export interface ProjectSkillUpdateTransaction {
+  readonly result: ProjectSkillInstallationResult;
+  rollback(): Promise<void>;
+  /** Deletes the private backup after all surrounding persistence succeeds. */
+  commit(): Promise<void>;
+}
+
+/**
+ * Updates one already tracked Skill using a captured Source tree. The existing
+ * directory is moved aside before the replacement is made, so a caller can
+ * roll the filesystem back if persistence or another transaction step fails.
+ */
+export interface ProjectSkillUpdateInspection {
+  readonly actualBaseline: SkillInstallationBaseline;
+  readonly recordedBaseline?: SkillInstallationBaseline;
+  readonly requiresOverwriteConfirmation: boolean;
+}
+
+export async function inspectProjectSkillUpdate(
+  selection: ProjectSkillSelection,
+  options: ProjectInstallationOptions,
+): Promise<ProjectSkillUpdateInspection> {
+  if (!selection.installation) {
+    throw new ProjectInstallationError("update-unavailable", "Cannot inspect a Skill without a recorded installation");
+  }
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  if (!fileSystem.readdir || !fileSystem.readFile) {
+    throw new ProjectInstallationError("update-unavailable", "Skill update inspection requires filesystem read support");
+  }
+  const projectRoot = path.resolve(options.projectRoot);
+  const targetPath = resolveInstallationPath(projectRoot, selection.installation.path);
+  await assertNoSymlinkComponents(projectRoot, fileSystem);
+  await assertDirectory(projectRoot, fileSystem, "project root");
+  await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, targetPath), fileSystem);
+  const information = await fileSystem.lstat(targetPath);
+  assertRealDirectory(targetPath, information);
+  const actualTree = await readExistingSkillTree(targetPath, selection.path, {
+    lstat: fileSystem.lstat,
+    readdir: fileSystem.readdir,
+    readFile: fileSystem.readFile,
+  });
+  const actualBaseline = skillTreeBaseline(actualTree);
+  return Object.freeze({
+    actualBaseline,
+    ...(selection.installation.baseline === undefined ? {} : { recordedBaseline: selection.installation.baseline }),
+    requiresOverwriteConfirmation: selection.installation.baseline === undefined ||
+      actualBaseline.digest !== selection.installation.baseline.digest,
+  });
+}
+
+export async function updateProjectSkill(
+  request: ProjectSkillUpdateRequest,
+  options: ProjectInstallationOptions,
+): Promise<ProjectSkillInstallationResult> {
+  const transaction = await updateProjectSkillTransaction(request, options);
+  await transaction.commit();
+  return transaction.result;
+}
+
+export async function updateProjectSkillTransaction(
+  request: ProjectSkillUpdateRequest,
+  options: ProjectInstallationOptions,
+): Promise<ProjectSkillUpdateTransaction> {
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  if (!fileSystem.rename) {
+    throw new ProjectInstallationError("update-unavailable", "Transactional Skill updates require an atomic filesystem rename adapter");
+  }
+  if (!request.selection.installation) {
+    throw new ProjectInstallationError("update-unavailable", "Cannot update a Skill without a recorded installation");
+  }
+
+  const skillName = skillNameFromSelection(request.selection);
+  const projectRoot = path.resolve(options.projectRoot);
+  const targetPath = resolveInstallationPath(projectRoot, request.selection.installation.path);
+  await assertNoSymlinkComponents(projectRoot, fileSystem);
+  await assertDirectory(projectRoot, fileSystem, "project root");
+  await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, targetPath), fileSystem);
+  const targetInformation = await fileSystem.lstat(targetPath).catch((error: unknown) => {
+    if (isMissing(error)) {
+      throw new ProjectInstallationError("missing-installation", `The tracked Skill installation does not exist: ${targetPath}`);
+    }
+    throw error;
+  });
+  assertRealDirectory(targetPath, targetInformation);
+  if (!fileSystem.readdir || !fileSystem.readFile) {
+    throw new ProjectInstallationError("update-unavailable", "Transactional Skill updates require filesystem read support");
+  }
+
+  const actualTree = await readExistingSkillTree(targetPath, request.selection.path, {
+    lstat: fileSystem.lstat,
+    readdir: fileSystem.readdir,
+    readFile: fileSystem.readFile,
+  });
+  const recordedBaseline = request.selection.installation.baseline;
+  if (!recordedBaseline) {
+    throw new ProjectInstallationError("unknown-baseline", "The tracked Skill has no content baseline; refusing to overwrite it");
+  }
+  const actualBaseline = skillTreeBaseline(actualTree);
+  const locallyModified = actualBaseline.digest !== recordedBaseline.digest;
+  if (locallyModified && request.confirmOverwrite !== true) {
+    throw new ProjectInstallationError(
+      "overwrite-confirmation-required",
+      `The tracked Skill at ${JSON.stringify(targetPath)} differs from its recorded baseline; explicit overwrite confirmation is required and no path was changed`,
+    );
+  }
+
+  const files = await readAndValidateTree({ ...request, previewTree: request.previewTree }, skillName, options.sourceAccess);
+  const parent = path.dirname(targetPath);
+  await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, parent), fileSystem);
+  const stagePath = path.join(parent, `.agent-depot-update-${randomUUID()}`);
+  const backupPath = path.join(parent, `.agent-depot-backup-${randomUUID()}`);
+  let staged = false;
+  let moved = false;
+  let replacementIdentity: PathIdentity | undefined;
+  try {
+    await fileSystem.mkdir(stagePath);
+    staged = true;
+    await writeStagedTree(stagePath, files, fileSystem);
+    await fileSystem.rename(targetPath, backupPath);
+    moved = true;
+    await fileSystem.rename(stagePath, targetPath);
+    replacementIdentity = pathIdentity(await fileSystem.lstat(targetPath));
+    staged = false;
+  } catch (error) {
+    const rollbackErrors: string[] = [];
+    if (staged) {
+      await fileSystem.rm(stagePath).catch((cleanupError: unknown) => rollbackErrors.push(errorMessage(cleanupError)));
+    }
+    if (moved) {
+      await fileSystem.rm(targetPath).catch((cleanupError: unknown) => rollbackErrors.push(errorMessage(cleanupError)));
+      await fileSystem.rename(backupPath, targetPath).catch((cleanupError: unknown) => rollbackErrors.push(errorMessage(cleanupError)));
+    }
+    if (rollbackErrors.length > 0) {
+      throw new ProjectInstallationError("rollback-failed", `${errorMessage(error)}; rollback failed: ${rollbackErrors.join("; ")}`);
+    }
+    throw error;
+  }
+
+  const result = Object.freeze({
+    skillName,
+    canonicalPath: targetPath,
+    hosts: Object.freeze([...request.selection.hosts]),
+    files: Object.freeze(files.map((file) => file.relativePath)),
+    adopted: request.selection.installation.adopted,
+    adoptedPaths: Object.freeze([targetPath]),
+    baseline: skillTreeBaseline(files.map((file) => file.source)),
+    ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
+  });
+  let state: "open" | "rolled-back" | "committed" = "open";
+  return Object.freeze({
+    result,
+    rollback: async () => {
+      if (state !== "open") return;
+      state = "rolled-back";
+      const errors: string[] = [];
+      try {
+        const current = await fileSystem.lstat(targetPath);
+        if (!replacementIdentity || !samePathIdentity(replacementIdentity, pathIdentity(current))) {
+          errors.push(`preserved concurrently replaced Skill at ${JSON.stringify(targetPath)}`);
+        } else {
+          await fileSystem.rm(targetPath);
+        }
+      } catch (error) {
+        if (!isMissing(error)) errors.push(`could not remove replacement: ${errorMessage(error)}`);
+      }
+      if (errors.length === 0) {
+        try {
+          await fileSystem.rename!(backupPath, targetPath);
+        } catch (error) {
+          errors.push(`could not restore original Skill: ${errorMessage(error)}`);
+        }
+      }
+      if (errors.length > 0) {
+        throw new ProjectInstallationError("rollback-failed", `Rollback was incomplete: ${errors.join("; ")}`);
+      }
+    },
+    commit: async () => {
+      if (state !== "open") return;
+      await fileSystem.rm(backupPath);
+      state = "committed";
+    },
+  });
+}
+
 /** A successful install that can be reversed if a later transaction step fails. */
 export interface ProjectSkillInstallationTransaction {
   readonly result: ProjectSkillInstallationResult;
@@ -109,6 +307,7 @@ const nodeFileSystem: ProjectInstallationFileSystem = {
   symlink: async (target, candidate, type) => {
     await symlink(target, candidate, type);
   },
+  rename,
   readlink,
   rm: async (candidate) => {
     await rm(candidate, { recursive: true, force: true });
@@ -773,6 +972,38 @@ function samePathIdentity(left: PathIdentity, right: PathIdentity): boolean {
   return Number.isFinite(left.birthtimeMs) && left.birthtimeMs > 0 &&
     left.birthtimeMs === right.birthtimeMs && left.ctimeMs === right.ctimeMs &&
     left.size === right.size && left.mode === right.mode;
+}
+
+async function writeStagedTree(
+  stagePath: string,
+  files: readonly ValidatedTreeFile[],
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<void> {
+  for (const file of files) {
+    const segments = file.relativePath.split("/");
+    const destination = path.join(stagePath, ...segments);
+    await ensureDirectoryTree(stagePath, segments.slice(0, -1), [], new Set(), fileSystem);
+    await fileSystem.writeFile(destination, file.source.content);
+    const information = await fileSystem.lstat(destination);
+    if (information.isSymbolicLink() || !information.isFile()) {
+      throw new ProjectInstallationError("unsafe-target", `Updated file is not a regular file: ${destination}`);
+    }
+    await fileSystem.chmod(destination, file.source.executable ? 0o755 : 0o644);
+  }
+}
+
+function resolveInstallationPath(projectRoot: string, installationPath: string): string {
+  const candidate = path.resolve(projectRoot, ...installationPath.split("/"));
+  const relative = path.relative(projectRoot, candidate);
+  if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new ProjectInstallationError("unsafe-target", `Tracked Skill installation escapes the project root: ${installationPath}`);
+  }
+  return candidate;
+}
+
+function relativeSegments(root: string, candidate: string): readonly string[] {
+  const relative = path.relative(root, candidate);
+  return relative === "" ? [] : relative.split(path.sep);
 }
 
 function errorMessage(error: unknown): string {

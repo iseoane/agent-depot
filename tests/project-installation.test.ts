@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import type { ProjectSkillSelection } from "../src/project-manifest.js";
 import {
+  inspectProjectSkillUpdate,
   installProjectSkill,
   installProjectSkillTransaction,
   type ProjectInstallationFileSystem,
@@ -195,6 +196,42 @@ test("rejects an incompatible selected Host before reading or changing the proje
     await assert.rejects(lstat(path.join(projectRoot, ".agents")), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects a symlinked ancestor during update preview before reading the target", async (t) => {
+  const projectRoot = await makeProject();
+  const outsideRoot = await makeProject();
+  try {
+    await mkdir(path.join(outsideRoot, "skills", "demo"), { recursive: true });
+    await writeFile(path.join(outsideRoot, "skills", "demo", "SKILL.md"), "outside");
+    try {
+      await symlink(outsideRoot, path.join(projectRoot, ".agents"), "dir");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    await assert.rejects(
+      inspectProjectSkillUpdate({
+        ...selection,
+        installation: {
+          path: ".agents/skills/demo",
+          adopted: false,
+          baseline: { algorithm: "sha256", digest: "a".repeat(64) },
+        },
+      }, {
+        projectRoot,
+        sourceAccess: { async readSkillTree() { throw new Error("must reject before reading"); } },
+      }),
+      /symbolic-link ancestor/i,
+    );
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
   }
 });
 

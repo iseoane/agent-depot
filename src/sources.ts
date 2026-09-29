@@ -131,6 +131,8 @@ export interface SourceOperations {
   /** Shared per-user records for user-global Skill installations. */
   listUserGlobalInstallations?: () => Promise<readonly UserGlobalSkillInstallation[]>;
   addUserGlobalInstallation?: (selection: ProjectSkillSelection) => Promise<void>;
+  /** Replaces one persisted user-global record without changing its identity. */
+  updateUserGlobalInstallation?: (selection: ProjectSkillSelection) => Promise<void>;
 }
 
 export interface SourceDiscoveryOperations extends SourceOperations {
@@ -285,6 +287,33 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
         };
       });
     },
+
+    async updateUserGlobalInstallation(selection: ProjectSkillSelection): Promise<void> {
+      if (selection.installation === undefined) {
+        throw new SourceSelectionError(
+          `User-global Skill ${JSON.stringify(selection.path)} must include an installation location`,
+        );
+      }
+      await stateStore.update((state) => {
+        const identity = JSON.stringify([selection.source, selection.path]);
+        const index = state.userGlobalInstallations.findIndex((candidate) =>
+          JSON.stringify([candidate.source, candidate.path]) === identity,
+        );
+        if (index < 0) {
+          throw new SourceSelectionError(`User-global Skill ${JSON.stringify(selection.path)} is not recorded`);
+        }
+        const installations = [...state.userGlobalInstallations];
+        installations[index] = selection;
+        return {
+          state: {
+            version: 1,
+            gitSources: state.gitSources,
+            userGlobalInstallations: installations,
+          },
+          result: undefined,
+        };
+      });
+    },
   };
 }
 
@@ -318,12 +347,12 @@ export function parseSourceInstallationMethod(value: unknown): SourceInstallatio
   });
 }
 
-/** Executes a validated method with an argument vector and no shell. */
-export async function executeSourceInstallationMethod(
+/** Resolves and validates a method cwd before any managed tree is replaced. */
+export async function resolveSourceInstallationMethodCwd(
   method: SourceInstallationMethod,
-  context: SourceInstallationContext,
-): Promise<void> {
-  const projectRoot = await realpath(path.resolve(context.projectRoot)).catch((error: unknown) => {
+  projectRootInput: string,
+): Promise<string> {
+  const projectRoot = await realpath(path.resolve(projectRootInput)).catch((error: unknown) => {
     throw new SourceMetadataError(`cannot resolve the project root: ${errorMessage(error)}`);
   });
   const requestedCwd = path.resolve(projectRoot, method.cwd ?? ".");
@@ -334,6 +363,15 @@ export async function executeSourceInstallationMethod(
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new SourceMetadataError("upstream installation method cwd escapes the project root after realpath resolution");
   }
+  return cwd;
+}
+
+/** Executes a validated method with an argument vector and no shell. */
+export async function executeSourceInstallationMethod(
+  method: SourceInstallationMethod,
+  context: SourceInstallationContext,
+): Promise<void> {
+  const cwd = await resolveSourceInstallationMethodCwd(method, context.projectRoot);
   return new Promise((resolve, reject) => {
     const child = spawn(method.argv[0], [...method.argv.slice(1)], {
       cwd,
