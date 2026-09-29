@@ -13,7 +13,7 @@ import {
   SourceNotFoundError,
   type SourceOperations,
 } from "../src/sources.js";
-import type { SkillTreeFile } from "../src/skill-discovery.js";
+import { NodeSourceContentAccess, type SkillTreeFile } from "../src/skill-discovery.js";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { runCli } from "../src/cli.js";
 
@@ -202,6 +202,58 @@ test("discovers built-in candidates through the CLI using real Source operations
     assert.deepEqual(output, [
       `Candidate: ${BUILT_IN_SOURCE.id}\tportable/demo\tDemo\tDemo skill`,
     ]);
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true });
+    await rm(builtInRoot, { recursive: true, force: true });
+  }
+});
+
+test("discovers boolean-frontmatter candidates without reading metadata or executing commands", async () => {
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-discover-boolean-state-"));
+  const builtInRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-discover-boolean-builtin-"));
+  const output: string[] = [];
+  const readPaths: string[] = [];
+  const markerPath = path.join(builtInRoot, "command-ran");
+  try {
+    const skillDirectory = path.join(builtInRoot, "portable", "discoverable");
+    await mkdir(path.join(skillDirectory, "scripts"), { recursive: true });
+    await writeFile(path.join(skillDirectory, "SKILL.md"), [
+      "---",
+      "name: Discoverable",
+      "description: A discoverable skill",
+      "disable-model-invocation: true",
+      "---",
+      "",
+    ].join("\n"), "utf8");
+    await writeFile(path.join(skillDirectory, "agent-depot-method.json"), JSON.stringify({
+      kind: "command",
+      argv: ["node", "-e", `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran')`],
+    }), "utf8");
+    await writeFile(path.join(skillDirectory, "scripts", "run.sh"), `#!/bin/sh\ntouch ${JSON.stringify(markerPath)}\n`, "utf8");
+
+    const sourceContentAccess = new NodeSourceContentAccess({
+      builtInRoot,
+      readFile: async (filePath) => {
+        readPaths.push(filePath);
+        assert.equal(path.basename(filePath), "SKILL.md", "discovery must not read installation metadata or commands");
+        return readFile(filePath, "utf8");
+      },
+    });
+    const operations = createSourceOperations({
+      statePath: path.join(stateDirectory, "sources.json"),
+      sourceContentAccess,
+    });
+    const exitCode = await runCli(["discover", BUILT_IN_SOURCE.id], {
+      operations,
+      stdout: (line) => output.push(line),
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(output, [
+      `Candidate: ${BUILT_IN_SOURCE.id}\tportable/discoverable\tDiscoverable\tA discoverable skill`,
+    ]);
+    assert.deepEqual(readPaths, [path.join(skillDirectory, "SKILL.md")]);
+    await assert.rejects(readFile(markerPath), { code: "ENOENT" });
   } finally {
     await rm(stateDirectory, { recursive: true, force: true });
     await rm(builtInRoot, { recursive: true, force: true });

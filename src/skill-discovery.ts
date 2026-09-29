@@ -141,7 +141,7 @@ export function parseSkillFrontmatter(content: string): { name: string; descript
     return undefined;
   }
 
-  const values = new Map<string, string>();
+  const values = new Map<string, string | boolean>();
   let index = 1;
   let closed = false;
   while (index < lines.length) {
@@ -192,8 +192,10 @@ export function parseSkillFrontmatter(content: string): { name: string; descript
   if (!closed) {
     return undefined;
   }
-  const name = values.get("name")?.trim();
-  const description = values.get("description")?.trim();
+  const nameValue = values.get("name");
+  const descriptionValue = values.get("description");
+  const name = typeof nameValue === "string" ? nameValue.trim() : undefined;
+  const description = typeof descriptionValue === "string" ? descriptionValue.trim() : undefined;
   if (!name || !description) {
     return undefined;
   }
@@ -420,7 +422,7 @@ function normalizeSourcePath(candidate: string): string | undefined {
   return normalized;
 }
 
-function parseScalar(rawValue: string): string | undefined {
+function parseScalar(rawValue: string): string | boolean | undefined {
   const value = rawValue.trim();
   if (value.startsWith("\"")) {
     if (!value.endsWith("\"") || value.length < 2) {
@@ -440,8 +442,11 @@ function parseScalar(rawValue: string): string | undefined {
     return value.slice(1, -1).replace(/''/gu, "'");
   }
   const plain = value.replace(/\s+#.*$/u, "").trim();
-  if (!plain || /^(?:null|~|true|false|\[|\{|\]|\})$/iu.test(plain)) {
+  if (!plain || /^(?:null|~|\[|\{|\]|\})$/iu.test(plain)) {
     return undefined;
+  }
+  if (/^(?:true|false)$/iu.test(plain)) {
+    return plain.toLowerCase() === "true";
   }
   return plain;
 }
