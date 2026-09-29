@@ -137,7 +137,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -752,6 +752,94 @@ test("previews and executes a source method for user-global installation", async
       path: ".agents/skills/demo",
       adopted: false,
     });
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+  }
+});
+
+test("configures a user-global install method from direct CLI JSON and persists it only after confirmation", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-configured-method-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-configured-method-state-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  const calls: string[][] = [];
+  let sourceMethodReads = 0;
+  try {
+    const operations = {
+      ...createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") }),
+      async readInstallationMethod() {
+        sourceMethodReads += 1;
+        return { kind: "command", argv: ["node", "--source-method"] };
+      },
+      async executeInstallationMethod(method: { readonly argv: readonly string[] }) {
+        calls.push([...method.argv]);
+      },
+    };
+    const method = JSON.stringify({
+      kind: "command",
+      argv: ["node", "scripts/install.mjs", "--portable"],
+      cwd: "tools",
+    });
+    const args = [
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--method", method, "--portable-v1",
+    ];
+    const dependencies = {
+      operations,
+      homeDirectory,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.deepEqual(calls, []);
+    assert.equal(sourceMethodReads, 0);
+    assert.match(output.join("\\n"), /argv=\["node","scripts\/install\.mjs","--portable"\].*cwd=/);
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    await assert.rejects(readFile(path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
+
+    assert.equal(await runCli([...args, "--yes"], dependencies), 0);
+    assert.deepEqual(calls, [["node", "scripts/install.mjs", "--portable"]]);
+    const state = JSON.parse(await readFile(path.join(stateDirectory, "sources.json"), "utf8")) as {
+      userGlobalInstallations: Array<{ methods?: unknown }>;
+    };
+    assert.deepEqual(state.userGlobalInstallations[0]?.methods, {
+      install: { kind: "command", argv: ["node", "scripts/install.mjs", "--portable"], cwd: "tools" },
+    });
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("rejects direct CLI methods containing credentials or OS-specific executables", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-invalid-method-home-"));
+  const errors: string[] = [];
+  try {
+    const baseArgs = [
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1", "--yes",
+    ];
+    const dependencies = {
+      operations: fakeOperations({
+        async listUserGlobalInstallations() {
+          return [];
+        },
+        async addUserGlobalInstallation() {
+          throw new Error("should not persist an invalid method");
+        },
+      }),
+      homeDirectory,
+      sourceAccess: cliSourceAccess(),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli([...baseArgs, "--method", JSON.stringify({ kind: "command", argv: ["node", "--token=secret"] })], dependencies), 1);
+    assert.match(errors[0] ?? "", /credential|secret/i);
+    assert.equal(await runCli([...baseArgs, "--method", JSON.stringify({ kind: "command", argv: ["node.exe", "scripts/install.mjs"] })], dependencies), 1);
+    assert.match(errors[1] ?? "", /safe portable no-shell command name/);
+    await assert.rejects(readFile(path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
   } finally {
     await rm(homeDirectory, { recursive: true, force: true });
   }

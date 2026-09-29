@@ -45,6 +45,22 @@ are recorded in the shared per-user Source state, so separate CLI invocations
 reuse the same installation records. The selected Source, Skill, Hosts, and
 actual adopted or installed location are previewed before `--yes` confirmation.
 
+A direct project or user-global install can configure its install method before
+first installation with `--method <json>`. The value must be one strict JSON
+method object, for example:
+
+```sh
+node dist/src/cli.js install --scope user-global --source builtin:agent-depot \
+  --skill architecture --host pi --version latest \
+  --method '{"kind":"command","argv":["node","scripts/install.mjs"],"cwd":"tools"}' \
+  --portable-v1 --yes
+```
+
+The method is stored as `methods.install`, takes precedence over Source metadata,
+and is executed from an argument vector without a shell. The command and
+intended changes are previewed before confirmation. This option only configures
+the install method; update execution is not part of this lifecycle.
+
 ## Project installation
 
 Project installation requires an explicit `--scope project`, Source ID, Skill

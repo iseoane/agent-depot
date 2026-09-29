@@ -56,10 +56,10 @@ const USAGE = [
   "  agent-depot source add <url>",
   "  agent-depot source refresh <id> [--yes]",
   "  agent-depot discover <source-id> [source-id...]",
-  "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]",
+  "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
 ].join("\n");
-const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] --portable-v1 [--yes] [--confirm-additional-host]";
+const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 
 /** Runs the CLI application and returns a process exit code. */
@@ -229,6 +229,7 @@ async function runInstall(
       path: options.skillPath,
       version: options.version,
       hosts: options.hosts,
+      ...(options.method === undefined ? {} : { methods: { install: options.method } }),
     }],
   }).skills[0];
   if (!selection) {
@@ -298,6 +299,7 @@ async function runUserGlobalInstall(
       path: options.skillPath,
       version: options.version,
       hosts: options.hosts,
+      ...(options.method === undefined ? {} : { methods: { install: options.method } }),
     }],
   }).skills[0];
   if (!selection) {
@@ -355,6 +357,7 @@ interface InstallOptions {
   readonly hosts: readonly ProjectHost[];
   readonly version?: VersionPolicy;
   readonly ref?: string;
+  readonly method?: unknown;
   readonly portableV1: boolean;
   readonly confirmed: boolean;
   readonly confirmAdditionalHostExposure: boolean;
@@ -366,6 +369,7 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
   let skillPath: string | undefined;
   let versionValue: string | undefined;
   let ref: string | undefined;
+  let method: unknown;
   let fromManifest = false;
   let portableV1 = false;
   let confirmed = false;
@@ -398,6 +402,9 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
       case "--ref":
         ref = requireOptionValue(argv, ++index, "--ref");
         break;
+      case "--method":
+        method = parseMethodOption(requireOptionValue(argv, ++index, "--method"));
+        break;
       case "--manifest":
         fromManifest = true;
         break;
@@ -421,8 +428,8 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
   if (fromManifest && scope !== "project") {
     throw new CliUsageError("--manifest is only supported with --scope project");
   }
-  if (fromManifest && (sourceId !== undefined || skillPath !== undefined || versionValue !== undefined || ref !== undefined || hosts.length > 0)) {
-    throw new CliUsageError("--manifest cannot be combined with --source, --skill, --host, --version, or --ref");
+  if (fromManifest && (sourceId !== undefined || skillPath !== undefined || versionValue !== undefined || ref !== undefined || method !== undefined || hosts.length > 0)) {
+    throw new CliUsageError("--manifest cannot be combined with --source, --skill, --host, --version, --ref, or --method");
   }
   if (!fromManifest && !versionValue && (sourceId || skillPath || ref || hosts.length > 0)) {
     throw new CliUsageError("--version is required for a selected Skill");
@@ -438,10 +445,20 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
     hosts: Object.freeze(hosts),
     version: versionValue === undefined ? undefined : parseVersionOption(versionValue),
     ref,
+    method,
     portableV1,
     confirmed,
     confirmAdditionalHostExposure,
   };
+}
+
+function parseMethodOption(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    throw new CliUsageError(`--method must be valid JSON${detail}`);
+  }
 }
 
 function parseVersionOption(value: string): VersionPolicy {
