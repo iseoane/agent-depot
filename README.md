@@ -74,28 +74,60 @@ The complete Skill tree is copied byte-for-byte and existing paths are never
 overwritten. Claude is exposed through a symlink to the canonical
 `.agents/skills/<skill>` installation.
 
+## User-provided installation methods
+
+A project selection may persist portable install and future-update methods in
+its `methods` field:
+
+```json
+{
+  "source": { "kind": "external", "url": "https://example.com/skills.git", "ref": "main" },
+  "path": "portable/example",
+  "version": { "policy": "latest" },
+  "hosts": ["pi"],
+  "methods": {
+    "install": { "kind": "command", "argv": ["node", "scripts/install.mjs"], "cwd": "tools" },
+    "update": { "kind": "command", "argv": ["node", "scripts/update.mjs"] }
+  }
+}
+```
+
+The same selection shape is stored under `userGlobalInstallations` in the
+shared user-global `sources.json` state. `methods.install` takes precedence
+over a method declared by the selected Source; the Source method is used only
+when no configured install method exists. The configured `update` method is
+currently persisted only; update execution belongs to the update workflow.
+
+Before any configured or Source method runs, the CLI previews the exact argv,
+resolved project or user-global cwd, selected files, and intended installation
+locations. It requires explicit `--yes`; refusing the preview performs no
+installation and runs no method. Methods are argument vectors, never shell
+strings: they must use one portable command with no OS-specific variants, and
+shell interpreters and shell syntax are rejected. Configuration must not contain
+credential literals. Validation rejects obvious credential patterns on a
+best-effort basis; it cannot detect every secret, so users remain responsible
+for avoiding secrets in arguments or repository files.
+
+A confirmed method runs as arbitrary child-process code with no sandbox. It may
+change any filesystem location or external system available to that process;
+Agent Depot cannot preview or roll back those side effects. The managed Skill
+installation and manifest/state are persisted before method execution, and a
+method failure retains those records. Source metadata is read from the same
+immutable tree snapshot shown in the preview, not from a mutable latest re-read.
+
 A Source may declare an installation method only through an explicit JSON
 metadata file inside the selected Skill (`.agent-depot.json`,
 `agent-depot-method.json`, or `installation-method.json`), never from
 `SKILL.md` prose. The file may contain either the method object or
 `{ "method": { "kind": "command", "argv": ["executable", "arg", ...],
 "cwd": "optional/project-relative-directory" } }`. The executable must be a
-bare safe command name, `cwd` must remain below the project root after realpath
-resolution, and shell syntax, control characters, unsupported fields, and OS-
-specific shell interpreters are refused. Metadata is read from the same
-immutable tree snapshot as the preview; confirmation never triggers a mutable
-latest re-read. The exact executable, argument array, working directory, and
-complete file list are previewed before `--yes`; execution uses a child process
-with `shell: false` and never interpolates a shell command. Commands are not
-inferred from `SKILL.md` prose. A confirmed method still goes through
-compatibility validation, canonical installation, and the Claude symlink path.
-The manifest is persisted before an external method runs. If that method fails,
-its side effects cannot be rolled back, so the installed files and manifest are
-retained and the failure does not claim rollback. Method-containing batch
-installs are refused because arbitrary child-process side effects are
-non-rollbackable. Manifest entries that identify an external local path are
-refused by the Git-only resolver with an actionable unsupported-source error;
-URL Sources remain self-contained and resolvable on a fresh machine.
+bare safe command name and `cwd` must remain below the project root after
+realpath resolution. A confirmed method still goes through compatibility
+validation, canonical installation, and the Claude symlink path. Method-
+containing batch installs are refused because arbitrary child-process side
+effects are non-rollbackable. Manifest entries that identify an external local
+path are refused by the Git-only resolver with an actionable unsupported-source
+error; URL Sources remain self-contained and resolvable on a fresh machine.
 
 ## Configuration and cache
 

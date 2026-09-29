@@ -189,7 +189,14 @@ async function runInstall(
       }
       const nextManifest = parseProjectManifest({
         version: 1,
-        skills: installed.map(({ item, result }) => selectionWithInstallation(item.selection, result, projectRoot)),
+        skills: manifest.skills.map((selection) => {
+          const installedSelection = installed.find(({ item }) =>
+            JSON.stringify([item.selection.source, item.selection.path]) === JSON.stringify([selection.source, selection.path]),
+          );
+          return installedSelection === undefined
+            ? selection
+            : selectionWithInstallation(installedSelection.item.selection, installedSelection.result, projectRoot);
+        }),
       });
       await manifestStore.save(nextManifest);
       for (const { item, result } of installed) {
@@ -487,7 +494,9 @@ async function resolveSelection(
   sourceAccess: ProjectSkillTreeAccess,
 ): Promise<ResolvedManifestSelection> {
   const files = await readPreviewTree(sourceAccess, source, selection);
-  const method = await readStructuredMethod(operations, source, selection.path, files);
+  // An explicitly configured method is authoritative. Avoid reading source metadata
+  // when it is present so an invalid fallback cannot override user intent.
+  const method = selection.methods?.install ?? await readStructuredMethod(operations, source, selection.path, files);
   return Object.freeze({ selection, source, files, method });
 }
 
@@ -565,6 +574,8 @@ function outputInstallPreview(
   const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
   output(`Preview: reconcile Skill ${JSON.stringify(skillName)} from ${source.id} (destination determined by safe inspection)`);
   output(`  scope: ${scope}; hosts: ${selection.hosts.join(",")}; version policy: ${formatVersionPolicy(selection.version)}`);
+  output("  intended filesystem changes:");
+  output("    reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts");
   output("  selected source files:");
   for (const file of files) {
     output(`    ${file.path} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""}; adopt if identical, create if missing)`);
@@ -576,7 +587,7 @@ function outputInstallPreview(
   }
   if (method) {
     const cwd = path.resolve(projectRoot, method.cwd ?? ".");
-    output(`  run external method: executable=${JSON.stringify(method.argv[0])} args=${JSON.stringify(method.argv.slice(1))} cwd=${JSON.stringify(cwd)}`);
+    output(`  run external method: argv=${JSON.stringify(method.argv)} executable=${JSON.stringify(method.argv[0])} args=${JSON.stringify(method.argv.slice(1))} cwd=${JSON.stringify(cwd)}`);
   }
 }
 

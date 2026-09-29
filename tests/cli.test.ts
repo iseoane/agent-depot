@@ -14,7 +14,7 @@ import {
   type SourceOperations,
 } from "../src/sources.js";
 import type { SkillTreeFile } from "../src/skill-discovery.js";
-import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
+import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "../src/project-manifest.js";
 import { runCli } from "../src/cli.js";
 
 const external = {
@@ -599,6 +599,164 @@ test("resolves a project manifest on a fresh machine without global Source looku
   }
 });
 
+test("prefers a configured install method, previews it without execution, and persists install/update methods", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-configured-method-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  const calls: string[][] = [];
+  let sourceMethodReads = 0;
+  try {
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: [{
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: "portable/demo",
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        methods: {
+          install: { kind: "command", argv: ["node", "--configured-install"], cwd: "tools" },
+          update: { kind: "command", argv: ["node", "--configured-update"] },
+        },
+      }],
+    }), "utf8");
+    const operations = fakeOperations({
+      async readInstallationMethod() {
+        sourceMethodReads += 1;
+        return { kind: "command", argv: ["node", "--source-method"] };
+      },
+      async executeInstallationMethod(method) {
+        calls.push([...method.argv]);
+      },
+    });
+    const args = ["install", "--scope", "project", "--manifest", "--portable-v1"];
+    const dependencies = {
+      operations,
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.deepEqual(calls, []);
+    assert.equal(sourceMethodReads, 0);
+    assert.match(output.join("\\n"), /argv=\["node","--configured-install"\].*cwd=/);
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    await assert.rejects(readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
+
+    assert.equal(await runCli([...args, "--yes"], dependencies), 0);
+    assert.deepEqual(calls, [["node", "--configured-install"]]);
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as {
+      skills: Array<{ methods?: { install?: unknown; update?: unknown }; installation?: unknown }>;
+    };
+    assert.deepEqual(manifest.skills[0]?.methods, {
+      install: { kind: "command", argv: ["node", "--configured-install"], cwd: "tools" },
+      update: { kind: "command", argv: ["node", "--configured-update"] },
+    });
+    assert.deepEqual(manifest.skills[0]?.installation, { path: ".agents/skills/demo", adopted: false });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("preserves configured methods when a project manifest install is a batch", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-method-batch-"));
+  try {
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: ["one", "two"].map((name) => ({
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: `portable/${name}`,
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        methods: { update: { kind: "command", argv: ["node", `--update-${name}`] } },
+      })),
+    }), "utf8");
+    const operations = fakeOperations();
+    const exitCode = await runCli(["install", "--scope", "project", "--manifest", "--portable-v1", "--yes"], {
+      operations,
+      projectRoot,
+      sourceAccess: {
+        async readSkillTree(source, skillPath) {
+          assert.equal(source.id, BUILT_IN_SOURCE.id);
+          return [{
+            path: `${skillPath}/SKILL.md`,
+            content: Uint8Array.from(Buffer.from(`## ${path.posix.basename(skillPath)}`)),
+            executable: false,
+          }];
+        },
+      },
+    });
+
+    assert.equal(exitCode, 0);
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as {
+      skills: Array<{ path: string; methods?: { update?: unknown }; installation?: unknown }>;
+    };
+    assert.deepEqual(manifest.skills.map((skill) => skill.path), ["portable/one", "portable/two"]);
+    assert.deepEqual(manifest.skills.map((skill) => skill.methods), [
+      { update: { kind: "command", argv: ["node", "--update-one"] } },
+      { update: { kind: "command", argv: ["node", "--update-two"] } },
+    ]);
+    assert.deepEqual(manifest.skills.map((skill) => skill.installation), [
+      { path: ".agents/skills/one", adopted: false },
+      { path: ".agents/skills/two", adopted: false },
+    ]);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("previews and executes a source method for user-global installation", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-method-home-"));
+  const records: ProjectSkillSelection[] = [];
+  const output: string[] = [];
+  const errors: string[] = [];
+  const calls: Array<{ argv: readonly string[]; cwd: string }> = [];
+  try {
+    const operations = fakeOperations({
+      async readInstallationMethod() {
+        return { kind: "command", argv: ["node", "--global-source-method"], cwd: "." };
+      },
+      async executeInstallationMethod(method, context) {
+        calls.push({ argv: method.argv, cwd: path.resolve(context.projectRoot, method.cwd ?? ".") });
+      },
+      async listUserGlobalInstallations() {
+        return records;
+      },
+      async addUserGlobalInstallation(selection) {
+        records.push(selection);
+      },
+    });
+    const args = [
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1",
+    ];
+    const dependencies = {
+      operations,
+      homeDirectory,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.deepEqual(calls, []);
+    assert.match(output.join("\\n"), /argv=\["node","--global-source-method"\].*cwd=/);
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    assert.equal(records.length, 0);
+
+    assert.equal(await runCli([...args, "--yes"], dependencies), 0);
+    assert.deepEqual(calls, [{ argv: ["node", "--global-source-method"], cwd: homeDirectory }]);
+    assert.equal(records.length, 1);
+    assert.deepEqual((records[0] as { installation?: unknown }).installation, {
+      path: ".agents/skills/demo",
+      adopted: false,
+    });
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+  }
+});
+
 test("executes a reviewed structured method only after the complete preview and confirmation", async () => {
   const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-safe-method-"));
   const output: string[] = [];
@@ -742,7 +900,7 @@ test("rejects Windows shell-interpreter executable variants", () => {
   for (const executable of ["cmd.exe", "powershell.exe", "pwsh.exe", "sh.exe", "install.cmd"]) {
     assert.throws(
       () => parseSourceInstallationMethod({ kind: "command", argv: [executable] }),
-      /safe no-shell command name/,
+      /safe (?:portable )?no-shell command name/,
     );
   }
 });
@@ -907,7 +1065,7 @@ test("refuses unsafe or unsupported upstream methods without executing commands"
       stderr: (line) => errors.push(line),
     }), 1);
     assert.equal(executed, false);
-    assert.match(errors[0] ?? "", /executable is not a safe no-shell command name/);
+    assert.match(errors[0] ?? "", /executable is not a safe (?:portable )?no-shell command name/);
     await assert.rejects(readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
