@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
+import { clearTimeout as clearRealTimeout, setTimeout as setRealTimeout } from "node:timers";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -197,6 +198,58 @@ test("serializes concurrent first clones for the same Source", async () => {
     assert.equal(runner.calls.filter((call) => call.args[0] === "clone").length, 1);
     assert.equal(runner.calls.filter((call) => call.args[0] === "-C").length, 1);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("reports the exact busy Source lock directory without treating it as stale", async (context) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-git-lock-"));
+  try {
+    const cachePath = path.join(directory, "cache");
+    const source = {
+      id: sourceIdForUrl("https://github.com/example/skills.git"),
+      kind: "git" as const,
+      url: "https://github.com/example/skills.git",
+    };
+    const lockPath = `${path.join(cachePath, source.id.slice(4))}.lock`;
+    await mkdir(lockPath, { recursive: true });
+    context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+
+    let settled = false;
+    let stopDriving = false;
+    const refresh = new GitSourceAccessAdapter({ cachePath, runner: new FakeGitRunner() }).refresh(source).then(
+      () => undefined,
+      (error: unknown) => error,
+    ).finally(() => {
+      settled = true;
+    });
+    const driveRefresh = (async () => {
+      while (!settled && !stopDriving) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (!settled && !stopDriving) {
+          context.mock.timers.tick(100);
+        }
+      }
+    })();
+    const realTimeout = new Promise<never>((_, reject) => {
+      const timeout = setRealTimeout(() => {
+        stopDriving = true;
+        reject(new Error("busy Source lock refresh test exceeded the real timeout"));
+      }, 5_000);
+      driveRefresh.then(
+        () => clearRealTimeout(timeout),
+        () => clearRealTimeout(timeout),
+      );
+    });
+    await Promise.race([driveRefresh, realTimeout]);
+
+    const error = await refresh;
+    assert.ok(error instanceof GitSourceAccessError);
+    assert.match(error.message, new RegExp(lockPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(error.message, /another refresh might be active/);
+    assert.doesNotMatch(error.message, /stale|delete/i);
+  } finally {
+    context.mock.timers.reset();
     await rm(directory, { recursive: true, force: true });
   }
 });

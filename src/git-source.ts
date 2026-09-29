@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, rename, rm, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
@@ -472,9 +471,11 @@ async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>>
         throw new Error("the Source cache lock is a symbolic link");
       }
       if (Date.now() >= deadline) {
-        throw new Error("the Source cache is busy; retry after the other refresh finishes");
+        throw new Error(
+          `the Source cache lock directory is busy: ${lockPath}; another refresh might be active. Wait for it to finish before retrying`,
+        );
       }
-      await delay(SOURCE_LOCK_RETRY_MS);
+      await new Promise<void>((resolve) => setTimeout(resolve, SOURCE_LOCK_RETRY_MS));
     }
   }
 }
