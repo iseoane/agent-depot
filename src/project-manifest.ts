@@ -123,6 +123,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function containsControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
 function assertKeys(value: Record<string, unknown>, allowed: readonly string[], label: string, manifestPath: string): void {
   const allowedKeys = new Set(allowed);
   const unsupported = Object.keys(value).find((key) => !allowedKeys.has(key));
@@ -135,7 +142,7 @@ function nonEmptyString(value: unknown, label: string, manifestPath: string): st
   if (typeof value !== "string" || value.length === 0 || value.trim() !== value) {
     throw new ProjectManifestError(manifestPath, `${label} must be a non-empty string without surrounding whitespace`);
   }
-  if (/\s|[\u0000-\u001f\u007f]/u.test(value)) {
+  if (/\s/u.test(value) || containsControlCharacter(value)) {
     throw new ProjectManifestError(manifestPath, `${label} contains unsafe whitespace or control characters`);
   }
   return value;
@@ -185,7 +192,7 @@ export function parsePortableInstallationMethod(
   }
   assertKeysForMethod(value, ["kind", "argv", "cwd"], label, options);
   if (value.kind !== "command" || !Array.isArray(value.argv) || value.argv.length === 0 ||
-    value.argv.some((part) => typeof part !== "string" || part.length === 0 || /[\u0000-\u001f\u007f]/u.test(part))) {
+    value.argv.some((part) => typeof part !== "string" || part.length === 0 || containsControlCharacter(part))) {
     return fail("must define a non-empty argv array without control characters");
   }
 
@@ -208,7 +215,7 @@ export function parsePortableInstallationMethod(
   }
 
   if (value.cwd !== undefined && (typeof value.cwd !== "string" || value.cwd.length === 0 ||
-    /[\u0000-\u001f\u007f]/u.test(value.cwd) || path.posix.isAbsolute(value.cwd) ||
+    (typeof value.cwd === "string" && containsControlCharacter(value.cwd)) || path.posix.isAbsolute(value.cwd) ||
     /^[A-Za-z]:/u.test(value.cwd) || value.cwd === ".." || value.cwd.startsWith("../") ||
     value.cwd.includes("\\") || containsObviousCredential(value.cwd))) {
     return fail("cwd is unsafe");
@@ -261,13 +268,13 @@ function parseSource(value: unknown, manifestPath: string, index: number): Proje
   if (value.kind === "builtin") {
     assertKeys(value, ["kind", "id"], label, manifestPath);
     if (value.id !== "builtin:agent-depot") {
-      throw new ProjectManifestError(manifestPath, `${label}.id must be \"builtin:agent-depot\"`);
+      throw new ProjectManifestError(manifestPath, `${label}.id must be "builtin:agent-depot"`);
     }
     return Object.freeze({ kind: "builtin", id: "builtin:agent-depot" });
   }
 
   if (value.kind !== "external") {
-    throw new ProjectManifestError(manifestPath, `${label}.kind must be \"builtin\" or \"external\"`);
+    throw new ProjectManifestError(manifestPath, `${label}.kind must be "builtin" or "external"`);
   }
   if (typeof value.url === "string") {
     assertKeys(value, ["kind", "url", "ref"], label, manifestPath);
@@ -334,7 +341,7 @@ function parseVersionPolicy(value: unknown, source: ProjectSource, manifestPath:
     }
     return Object.freeze({ policy: "fixed", version });
   }
-  throw new ProjectManifestError(manifestPath, `${label}.policy must be \"fixed\" or \"latest\"`);
+  throw new ProjectManifestError(manifestPath, `${label}.policy must be "fixed" or "latest"`);
 }
 
 function parseHosts(value: unknown, manifestPath: string, index: number): readonly ProjectHost[] {
@@ -391,7 +398,7 @@ function parseInstallationBaseline(value: unknown, label: string, manifestPath: 
   }
   assertKeys(value, ["algorithm", "digest"], label, manifestPath);
   if (value.algorithm !== "sha256") {
-    throw new ProjectManifestError(manifestPath, `${label}.algorithm must be \"sha256\"`);
+    throw new ProjectManifestError(manifestPath, `${label}.algorithm must be "sha256"`);
   }
   const digest = nonEmptyString(value.digest, `${label}.digest`, manifestPath);
   if (!/^[0-9a-f]{64}$/u.test(digest)) {

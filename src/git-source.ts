@@ -481,7 +481,8 @@ async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>>
 
 export function validateGitRef(candidate: string): string {
   if (typeof candidate !== "string" || candidate.length === 0 || candidate.trim() !== candidate ||
-    /[\u0000-\u0020~^:?*[\\]/u.test(candidate) || candidate.includes("..") || candidate.includes("@{")) {
+    Array.from(candidate).some((character) => (character.codePointAt(0) ?? 0) <= 0x20) ||
+    /[~^:?*[\\]/u.test(candidate) || candidate.includes("..") || candidate.includes("@{")) {
     throw new Error("Git Source ref contains unsafe characters");
   }
   const segments = candidate.split("/");
@@ -497,7 +498,10 @@ export function validateSkillDirectoryPath(candidate: string): string {
   }
   if (Buffer.byteLength(candidate, "utf8") > SKILL_TREE_LIMITS.maxPathBytes
     || candidate.includes("\\")
-    || /[\u0000-\u001f\u007f]/u.test(candidate)
+    || Array.from(candidate).some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code <= 0x1f || code === 0x7f;
+    })
     || candidate.startsWith("/")
     || candidate.endsWith("/")) {
     throw new Error("Selected Skill path contains unsafe characters");
@@ -533,7 +537,10 @@ export function canonicalizeGitSourceUrl(input: string): string {
   if (typeof input !== "string" || input.length === 0 || input.trim() !== input) {
     throw new Error("Git Source URL must be a non-empty URL without surrounding whitespace");
   }
-  if (/\s|[\u0000-\u001f\u007f\\]/u.test(input)) {
+  if (/\s/u.test(input) || input.includes("\\") || Array.from(input).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  })) {
     throw new Error("Git Source URL contains unsafe characters");
   }
 

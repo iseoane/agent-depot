@@ -1169,7 +1169,10 @@ function isSafeSegment(candidate: string): boolean {
   }
   // Reject the Windows-invalid subset on every host so a portable Skill cannot
   // succeed on one host and become un-installable on another.
-  if (/[\u0000-\u001f\u007f<>:"|?*]/u.test(candidate) || /[. ]$/u.test(candidate)) {
+  if (Array.from(candidate).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  }) || /[<>:"|?*]/u.test(candidate) || /[. ]$/u.test(candidate)) {
     return false;
   }
   const deviceName = candidate.split(".", 1)[0].toLowerCase();

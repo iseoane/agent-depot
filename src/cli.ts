@@ -1132,7 +1132,10 @@ function parseVersionOption(value: string): VersionPolicy {
     return { policy: "latest" };
   }
   const version = value.startsWith("fixed:") ? value.slice("fixed:".length) : value;
-  if (!version || /\s|[\u0000-\u001f\u007f]/u.test(version)) {
+  if (!version || /\s/u.test(version) || Array.from(version).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  })) {
     throw new CliUsageError("--version fixed:<value> must provide a non-empty version without whitespace or control characters");
   }
   return { policy: "fixed", version };

@@ -46,7 +46,6 @@ test("lists the package-owned built-in Source without registering it", async () 
 test("resolves package and Git version evidence without refreshing Sources", async () => {
   await withState(async (statePath, gitAccess) => {
     const externalUrl = "https://github.com/example/skills.git";
-    let external: GitSource | undefined;
     const operations = createSourceOperations({
       statePath,
       gitAccess,
@@ -58,12 +57,13 @@ test("resolves package and Git version evidence without refreshing Sources", asy
           if (source.kind === "builtin") {
             return { kind: "builtin-package", version: "0.1.0" };
           }
-          assert.equal(source.id, external?.id);
+          assert.equal(source.kind, "git");
+          assert.equal(source.url, externalUrl);
           return { kind: "git-commit", commit: "c".repeat(40) };
         },
       },
     });
-    external = await operations.addGitSource(externalUrl);
+    const external = await operations.addGitSource(externalUrl);
 
     assert.deepEqual(await operations.resolveSourceVersion!(BUILT_IN_SOURCE), {
       kind: "builtin-package",
@@ -330,10 +330,10 @@ test("fails closed on corrupt or unsupported state and preserves bytes when addi
 test("discovers only explicitly selected Source snapshots without refreshing or persisting selection", async () => {
   await withState(async (statePath, gitAccess) => {
     const externalUrl = "https://github.com/example/skills.git";
-    let selectedExternal: GitSource | undefined;
     const contentAccess: SourceContentAccess = {
       async readSnapshot(source) {
-        assert.equal(source.id, selectedExternal?.id);
+        assert.equal(source.kind, "git");
+        assert.equal(source.url, externalUrl);
         return [{
           path: "chosen/SKILL.md",
           content: "---\nname: Chosen\ndescription: Chosen skill\n---\n",
@@ -341,7 +341,7 @@ test("discovers only explicitly selected Source snapshots without refreshing or 
       },
     };
     const operations = createSourceOperations({ statePath, gitAccess, sourceContentAccess: contentAccess });
-    selectedExternal = await operations.addGitSource(externalUrl);
+    const selectedExternal = await operations.addGitSource(externalUrl);
     const before = await readFile(statePath, "utf8");
 
     assert.deepEqual(await operations.discoverSkills([selectedExternal.id]), [{
