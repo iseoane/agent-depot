@@ -75,6 +75,15 @@ test("parses quoted and folded required frontmatter fields and rejects incomplet
   assert.equal(parseSkillFrontmatter("---\n  name: indented\ndescription: text\n---\n"), undefined);
 });
 
+test("accepts optional boolean metadata without weakening required fields", () => {
+  assert.deepEqual(parseSkillFrontmatter("---\nname: Discoverable\ndescription: A discoverable skill\ndisable-model-invocation: true\n---\n"), {
+    name: "Discoverable",
+    description: "A discoverable skill",
+  });
+  assert.equal(parseSkillFrontmatter("---\nname: true\ndescription: A skill\n---\n"), undefined);
+  assert.equal(parseSkillFrontmatter("---\nname: A skill\ndescription: false\n---\n"), undefined);
+});
+
 test("reads only nested SKILL.md files and skips lifecycle subtrees before reading", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-skills-"));
   try {
