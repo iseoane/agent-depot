@@ -177,12 +177,7 @@ export function parsePortableInstallationMethod(
   }
   const credentialFlag = /^(?:--?)(?:access[-_]?key|api[-_]?key|auth(?:orization)?|client[-_]?secret|credential|pass(?:word|wd)?|private[-_]?key|refresh[-_]?token|secret|token)(?:$|[=:])/iu;
   for (const [index, part] of argv.entries()) {
-    if (/^[A-Za-z_][A-Za-z0-9_]*=.+$/u.test(part) ||
-      /(?:^|[=:])[A-Za-z_][A-Za-z0-9_]*=.+/u.test(part) ||
-      /^(?:[A-Za-z][A-Za-z0-9+.-]*):\/\/[^/\s:@]+:[^/\s@]+@/u.test(part) ||
-      /^(?:authorization|proxy-authorization)\s*:/iu.test(part) ||
-      /^(?:basic|bearer)\s+\S+/iu.test(part) ||
-      /(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})/u.test(part)) {
+    if (containsObviousCredential(part)) {
       return fail("contains an obvious credential or environment assignment");
     }
     if (credentialFlag.test(part) || (index > 0 && credentialFlag.test(argv[index - 1] ?? ""))) {
@@ -192,7 +187,8 @@ export function parsePortableInstallationMethod(
 
   if (value.cwd !== undefined && (typeof value.cwd !== "string" || value.cwd.length === 0 ||
     /[\u0000-\u001f\u007f]/u.test(value.cwd) || path.posix.isAbsolute(value.cwd) ||
-    value.cwd === ".." || value.cwd.startsWith("../") || value.cwd.includes("\\"))) {
+    /^[A-Za-z]:/u.test(value.cwd) || value.cwd === ".." || value.cwd.startsWith("../") ||
+    value.cwd.includes("\\") || containsObviousCredential(value.cwd))) {
     return fail("cwd is unsafe");
   }
   return Object.freeze({
@@ -220,8 +216,19 @@ function isShellInterpreter(executable: string): boolean {
   const normalized = executable.toLowerCase();
   return new Set([
     "sh", "sh.exe", "bash", "bash.exe", "zsh", "zsh.exe", "fish", "fish.exe",
+    "dash", "ksh", "ksh93", "csh", "tcsh", "ash",
     "cmd", "cmd.exe", "command.com", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
   ]).has(normalized);
+}
+
+function containsObviousCredential(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*=.+$/u.test(value) ||
+    /(?:^|[=:])[A-Za-z_][A-Za-z0-9_]*=.+/u.test(value) ||
+    /(?:^|[/\\])(?:access[-_]?key|api[-_]?key|auth(?:orization)?|client[-_]?secret|credential|pass(?:word|wd)?|private[-_]?key|refresh[-_]?token|secret|token)[=_-][^/\\\s]+/iu.test(value) ||
+    /^(?:[A-Za-z][A-Za-z0-9+.-]*):\/\/[^/\s:@]+:[^/\s@]+@/u.test(value) ||
+    /^(?:authorization|proxy-authorization)\s*:/iu.test(value) ||
+    /^(?:basic|bearer)\s+\S+/iu.test(value) ||
+    /(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})/u.test(value);
 }
 
 function parseSource(value: unknown, manifestPath: string, index: number): ProjectSource {

@@ -240,9 +240,13 @@ test("validates source methods with the same portable no-shell safety rules", ()
 
   for (const method of [
     { kind: "command", argv: ["bash", "-c", "echo unsafe"] },
+    { kind: "command", argv: ["dash", "-c", "echo unsafe"] },
+    { kind: "command", argv: ["ksh", "-c", "echo unsafe"] },
     { kind: "command", argv: ["pnpm", "--api-key=secret"] },
     { kind: "command", argv: ["pnpm", "REGISTRY_TOKEN=secret"] },
     { kind: "command", argv: ["pnpm", "https://user:secret@example.com/skill"] },
+    { kind: "command", argv: ["pnpm", "install"], cwd: "tools/TOKEN=secret" },
+    { kind: "command", argv: ["pnpm", "install"], cwd: "C:/tools" },
     { kind: "command", argv: ["pnpm", "install"], windows: ["pnpm.cmd"] },
   ]) {
     assert.throws(() => parseSourceInstallationMethod(method), SourceMetadataError);

@@ -212,6 +212,23 @@ test("rejects unsafe or unknown user method fields", () => {
   }
 });
 
+test("rejects common shell interpreters and unsafe portable cwd values", () => {
+  const selection = validManifest().skills[0];
+  const invalidMethods = [
+    { install: { kind: "command", argv: ["dash", "-c", "echo unsafe"] } },
+    { install: { kind: "command", argv: ["ksh", "-c", "echo unsafe"] } },
+    { install: { kind: "command", argv: ["pnpm", "install"], cwd: "tools/TOKEN=secret" } },
+    { install: { kind: "command", argv: ["pnpm", "install"], cwd: "C:/tools" } },
+  ];
+
+  for (const methods of invalidMethods) {
+    assert.throws(
+      () => parseProjectManifest({ version: 1, skills: [{ ...selection, methods }] }),
+      ProjectManifestError,
+    );
+  }
+});
+
 test("rejects unsupported root fields and duplicate Source/path selections", () => {
   const manifest = validManifest();
   const duplicate = manifest.skills[0];
