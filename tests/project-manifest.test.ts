@@ -212,6 +212,32 @@ test("rejects unsafe or unknown user method fields", () => {
   }
 });
 
+test("rejects credential token and key flags with inline or separated values", () => {
+  const selection = validManifest().skills[0];
+  const credentialFlags = ["auth-token", "access-token", "oauth-token", "secret-key"];
+
+  for (const flag of credentialFlags) {
+    for (const argv of [["pnpm", `--${flag}=secret`], ["pnpm", `--${flag}`, "secret"]]) {
+      assert.throws(
+        () => parseProjectManifest({
+          version: 1,
+          skills: [{ ...selection, methods: { install: { kind: "command", argv } } }],
+        }),
+        ProjectManifestError,
+        `${flag} should be rejected whether its value is inline or separated`,
+      );
+    }
+  }
+
+  assert.doesNotThrow(() => parseProjectManifest({
+    version: 1,
+    skills: [{
+      ...selection,
+      methods: { install: { kind: "command", argv: ["pnpm", "--access-tokenizer", "enabled"] } },
+    }],
+  }));
+});
+
 test("rejects common shell interpreters and unsafe portable cwd values", () => {
   const selection = validManifest().skills[0];
   const invalidMethods = [

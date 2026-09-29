@@ -175,7 +175,7 @@ export function parsePortableInstallationMethod(
   if (argv.some((part) => /[;&|<>$`]/u.test(part))) {
     return fail("contains shell syntax");
   }
-  const credentialFlag = /^(?:--?)(?:access[-_]?key|api[-_]?key|auth(?:orization)?|client[-_]?secret|credential|pass(?:word|wd)?|private[-_]?key|refresh[-_]?token|secret|token)(?:$|[=:])/iu;
+  const credentialFlag = /^(?:--?)(?:access[-_]?key|access[-_]?token|api[-_]?key|auth(?:orization)?|auth[-_]?token|client[-_]?secret|credential|oauth[-_]?token|pass(?:word|wd)?|private[-_]?key|refresh[-_]?token|secret|secret[-_]?key|token)(?:$|[=:])/iu;
   for (const [index, part] of argv.entries()) {
     if (containsObviousCredential(part)) {
       return fail("contains an obvious credential or environment assignment");
