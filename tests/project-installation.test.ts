@@ -93,6 +93,36 @@ test("installs a full project Skill tree at the canonical path and exposes Claud
   }
 });
 
+test("preserves skill-relative agents support files during install and adoption", async () => {
+  const projectRoot = await makeProject();
+  const supportTree: readonly SkillTreeFile[] = [
+    ...tree,
+    { path: "portable/demo/agents/openai.yaml", content: Buffer.from("model = gpt-4.1\n"), executable: false },
+  ];
+  try {
+    const first = await installProjectSkill({
+      selection: { ...selection, hosts: ["pi"] },
+      source,
+      portableV1: true,
+      previewTree: supportTree,
+    }, { projectRoot, sourceAccess: accessFor(supportTree) });
+    const supportPath = path.join(first.canonicalPath, "agents", "openai.yaml");
+    assert.equal(await readFile(supportPath, "utf8"), "model = gpt-4.1\n");
+
+    const adopted = await installProjectSkill({
+      selection: { ...selection, hosts: ["pi"] },
+      source,
+      portableV1: true,
+      previewTree: supportTree,
+    }, { projectRoot, sourceAccess: accessFor(supportTree) });
+    assert.equal(adopted.adopted, true);
+    assert.deepEqual(adopted.files, ["SKILL.md", "assets/data.bin", "scripts/run.sh", "agents/openai.yaml"]);
+    assert.equal(await readFile(supportPath, "utf8"), "model = gpt-4.1\n");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("installs the exact preview tree without rereading a mutable Source", async () => {
   const projectRoot = await makeProject();
   let reads = 0;
@@ -334,6 +364,7 @@ test("rejects Windows-invalid Skill names and tree segments before writing", asy
         sourceAccess: accessFor([
           { ...tree[0] },
           { ...tree[1], path: "portable/demo/unsafe:stream.bin" },
+          { ...tree[1], path: "portable/demo/agents/../outside.bin" },
         ]),
       }),
       /unsafe or duplicate file path/i,
@@ -341,6 +372,29 @@ test("rejects Windows-invalid Skill names and tree segments before writing", asy
     await assert.rejects(lstat(path.join(projectRoot, ".agents")), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("retains the other portable V1 directory exclusions", async () => {
+  for (const excludedDirectory of [".claude", ".codex", ".opencode", ".pi", "extensions", "plugins", "mcp"]) {
+    const projectRoot = await makeProject();
+    try {
+      await assert.rejects(
+        installProjectSkill({
+          selection,
+          source,
+          portableV1: true,
+          previewTree: [
+            tree[0]!,
+            { ...tree[1]!, path: `portable/demo/${excludedDirectory}/config.json` },
+          ],
+        }, { projectRoot, sourceAccess: accessFor() }),
+        /excluded by the portable V1 format rules/i,
+      );
+      await assert.rejects(lstat(path.join(projectRoot, ".agents")), { code: "ENOENT" });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   }
 });
 

@@ -14,8 +14,13 @@ import type { SkillTreeFile } from "../src/skill-discovery.js";
 const oldVersion = { kind: "builtin-package" as const, version: "0.1.0" };
 const newVersion = { kind: "builtin-package" as const, version: "0.2.0" };
 
-function tree(name: string, content: string): readonly SkillTreeFile[] {
-  return [{ path: `portable/${name}/SKILL.md`, content: Buffer.from(content), executable: false }];
+function tree(name: string, content: string, agentsConfig?: string): readonly SkillTreeFile[] {
+  return [
+    { path: `portable/${name}/SKILL.md`, content: Buffer.from(content), executable: false },
+    ...(agentsConfig === undefined
+      ? []
+      : [{ path: `portable/${name}/agents/openai.yaml`, content: Buffer.from(agentsConfig), executable: false }]),
+  ];
 }
 
 function baseSelection(name: string): ProjectSkillSelection {
@@ -32,9 +37,10 @@ async function setupSkill(
   name: string,
   content: string,
   methods?: ProjectSkillSelection["methods"],
+  agentsConfig?: string,
 ): Promise<ProjectSkillSelection> {
   const selection = { ...baseSelection(name), ...(methods === undefined ? {} : { methods }) };
-  const sourceFiles = tree(name, content);
+  const sourceFiles = tree(name, content, agentsConfig);
   const result = await installProjectSkill({
     selection,
     source: BUILT_IN_SOURCE,
@@ -87,6 +93,103 @@ test("previews an immutable update and requires explicit overwrite confirmation 
       /explicit overwrite confirmation/i,
     );
     assert.equal(await readFile(target, "utf8"), "locally edited");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects incompatible portable trees during update preview before confirmation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-depot-update-"));
+  try {
+    const selection = await setupSkill(root, "demo", "old");
+    const incompatibleTree = [
+      ...tree("demo", "new"),
+      { path: "portable/demo/.claude/settings.json", content: Buffer.from("host-specific"), executable: false },
+    ] as const;
+    const item = (await assessUpdateBatch([selection], {
+      resolveSource: async () => BUILT_IN_SOURCE,
+      sourceAccess: {
+        async readSkillTreeSnapshot() {
+          return { files: incompatibleTree, resolvedVersion: newVersion };
+        },
+      },
+    })).items[0]!;
+    let confirmed = false;
+
+    await assert.rejects(applySkillUpdate(item, {
+      projectRoot: root,
+      scope: "project",
+      sourceAccess: { async readSkillTree() { throw new Error("must use immutable preview"); } },
+      confirm: async () => {
+        confirmed = true;
+        return { overwriteModifiedInstallation: true };
+      },
+    }), /Skill "demo" contains "\.claude\/settings\.json", which is excluded by the portable V1 format rules/);
+    assert.equal(confirmed, false);
+    assert.equal(await readFile(path.join(root, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "old");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("updates skill-relative agents support files without dropping them", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-depot-update-"));
+  try {
+    const selection = await setupSkill(root, "demo", "old", undefined, "model = old\n");
+    const store = new ProjectManifestStore(path.join(root, "agent-depot.json"));
+    await store.save({ version: 1, skills: [selection] });
+    const item = (await assessUpdateBatch([selection], {
+      resolveSource: async () => BUILT_IN_SOURCE,
+      sourceAccess: {
+        async readSkillTreeSnapshot() {
+          return { files: tree("demo", "new", "model = new\n"), resolvedVersion: newVersion };
+        },
+      },
+    })).items[0]!;
+
+    await applySkillUpdate(item, {
+      projectRoot: root,
+      scope: "project",
+      sourceAccess: { async readSkillTree() { throw new Error("must use immutable preview"); } },
+      projectManifestStore: store,
+    });
+
+    assert.equal(await readFile(path.join(root, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "new");
+    assert.equal(await readFile(path.join(root, ".agents", "skills", "demo", "agents", "openai.yaml"), "utf8"), "model = new\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects unsafe paths under skill-relative agents support files during update", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-depot-update-"));
+  try {
+    const selection = await setupSkill(root, "demo", "old");
+    const store = new ProjectManifestStore(path.join(root, "agent-depot.json"));
+    await store.save({ version: 1, skills: [selection] });
+    const item = (await assessUpdateBatch([selection], {
+      resolveSource: async () => BUILT_IN_SOURCE,
+      sourceAccess: {
+        async readSkillTreeSnapshot() {
+          return {
+            files: [
+              ...tree("demo", "new"),
+              { path: "portable/demo/agents/../escape.txt", content: Buffer.from("escape"), executable: false },
+            ],
+            resolvedVersion: newVersion,
+          };
+        },
+      },
+    })).items[0]!;
+
+    await assert.rejects(applySkillUpdate(item, {
+      projectRoot: root,
+      scope: "project",
+      sourceAccess: { async readSkillTree() { throw new Error("must use immutable preview"); } },
+      projectManifestStore: store,
+    }), /unsafe or duplicate file path/i);
+    assert.equal(await readFile(path.join(root, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "old");
+    await assert.rejects(lstat(path.join(root, ".agents", "skills", "escape.txt")), { code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

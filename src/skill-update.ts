@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   inspectProjectSkillUpdate,
   updateProjectSkillTransaction,
+  validateProjectSkillInstallationPreview,
   type ProjectInstallationFileSystem,
   type ProjectInstallationOptions,
   type ProjectSkillInstallationResult,
@@ -106,6 +107,12 @@ export async function previewSkillUpdate(
 
   const selection = immutableSelection(item.selection);
   const snapshot = immutableUpdateSnapshot(item) ?? freezeSnapshot(item.currentSnapshot);
+  await validateProjectSkillInstallationPreview({
+    selection,
+    source: item.source,
+    previewTree: snapshot.files,
+    portableV1: true,
+  }, options.sourceAccess);
   const installationOptions = projectInstallationOptions(options);
   const inspection = await inspectProjectSkillUpdate(selection, installationOptions);
   const target = path.resolve(options.projectRoot, ...selection.installation!.path.split("/"));

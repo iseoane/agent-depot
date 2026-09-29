@@ -91,6 +91,29 @@ test("assesses latest built-in updates from the immutable current snapshot", asy
   assert.match(assessment.items[0]?.reason ?? "", /newer|changed/i);
 });
 
+test("treats skill-relative agents support files as portable update content", async () => {
+  const currentFiles = [
+    file("demo/SKILL.md", "new"),
+    file("demo/agents/openai.yaml", "model = new"),
+  ];
+  const assessment = await assessUpdateBatch([
+    selection({
+      source: BUILT_IN_SOURCE,
+      path: "demo",
+      installation: installed(builtinV1, "a".repeat(64)),
+    }),
+  ], {
+    resolveSource: async () => BUILT_IN_SOURCE,
+    sourceAccess: withSnapshot(BUILT_IN_SOURCE, "demo", { files: currentFiles, resolvedVersion: builtinV2 }),
+  });
+
+  assert.equal(assessment.items[0]?.status, "updateable");
+  assert.deepEqual(assessment.items[0]?.currentSnapshot?.files.map((candidate) => candidate.path), [
+    "demo/SKILL.md",
+    "demo/agents/openai.yaml",
+  ]);
+});
+
 test("treats a latest installation with matching version and baseline as current", async () => {
   const currentFiles = [file("demo/SKILL.md", "same")];
   const currentBaseline = skillTreeBaseline(currentFiles).digest;

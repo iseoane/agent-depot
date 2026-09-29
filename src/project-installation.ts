@@ -331,7 +331,7 @@ export async function updateProjectSkillTransaction(
     );
   }
 
-  const files = await readAndValidateTree({ ...request, previewTree: request.previewTree }, skillName, options.sourceAccess);
+  const files = await readAndValidateTree({ ...request, previewTree: request.previewTree, portableV1: true }, skillName, options.sourceAccess);
   const parent = path.dirname(targetPath);
   await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, parent), fileSystem);
   const stagePath = path.join(parent, `.agent-depot-update-${randomUUID()}`);
@@ -448,6 +448,16 @@ const nodeFileSystem: ProjectInstallationFileSystem = {
   },
   rmdir,
 };
+
+/** Validates the immutable preview tree and its requested Host compatibility without writing. */
+export async function validateProjectSkillInstallationPreview(
+  request: ProjectSkillInstallationRequest,
+  sourceAccess: ProjectSkillTreeAccess,
+): Promise<void> {
+  const skillName = skillNameFromSelection(request.selection);
+  const files = await readAndValidateTree(request, skillName, sourceAccess);
+  validateCompatibility(request, skillName, files);
+}
 
 /**
  * Installs one selected Skill into a project without consulting user-global
@@ -836,6 +846,15 @@ async function readAndValidateTree(
       `Skill ${JSON.stringify(skillName)} does not contain its required SKILL.md file`,
     );
   }
+  if (request.portableV1 === true) {
+    const excluded = validated.find((file) => portableV1ExcludedDirectory(file.relativePath));
+    if (excluded) {
+      throw new ProjectInstallationError(
+        "incompatible-skill-tree",
+        `Skill ${JSON.stringify(skillName)} contains ${JSON.stringify(excluded.relativePath)}, which is excluded by the portable V1 format rules`,
+      );
+    }
+  }
   return Object.freeze(validated);
 }
 
@@ -1156,11 +1175,13 @@ function isSafeRelativePath(candidate: string): boolean {
 }
 
 function isPortableV1Tree(files: readonly ValidatedTreeFile[]): boolean {
-  const excludedTopLevelDirectories = new Set([".claude", ".codex", ".opencode", ".pi", "agents", "extensions", "plugins", "mcp"]);
-  return files.every((file) => {
-    const firstSegment = file.relativePath.split("/", 1)[0];
-    return !excludedTopLevelDirectories.has(firstSegment ?? "");
-  });
+  return files.every((file) => !portableV1ExcludedDirectory(file.relativePath));
+}
+
+function portableV1ExcludedDirectory(relativePath: string): boolean {
+  const excludedTopLevelDirectories = new Set([".claude", ".codex", ".opencode", ".pi", "extensions", "plugins", "mcp"]);
+  const firstSegment = relativePath.split("/", 1)[0];
+  return excludedTopLevelDirectories.has(firstSegment ?? "");
 }
 
 function isSafeSegment(candidate: string): boolean {

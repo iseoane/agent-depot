@@ -860,6 +860,85 @@ test("previews project selection before confirmation, then installs and persists
   }
 });
 
+test("rejects an incompatible Git Skill tree before asking for confirmation", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-git-incompatible-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  const incompatibleTree: readonly SkillTreeFile[] = [
+    ...cliTree,
+    { path: "portable/demo/.claude/settings.json", content: Buffer.from("host-specific"), executable: false },
+  ];
+  try {
+    const sourceAccess = {
+      async readSkillTree(source: Source, skillPath: string) {
+        assert.equal(source.id, external.id);
+        assert.equal(skillPath, "portable/demo");
+        return incompatibleTree;
+      },
+      async readSkillTreeSnapshot(source: Source, skillPath: string) {
+        assert.equal(source.id, external.id);
+        assert.equal(skillPath, "portable/demo");
+        return {
+          files: incompatibleTree,
+          resolvedVersion: { kind: "git-commit" as const, commit: "a".repeat(40) },
+        };
+      },
+    };
+    const args = [
+      "install", "--scope", "project", "--source", external.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1",
+    ];
+
+    assert.equal(await runCli(args, {
+      operations: fakeOperations({ resolveProjectSource: async () => external }),
+      projectRoot,
+      sourceAccess,
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    }), 1);
+    assert.deepEqual(output, []);
+    assert.deepEqual(errors, [
+      'Error: Skill "demo" contains ".claude/settings.json", which is excluded by the portable V1 format rules',
+    ]);
+    await assert.rejects(readFile(path.join(projectRoot, "agent-depot.json")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("previews and installs skill-relative agents support files as portable content", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-agents-support-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  const agentsTree: readonly SkillTreeFile[] = [
+    ...cliTree,
+    { path: "portable/demo/agents/openai.yaml", content: Buffer.from("model = gpt-4.1\\n"), executable: false },
+  ];
+  try {
+    const dependencies = {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(agentsTree),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+    const args = [
+      "install", "--scope", "project", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1",
+    ];
+
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.ok(output.some((line) => line.includes("portable/demo/agents/openai.yaml")));
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    assert.equal(errors.some((line) => /incompatible|excluded by the portable/i.test(line)), false);
+
+    assert.equal(await runCli([...args, "--yes"], dependencies), 0);
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "agents", "openai.yaml"), "utf8"), "model = gpt-4.1\\n");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("previews and installs a user-global Skill in the injected home while sharing Source state", async (t) => {
   const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-home-"));
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-state-"));

@@ -36,6 +36,7 @@ import {
   inspectProjectSkillRemoval,
   installProjectSkillTransaction,
   removeProjectSkill,
+  validateProjectSkillInstallationPreview,
   assertNoOverlappingProjectSkillRemovalTargets,
   type ProjectInstallationOptions,
   type ProjectSkillInstallationResult,
@@ -1181,6 +1182,12 @@ async function resolveSelection(
   sourceAccess: ProjectSkillTreeAccess,
 ): Promise<ResolvedManifestSelection> {
   const preview = await readPreviewTree(sourceAccess, source, selection);
+  await validateProjectSkillInstallationPreview({
+    selection,
+    source,
+    previewTree: preview.files,
+    portableV1: true,
+  }, sourceAccess);
   // An explicitly configured method is authoritative. Avoid reading source metadata
   // when it is present so an invalid fallback cannot override user intent.
   const method = selection.methods?.install ?? await readStructuredMethod(operations, source, selection.path, preview.files);

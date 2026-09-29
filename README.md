@@ -144,8 +144,18 @@ explicitly. External `latest` may track an explicit mutable safe ref, but an
 immutable commit ref must use a fixed policy matching that commit. The
 `--portable-v1` flag requires the validated portable format rule; compatibility
 is derived from source bytes and exclusions rather than trusted from a caller
-assertion. It previews every file and the Claude symlink, then requires `--yes`
-before writing.
+assertion. A skill-relative `agents/` directory is supported: its files remain
+inside the selected Skill tree and are installed at
+`.agents/skills/<skill>/agents/`, rather than being treated as a Host-level
+`agents/` directory. Other Host-specific top-level directories such as
+`.claude`, `.codex`, `.opencode`, `.pi`, `extensions`, `plugins`, and `mcp`
+remain outside the portable V1 format.
+
+The CLI reads the selected immutable Skill tree before asking for `--yes`.
+Portable incompatibilities are rejected before confirmation or any write, with
+the rejected source path and reason shown in the error. A successful preview
+lists the exact selected files, including supported skill-relative agents
+files, and only a confirmed `--yes` proceeds to installation.
 
 A confirmed installation writes `agent-depot.json` in the project root. The
 manifest stores built-in identity or an external canonical URL, Skill path,
