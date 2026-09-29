@@ -139,7 +139,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]\n  agent-depot uninstall [--skills] [--data] [--cli] [--yes]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -194,6 +194,156 @@ test("previews dependent user-global Skills, keeps them by default, and removes 
     assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "kept", "SKILL.md"), "utf8"), "kept");
     await assert.rejects(readFile(path.join(homeDirectory, ".agents", "skills", "removed", "SKILL.md")), { code: "ENOENT" });
     assert.deepEqual(await operations.listUserGlobalInstallations!(), [kept]);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("uninstalls independent user-global choices with conservative defaults", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-state-"));
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-project-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const source = await operations.addGitSource(external.url);
+    const selection: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url },
+      path: "portable/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    };
+    await operations.addUserGlobalInstallation!(selection);
+    const skillFile = path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md");
+    await mkdir(path.dirname(skillFile), { recursive: true });
+    await writeFile(skillFile, "managed", "utf8");
+    const manifest = path.join(projectRoot, "agent-depot.json");
+    await writeFile(manifest, "project manifest remains", "utf8");
+    const dependencies = {
+      operations,
+      homeDirectory,
+      projectRoot,
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(["uninstall", "--skills"], dependencies), 1);
+    assert.match(errors[0] ?? "", /Uninstall not confirmed/);
+    assert.equal(await readFile(skillFile, "utf8"), "managed");
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli(["uninstall", "--skills", "--yes"], dependencies), 0);
+    await assert.rejects(readFile(skillFile), { code: "ENOENT" });
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+    assert.deepEqual(await operations.listSources(), [BUILT_IN_SOURCE, source]);
+    assert.equal(await readFile(manifest, "utf8"), "project manifest remains");
+    assert.match(output.join("\\n"), /catalog\/configuration data: preserve/i);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("removes catalog data without deleting retained Skills and only prints CLI handoff", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-data-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-data-state-"));
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-data-project-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    const statePath = path.join(stateDirectory, "sources.json");
+    const operations = createSourceOperations({ statePath });
+    const selection: ProjectSkillSelection = {
+      source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+      path: "portable/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    };
+    await operations.addUserGlobalInstallation!(selection);
+    const skillFile = path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md");
+    await mkdir(path.dirname(skillFile), { recursive: true });
+    await writeFile(skillFile, "retained", "utf8");
+    const manifest = path.join(projectRoot, "agent-depot.json");
+    await writeFile(manifest, "project manifest remains", "utf8");
+    const dependencies = {
+      operations,
+      homeDirectory,
+      projectRoot,
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(["uninstall", "--data"], dependencies), 1);
+    assert.match(errors[0] ?? "", /Uninstall not confirmed/);
+    assert.equal(await readFile(skillFile, "utf8"), "retained");
+    assert.equal(await readFile(statePath, "utf8").then(() => true), true);
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli(["uninstall", "--data", "--yes"], dependencies), 0);
+    assert.equal(await readFile(skillFile, "utf8"), "retained");
+    await assert.rejects(readFile(statePath), { code: "ENOENT" });
+    assert.equal(await readFile(manifest, "utf8"), "project manifest remains");
+    assert.match(output.join("\\n"), /become untracked/i);
+
+    output.length = 0;
+    assert.equal(await runCli(["uninstall", "--cli"], {
+      operations,
+      stdout: (line) => output.push(line),
+      stderr: (line) => errors.push(line),
+    }), 0);
+    assert.match(output.join("\\n"), /package-manager handoff only/i);
+    assert.match(output.join("\\n"), /will not invoke or infer/i);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("reconciles removed Skills before a later combined catalog purge failure", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-partial-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-partial-state-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    const statePath = path.join(stateDirectory, "sources.json");
+    const baseOperations = createSourceOperations({ statePath });
+    const selection: ProjectSkillSelection = {
+      source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+      path: "portable/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    };
+    await baseOperations.addUserGlobalInstallation!(selection);
+    const skillFile = path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md");
+    await mkdir(path.dirname(skillFile), { recursive: true });
+    await writeFile(skillFile, "managed", "utf8");
+    const operations: SourceOperations = {
+      ...baseOperations,
+      async removeCatalogData() {
+        throw new Error("catalog purge failed");
+      },
+    };
+
+    assert.equal(await runCli(["uninstall", "--skills", "--data", "--yes"], {
+      operations,
+      homeDirectory,
+      stdout: (line) => output.push(line),
+      stderr: (line) => errors.push(line),
+    }), 1);
+    assert.match(errors[0] ?? "", /catalog purge failed/);
+    await assert.rejects(readFile(skillFile), { code: "ENOENT" });
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+    assert.equal(await readFile(statePath).then(() => true), true);
   } finally {
     await rm(homeDirectory, { recursive: true, force: true });
     await rm(stateDirectory, { recursive: true, force: true });

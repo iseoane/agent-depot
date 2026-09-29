@@ -22,6 +22,9 @@ node dist/src/cli.js install --scope project --manifest --portable-v1 --yes
 node dist/src/cli.js update check --scope project
 node dist/src/cli.js update apply --scope project --all --yes
 node dist/src/cli.js update apply --scope user-global --skill 0 --yes
+node dist/src/cli.js uninstall --cli
+node dist/src/cli.js uninstall --skills --yes
+node dist/src/cli.js uninstall --data --yes
 ```
 
 Refresh first prints the registered URL as a preview. It requires explicit
@@ -49,6 +52,18 @@ rejected. Fixed version policies are retained only when the replacement Source
 provides matching commit evidence; old resolved Source evidence is otherwise
 removed. Content baselines remain tied to the unchanged installation, and
 user-provided methods are retained for review rather than rewritten.
+
+## Uninstall choices
+
+Uninstall is user-global only and never reads or changes project manifests. The
+choices are independent: `--skills` removes all managed user-global Skills,
+`--data` removes the catalog/configuration state file, and `--cli` prints a
+package-manager handoff for removing the persistent CLI. Skills and catalog data
+are preserved when their flags are omitted. Removing Skills reconciles their
+installation records; removing data while retaining Skills leaves those Skills
+untracked. Every filesystem deletion requires `--yes` after the complete
+preview. Agent Depot never invokes or infers a package manager, and Git Source
+caches are retained.
 
 ## Batch updates
 

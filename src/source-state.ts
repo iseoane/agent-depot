@@ -189,6 +189,18 @@ export class SourceStateStore {
     }
   }
 
+  /** Removes the persisted catalog/configuration file without touching caches. */
+  async remove(): Promise<void> {
+    const release = await this.acquireLock();
+    try {
+      await unlink(this.path).catch((error: unknown) => {
+        if (!isMissingFile(error)) throw error;
+      });
+    } finally {
+      await release();
+    }
+  }
+
   private async loadUnlocked(): Promise<PersistedSourceState> {
     let contents: string;
     try {

@@ -77,11 +77,13 @@ const USAGE = [
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot update check --scope <project|user-global>",
   "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
+  "  agent-depot uninstall [--skills] [--data] [--cli] [--yes]",
 ].join("\n");
 const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 const REMOVE_SOURCE_USAGE = "Usage: agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]";
 const MIGRATE_SOURCE_USAGE = "Usage: agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]";
+const UNINSTALL_USAGE = "Usage: agent-depot uninstall [--skills] [--data] [--cli] [--yes]";
 
 /** Runs the CLI application and returns a process exit code. */
 export async function runCli(argv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
@@ -97,6 +99,11 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
 
     if (argv[0] === "update") {
       return await runUpdate(argv.slice(1), operations, dependencies, output);
+    }
+
+    if (argv[0] === "uninstall") {
+      await runUninstall(argv.slice(1), operations, dependencies, output);
+      return 0;
     }
 
     if (argv[0] === "discover") {
@@ -455,6 +462,142 @@ function resolveRemovalSelections(
     if (!selected.includes(candidate)) selected.push(candidate);
   }
   return Object.freeze(selected);
+}
+
+interface UninstallOptions {
+  readonly skills: boolean;
+  readonly data: boolean;
+  readonly cli: boolean;
+  readonly confirmed: boolean;
+}
+
+function parseUninstallOptions(argv: readonly string[]): UninstallOptions {
+  let skills = false;
+  let data = false;
+  let cli = false;
+  let confirmed = false;
+  for (const argument of argv) {
+    switch (argument) {
+      case "--skills":
+        if (skills) throw new CliUsageError(UNINSTALL_USAGE);
+        skills = true;
+        break;
+      case "--data":
+        if (data) throw new CliUsageError(UNINSTALL_USAGE);
+        data = true;
+        break;
+      case "--cli":
+        if (cli) throw new CliUsageError(UNINSTALL_USAGE);
+        cli = true;
+        break;
+      case "--yes":
+        confirmed = true;
+        break;
+      default:
+        throw new CliUsageError(UNINSTALL_USAGE);
+    }
+  }
+  if (!skills && !data && !cli) {
+    throw new CliUsageError("Select at least one uninstall choice: --skills, --data, or --cli");
+  }
+  return { skills, data, cli, confirmed };
+}
+
+async function runUninstall(
+  argv: readonly string[],
+  operations: SourceOperations,
+  dependencies: CliDependencies,
+  output: (line: string) => void,
+): Promise<void> {
+  const options = parseUninstallOptions(argv);
+  if (options.skills && !operations.listUserGlobalInstallations) {
+    throw new Error("Configured Source operations cannot inspect user-global Skill installations");
+  }
+  if (options.skills && !operations.removeUserGlobalInstallations) {
+    throw new Error("Configured Source operations cannot reconcile removed user-global Skills");
+  }
+  if (options.data && !operations.removeCatalogData) {
+    throw new Error("Configured Source operations cannot remove user-global catalog data");
+  }
+
+  const homeDirectory = path.resolve(dependencies.homeDirectory ?? homedir());
+  const installations = options.skills ? await operations.listUserGlobalInstallations!() : [];
+  const inspections: ProjectSkillRemovalInspection[] = [];
+  const removalOptions: ProjectInstallationOptions = {
+    projectRoot: homeDirectory,
+    sourceAccess: { readSkillTree: async () => [] },
+    ...dependencies.installationOptions,
+  };
+
+  output("Uninstall preview (scope: user-global only)");
+  if (options.skills) {
+    output(`Managed Skills (${installations.length}):`);
+    for (const selection of installations) {
+      const inspection = await inspectProjectSkillRemoval(selection, removalOptions);
+      inspections.push(inspection);
+      output(`  remove ${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`);
+      if (inspection.adopted) {
+        output("    WARNING: this Skill was adopted; removal deletes content that Agent Depot did not create");
+      }
+      if (inspection.modified) {
+        output("    WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes");
+      }
+    }
+    output("  Installation records are reconciled after each successful Skill removal");
+  } else {
+    output("Managed Skills: preserve (not selected)");
+  }
+
+  if (options.data) {
+    output("Catalog/configuration data: remove the user-global Source state file");
+    output("  Git Source caches are retained");
+    if (!options.skills) {
+      output("  Managed Skills are preserved but become untracked when their state is removed");
+    }
+  } else {
+    output("Catalog/configuration data: preserve (not selected)");
+  }
+
+  if (options.cli) {
+    output("Persistent CLI: package-manager handoff only; Agent Depot will not invoke or infer a package manager");
+  } else {
+    output("Persistent CLI: preserve (not selected)");
+  }
+
+  assertNoOverlappingProjectSkillRemovalTargets(inspections);
+  if (options.skills || options.data) {
+    requireConfirmation(options.confirmed, "Uninstall not confirmed; rerun with --yes after reviewing every user-global deletion preview");
+  }
+
+  const rechecked: ProjectSkillRemovalInspection[] = [];
+  for (const selection of installations) {
+    rechecked.push(await inspectProjectSkillRemoval(selection, removalOptions));
+  }
+  assertNoOverlappingProjectSkillRemovalTargets(rechecked);
+  for (let index = 0; index < installations.length; index += 1) {
+    const before = inspections[index]!;
+    const after = rechecked[index]!;
+    if (before.digest !== after.digest || before.adopted !== after.adopted || before.modified !== after.modified ||
+      before.skillName !== after.skillName || before.paths.length !== after.paths.length ||
+      before.paths.some((candidate, pathIndex) => candidate !== after.paths[pathIndex])) {
+      throw new Error("The inspected Skill removal target changed before deletion; no path was removed");
+    }
+    await removeProjectSkill(installations[index]!, after, removalOptions);
+    await operations.removeUserGlobalInstallations!([installations[index]!]);
+  }
+
+  if (options.data) {
+    await operations.removeCatalogData!();
+  }
+  if (options.skills) {
+    output(`Removed ${installations.length} managed user-global Skill${installations.length === 1 ? "" : "s"}`);
+  }
+  if (options.data) {
+    output("Removed user-global catalog/configuration data; Git Source caches were retained");
+  }
+  if (options.cli) {
+    output("Handoff: remove the persistent Agent Depot CLI with the package manager that installed it; no package manager was invoked or inferred");
+  }
 }
 
 interface UpdateOptions {

@@ -148,6 +148,10 @@ export interface SourceOperations {
   addUserGlobalInstallation?: (selection: ProjectSkillSelection) => Promise<void>;
   /** Replaces one persisted user-global record without changing its identity. */
   updateUserGlobalInstallation?: (selection: ProjectSkillSelection) => Promise<void>;
+  /** Removes explicitly selected user-global records after their files are safely removed. */
+  removeUserGlobalInstallations?: (selections: readonly UserGlobalSkillInstallation[]) => Promise<void>;
+  /** Removes the user-global catalog/configuration state but never the Git cache. */
+  removeCatalogData?: () => Promise<void>;
 }
 
 export interface SourceDiscoveryOperations extends SourceOperations {
@@ -422,6 +426,36 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
           result: undefined,
         };
       });
+    },
+
+    async removeUserGlobalInstallations(selections: readonly UserGlobalSkillInstallation[]): Promise<void> {
+      await stateStore.update((state) => {
+        const selectedIdentities = new Set<string>();
+        for (const selection of selections) {
+          const identity = userGlobalInstallationIdentity(selection);
+          if (selectedIdentities.has(identity)) {
+            throw new SourceSelectionError(`User-global Skill ${JSON.stringify(selection.path)} was selected more than once`);
+          }
+          selectedIdentities.add(identity);
+          if (!state.userGlobalInstallations.some((candidate) => userGlobalInstallationIdentity(candidate) === identity)) {
+            throw new SourceSelectionError(`User-global Skill ${JSON.stringify(selection.path)} is not recorded`);
+          }
+        }
+        return {
+          state: {
+            version: 1,
+            gitSources: state.gitSources,
+            userGlobalInstallations: state.userGlobalInstallations.filter(
+              (installation) => !selectedIdentities.has(userGlobalInstallationIdentity(installation)),
+            ),
+          },
+          result: undefined,
+        };
+      });
+    },
+
+    async removeCatalogData(): Promise<void> {
+      await stateStore.remove();
     },
   };
 }

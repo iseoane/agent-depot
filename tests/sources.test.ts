@@ -407,6 +407,30 @@ test("loads legacy Source state and persists user-global installations in the sh
   });
 });
 
+test("reconciles selected user-global records and removes catalog data without touching caches", async () => {
+  await withState(async (statePath, gitAccess) => {
+    const operations = createSourceOperations({ statePath, gitAccess });
+    const source = await operations.addGitSource("https://github.com/example/uninstall.git");
+    const retained = {
+      source: { kind: "external" as const, url: source.url },
+      path: "portable/retained",
+      version: { policy: "latest" as const },
+      hosts: ["pi" as const],
+      installation: { path: ".agents/skills/retained", adopted: false },
+    };
+    const removed = { ...retained, path: "portable/removed", installation: { path: ".agents/skills/removed", adopted: false } };
+    await operations.addUserGlobalInstallation!(retained);
+    await operations.addUserGlobalInstallation!(removed);
+
+    await operations.removeUserGlobalInstallations!([removed]);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), [retained]);
+    assert.ok(operations.removeCatalogData);
+    await operations.removeCatalogData!();
+    await assert.rejects(readFile(statePath), { code: "ENOENT" });
+    assert.deepEqual(gitAccess.refreshed, []);
+  });
+});
+
 test("validates source methods with the same portable no-shell safety rules", () => {
   assert.deepEqual(parseSourceInstallationMethod({
     kind: "command",
