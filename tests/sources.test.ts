@@ -8,6 +8,8 @@ import {
   BUILT_IN_SOURCE,
   BuiltInSourceError,
   createSourceOperations,
+  parseSourceInstallationMethod,
+  SourceMetadataError,
   SourceNotFoundError,
   SourceSelectionError,
 } from "../src/sources.js";
@@ -205,6 +207,10 @@ test("loads legacy Source state and persists user-global installations in the sh
       version: { policy: "latest" },
       hosts: ["pi"],
       installation: { path: ".agents/skills/demo", adopted: false },
+      methods: {
+        install: { kind: "command", argv: ["pnpm", "dlx", "demo-skill"] },
+        update: { kind: "command", argv: ["npm", "exec", "--", "demo-skill", "update"] },
+      },
     });
 
     const state = JSON.parse(await readFile(statePath, "utf8")) as {
@@ -213,8 +219,34 @@ test("loads legacy Source state and persists user-global installations in the sh
     };
     assert.deepEqual(state.gitSources, []);
     assert.equal(state.userGlobalInstallations.length, 1);
-    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+    assert.deepEqual((state.userGlobalInstallations[0] as { methods: unknown }).methods, {
+      install: { kind: "command", argv: ["pnpm", "dlx", "demo-skill"] },
+      update: { kind: "command", argv: ["npm", "exec", "--", "demo-skill", "update"] },
+    });
+    assert.equal((await operations.listUserGlobalInstallations!())[0]?.methods?.install?.argv[0], "pnpm");
   });
+});
+
+test("validates source methods with the same portable no-shell safety rules", () => {
+  assert.deepEqual(parseSourceInstallationMethod({
+    kind: "command",
+    argv: ["pnpm", "dlx", "demo-skill"],
+    cwd: "tools",
+  }), {
+    kind: "command",
+    argv: ["pnpm", "dlx", "demo-skill"],
+    cwd: "tools",
+  });
+
+  for (const method of [
+    { kind: "command", argv: ["bash", "-c", "echo unsafe"] },
+    { kind: "command", argv: ["pnpm", "--api-key=secret"] },
+    { kind: "command", argv: ["pnpm", "REGISTRY_TOKEN=secret"] },
+    { kind: "command", argv: ["pnpm", "https://user:secret@example.com/skill"] },
+    { kind: "command", argv: ["pnpm", "install"], windows: ["pnpm.cmd"] },
+  ]) {
+    assert.throws(() => parseSourceInstallationMethod(method), SourceMetadataError);
+  }
 });
 
 test("rejects persisted user-global installations without an installation location", async () => {

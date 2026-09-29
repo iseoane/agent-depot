@@ -17,8 +17,15 @@ import {
   type SkillTreeFile,
   type SourceContentAccess,
 } from "./skill-discovery.js";
-import type { ProjectSkillSelection, ProjectSource } from "./project-manifest.js";
+import {
+  parsePortableInstallationMethod,
+  type ProjectSkillSelection,
+  type ProjectSource,
+  type SourceInstallationMethod,
+} from "./project-manifest.js";
 import type { UserGlobalSkillInstallation } from "./source-state.js";
+
+export type { SourceInstallationMethod } from "./project-manifest.js";
 
 export interface BuiltInSource {
   readonly id: "builtin:agent-depot";
@@ -75,13 +82,7 @@ export class SourceMetadataError extends Error {
   }
 }
 
-/** A command supplied by an upstream adapter, never inferred from skill prose. */
-export interface SourceInstallationMethod {
-  readonly kind: "command";
-  readonly argv: readonly [string, ...string[]];
-  readonly cwd?: string;
-}
-
+/** Context supplied when executing a validated installation method. */
 export interface SourceInstallationContext {
   readonly source: Source;
   readonly skillPath: string;
@@ -288,37 +289,9 @@ export function resolveProjectSource(projectSource: ProjectSource): Source {
  * shell strings, empty argv, and control characters all fail closed.
  */
 export function parseSourceInstallationMethod(value: unknown): SourceInstallationMethod {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new SourceMetadataError("upstream installation metadata must be an object");
-  }
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record);
-  if (keys.some((key) => key !== "kind" && key !== "argv" && key !== "cwd")) {
-    throw new SourceMetadataError("upstream installation metadata contains unsupported fields");
-  }
-  if (record.kind !== "command" || !Array.isArray(record.argv) || record.argv.length === 0 ||
-    record.argv.some((part) => typeof part !== "string" || part.length === 0 || /[\u0000-\u001f\u007f]/u.test(part))) {
-    throw new SourceMetadataError("upstream installation metadata must define a non-empty argv array without control characters");
-  }
-  const executable = record.argv[0];
-  if (typeof executable !== "string" || !/^[A-Za-z0-9._+-]+$/u.test(executable) ||
-    isShellInterpreter(executable)) {
-    throw new SourceMetadataError("upstream installation metadata executable is not a safe no-shell command name");
-  }
-  if (record.argv.some((part) => typeof part === "string" && /[;&|<>$`]/u.test(part))) {
-    throw new SourceMetadataError("upstream installation metadata contains shell syntax");
-  }
-  if (typeof record.cwd === "string" && (record.cwd.length === 0 || /[\u0000-\u001f\u007f]/u.test(record.cwd) ||
-    path.posix.isAbsolute(record.cwd) || record.cwd === ".." || record.cwd.startsWith("../") || record.cwd.includes("\\"))) {
-    throw new SourceMetadataError("upstream installation metadata cwd is unsafe");
-  }
-  if (record.cwd !== undefined && typeof record.cwd !== "string") {
-    throw new SourceMetadataError("upstream installation metadata cwd must be a string");
-  }
-  return Object.freeze({
-    kind: "command",
-    argv: Object.freeze([...record.argv] as [string, ...string[]]),
-    ...(record.cwd === undefined ? {} : { cwd: record.cwd }),
+  return parsePortableInstallationMethod(value, {
+    label: "upstream installation metadata",
+    error: (message) => new SourceMetadataError(message),
   });
 }
 
@@ -358,14 +331,6 @@ export async function executeSourceInstallationMethod(
       ));
     });
   });
-}
-
-function isShellInterpreter(executable: string): boolean {
-  const normalized = executable.toLowerCase();
-  return new Set([
-    "sh", "sh.exe", "bash", "bash.exe", "zsh", "zsh.exe", "fish", "fish.exe",
-    "cmd", "cmd.exe", "command.com", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
-  ]).has(normalized) || /\.(?:bat|cmd|com|ps1)$/u.test(normalized);
 }
 
 function errorMessage(error: unknown): string {

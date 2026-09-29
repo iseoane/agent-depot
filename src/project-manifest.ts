@@ -45,6 +45,19 @@ export interface FixedVersionPolicy {
 
 export type VersionPolicy = LatestVersionPolicy | FixedVersionPolicy;
 
+/** A portable command represented as an executable and argument vector. */
+export interface SourceInstallationMethod {
+  readonly kind: "command";
+  readonly argv: readonly [string, ...string[]];
+  readonly cwd?: string;
+}
+
+/** User-provided fallback methods shared by project and user-global selections. */
+export interface ProjectSkillMethods {
+  readonly install?: SourceInstallationMethod;
+  readonly update?: SourceInstallationMethod;
+}
+
 export interface ProjectSkillInstallation {
   /** POSIX path relative to the project root where the Skill is actually installed. */
   readonly path: string;
@@ -58,6 +71,8 @@ export interface ProjectSkillSelection {
   readonly path: string;
   readonly version: VersionPolicy;
   readonly hosts: readonly ProjectHost[];
+  /** Optional user-provided fallback commands for installation and future updates. */
+  readonly methods?: ProjectSkillMethods;
   /** Actual project installation location, when this selection has been installed. */
   readonly installation?: ProjectSkillInstallation;
 }
@@ -122,6 +137,91 @@ function normalizeSkillPath(value: unknown, label: string, manifestPath: string)
     throw new ProjectManifestError(manifestPath, `${label} must identify a skill below its Source root`);
   }
   return normalized;
+}
+
+interface InstallationMethodParserOptions {
+  readonly label?: string;
+  readonly error?: (message: string) => Error;
+}
+
+/**
+ * Validates the shared command shape used by Source metadata and user configuration.
+ * The caller supplies the error type so Source adapters and manifests can report
+ * failures in their own domain without maintaining divergent safety rules.
+ */
+export function parsePortableInstallationMethod(
+  value: unknown,
+  options: InstallationMethodParserOptions = {},
+): SourceInstallationMethod {
+  const label = options.label ?? "installation method";
+  const fail = (reason: string): never => {
+    throw (options.error ?? ((message: string) => new Error(message)))(`${label} ${reason}`);
+  };
+
+  if (!isRecord(value)) {
+    return fail("must be an object");
+  }
+  assertKeysForMethod(value, ["kind", "argv", "cwd"], label, options);
+  if (value.kind !== "command" || !Array.isArray(value.argv) || value.argv.length === 0 ||
+    value.argv.some((part) => typeof part !== "string" || part.length === 0 || /[\u0000-\u001f\u007f]/u.test(part))) {
+    return fail("must define a non-empty argv array without control characters");
+  }
+
+  const argv = value.argv as string[];
+  const executable = argv[0];
+  if (!/^[A-Za-z0-9._+-]+$/u.test(executable) || isShellInterpreter(executable) || /\.(?:bat|cmd|com|exe|ps1)$/iu.test(executable)) {
+    return fail("executable is not a safe portable no-shell command name");
+  }
+  if (argv.some((part) => /[;&|<>$`]/u.test(part))) {
+    return fail("contains shell syntax");
+  }
+  const credentialFlag = /^(?:--?)(?:access[-_]?key|api[-_]?key|auth(?:orization)?|client[-_]?secret|credential|pass(?:word|wd)?|private[-_]?key|refresh[-_]?token|secret|token)(?:$|[=:])/iu;
+  for (const [index, part] of argv.entries()) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=.+$/u.test(part) ||
+      /(?:^|[=:])[A-Za-z_][A-Za-z0-9_]*=.+/u.test(part) ||
+      /^(?:[A-Za-z][A-Za-z0-9+.-]*):\/\/[^/\s:@]+:[^/\s@]+@/u.test(part) ||
+      /^(?:authorization|proxy-authorization)\s*:/iu.test(part) ||
+      /^(?:basic|bearer)\s+\S+/iu.test(part) ||
+      /(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})/u.test(part)) {
+      return fail("contains an obvious credential or environment assignment");
+    }
+    if (credentialFlag.test(part) || (index > 0 && credentialFlag.test(argv[index - 1] ?? ""))) {
+      return fail("contains a credential-style argument");
+    }
+  }
+
+  if (value.cwd !== undefined && (typeof value.cwd !== "string" || value.cwd.length === 0 ||
+    /[\u0000-\u001f\u007f]/u.test(value.cwd) || path.posix.isAbsolute(value.cwd) ||
+    value.cwd === ".." || value.cwd.startsWith("../") || value.cwd.includes("\\"))) {
+    return fail("cwd is unsafe");
+  }
+  return Object.freeze({
+    kind: "command",
+    argv: Object.freeze([...argv] as [string, ...string[]]),
+    ...(value.cwd === undefined ? {} : { cwd: value.cwd }),
+  });
+}
+
+function assertKeysForMethod(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  label: string,
+  options: InstallationMethodParserOptions,
+): void {
+  const unsupported = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unsupported) {
+    throw (options.error ?? ((message: string) => new Error(message)))(
+      `${label} contains unsupported field ${JSON.stringify(unsupported)}`,
+    );
+  }
+}
+
+function isShellInterpreter(executable: string): boolean {
+  const normalized = executable.toLowerCase();
+  return new Set([
+    "sh", "sh.exe", "bash", "bash.exe", "zsh", "zsh.exe", "fish", "fish.exe",
+    "cmd", "cmd.exe", "command.com", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+  ]).has(normalized);
 }
 
 function parseSource(value: unknown, manifestPath: string, index: number): ProjectSource {
@@ -244,12 +344,35 @@ function parseInstallation(value: unknown, manifestPath: string, index: number):
   return Object.freeze({ path: pathValue, adopted: value.adopted });
 }
 
+function parseMethods(value: unknown, manifestPath: string, index: number): ProjectSkillMethods {
+  const label = `skills[${index}].methods`;
+  if (!isRecord(value)) {
+    throw new ProjectManifestError(manifestPath, `${label} must be an object`);
+  }
+  assertKeys(value, ["install", "update"], label, manifestPath);
+  const parse = (method: unknown, name: "install" | "update"): SourceInstallationMethod | undefined => {
+    if (method === undefined) {
+      return undefined;
+    }
+    return parsePortableInstallationMethod(method, {
+      label: `${label}.${name}`,
+      error: (message) => new ProjectManifestError(manifestPath, message),
+    });
+  };
+  const install = parse(value.install, "install");
+  const update = parse(value.update, "update");
+  return Object.freeze({
+    ...(install === undefined ? {} : { install }),
+    ...(update === undefined ? {} : { update }),
+  });
+}
+
 function parseSelection(value: unknown, manifestPath: string, index: number): ProjectSkillSelection {
   const label = `skills[${index}]`;
   if (!isRecord(value)) {
     throw new ProjectManifestError(manifestPath, `${label} must be an object`);
   }
-  assertKeys(value, ["source", "path", "version", "hosts", "installation"], label, manifestPath);
+  assertKeys(value, ["source", "path", "version", "hosts", "installation", "methods"], label, manifestPath);
   const source = parseSource(value.source, manifestPath, index);
   const version = parseVersionPolicy(value.version, source, manifestPath, index);
   if (version.policy === "latest" && source.kind === "external" && "url" in source && source.ref !== undefined && isCommitId(source.ref)) {
@@ -267,12 +390,16 @@ function parseSelection(value: unknown, manifestPath: string, index: number): Pr
   const installation = value.installation === undefined
     ? undefined
     : parseInstallation(value.installation, manifestPath, index);
+  const methods = value.methods === undefined
+    ? undefined
+    : parseMethods(value.methods, manifestPath, index);
   return Object.freeze({
     source,
     path: normalizeSkillPath(value.path, `${label}.path`, manifestPath),
     version,
     hosts: parseHosts(value.hosts, manifestPath, index),
     ...(installation === undefined ? {} : { installation }),
+    ...(methods === undefined ? {} : { methods }),
   });
 }
 

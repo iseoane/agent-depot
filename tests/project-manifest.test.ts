@@ -66,6 +66,25 @@ test("validates a self-contained manifest for built-in and URL Sources", () => {
   assert.equal("id" in (manifest.skills[1]?.source ?? {}), false);
 });
 
+test("accepts optional user install and update methods while preserving older manifests", () => {
+  const manifest = parseProjectManifest({
+    version: 1,
+    skills: [{
+      ...validManifest().skills[0],
+      methods: {
+        install: { kind: "command", argv: ["pnpm", "dlx", "example-skill"] },
+        update: { kind: "command", argv: ["npm", "exec", "--", "example-skill", "update"], cwd: "tools" },
+      },
+    }],
+  });
+
+  assert.deepEqual(manifest.skills[0]?.methods, {
+    install: { kind: "command", argv: ["pnpm", "dlx", "example-skill"] },
+    update: { kind: "command", argv: ["npm", "exec", "--", "example-skill", "update"], cwd: "tools" },
+  });
+  assert.equal(validManifest().skills[0]?.methods, undefined);
+});
+
 test("accepts an optional actual installation record while preserving older manifests", () => {
   const manifest = parseProjectManifest({
     version: 1,
@@ -167,6 +186,27 @@ test("fails closed on unsafe Source and skill identities", () => {
   for (const selectionValue of invalidSelections) {
     assert.throws(
       () => parseProjectManifest({ version: 1, skills: [selectionValue] }),
+      ProjectManifestError,
+    );
+  }
+});
+
+test("rejects unsafe or unknown user method fields", () => {
+  const selection = validManifest().skills[0];
+  const invalidMethods = [
+    { install: { kind: "command", argv: ["sh", "-c", "echo unsafe"] } },
+    { install: { kind: "command", argv: ["pnpm", "--token", "secret"] } },
+    { install: { kind: "command", argv: ["pnpm", "TOKEN=secret"] } },
+    { install: { kind: "command", argv: ["pnpm", "--env=TOKEN=secret"] } },
+    { install: { kind: "command", argv: ["pnpm", "Authorization: Bearer secret"] } },
+    { install: { kind: "command", argv: ["pnpm", "https://user:secret@example.com/skill"] } },
+    { linux: { kind: "command", argv: ["pnpm", "install"] } },
+    { install: { kind: "command", argv: ["pnpm", "install"], platform: "linux" } },
+  ];
+
+  for (const methods of invalidMethods) {
+    assert.throws(
+      () => parseProjectManifest({ version: 1, skills: [{ ...selection, methods }] }),
       ProjectManifestError,
     );
   }
