@@ -109,6 +109,140 @@ export interface ProjectSkillUpdateInspection {
   readonly requiresOverwriteConfirmation: boolean;
 }
 
+/** Read-only receipt for removing one user-global Skill installation. */
+export interface ProjectSkillRemovalInspection {
+  readonly skillName: string;
+  readonly paths: readonly string[];
+  /** Digest captured during preflight and required to match before deletion. */
+  readonly digest: string;
+  readonly adopted: boolean;
+  /** True when the content differs from its recorded baseline or no baseline exists. */
+  readonly modified: boolean;
+}
+
+/** Refuses a removal batch whose selected filesystem targets overlap. */
+export function assertNoOverlappingProjectSkillRemovalTargets(
+  inspections: readonly ProjectSkillRemovalInspection[],
+): void {
+  const paths = inspections.flatMap((inspection) => inspection.paths);
+  for (let leftIndex = 0; leftIndex < paths.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < paths.length; rightIndex += 1) {
+      const left = path.resolve(paths[leftIndex]!);
+      const right = path.resolve(paths[rightIndex]!);
+      const relative = path.relative(left, right);
+      const reverse = path.relative(right, left);
+      if (relative === "" || reverse === "" || (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) ||
+        (!reverse.startsWith(`..${path.sep}`) && !path.isAbsolute(reverse))) {
+        throw new ProjectInstallationError(
+          "overlapping-targets",
+          `Cannot remove selected Skills because removal targets overlap: ${JSON.stringify(left)} and ${JSON.stringify(right)}; no path was changed`,
+        );
+      }
+    }
+  }
+}
+
+export async function inspectProjectSkillRemoval(
+  selection: ProjectSkillSelection,
+  options: ProjectInstallationOptions,
+): Promise<ProjectSkillRemovalInspection> {
+  if (!selection.installation) {
+    throw new ProjectInstallationError("removal-unavailable", "Cannot remove a Skill without a recorded installation");
+  }
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  if (!fileSystem.readdir || !fileSystem.readFile) {
+    throw new ProjectInstallationError("removal-unavailable", "Skill removal requires filesystem read support");
+  }
+
+  const projectRoot = path.resolve(options.projectRoot);
+  const skillName = skillNameFromSelection(selection);
+  const targetPath = resolveInstallationPath(projectRoot, selection.installation.path);
+  await assertNoSymlinkComponents(projectRoot, fileSystem);
+  await assertDirectory(projectRoot, fileSystem, "user-global root");
+  await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, targetPath), fileSystem);
+
+  let targetInformation: Stats;
+  try {
+    targetInformation = await fileSystem.lstat(targetPath);
+  } catch (error) {
+    if (isMissing(error)) {
+      throw new ProjectInstallationError(
+        "missing-installation",
+        `The tracked Skill installation does not exist: ${targetPath}; no path was changed`,
+      );
+    }
+    throw error;
+  }
+  assertRealDirectory(targetPath, targetInformation);
+  const actualTree = await readExistingSkillTree(targetPath, selection.path, {
+    lstat: fileSystem.lstat,
+    readdir: fileSystem.readdir,
+    readFile: fileSystem.readFile,
+  });
+  const actualBaseline = skillTreeBaseline(actualTree);
+  const modified = selection.installation.baseline === undefined ||
+    actualBaseline.digest !== selection.installation.baseline.digest;
+  const paths = [targetPath];
+
+  // A Claude exposure created by Agent Depot is removable only when it is the
+  // exact relative symlink to this canonical installation. Never follow or
+  // remove an unrelated path merely because the Skill selected Claude.
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
+  const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
+  if (selection.hosts.includes("claude") && targetPath === canonicalPath) {
+    await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, path.dirname(claudePath)), fileSystem);
+    try {
+      const claudeInformation = await fileSystem.lstat(claudePath);
+      if (!claudeInformation.isSymbolicLink()) {
+        throw new ProjectInstallationError(
+          "unsafe-target",
+          `Cannot remove the tracked Skill because its Claude location is not the managed symlink: ${claudePath}; no path was changed`,
+        );
+      }
+      const target = await fileSystem.readlink(claudePath);
+      if (path.resolve(path.dirname(claudePath), target) !== canonicalPath) {
+        throw new ProjectInstallationError(
+          "unsafe-target",
+          `Cannot remove the tracked Skill because its Claude symlink does not point to the canonical installation: ${claudePath}; no path was changed`,
+        );
+      }
+      paths.push(claudePath);
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+  }
+
+  return Object.freeze({
+    skillName,
+    paths: Object.freeze(paths),
+    digest: actualBaseline.digest,
+    adopted: selection.installation.adopted,
+    modified,
+  });
+}
+
+/** Removes a previously inspected user-global Skill after rechecking ownership. */
+export async function removeProjectSkill(
+  selection: ProjectSkillSelection,
+  inspection: ProjectSkillRemovalInspection,
+  options: ProjectInstallationOptions,
+): Promise<void> {
+  assertNoOverlappingProjectSkillRemovalTargets([inspection]);
+  const current = await inspectProjectSkillRemoval(selection, options);
+  if (current.skillName !== inspection.skillName ||
+    current.paths.length !== inspection.paths.length ||
+    current.paths.some((candidate, index) => candidate !== inspection.paths[index]) ||
+    current.digest !== inspection.digest ||
+    current.adopted !== inspection.adopted ||
+    current.modified !== inspection.modified) {
+    throw new ProjectInstallationError("removal-changed", "The inspected Skill removal target, digest, adoption, or modification state changed; no path was removed");
+  }
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  for (const candidate of [...current.paths].reverse()) {
+    await fileSystem.rm(candidate);
+  }
+}
+
 export async function inspectProjectSkillUpdate(
   selection: ProjectSkillSelection,
   options: ProjectInstallationOptions,

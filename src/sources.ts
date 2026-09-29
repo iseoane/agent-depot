@@ -99,10 +99,25 @@ const SOURCE_METADATA_FILENAMES = Object.freeze([
 ] as const);
 const SOURCE_METADATA_MAX_BYTES = 64 * 1024;
 
+export interface UserGlobalSkillMigration {
+  /** Existing user-global record selected from the old Source. */
+  readonly from: UserGlobalSkillInstallation;
+  /** Replacement record whose Source identity is the separately registered new Source. */
+  readonly to: UserGlobalSkillInstallation;
+}
+
 export interface SourceOperations {
   addGitSource(url: string): Promise<GitSource>;
   listSources(): Promise<readonly Source[]>;
   refreshSource(sourceId: string): Promise<GitSource>;
+  /** Removes a Git Source and, when requested, its selected user-global records. */
+  removeGitSource?: (sourceId: string, installations?: readonly UserGlobalSkillInstallation[]) => Promise<void>;
+  /** Rewrites only explicitly selected user-global identities; it never moves files or project manifests. */
+  migrateUserGlobalInstallations?: (
+    oldSourceId: string,
+    newSourceId: string,
+    migrations: readonly UserGlobalSkillMigration[],
+  ) => Promise<void>;
   selectSources(sourceIds: readonly string[]): Promise<readonly Source[]>;
   /** Resolves a self-contained project Source without consulting global state. */
   resolveProjectSource?: (source: ProjectSource) => Promise<Source>;
@@ -189,6 +204,100 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
 
       await gitAccess.refresh(source);
       return source;
+    },
+
+    async removeGitSource(sourceId: string, installations: readonly UserGlobalSkillInstallation[] = []): Promise<void> {
+      if (sourceId === BUILT_IN_SOURCE.id) {
+        throw new BuiltInSourceError();
+      }
+
+      await stateStore.update((state) => {
+        const source = state.gitSources.find((candidate) => candidate.id === sourceId);
+        if (!source) {
+          throw new SourceNotFoundError(sourceId);
+        }
+
+        const requested = new Set(installations.map(userGlobalInstallationIdentity));
+        for (const installation of installations) {
+          if (sourceIdForUserGlobalInstallation(installation) !== sourceId ||
+            !state.userGlobalInstallations.some((candidate) => userGlobalInstallationIdentity(candidate) === userGlobalInstallationIdentity(installation))) {
+            throw new SourceSelectionError(
+              `User-global Skill ${JSON.stringify(installation.path)} is not a dependent installation of Source ${JSON.stringify(sourceId)}`,
+            );
+          }
+        }
+
+        return {
+          state: {
+            version: 1,
+            gitSources: state.gitSources.filter((candidate) => candidate.id !== sourceId),
+            userGlobalInstallations: state.userGlobalInstallations.filter((candidate) => !requested.has(userGlobalInstallationIdentity(candidate))),
+          },
+          result: undefined,
+        };
+      });
+    },
+
+    async migrateUserGlobalInstallations(
+      oldSourceId: string,
+      newSourceId: string,
+      migrations: readonly UserGlobalSkillMigration[],
+    ): Promise<void> {
+      if (oldSourceId === newSourceId) {
+        throw new SourceSelectionError("Source migration requires two different registered Git Sources");
+      }
+
+      await stateStore.update((state) => {
+        const oldSource = state.gitSources.find((source) => source.id === oldSourceId);
+        const newSource = state.gitSources.find((source) => source.id === newSourceId);
+        if (!oldSource) throw new SourceNotFoundError(oldSourceId);
+        if (!newSource) throw new SourceNotFoundError(newSourceId);
+
+        const sourceIds = (selection: UserGlobalSkillInstallation): string => sourceIdForUserGlobalInstallation(selection);
+        const existingIdentities = new Set(state.userGlobalInstallations.map(userGlobalInstallationIdentity));
+        const selectedIdentities = new Set<string>();
+        const replacementIdentities = new Set<string>();
+        for (const migration of migrations) {
+          const fromIdentity = userGlobalInstallationIdentity(migration.from);
+          const toIdentity = userGlobalInstallationIdentity(migration.to);
+          if (selectedIdentities.has(fromIdentity)) {
+            throw new SourceSelectionError(`User-global Skill ${JSON.stringify(migration.from.path)} was selected more than once`);
+          }
+          selectedIdentities.add(fromIdentity);
+          if (sourceIds(migration.from) !== oldSourceId || !existingIdentities.has(fromIdentity)) {
+            throw new SourceSelectionError(
+              `User-global Skill ${JSON.stringify(migration.from.path)} is not a dependent installation of Source ${JSON.stringify(oldSourceId)}`,
+            );
+          }
+          if (sourceIds(migration.to) !== newSourceId) {
+            throw new SourceSelectionError(
+              `User-global Skill ${JSON.stringify(migration.to.path)} does not belong to replacement Source ${JSON.stringify(newSourceId)}`,
+            );
+          }
+          if (replacementIdentities.has(toIdentity)) {
+            throw new SourceSelectionError(`Replacement identity ${JSON.stringify(migration.to.path)} was selected more than once`);
+          }
+          replacementIdentities.add(toIdentity);
+          const collision = existingIdentities.has(toIdentity) && !selectedIdentities.has(toIdentity);
+          if (collision) {
+            throw new SourceSelectionError(
+              `Cannot migrate Skill ${JSON.stringify(migration.from.path)}: replacement identity ${JSON.stringify(migration.to.path)} already exists`,
+            );
+          }
+        }
+
+        const replacements = new Map(migrations.map((migration) => [userGlobalInstallationIdentity(migration.from), migration.to]));
+        return {
+          state: {
+            version: 1,
+            gitSources: state.gitSources,
+            userGlobalInstallations: state.userGlobalInstallations.map((installation) =>
+              replacements.get(userGlobalInstallationIdentity(installation)) ?? installation,
+            ),
+          },
+          result: undefined,
+        };
+      });
     },
 
     async selectSources(sourceIds: readonly string[]): Promise<readonly Source[]> {
@@ -396,6 +505,18 @@ export async function executeSourceInstallationMethod(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function userGlobalInstallationIdentity(selection: UserGlobalSkillInstallation): string {
+  return JSON.stringify([selection.source, selection.path]);
+}
+
+function sourceIdForUserGlobalInstallation(selection: UserGlobalSkillInstallation): string {
+  return selection.source.kind === "builtin"
+    ? selection.source.id
+    : "url" in selection.source
+      ? sourceIdForUrl(selection.source.url)
+      : "";
 }
 
 async function readSourceInstallationMethod(
