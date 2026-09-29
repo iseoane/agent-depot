@@ -113,9 +113,33 @@ export interface ProjectSkillUpdateInspection {
 export interface ProjectSkillRemovalInspection {
   readonly skillName: string;
   readonly paths: readonly string[];
+  /** Digest captured during preflight and required to match before deletion. */
+  readonly digest: string;
   readonly adopted: boolean;
   /** True when the content differs from its recorded baseline or no baseline exists. */
   readonly modified: boolean;
+}
+
+/** Refuses a removal batch whose selected filesystem targets overlap. */
+export function assertNoOverlappingProjectSkillRemovalTargets(
+  inspections: readonly ProjectSkillRemovalInspection[],
+): void {
+  const paths = inspections.flatMap((inspection) => inspection.paths);
+  for (let leftIndex = 0; leftIndex < paths.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < paths.length; rightIndex += 1) {
+      const left = path.resolve(paths[leftIndex]!);
+      const right = path.resolve(paths[rightIndex]!);
+      const relative = path.relative(left, right);
+      const reverse = path.relative(right, left);
+      if (relative === "" || reverse === "" || (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) ||
+        (!reverse.startsWith(`..${path.sep}`) && !path.isAbsolute(reverse))) {
+        throw new ProjectInstallationError(
+          "overlapping-targets",
+          `Cannot remove selected Skills because removal targets overlap: ${JSON.stringify(left)} and ${JSON.stringify(right)}; no path was changed`,
+        );
+      }
+    }
+  }
 }
 
 export async function inspectProjectSkillRemoval(
@@ -191,6 +215,7 @@ export async function inspectProjectSkillRemoval(
   return Object.freeze({
     skillName,
     paths: Object.freeze(paths),
+    digest: actualBaseline.digest,
     adopted: selection.installation.adopted,
     modified,
   });
@@ -202,11 +227,15 @@ export async function removeProjectSkill(
   inspection: ProjectSkillRemovalInspection,
   options: ProjectInstallationOptions,
 ): Promise<void> {
+  assertNoOverlappingProjectSkillRemovalTargets([inspection]);
   const current = await inspectProjectSkillRemoval(selection, options);
   if (current.skillName !== inspection.skillName ||
     current.paths.length !== inspection.paths.length ||
-    current.paths.some((candidate, index) => candidate !== inspection.paths[index])) {
-    throw new ProjectInstallationError("removal-changed", "The inspected Skill removal target changed; no path was removed");
+    current.paths.some((candidate, index) => candidate !== inspection.paths[index]) ||
+    current.digest !== inspection.digest ||
+    current.adopted !== inspection.adopted ||
+    current.modified !== inspection.modified) {
+    throw new ProjectInstallationError("removal-changed", "The inspected Skill removal target, digest, adoption, or modification state changed; no path was removed");
   }
   const fileSystem = options.fileSystem ?? nodeFileSystem;
   for (const candidate of [...current.paths].reverse()) {

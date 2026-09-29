@@ -14,6 +14,7 @@ node dist/src/cli.js source refresh git:<source-id>
 node dist/src/cli.js source refresh git:<source-id> --yes
 node dist/src/cli.js source remove git:<source-id> --yes
 node dist/src/cli.js source remove git:<source-id> --skill <id|path> --yes
+node dist/src/cli.js source migrate git:<old-source-id> git:<new-source-id> --skill <path> --yes
 node dist/src/cli.js discover builtin:agent-depot git:<source-id>
 node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
 node dist/src/cli.js install --scope user-global --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
@@ -33,8 +34,19 @@ Source caches. It previews every dependent user-global Skill and keeps all of th
 tracked by default. Pass `--skill <id|path>` for a selected subset or `--all` for
 every dependent Skill. Skill deletion always requires `--yes`; adopted content and
 content that is locally modified (or lacks a trusted baseline) receive warnings.
-Preflight rejects unsafe paths, unexpected links, missing installations, and other
-inspection failures before changing the Source state or deleting any Skill.
+Preflight rejects unsafe paths, unexpected links, missing installations, overlapping
+selected targets, and other inspection failures before changing the Source state or
+deleting any Skill. A second preflight compares each target's content digest,
+adoption flag, and modified status before the first deletion.
+
+To replace a Source URL, register the new Git Source first, then explicitly migrate
+user-global identities with `source migrate <old-id> <new-id> (--skill <path>... |
+--all) [--yes]`. Migration rewrites only selected user-global records: it never
+moves physical installations or rewrites project manifests. Identity collisions are
+rejected. Fixed version policies are retained only when the replacement Source
+provides matching commit evidence; old resolved Source evidence is otherwise
+removed. Content baselines remain tied to the unchanged installation, and
+user-provided methods are retained for review rather than rewritten.
 
 ## Batch updates
 

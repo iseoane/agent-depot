@@ -12,6 +12,7 @@ import {
   parseSourceInstallationMethod,
   SourceNotFoundError,
   type SourceOperations,
+  type Source,
 } from "../src/sources.js";
 import { NodeSourceContentAccess, skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
 import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "../src/project-manifest.js";
@@ -138,7 +139,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -235,6 +236,49 @@ test("refuses Source removal when a dependent Skill path is unsafe without mutat
     await rm(homeDirectory, { recursive: true, force: true });
     await rm(stateDirectory, { recursive: true, force: true });
     await rm(outsideDirectory, { recursive: true, force: true });
+  }
+});
+
+test("refuses overlapping selected removal targets before deleting any Skill", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-overlap-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-overlap-state-"));
+  const errors: string[] = [];
+  try {
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const source = await operations.addGitSource(external.url);
+    const records: ProjectSkillSelection[] = [
+      {
+        source: { kind: "external", url: source.url },
+        path: "portable/one",
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        installation: { path: ".agents/skills/shared", adopted: false },
+      },
+      {
+        source: { kind: "external", url: source.url },
+        path: "portable/two",
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        installation: { path: ".agents/skills/shared/nested", adopted: false },
+      },
+    ];
+    for (const record of records) await operations.addUserGlobalInstallation!(record);
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "shared", "nested"), { recursive: true });
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "shared", "SKILL.md"), "one", "utf8");
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "shared", "nested", "SKILL.md"), "two", "utf8");
+
+    assert.equal(await runCli(["source", "remove", source.id, "--all", "--yes"], {
+      operations,
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+    }), 1);
+    assert.match(errors[0] ?? "", /overlap/u);
+    assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), true);
+    assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "shared", "SKILL.md"), "utf8"), "one");
+    assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "shared", "nested", "SKILL.md"), "utf8"), "two");
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
   }
 });
 
@@ -418,6 +462,79 @@ function cliSourceAccess(tree: readonly SkillTreeFile[] = cliTree) {
     },
   };
 }
+
+test("previews and explicitly migrates user-global identities without moving files or writing manifests", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-migrate-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-migrate-state-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  const oldCommit = "a".repeat(40);
+  const newCommit = "b".repeat(40);
+  try {
+    const sourceAccess = {
+      async readSnapshot() { return []; },
+      async readSkillTreeSnapshot(source: Source, skillPath: string) {
+        assert.equal(skillPath, "portable/demo");
+        assert.equal(source.kind, "git");
+        return {
+          files: cliTree,
+          resolvedVersion: { kind: "git-commit" as const, commit: source.url.includes("new-migration") ? newCommit : oldCommit },
+        };
+      },
+    };
+    const operations = createSourceOperations({
+      statePath: path.join(stateDirectory, "sources.json"),
+      sourceContentAccess: sourceAccess,
+    });
+    const oldSource = await operations.addGitSource("https://github.com/example/old-migration.git");
+    const newSource = await operations.addGitSource("https://github.com/example/new-migration.git");
+    const selection: ProjectSkillSelection = {
+      source: { kind: "external", url: oldSource.url },
+      path: "portable/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: {
+        path: ".agents/skills/demo",
+        adopted: true,
+        resolvedVersion: { kind: "git-commit", commit: oldCommit },
+        baseline: skillTreeBaseline(cliTree),
+      },
+    };
+    await operations.addUserGlobalInstallation!(selection);
+    const skillFile = path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md");
+    await mkdir(path.dirname(skillFile), { recursive: true });
+    await writeFile(skillFile, "unchanged", "utf8");
+    const dependencies = {
+      operations,
+      homeDirectory,
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+    const args = ["source", "migrate", oldSource.id, newSource.id, "--skill", "portable/demo"];
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.match(errors[0] ?? "", /Migration not confirmed/);
+    assert.deepEqual((await operations.listUserGlobalInstallations!())[0]?.source, { kind: "external", url: oldSource.url });
+    assert.equal(await readFile(skillFile, "utf8"), "unchanged");
+
+    errors.length = 0;
+    assert.equal(await runCli([...args, "--yes"], dependencies), 0);
+    assert.deepEqual((await operations.listUserGlobalInstallations!())[0], {
+      ...selection,
+      source: { kind: "external", url: newSource.url },
+      installation: {
+        ...selection.installation,
+        resolvedVersion: { kind: "git-commit", commit: newCommit },
+      },
+    });
+    assert.equal(await readFile(skillFile, "utf8"), "unchanged");
+    await assert.rejects(readFile(path.join(homeDirectory, "agent-depot.json")), { code: "ENOENT" });
+    assert.match(output.join("\\n"), /no files or project manifests are changed/);
+    assert.deepEqual(errors, []);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
 
 function injectedUpdateFileSystem(
   calls: string[],

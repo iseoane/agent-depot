@@ -195,6 +195,43 @@ test("keeps the old identity when a new URL is added", async () => {
   });
 });
 
+test("migrates selected user-global identities atomically and rejects replacement collisions", async () => {
+  await withState(async (statePath, gitAccess) => {
+    const operations = createSourceOperations({ statePath, gitAccess });
+    const oldSource = await operations.addGitSource("https://github.com/example/old-migration.git");
+    const newSource = await operations.addGitSource("https://github.com/example/new-migration.git");
+    const selected = {
+      source: { kind: "external" as const, url: oldSource.url },
+      path: "portable/demo",
+      version: { policy: "latest" as const },
+      hosts: ["pi" as const],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    };
+    const collision = {
+      source: { kind: "external" as const, url: newSource.url },
+      path: "portable/collision",
+      version: { policy: "latest" as const },
+      hosts: ["pi" as const],
+      installation: { path: ".agents/skills/collision", adopted: false },
+    };
+    await operations.addUserGlobalInstallation!(selected);
+    await operations.addUserGlobalInstallation!(collision);
+
+    await assert.rejects(
+      operations.migrateUserGlobalInstallations!(oldSource.id, newSource.id, [{
+        from: selected,
+        to: { ...selected, source: { kind: "external", url: newSource.url }, path: collision.path },
+      }]),
+      (error: unknown) => error instanceof SourceSelectionError && /already exists/u.test(error.message),
+    );
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), [selected, collision]);
+
+    const migrated = { ...selected, source: { kind: "external" as const, url: newSource.url } };
+    await operations.migrateUserGlobalInstallations!(oldSource.id, newSource.id, [{ from: selected, to: migrated }]);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), [migrated, collision]);
+  });
+});
+
 test("removes a Git Source while keeping dependent user-global Skills by default", async () => {
   await withState(async (statePath, gitAccess) => {
     const operations = createSourceOperations({ statePath, gitAccess });

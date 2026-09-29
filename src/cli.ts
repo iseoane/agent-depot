@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { createSourceContentAccess, type SkillCandidate, type SkillTreeFile } from "./skill-discovery.js";
+import { createSourceContentAccess, skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "./skill-discovery.js";
 import {
   BuiltInSourceError,
   createSourceOperations,
@@ -17,6 +17,7 @@ import {
   type Source,
   type SourceInstallationMethod,
   type SourceOperations,
+  type UserGlobalSkillMigration,
 } from "./sources.js";
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
@@ -35,6 +36,7 @@ import {
   inspectProjectSkillRemoval,
   installProjectSkillTransaction,
   removeProjectSkill,
+  assertNoOverlappingProjectSkillRemovalTargets,
   type ProjectInstallationOptions,
   type ProjectSkillInstallationResult,
   type ProjectSkillInstallationTransaction,
@@ -69,6 +71,7 @@ const USAGE = [
   "  agent-depot source add <url>",
   "  agent-depot source refresh <id> [--yes]",
   "  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]",
+  "  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]",
   "  agent-depot discover <source-id> [source-id...]",
   "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
@@ -78,6 +81,7 @@ const USAGE = [
 const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 const REMOVE_SOURCE_USAGE = "Usage: agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]";
+const MIGRATE_SOURCE_USAGE = "Usage: agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]";
 
 /** Runs the CLI application and returns a process exit code. */
 export async function runCli(argv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
@@ -155,6 +159,9 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
       case "remove":
         await runSourceRemoval(values, operations, dependencies, output);
         return 0;
+      case "migrate":
+        await runSourceMigration(values, operations, dependencies, output);
+        return 0;
       default:
         throw new CliUsageError(USAGE);
     }
@@ -169,6 +176,14 @@ export const main = runCli;
 
 interface RemoveSourceOptions {
   readonly sourceId: string;
+  readonly all: boolean;
+  readonly requested: readonly string[];
+  readonly confirmed: boolean;
+}
+
+interface MigrateSourceOptions {
+  readonly oldSourceId: string;
+  readonly newSourceId: string;
   readonly all: boolean;
   readonly requested: readonly string[];
   readonly confirmed: boolean;
@@ -223,9 +238,28 @@ async function runSourceRemoval(
     }
   }
 
+  assertNoOverlappingProjectSkillRemovalTargets(inspections);
   requireConfirmation(options.confirmed, "Removal not confirmed; rerun with --yes after reviewing every Source and Skill preview");
+  // Recheck every selected target before deleting the first one. A changed later
+  // target must never result in a partially removed batch.
+  const rechecked: ProjectSkillRemovalInspection[] = [];
+  for (const selection of selected) {
+    rechecked.push(await inspectProjectSkillRemoval(selection, {
+      projectRoot: homeDirectory,
+      sourceAccess: { readSkillTree: async () => [] },
+      ...dependencies.installationOptions,
+    }));
+  }
+  assertNoOverlappingProjectSkillRemovalTargets(rechecked);
   for (let index = 0; index < selected.length; index += 1) {
-    await removeProjectSkill(selected[index]!, inspections[index]!, {
+    const before = inspections[index]!;
+    const after = rechecked[index]!;
+    if (before.digest !== after.digest || before.adopted !== after.adopted || before.modified !== after.modified ||
+      before.skillName !== after.skillName || before.paths.length !== after.paths.length ||
+      before.paths.some((candidate, pathIndex) => candidate !== after.paths[pathIndex])) {
+      throw new Error(`The inspected Skill removal target changed before deletion; no path was removed`);
+    }
+    await removeProjectSkill(selected[index]!, after, {
       projectRoot: homeDirectory,
       sourceAccess: { readSkillTree: async () => [] },
       ...dependencies.installationOptions,
@@ -236,6 +270,143 @@ async function runSourceRemoval(
   if (selected.length > 0) {
     output(`Removed ${selected.length} dependent user-global Skill${selected.length === 1 ? "" : "s"}; other dependent Skills remain tracked`);
   }
+}
+
+function parseMigrateSourceOptions(argv: readonly string[]): MigrateSourceOptions {
+  if (argv.length < 2 || argv[0]?.startsWith("--") || argv[1]?.startsWith("--")) {
+    throw new CliUsageError(MIGRATE_SOURCE_USAGE);
+  }
+  const oldSourceId = argv[0]!;
+  const newSourceId = argv[1]!;
+  const requested: string[] = [];
+  let all = false;
+  let confirmed = false;
+  for (let index = 2; index < argv.length; index += 1) {
+    switch (argv[index]) {
+      case "--all":
+        if (all || requested.length > 0) throw new CliUsageError(MIGRATE_SOURCE_USAGE);
+        all = true;
+        break;
+      case "--skill":
+        if (all) throw new CliUsageError(MIGRATE_SOURCE_USAGE);
+        requested.push(requireOptionValue(argv, ++index, "--skill"));
+        break;
+      case "--yes":
+        confirmed = true;
+        break;
+      default:
+        throw new CliUsageError(MIGRATE_SOURCE_USAGE);
+    }
+  }
+  if (all === (requested.length > 0)) {
+    throw new CliUsageError("Source migration requires exactly one selection mode: --all or one or more --skill paths");
+  }
+  return { oldSourceId, newSourceId, all, requested: Object.freeze(requested), confirmed };
+}
+
+async function runSourceMigration(
+  argv: readonly string[],
+  operations: SourceOperations,
+  _dependencies: CliDependencies,
+  output: (line: string) => void,
+): Promise<void> {
+  const options = parseMigrateSourceOptions(argv);
+  if (!operations.listUserGlobalInstallations || !operations.migrateUserGlobalInstallations) {
+    throw new Error("Configured Source operations cannot migrate user-global Source selections");
+  }
+  const oldSource = await findSource(operations, options.oldSourceId);
+  const newSource = await findSource(operations, options.newSourceId);
+  if (oldSource.kind !== "git" || newSource.kind !== "git") {
+    throw new CliUsageError("Source migration requires two registered Git Sources; the built-in Source cannot be migrated");
+  }
+  if (oldSource.id === newSource.id) {
+    throw new CliUsageError("Source migration requires two different registered Git Sources");
+  }
+  const installations = await operations.listUserGlobalInstallations();
+  const dependent = installations.filter((selection) =>
+    selection.source.kind === "external" && "url" in selection.source && selection.source.url === oldSource.url,
+  );
+  const selected = options.all ? dependent : resolveMigrationSelections(dependent, options.requested);
+  const migrations: UserGlobalSkillMigration[] = [];
+  output(`Preview: migrate user-global selections from ${oldSource.id} (${oldSource.url}) to ${newSource.id} (${newSource.url})`);
+  output(`Dependent user-global Skills (${dependent.length}):`);
+  for (const selection of dependent) {
+    output(`  ${selection.path}${selected.includes(selection) ? " (selected for migration)" : " (kept)"}`);
+  }
+
+  for (const selection of selected) {
+    const migration = await planUserGlobalSkillMigration(selection, newSource, operations);
+    migrations.push(migration);
+    const installation = migration.to.installation;
+    output(`  migrate ${JSON.stringify(selection.path)} -> ${JSON.stringify(migration.to.source)}`);
+    output(`    retain installation at ${JSON.stringify(installation?.path ?? "missing installation location")}; no files or project manifests are changed`);
+    if (selection.installation?.baseline && installation?.resolvedVersion) {
+      output("    preserve content baseline and replace resolved version with evidence from the new Source");
+    } else if (selection.installation?.baseline) {
+      output("    preserve content baseline; drop old resolved version evidence because it belongs to the old Source");
+    } else {
+      output("    preserve installation location/adoption only; no trusted version evidence is carried over");
+    }
+  }
+
+  requireConfirmation(options.confirmed, "Migration not confirmed; rerun with --yes after reviewing every selected Skill");
+  await operations.migrateUserGlobalInstallations(oldSource.id, newSource.id, migrations);
+  output(`Migrated ${migrations.length} user-global Skill${migrations.length === 1 ? "" : "s"}; physical installations and project manifests were unchanged`);
+}
+
+async function planUserGlobalSkillMigration(
+  selection: ProjectSkillSelection,
+  newSource: Extract<Source, { readonly kind: "git" }>,
+  operations: SourceOperations,
+): Promise<UserGlobalSkillMigration> {
+  const snapshot = operations.readSkillTreeSnapshot
+    ? await operations.readSkillTreeSnapshot(newSource, selection.path)
+    : undefined;
+  const newBaseline = snapshot === undefined ? undefined : skillTreeBaseline(snapshot.files);
+  if (snapshot !== undefined && !snapshot.files.some((file) => file.path === `${selection.path}/SKILL.md`)) {
+    throw new Error(`Replacement Source does not contain selected Skill ${JSON.stringify(selection.path)}`);
+  }
+  if (selection.version.policy === "fixed" &&
+    (snapshot?.resolvedVersion?.kind !== "git-commit" || snapshot.resolvedVersion.commit !== selection.version.version)) {
+    throw new Error(`Cannot migrate fixed Skill ${JSON.stringify(selection.path)} without matching version evidence from the replacement Source`);
+  }
+  const contentMatches = selection.installation?.baseline !== undefined &&
+    newBaseline !== undefined && selection.installation.baseline.digest === newBaseline.digest;
+  const source = selection.version.policy === "fixed"
+    ? { kind: "external" as const, url: newSource.url, ref: selection.version.version }
+    : { kind: "external" as const, url: newSource.url };
+  const installation = selection.installation === undefined
+    ? undefined
+    : {
+      path: selection.installation.path,
+      adopted: selection.installation.adopted,
+      ...(selection.installation.baseline === undefined ? {} : { baseline: selection.installation.baseline }),
+      ...(contentMatches && snapshot?.resolvedVersion === undefined ? {} :
+        contentMatches && snapshot?.resolvedVersion !== undefined ? { resolvedVersion: snapshot.resolvedVersion } : {}),
+    };
+  return {
+    from: selection,
+    to: {
+      ...selection,
+      source,
+      ...(installation === undefined ? {} : { installation }),
+    },
+  };
+}
+
+function resolveMigrationSelections(
+  dependent: readonly ProjectSkillSelection[],
+  requested: readonly string[],
+): readonly ProjectSkillSelection[] {
+  const selected: ProjectSkillSelection[] = [];
+  for (const value of requested) {
+    const candidate = dependent.find((selection) => selection.path === value);
+    if (!candidate) {
+      throw new CliUsageError(`Unknown dependent user-global Skill selection ${JSON.stringify(value)}`);
+    }
+    if (!selected.includes(candidate)) selected.push(candidate);
+  }
+  return Object.freeze(selected);
 }
 
 function parseRemoveSourceOptions(argv: readonly string[]): RemoveSourceOptions {
