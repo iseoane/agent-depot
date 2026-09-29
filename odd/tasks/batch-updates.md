@@ -10,9 +10,9 @@ TDD: not configured (existing task evidence and no project-level strict-TDD conf
 
 Delivery: auto-chain authorized above ~400 accumulated authored lines, strategy `stacked-to-main` selected by user. Forecast: >400 authored lines across four work units. T1 currently ~508 changed lines (excluding task document), so first slice is T1. No push or PR authorized yet.
 
-- [x] T1 Establish reliable version evidence and installation baselines; legacy unknown records remain safe. Route: delegated writer (multi-file). Check: focused tests passed, `pnpm typecheck` passed, full `pnpm test` passed (106/106), independent verifier confirmed persistence and snapshot coherence. Commit: pending recording.
-- [ ] T2 Assess available and unknown updates in one batch with all/subset selection and policy semantics. Route: delegated writer (multi-file). Check: focused batch tests. Commit: pending.
+- [x] T1 Establish reliable version evidence and installation baselines; legacy unknown records remain safe. Route: delegated writer (multi-file). Check: focused tests passed, `pnpm typecheck` passed, full `pnpm test` passed (106/106), independent verifier confirmed persistence and snapshot coherence. Commit: `59d5bc7`.
+- [x] T2 Assess available and unknown updates in one batch with all/subset selection and policy semantics. Route: delegated writer (multi-file). Check: independent verifier confirmed fail-closed selection and per-item isolation; `pnpm test` passed (120/120), `pnpm typecheck` passed. Commit: pending recording.
 - [ ] T3 Apply selected updates transactionally, continue on independent failures, and preview/confirm external methods and overwrites. Route: delegated writer (multi-file). Check: focused update tests. Commit: pending.
 - [ ] T4 Expose batch CLI, documentation and end-to-end coverage. Route: delegated writer (multi-file). Check: CLI tests, typecheck, full suite. Commit: pending.
 
-Progress: T1 verified; T2 next. Product decisions recorded above. Next: implement and verify T2. Pending checks: update-specific tests, final full suite, PR slice review.
+Progress: T1 and T2 verified. T3 next. Product decisions recorded above. Next: implement and verify safe independent updates. Pending checks: update executor and CLI tests, final full suite, PR slice review.

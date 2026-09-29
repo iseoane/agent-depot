@@ -90,6 +90,31 @@ test("sorts installation baseline paths by UTF-8 byte order", () => {
   assert.deepEqual(skillTreeBaseline([...files].reverse()), skillTreeBaseline(files));
 });
 
+test("exposes the immutable Skill tree snapshot seam without executing a method", async () => {
+  await withState(async (statePath, gitAccess) => {
+    const sourceAccess: SourceContentAccess = {
+      async readSnapshot() {
+        return [];
+      },
+      async readSkillTreeSnapshot(source, skillPath) {
+        assert.equal(source.id, BUILT_IN_SOURCE.id);
+        assert.equal(skillPath, "portable/demo");
+        return {
+          files: [{ path: "portable/demo/SKILL.md", content: Uint8Array.from([1]), executable: false }],
+          resolvedVersion: { kind: "builtin-package", version: "0.1.0" },
+        };
+      },
+    };
+    const operations = createSourceOperations({ statePath, gitAccess, sourceContentAccess: sourceAccess });
+
+    assert.ok(operations.readSkillTreeSnapshot);
+    assert.deepEqual(await operations.readSkillTreeSnapshot!(BUILT_IN_SOURCE, "portable/demo"), {
+      files: [{ path: "portable/demo/SKILL.md", content: Uint8Array.from([1]), executable: false }],
+      resolvedVersion: { kind: "builtin-package", version: "0.1.0" },
+    });
+  });
+});
+
 test("adds a Git Source, keeps its URL identity stable, and does not refresh on registration", async () => {
   await withState(async (statePath, gitAccess) => {
     const operations = createSourceOperations({ statePath, gitAccess });

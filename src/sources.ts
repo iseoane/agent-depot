@@ -16,6 +16,7 @@ import {
   type SkillCandidate,
   type SkillTreeFile,
   type SourceContentAccess,
+  type SourceSkillTreeSnapshot,
 } from "./skill-discovery.js";
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
@@ -125,6 +126,8 @@ export interface SourceOperations {
   discoverSkills?: (sourceIds: readonly string[]) => Promise<readonly SkillCandidate[]>;
   /** Reads trustworthy resolved version evidence without refreshing a Source. */
   resolveSourceVersion?: (source: Source) => Promise<ResolvedVersionEvidence | undefined>;
+  /** Reads one immutable Skill tree and its version evidence without refreshing a Source. */
+  readSkillTreeSnapshot?: (source: Source, skillPath: string) => Promise<SourceSkillTreeSnapshot>;
   /** Shared per-user records for user-global Skill installations. */
   listUserGlobalInstallations?: () => Promise<readonly UserGlobalSkillInstallation[]>;
   addUserGlobalInstallation?: (selection: ProjectSkillSelection) => Promise<void>;
@@ -244,6 +247,13 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
         ? Object.freeze({ kind: "builtin-package", version: AGENT_DEPOT_PACKAGE_VERSION })
         : undefined;
     },
+
+    ...(sourceContentAccess.readSkillTreeSnapshot === undefined
+      ? {}
+      : {
+        readSkillTreeSnapshot: (source: Source, skillPath: string): Promise<SourceSkillTreeSnapshot> =>
+          sourceContentAccess.readSkillTreeSnapshot!(source, skillPath),
+      }),
 
     async discoverSkills(sourceIds: readonly string[]): Promise<readonly SkillCandidate[]> {
       const sources = await this.selectSources(sourceIds);
