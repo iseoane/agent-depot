@@ -200,6 +200,76 @@ test("previews dependent user-global Skills, keeps them by default, and removes 
   }
 });
 
+test("rejects conflicting Source removal selection flags in either order", async () => {
+  const errors: string[] = [];
+  const operations = fakeOperations();
+  const argumentSets = [
+    ["source", "remove", external.id, "--skill", "portable/demo", "--all", "--yes"],
+    ["source", "remove", external.id, "--all", "--skill", "portable/demo", "--yes"],
+  ] as const;
+
+  for (const args of argumentSets) {
+    errors.length = 0;
+    assert.equal(await runCli(args, {
+      operations,
+      stderr: (line) => errors.push(line),
+    }), 1);
+    assert.deepEqual(errors, ["Error: source remove cannot combine --all with --skill"]);
+  }
+});
+
+test("resolves digit-only Source removal Skill paths before numeric indexes", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-digit-path-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-digit-path-state-"));
+  try {
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const source = await operations.addGitSource(external.url);
+    const indexed: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url },
+      path: "portable/index",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/index", adopted: false },
+    };
+    const digitPath: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url },
+      path: "0",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/digit", adopted: false },
+    };
+    const numericIndex: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url },
+      path: "portable/fallback",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/fallback", adopted: false },
+    };
+    await operations.addUserGlobalInstallation!(indexed);
+    await operations.addUserGlobalInstallation!(digitPath);
+    await operations.addUserGlobalInstallation!(numericIndex);
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "index"), { recursive: true });
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "digit"), { recursive: true });
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "fallback"), { recursive: true });
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "index", "SKILL.md"), "indexed");
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "digit", "SKILL.md"), "digit path");
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "fallback", "SKILL.md"), "numeric index");
+
+    assert.equal(await runCli(["source", "remove", source.id, "--skill", "0", "--skill", "2", "--yes"], {
+      operations,
+      homeDirectory,
+      stdout: () => undefined,
+    }), 0);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), [indexed]);
+    assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "index", "SKILL.md"), "utf8"), "indexed");
+    await assert.rejects(readFile(path.join(homeDirectory, ".agents", "skills", "digit", "SKILL.md")), { code: "ENOENT" });
+    await assert.rejects(readFile(path.join(homeDirectory, ".agents", "skills", "fallback", "SKILL.md")), { code: "ENOENT" });
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
 test("refuses Source removal when a dependent Skill path is unsafe without mutating state", async (t) => {
   const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-unsafe-home-"));
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-remove-unsafe-state-"));

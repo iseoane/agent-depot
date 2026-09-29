@@ -421,6 +421,7 @@ function parseRemoveSourceOptions(argv: readonly string[]): RemoveSourceOptions 
     switch (argv[index]) {
       case "--all":
         if (all) throw new CliUsageError(REMOVE_SOURCE_USAGE);
+        if (requested.length > 0) throw new CliUsageError("source remove cannot combine --all with --skill");
         all = true;
         break;
       case "--skill":
@@ -443,10 +444,11 @@ function resolveRemovalSelections(
 ): readonly ProjectSkillSelection[] {
   const selected: ProjectSkillSelection[] = [];
   for (const value of requested) {
-    const numeric = /^\\d+$/u.test(value) ? Number(value) : undefined;
-    const candidate = numeric !== undefined && Number.isSafeInteger(numeric)
+    const pathMatch = dependent.find((selection) => selection.path === value);
+    const numeric = /^\d+$/u.test(value) ? Number(value) : undefined;
+    const candidate = pathMatch ?? (numeric !== undefined && Number.isSafeInteger(numeric)
       ? dependent[numeric]
-      : dependent.find((selection) => selection.path === value);
+      : undefined);
     if (!candidate) {
       throw new CliUsageError(`Unknown dependent user-global Skill selection ${JSON.stringify(value)}`);
     }

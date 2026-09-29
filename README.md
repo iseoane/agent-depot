@@ -32,8 +32,10 @@ refreshed.
 Source removal is user-global only and never reads project manifests or deletes
 Source caches. It previews every dependent user-global Skill and keeps all of them
 tracked by default. Pass `--skill <id|path>` for a selected subset or `--all` for
-every dependent Skill. Skill deletion always requires `--yes`; adopted content and
-content that is locally modified (or lacks a trusted baseline) receive warnings.
+every dependent Skill. Numeric indexes are accepted for the dependent list, but a
+literal digit-only Skill path takes precedence over its numeric index. Skill
+deletion always requires `--yes`; adopted content and content that is locally
+modified (or lacks a trusted baseline) receive warnings.
 Preflight rejects unsafe paths, unexpected links, missing installations, overlapping
 selected targets, and other inspection failures before changing the Source state or
 deleting any Skill. A second preflight compares each target's content digest,
