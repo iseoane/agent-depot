@@ -8,16 +8,20 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "pnpm build && node --test \"dist/**/*.test.js\"",
     "test:single": "pnpm build && node -e \"const { spawnSync } = require('node:child_process'); const input = process.argv[1] || 'tests/version.test.ts'; const file = input.replace(/^tests[\\\\/]/, 'dist/tests/').replace(/\\\\.ts$/i, '.js'); process.exit(spawnSync(process.execPath, ['--test', file], { stdio: 'inherit' }).status ?? 1);\""
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/node": "^20.17.10",
-    "typescript": "^5.7.2"
+    "eslint": "^9.39.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.70.1"
   }
 }
