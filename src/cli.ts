@@ -38,6 +38,14 @@ import {
   type ProjectSkillInstallationTransaction,
   type ProjectSkillTreeAccess,
 } from "./project-installation.js";
+import {
+  assessUpdateBatch,
+  selectUpdateBatch,
+  UpdateBatchSelectionError,
+  type UpdateBatchAssessment,
+  type UpdateBatchAssessmentItem,
+} from "./update-batch.js";
+import { applyUpdateBatch, previewSkillUpdate } from "./skill-update.js";
 
 export interface CliDependencies {
   readonly operations?: SourceOperations;
@@ -60,6 +68,8 @@ const USAGE = [
   "  agent-depot discover <source-id> [source-id...]",
   "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
+  "  agent-depot update check --scope <project|user-global>",
+  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
 ].join("\n");
 const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
@@ -74,6 +84,10 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
     if (argv[0] === "install") {
       await runInstall(argv.slice(1), operations, dependencies, output);
       return 0;
+    }
+
+    if (argv[0] === "update") {
+      return await runUpdate(argv.slice(1), operations, dependencies, output);
     }
 
     if (argv[0] === "discover") {
@@ -144,6 +158,214 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
 
 /** Alias retained as a discoverable public CLI seam for embedding and tests. */
 export const main = runCli;
+
+interface UpdateOptions {
+  readonly action: "check" | "apply";
+  readonly scope: "project" | "user-global";
+  readonly all: boolean;
+  readonly requested: readonly string[];
+  readonly confirmed: boolean;
+}
+
+async function runUpdate(
+  argv: readonly string[],
+  operations: SourceOperations,
+  dependencies: CliDependencies,
+  output: (line: string) => void,
+): Promise<number> {
+  const options = parseUpdateOptions(argv);
+  const sourceAccess = dependencies.sourceAccess ?? defaultProjectSkillTreeAccess();
+  const projectRoot = options.scope === "project"
+    ? path.resolve(dependencies.projectRoot ?? process.cwd())
+    : path.resolve(dependencies.homeDirectory ?? homedir());
+  const manifestStore = options.scope === "project"
+    ? dependencies.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot))
+    : undefined;
+  const installed = options.scope === "project"
+    ? (await manifestStore!.load()).skills
+    : await requireUserGlobalInstallations(operations);
+  const resolveSource = operations.resolveProjectSource
+    ? (source: ProjectSource) => operations.resolveProjectSource!(source)
+    : resolveProjectSource;
+  const assessment = await assessUpdateBatch(installed, { sourceAccess, resolveSource });
+
+  outputUpdateAssessment(assessment, options.scope, output);
+  if (options.action === "check") {
+    return 0;
+  }
+
+  const requested = options.all
+    ? "all" as const
+    : resolveUpdateSelectionIds(assessment, options.requested);
+  let selected: readonly UpdateBatchAssessmentItem[];
+  try {
+    selected = selectUpdateBatch(assessment, requested);
+  } catch (error) {
+    if (error instanceof UpdateBatchSelectionError) throw new CliUsageError(error.message);
+    throw error;
+  }
+
+  const previewFailures: Array<{ readonly item: UpdateBatchAssessmentItem; readonly error: string }> = [];
+  const installationFileSystem = dependencies.installationOptions?.fileSystem;
+  for (const item of selected) {
+    try {
+      outputUpdatePreview(await previewSkillUpdate(item, {
+        projectRoot,
+        scope: options.scope,
+        sourceAccess,
+        sourceOperations: operations,
+        ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
+        ...(installationFileSystem === undefined ? {} : { installationFileSystem }),
+      }), options.scope, output);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      previewFailures.push({ item, error: message });
+      output(`Preview failed for ${JSON.stringify(item.id)}: ${message}`);
+    }
+  }
+
+  requireConfirmation(options.confirmed, "Update not confirmed; rerun with --yes after reviewing every candidate preview");
+  const result = await applyUpdateBatch(selected, {
+    projectRoot,
+    scope: options.scope,
+    sourceAccess,
+    sourceOperations: operations,
+    ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
+    ...(installationFileSystem === undefined ? {} : { installationFileSystem }),
+    // The callback is invoked independently for every candidate. In particular,
+    // a modified installation is never overwritten unless this invocation was
+    // explicitly confirmed with --yes.
+    confirm: async () => ({
+      overwriteModifiedInstallation: options.confirmed,
+      externalMethod: options.confirmed,
+    }),
+  });
+
+  for (const failure of previewFailures) {
+    if (!result.failed.some((item) => item.id === failure.item.id)) {
+      output(`Preview failure was not selected for application: ${JSON.stringify(failure.item.id)}`);
+    }
+  }
+  for (const item of result.updated) {
+    output(`Updated Skill ${JSON.stringify(item.selection.path)} (${item.id})`);
+  }
+  for (const item of result.failed) {
+    output(`Failed Skill ${JSON.stringify(item.selection.path)} (${item.id}): ${item.error ?? "unknown error"}`);
+  }
+  output(`Update summary: ${result.updated.length} updated, ${result.failed.length} failed`);
+  return result.failed.length === 0 ? 0 : 1;
+}
+
+function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
+  const action = argv[0];
+  if (action !== "check" && action !== "apply") {
+    throw new CliUsageError(USAGE);
+  }
+
+  let scope: string | undefined;
+  let all = false;
+  let confirmed = false;
+  const requested: string[] = [];
+  for (let index = 1; index < argv.length; index += 1) {
+    switch (argv[index]) {
+      case "--scope":
+        scope = requireOptionValue(argv, ++index, "--scope");
+        break;
+      case "--all":
+        all = true;
+        break;
+      case "--skill":
+        requested.push(requireOptionValue(argv, ++index, "--skill"));
+        break;
+      case "--yes":
+        confirmed = true;
+        break;
+      default:
+        throw new CliUsageError(USAGE);
+    }
+  }
+
+  if (scope !== "project" && scope !== "user-global") {
+    throw new CliUsageError("Update scope must be explicit: use --scope project or --scope user-global");
+  }
+  if (action === "check" && (all || requested.length > 0 || confirmed)) {
+    throw new CliUsageError("update check only accepts --scope; use update apply to select and apply updates");
+  }
+  if (action === "apply" && (all === (requested.length > 0))) {
+    throw new CliUsageError("update apply requires exactly one selection mode: --all or one or more --skill values");
+  }
+  return {
+    action,
+    scope: scope as "project" | "user-global",
+    all,
+    requested: Object.freeze(requested),
+    confirmed,
+  };
+}
+
+async function requireUserGlobalInstallations(operations: SourceOperations): Promise<readonly ProjectSkillSelection[]> {
+  if (!operations.listUserGlobalInstallations) {
+    throw new Error("Configured Source operations cannot inspect user-global Skill updates");
+  }
+  return operations.listUserGlobalInstallations();
+}
+
+function resolveUpdateSelectionIds(
+  assessment: UpdateBatchAssessment,
+  requested: readonly string[],
+): readonly (string | number)[] {
+  return requested.map((value) => {
+    const numeric = /^\d+$/u.test(value) ? Number(value) : undefined;
+    if (numeric !== undefined && Number.isSafeInteger(numeric)) return numeric;
+    if (assessment.items.some((item) => item.id === value)) return value;
+    const matches = assessment.items.filter((item) => item.selection?.path === value);
+    if (matches.length === 1) return matches[0]!.id;
+    if (matches.length > 1) {
+      throw new CliUsageError(`Skill path ${JSON.stringify(value)} is ambiguous; select its full update ID`);
+    }
+    throw new CliUsageError(`Unknown update Skill selection ${JSON.stringify(value)}`);
+  });
+}
+
+function outputUpdateAssessment(
+  assessment: UpdateBatchAssessment,
+  scope: "project" | "user-global",
+  output: (line: string) => void,
+): void {
+  output(`Update check (scope: ${scope})`);
+  output(`Updateable (${assessment.updateable.length}):`);
+  for (const item of assessment.updateable) outputUpdateItem(item, output);
+  output(`Current (${assessment.current.length}):`);
+  for (const item of assessment.current) outputUpdateItem(item, output);
+  output(`Unknown (${assessment.unknown.length}):`);
+  for (const item of assessment.unknown) outputUpdateItem(item, output);
+}
+
+function outputUpdateItem(item: UpdateBatchAssessmentItem, output: (line: string) => void): void {
+  const selection = item.selection as Partial<ProjectSkillSelection> | undefined;
+  output(`  [${item.index}] ${item.id}${typeof selection?.path === "string" ? ` path=${selection.path}` : ""}: ${item.reason}`);
+}
+
+function outputUpdatePreview(
+  plan: Awaited<ReturnType<typeof previewSkillUpdate>>,
+  scope: "project" | "user-global",
+  output: (line: string) => void,
+): void {
+  output(`Preview: update Skill ${JSON.stringify(plan.selection.path)} from ${plan.source.id} (scope: ${scope})`);
+  output(`  target: ${plan.target}`);
+  output(`  proposed changes: replace ${plan.snapshot.files.length} managed files and persist the new version/content baseline`);
+  if (plan.overwriteRequired) {
+    output("  WARNING: the installed Skill has local modifications; --yes explicitly confirms replacing them");
+  }
+  if (plan.methodPreview) {
+    output(`  external command: argv=${JSON.stringify(plan.methodPreview.argv)}`);
+    output(`  external cwd: ${JSON.stringify(plan.methodPreview.cwd)}`);
+    output(`  external target: ${JSON.stringify(plan.methodPreview.target)}`);
+    output("  declared changes:");
+    for (const change of plan.methodPreview.declaredChanges) output(`    ${change}`);
+    output(`  WARNING: ${plan.methodPreview.warning}`);
+  }
+}
 
 async function runInstall(
   argv: readonly string[],

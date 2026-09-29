@@ -16,12 +16,42 @@ node dist/src/cli.js discover builtin:agent-depot git:<source-id>
 node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
 node dist/src/cli.js install --scope user-global --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
 node dist/src/cli.js install --scope project --manifest --portable-v1 --yes
+node dist/src/cli.js update check --scope project
+node dist/src/cli.js update apply --scope project --all --yes
+node dist/src/cli.js update apply --scope user-global --skill 0 --yes
 ```
 
 Refresh first prints the registered URL as a preview. It requires explicit
 `--yes` confirmation before any network access and otherwise fails closed. The
 package-owned `builtin:agent-depot` Source is listed as read-only and cannot be
 refreshed.
+
+## Batch updates
+
+Check either independent installation scope before applying updates:
+
+```sh
+node dist/src/cli.js update check --scope project
+node dist/src/cli.js update check --scope user-global
+```
+
+The check reports `Updateable`, `Current`, and `Unknown` Skills separately. Apply
+all updateable Skills or select one or more by their printed update ID, numeric
+index, or an unambiguous Skill path:
+
+```sh
+node dist/src/cli.js update apply --scope project --all --yes
+node dist/src/cli.js update apply --scope user-global --skill 0 --yes
+```
+
+Applying always previews each selected candidate first. `--yes` is required and
+confirms each candidate independently; without it, no files or state are
+changed. Modified installations are called out and are never overwritten
+without that explicit confirmation. External update commands show their exact
+argument vector, working directory, target, declared changes, and a warning
+that side effects cannot be verified or rolled back. Unknown-version Skills are
+reported but cannot be selected for application, and independent failures are
+summarized after the remaining candidates finish.
 
 `discover` requires one or more Source IDs on every invocation. Use
 `source list` to find registered IDs. It reads the current cached Git mirror

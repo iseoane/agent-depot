@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -15,6 +15,7 @@ import {
 } from "../src/sources.js";
 import { NodeSourceContentAccess, skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
 import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "../src/project-manifest.js";
+import type { ProjectInstallationFileSystem } from "../src/project-installation.js";
 import { runCli } from "../src/cli.js";
 
 const external = {
@@ -137,7 +138,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -319,6 +320,67 @@ function cliSourceAccess(tree: readonly SkillTreeFile[] = cliTree) {
       assert.equal(source.id, BUILT_IN_SOURCE.id);
       assert.equal(skillPath, "portable/demo");
       return { files: tree, resolvedVersion: cliResolvedVersion };
+    },
+  };
+}
+
+function injectedUpdateFileSystem(
+  calls: string[],
+  scopeRoot?: string,
+  adapterRoot?: string,
+): ProjectInstallationFileSystem {
+  const mapPath = (candidate: string): string => {
+    if (scopeRoot === undefined || adapterRoot === undefined) return candidate;
+    const relative = path.relative(path.resolve(scopeRoot), path.resolve(candidate));
+    if (relative === "" || (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))) {
+      return path.join(adapterRoot, relative);
+    }
+    return candidate;
+  };
+  return {
+    lstat: async (candidate) => {
+      calls.push(`lstat:${candidate}`);
+      return lstat(mapPath(candidate));
+    },
+    readdir: async (candidate) => {
+      calls.push(`readdir:${candidate}`);
+      return readdir(mapPath(candidate));
+    },
+    readFile: async (candidate) => {
+      calls.push(`readFile:${candidate}`);
+      return readFile(mapPath(candidate));
+    },
+    mkdir: async (candidate) => {
+      calls.push(`mkdir:${candidate}`);
+      await mkdir(mapPath(candidate));
+    },
+    writeFile: async (candidate, content) => {
+      calls.push(`writeFile:${candidate}`);
+      await writeFile(mapPath(candidate), content, { flag: "wx" });
+    },
+    chmod: async (candidate, mode) => {
+      calls.push(`chmod:${candidate}`);
+      await chmod(mapPath(candidate), mode);
+    },
+    symlink: async (target, candidate, type) => {
+      calls.push(`symlink:${candidate}`);
+      await symlink(mapPath(target), mapPath(candidate), type);
+    },
+    readlink: async (candidate) => {
+      calls.push(`readlink:${candidate}`);
+      return readlink(mapPath(candidate));
+    },
+    rename: async (from, to) => {
+      calls.push(`rename:${from}:${to}`);
+      await rename(mapPath(from), mapPath(to));
+    },
+    rm: async (candidate) => {
+      calls.push(`rm:${candidate}`);
+      await rm(mapPath(candidate), { recursive: true, force: true });
+    },
+    rmdir: async (candidate) => {
+      calls.push(`rmdir:${candidate}`);
+      await rmdir(mapPath(candidate));
     },
   };
 }
@@ -1242,5 +1304,354 @@ test("refuses unsafe or unsupported upstream methods without executing commands"
     await assert.rejects(readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("selects one project update by numeric index and writes only through the injected filesystem", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-project-"));
+  const adapterRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-project-adapter-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  const filesystemCalls: string[] = [];
+  const fileSystem = injectedUpdateFileSystem(filesystemCalls, projectRoot, adapterRoot);
+  const oldTrees: Record<string, readonly SkillTreeFile[]> = {
+    "portable/demo": [{ path: "portable/demo/SKILL.md", content: Buffer.from("demo-old"), executable: false }],
+    "portable/other": [{ path: "portable/other/SKILL.md", content: Buffer.from("other-old"), executable: false }],
+  };
+  const newTrees: Record<string, readonly SkillTreeFile[]> = {
+    "portable/demo": [{ path: "portable/demo/SKILL.md", content: Buffer.from("demo-new"), executable: false }],
+    "portable/other": [{ path: "portable/other/SKILL.md", content: Buffer.from("other-new"), executable: false }],
+  };
+  const oldVersion = { kind: "builtin-package" as const, version: "0.1.0" };
+  const newVersion = { kind: "builtin-package" as const, version: "0.2.0" };
+  const installations = [
+    { sourcePath: "portable/demo", installPath: ".agents/skills/demo", content: "demo-old" },
+    { sourcePath: "portable/other", installPath: ".agents/skills/other", content: "other-old" },
+  ];
+  try {
+    for (const root of [projectRoot, adapterRoot]) {
+      for (const installation of installations) {
+        const target = path.join(root, installation.installPath);
+        await mkdir(target, { recursive: true });
+        await writeFile(path.join(target, "SKILL.md"), installation.content);
+      }
+    }
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: installations.map((installation) => ({
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: installation.sourcePath,
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        installation: {
+          path: installation.installPath,
+          adopted: false,
+          resolvedVersion: oldVersion,
+          baseline: skillTreeBaseline(oldTrees[installation.sourcePath]!),
+        },
+      })),
+    }), "utf8");
+    const readTree = (trees: Record<string, readonly SkillTreeFile[]>, skillPath: string): readonly SkillTreeFile[] => {
+      const tree = trees[skillPath];
+      if (!tree) throw new Error(`Unexpected Skill path: ${skillPath}`);
+      return tree;
+    };
+    const dependencies = {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: {
+        async readSkillTree(_source: typeof BUILT_IN_SOURCE, skillPath: string) {
+          return readTree(newTrees, skillPath);
+        },
+        async readSkillTreeSnapshot(_source: typeof BUILT_IN_SOURCE, skillPath: string) {
+          return { files: readTree(newTrees, skillPath), resolvedVersion: newVersion };
+        },
+      },
+      installationOptions: { fileSystem },
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(["update", "check", "--scope", "project"], dependencies), 0);
+    assert.match(output.join("\\n"), /Updateable \(2\)/);
+    assert.match(output.join("\\n"), /Current \(0\)/);
+    assert.match(output.join("\\n"), /Unknown \(0\)/);
+
+    output.length = 0;
+    assert.equal(await runCli(["update", "apply", "--scope", "project", "--skill", "1", "--yes"], dependencies), 0);
+    assert.match(output.join("\\n"), /Update summary: 1 updated, 0 failed/);
+    assert.ok(filesystemCalls.some((call) => call.startsWith("writeFile:")), "the injected filesystem must write staged files");
+    assert.ok(filesystemCalls.filter((call) => call.startsWith("rename:")).length >= 2, "the injected filesystem must perform atomic renames");
+
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "demo-old");
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "other", "SKILL.md"), "utf8"), "other-old");
+    assert.equal(await readFile(path.join(adapterRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "demo-old");
+    assert.equal(await readFile(path.join(adapterRoot, ".agents", "skills", "other", "SKILL.md"), "utf8"), "other-new");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(adapterRoot, { recursive: true, force: true });
+  }
+});
+
+test("displays unknown versions separately and excludes them from CLI batch updates", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-unknown-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  const oldVersion = { kind: "builtin-package" as const, version: "0.1.0" };
+  const newVersion = { kind: "builtin-package" as const, version: "0.2.0" };
+  const oldTrees: Record<string, readonly SkillTreeFile[]> = {
+    "portable/demo": [{ path: "portable/demo/SKILL.md", content: Buffer.from("demo-old"), executable: false }],
+    "portable/legacy": [{ path: "portable/legacy/SKILL.md", content: Buffer.from("legacy-old"), executable: false }],
+  };
+  const newTrees: Record<string, readonly SkillTreeFile[]> = {
+    "portable/demo": [{ path: "portable/demo/SKILL.md", content: Buffer.from("demo-new"), executable: false }],
+    "portable/legacy": [{ path: "portable/legacy/SKILL.md", content: Buffer.from("legacy-new"), executable: false }],
+  };
+  const installations = [
+    { sourcePath: "portable/demo", installPath: ".agents/skills/demo", resolvedVersion: oldVersion },
+    { sourcePath: "portable/legacy", installPath: ".agents/skills/legacy", resolvedVersion: undefined },
+  ];
+  try {
+    for (const installation of installations) {
+      const target = path.join(projectRoot, installation.installPath);
+      await mkdir(target, { recursive: true });
+      await writeFile(path.join(target, "SKILL.md"), installation.sourcePath === "portable/demo" ? "demo-old" : "legacy-old");
+    }
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: installations.map((installation) => ({
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: installation.sourcePath,
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        installation: {
+          path: installation.installPath,
+          adopted: false,
+          ...(installation.resolvedVersion === undefined ? {} : { resolvedVersion: installation.resolvedVersion }),
+          baseline: skillTreeBaseline(oldTrees[installation.sourcePath]!),
+        },
+      })),
+    }), "utf8");
+    const dependencies = {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: {
+        async readSkillTree(_source: typeof BUILT_IN_SOURCE, skillPath: string) {
+          const tree = newTrees[skillPath];
+          if (!tree) throw new Error(`Unexpected Skill path: ${skillPath}`);
+          return tree;
+        },
+        async readSkillTreeSnapshot(_source: typeof BUILT_IN_SOURCE, skillPath: string) {
+          const tree = newTrees[skillPath];
+          if (!tree) throw new Error(`Unexpected Skill path: ${skillPath}`);
+          return {
+            files: tree,
+            ...(skillPath === "portable/demo" ? { resolvedVersion: newVersion } : {}),
+          };
+        },
+      },
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(["update", "check", "--scope", "project"], dependencies), 0);
+    const unknownHeader = output.findIndex((line) => line === "Unknown (1):");
+    assert.ok(unknownHeader >= 0, "unknown versions must have their own section");
+    assert.match(output[unknownHeader + 1] ?? "", /path=portable\/legacy/);
+    assert.match(output.join("\\n"), /Updateable \(1\)/);
+
+    errors.length = 0;
+    assert.equal(await runCli(["update", "apply", "--scope", "project", "--skill", "1", "--yes"], dependencies), 1);
+    assert.match(errors.join("\\n"), /unknown version status and is not updateable/);
+
+    output.length = 0;
+    assert.equal(await runCli(["update", "apply", "--scope", "project", "--all", "--yes"], dependencies), 0);
+    assert.match(output.join("\\n"), /Update summary: 1 updated, 0 failed/);
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "demo-new");
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "legacy", "SKILL.md"), "utf8"), "legacy-old");
+
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as {
+      skills: Array<{ path: string; installation?: { resolvedVersion?: unknown; baseline?: unknown } }>;
+    };
+    assert.deepEqual(manifest.skills.find((skill) => skill.path === "portable/demo")?.installation, {
+      path: ".agents/skills/demo",
+      adopted: false,
+      resolvedVersion: newVersion,
+      baseline: skillTreeBaseline(newTrees["portable/demo"]!),
+    });
+    assert.equal(manifest.skills.find((skill) => skill.path === "portable/legacy")?.installation?.resolvedVersion, undefined);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("continues after one selected CLI update fails and reports the failed and successful Skills", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-failure-"));
+  const output: string[] = [];
+  const oldVersion = { kind: "builtin-package" as const, version: "0.1.0" };
+  const newVersion = { kind: "builtin-package" as const, version: "0.2.0" };
+  const oldTrees: Record<string, readonly SkillTreeFile[]> = {
+    "portable/failing": [{ path: "portable/failing/SKILL.md", content: Buffer.from("failing-old"), executable: false }],
+    "portable/succeeding": [{ path: "portable/succeeding/SKILL.md", content: Buffer.from("succeeding-old"), executable: false }],
+  };
+  const newTrees: Record<string, readonly SkillTreeFile[]> = {
+    "portable/failing": [{ path: "portable/failing/SKILL.md", content: Buffer.from("failing-new"), executable: false }],
+    "portable/succeeding": [{ path: "portable/succeeding/SKILL.md", content: Buffer.from("succeeding-new"), executable: false }],
+  };
+  const installations = [
+    { sourcePath: "portable/failing", installPath: ".agents/skills/failing", method: true },
+    { sourcePath: "portable/succeeding", installPath: ".agents/skills/succeeding", method: false },
+  ];
+  try {
+    for (const installation of installations) {
+      const target = path.join(projectRoot, installation.installPath);
+      await mkdir(target, { recursive: true });
+      await writeFile(path.join(target, "SKILL.md"), `${installation.sourcePath.split("/")[1]}-old`);
+    }
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: installations.map((installation) => ({
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: installation.sourcePath,
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        ...(installation.method ? { methods: { update: { kind: "command", argv: ["node", "fail-update"] } } } : {}),
+        installation: {
+          path: installation.installPath,
+          adopted: false,
+          resolvedVersion: oldVersion,
+          baseline: skillTreeBaseline(oldTrees[installation.sourcePath]!),
+        },
+      })),
+    }), "utf8");
+    const operations = fakeOperations({
+      async executeInstallationMethod(_method, context) {
+        if (context.skillPath === "portable/failing") throw new Error("intentional update failure");
+      },
+    });
+    const dependencies = {
+      operations,
+      projectRoot,
+      sourceAccess: {
+        async readSkillTree(_source: typeof BUILT_IN_SOURCE, skillPath: string) {
+          const tree = newTrees[skillPath];
+          if (!tree) throw new Error(`Unexpected Skill path: ${skillPath}`);
+          return tree;
+        },
+        async readSkillTreeSnapshot(_source: typeof BUILT_IN_SOURCE, skillPath: string) {
+          const tree = newTrees[skillPath];
+          if (!tree) throw new Error(`Unexpected Skill path: ${skillPath}`);
+          return { files: tree, resolvedVersion: newVersion };
+        },
+      },
+      stdout: (line: string) => output.push(line),
+    };
+
+    assert.equal(await runCli(["update", "apply", "--scope", "project", "--all", "--yes"], dependencies), 1);
+    assert.match(output.join("\\n"), /Updated Skill "portable\/succeeding"/);
+    assert.match(output.join("\\n"), /Failed Skill "portable\/failing".*intentional update failure/);
+    assert.match(output.join("\\n"), /Update summary: 1 updated, 1 failed/);
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "failing", "SKILL.md"), "utf8"), "failing-old");
+    assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "succeeding", "SKILL.md"), "utf8"), "succeeding-new");
+
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as {
+      skills: Array<{ path: string; installation?: { resolvedVersion?: unknown; baseline?: unknown } }>;
+    };
+    assert.deepEqual(manifest.skills.find((skill) => skill.path === "portable/succeeding")?.installation, {
+      path: ".agents/skills/succeeding",
+      adopted: false,
+      resolvedVersion: newVersion,
+      baseline: skillTreeBaseline(newTrees["portable/succeeding"]!),
+    });
+    assert.deepEqual(manifest.skills.find((skill) => skill.path === "portable/failing")?.installation?.resolvedVersion, oldVersion);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("checks and applies user-global updates with an external method preview through the injected filesystem", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-global-"));
+  const adapterRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-global-adapter-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  const filesystemCalls: string[] = [];
+  const fileSystem = injectedUpdateFileSystem(filesystemCalls, homeDirectory, adapterRoot);
+  const oldTree: readonly SkillTreeFile[] = [{ path: "portable/demo/SKILL.md", content: Buffer.from("old"), executable: false }];
+  const newTree: readonly SkillTreeFile[] = [{ path: "portable/demo/SKILL.md", content: Buffer.from("new"), executable: false }];
+  const oldVersion = { kind: "builtin-package" as const, version: "0.1.0" };
+  const newVersion = { kind: "builtin-package" as const, version: "0.2.0" };
+  const records: ProjectSkillSelection[] = [{
+    source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+    path: "portable/demo",
+    version: { policy: "latest" },
+    hosts: ["pi"],
+    methods: { update: { kind: "command", argv: ["node", "scripts/update.mjs"], cwd: "tools" } },
+    installation: {
+      path: ".agents/skills/demo",
+      adopted: false,
+      resolvedVersion: oldVersion,
+      baseline: skillTreeBaseline(oldTree),
+    },
+  }];
+  let executed = false;
+  try {
+    for (const root of [homeDirectory, adapterRoot]) {
+      await mkdir(path.join(root, ".agents", "skills", "demo"), { recursive: true });
+      await mkdir(path.join(root, "tools"));
+      await writeFile(path.join(root, ".agents", "skills", "demo", "SKILL.md"), "old");
+    }
+    const operations = fakeOperations({
+      async listUserGlobalInstallations() { return records; },
+      async updateUserGlobalInstallation(updated) { records[0] = updated; },
+      async executeInstallationMethod() { executed = true; },
+    });
+    const dependencies = {
+      operations,
+      homeDirectory,
+      sourceAccess: {
+        async readSkillTree() {
+          return newTree;
+        },
+        async readSkillTreeSnapshot() {
+          return { files: newTree, resolvedVersion: newVersion };
+        },
+      },
+      installationOptions: { fileSystem },
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+
+    assert.equal(await runCli(["update", "check", "--scope", "user-global"], dependencies), 0);
+    assert.match(output.join("\\n"), /Updateable \(1\)/);
+    output.length = 0;
+    assert.equal(await runCli(["update", "apply", "--scope", "user-global", "--all"], dependencies), 1);
+    assert.equal(executed, false);
+    assert.match(output.join("\\n"), /external command: argv=/);
+    assert.match(output.join("\\n"), /external cwd:/);
+    assert.match(output.join("\\n"), /declared changes:/);
+    assert.match(output.join("\\n"), /cannot verify or roll back/);
+    assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "old");
+    const callsAfterPreview = filesystemCalls.length;
+    assert.ok(callsAfterPreview > 0, "the injected filesystem must handle update preview");
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli(["update", "apply", "--scope", "user-global", "--all", "--yes"], dependencies), 0);
+    assert.ok(filesystemCalls.length > callsAfterPreview, "the injected filesystem must handle update application");
+    assert.ok(filesystemCalls.some((call) => call.startsWith("writeFile:")), "the injected filesystem must write staged files");
+    assert.ok(filesystemCalls.filter((call) => call.startsWith("rename:")).length >= 2, "the injected filesystem must perform atomic renames");
+    assert.equal(executed, true);
+    assert.match(output.join("\\n"), /Update summary: 1 updated, 0 failed/);
+    assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "old");
+    assert.equal(await readFile(path.join(adapterRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "new");
+    assert.deepEqual(records[0]?.installation, {
+      path: ".agents/skills/demo",
+      adopted: false,
+      resolvedVersion: newVersion,
+      baseline: skillTreeBaseline(newTree),
+    });
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(adapterRoot, { recursive: true, force: true });
   }
 });
