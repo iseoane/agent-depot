@@ -84,6 +84,61 @@ test("accepts optional boolean metadata without weakening required fields", () =
   assert.equal(parseSkillFrontmatter("---\nname: A skill\ndescription: false\n---\n"), undefined);
 });
 
+test("parses nested optional metadata without treating nested required fields as top-level", () => {
+  const prSkill = `---
+name: pr
+description: Create a pull request from the current changes.
+metadata:
+  credits: Matt Pocock
+---
+
+# Pull requests
+`;
+
+  assert.deepEqual(parseSkillFrontmatter(prSkill), {
+    name: "pr",
+    description: "Create a pull request from the current changes.",
+  });
+  assert.equal(parseSkillFrontmatter("---\nmetadata:\n  name: nested\n  description: nested\n---\n"), undefined);
+  assert.deepEqual(parseSkillFrontmatter("---\nname: Top-level\ndescription: Top-level description\nmetadata:\n  name: nested\n  description: nested\n---\n"), {
+    name: "Top-level",
+    description: "Top-level description",
+  });
+});
+
+test("rejects malformed nested metadata indentation and values", () => {
+  assert.equal(parseSkillFrontmatter("---\nname: Skill\ndescription: Description\nmetadata:\ncredits: outside\n---\n"), undefined);
+  assert.equal(parseSkillFrontmatter("---\nname: Skill\ndescription: Description\nmetadata:\n  credits: [\n---\n"), undefined);
+  assert.equal(parseSkillFrontmatter("---\nname: \ndescription: Description\nmetadata:\n  credits: valid\n---\n"), undefined);
+});
+
+test("discovers a real-shaped pr Skill with nested metadata", async () => {
+  const access = new FakeContentAccess(new Map([
+    [external.id, [{
+      path: "skills/engineering/pr/SKILL.md",
+      content: "---\nname: pr\ndescription: Create a pull request from the current changes.\nmetadata:\n  credits: Matt Pocock\n---\n",
+    }]],
+  ]));
+
+  assert.deepEqual(await discoverSkillsFromSources([external], access), [{
+    sourceId: external.id,
+    path: "skills/engineering/pr",
+    name: "pr",
+    description: "Create a pull request from the current changes.",
+  }]);
+});
+
+test("fails closed without throwing for deeply nested metadata", () => {
+  const nestedMappings = Array.from({ length: 256 }, (_, depth) => `${" ".repeat(depth + 1)}level${depth}:`).join("\n");
+  const content = `---\nname: Skill\ndescription: Description\nmetadata:\n${nestedMappings}\n---\n`;
+  let result: ReturnType<typeof parseSkillFrontmatter>;
+
+  assert.doesNotThrow(() => {
+    result = parseSkillFrontmatter(content);
+  });
+  assert.equal(result, undefined);
+});
+
 test("reads only nested SKILL.md files and skips lifecycle subtrees before reading", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-skills-"));
   try {

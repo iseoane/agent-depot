@@ -234,6 +234,15 @@ export function parseSkillFrontmatter(content: string): { name: string; descript
       return undefined;
     }
 
+    if (key === "metadata" && rawValue.trim() === "") {
+      const nextIndex = consumeNestedMapping(lines, index + 1);
+      if (nextIndex === undefined) {
+        return undefined;
+      }
+      index = nextIndex;
+      continue;
+    }
+
     if (/^[|>][+-]?\d*\s*$/u.test(rawValue)) {
       const folded = rawValue.startsWith(">");
       index += 1;
@@ -489,6 +498,79 @@ function normalizeSourcePath(candidate: string): string | undefined {
     return undefined;
   }
   return normalized;
+}
+
+const MAX_NESTED_MAPPING_DEPTH = 32;
+
+function consumeNestedMapping(lines: readonly string[], start: number, depth = 0): number | undefined {
+  if (depth > MAX_NESTED_MAPPING_DEPTH) {
+    return undefined;
+  }
+
+  let index = start;
+  let indentation: number | undefined;
+  let hasEntry = false;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (line.trim() === "" || /^\s*#/u.test(line)) {
+      index += 1;
+      continue;
+    }
+    if (/^(?:---|\.\.\.)\s*$/u.test(line) || !/^\s/u.test(line)) {
+      break;
+    }
+    if (/^\t/u.test(line)) {
+      return undefined;
+    }
+
+    const lineIndentation = line.match(/^ */u)?.[0].length ?? 0;
+    if (indentation === undefined) {
+      indentation = lineIndentation;
+    }
+    if (lineIndentation !== indentation) {
+      return undefined;
+    }
+
+    const match = /^ +(?<key>[A-Za-z][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$/u.exec(line);
+    if (!match) {
+      return undefined;
+    }
+    const rawValue = match.groups?.value ?? "";
+    if (rawValue === "") {
+      const childIndex = consumeNestedMapping(lines, index + 1, depth + 1);
+      if (childIndex === undefined) {
+        return undefined;
+      }
+      index = childIndex;
+      hasEntry = true;
+      continue;
+    }
+
+    if (/^[|>][+-]?\d*\s*$/u.test(rawValue)) {
+      index += 1;
+      while (index < lines.length) {
+        const blockLine = lines[index];
+        if (blockLine.trim() !== "" && (!/^\s/u.test(blockLine) || (blockLine.match(/^ */u)?.[0].length ?? 0) <= indentation)) {
+          break;
+        }
+        if (/^\t/u.test(blockLine)) {
+          return undefined;
+        }
+        index += 1;
+      }
+      hasEntry = true;
+      continue;
+    }
+
+    if (parseScalar(rawValue) === undefined) {
+      return undefined;
+    }
+    index += 1;
+    hasEntry = true;
+  }
+
+  return hasEntry ? index : undefined;
 }
 
 function parseScalar(rawValue: string): string | boolean | undefined {
