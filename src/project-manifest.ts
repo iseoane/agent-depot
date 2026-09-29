@@ -58,11 +58,33 @@ export interface ProjectSkillMethods {
   readonly update?: SourceInstallationMethod;
 }
 
+export type ResolvedVersionEvidence =
+  | {
+      readonly kind: "builtin-package";
+      /** The Agent Depot package version that supplied the built-in tree. */
+      readonly version: string;
+    }
+  | {
+      readonly kind: "git-commit";
+      /** The immutable commit resolved for the Git Source and ref. */
+      readonly commit: string;
+    };
+
+/** A content-only identity for the installed Skill tree. */
+export interface SkillInstallationBaseline {
+  readonly algorithm: "sha256";
+  readonly digest: string;
+}
+
 export interface ProjectSkillInstallation {
   /** POSIX path relative to the project root where the Skill is actually installed. */
   readonly path: string;
   /** True when the existing project tree was adopted without writing it. */
   readonly adopted: boolean;
+  /** Resolved Source evidence captured at installation time; absent means unknown. */
+  readonly resolvedVersion?: ResolvedVersionEvidence;
+  /** Content baseline captured at installation time; absent means unknown. */
+  readonly baseline?: SkillInstallationBaseline;
 }
 
 export interface ProjectSkillSelection {
@@ -335,12 +357,55 @@ function parseHosts(value: unknown, manifestPath: string, index: number): readon
   return Object.freeze(hosts);
 }
 
-function parseInstallation(value: unknown, manifestPath: string, index: number): ProjectSkillInstallation {
+function parseResolvedVersion(value: unknown, source: ProjectSource, label: string, manifestPath: string): ResolvedVersionEvidence {
+  if (!isRecord(value)) {
+    throw new ProjectManifestError(manifestPath, `${label} must be an object`);
+  }
+  if (value.kind === "builtin-package") {
+    assertKeys(value, ["kind", "version"], label, manifestPath);
+    if (source.kind !== "builtin") {
+      throw new ProjectManifestError(manifestPath, `${label} is only valid for the built-in Source`);
+    }
+    return Object.freeze({
+      kind: "builtin-package",
+      version: nonEmptyString(value.version, `${label}.version`, manifestPath),
+    });
+  }
+  if (value.kind === "git-commit") {
+    assertKeys(value, ["kind", "commit"], label, manifestPath);
+    if (source.kind !== "external" || !("url" in source)) {
+      throw new ProjectManifestError(manifestPath, `${label} is only valid for a Git Source`);
+    }
+    const commit = nonEmptyString(value.commit, `${label}.commit`, manifestPath);
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(commit)) {
+      throw new ProjectManifestError(manifestPath, `${label}.commit must be a 40- or 64-character commit ID`);
+    }
+    return Object.freeze({ kind: "git-commit", commit });
+  }
+  throw new ProjectManifestError(manifestPath, `${label}.kind is unsupported`);
+}
+
+function parseInstallationBaseline(value: unknown, label: string, manifestPath: string): SkillInstallationBaseline {
+  if (!isRecord(value)) {
+    throw new ProjectManifestError(manifestPath, `${label} must be an object`);
+  }
+  assertKeys(value, ["algorithm", "digest"], label, manifestPath);
+  if (value.algorithm !== "sha256") {
+    throw new ProjectManifestError(manifestPath, `${label}.algorithm must be \"sha256\"`);
+  }
+  const digest = nonEmptyString(value.digest, `${label}.digest`, manifestPath);
+  if (!/^[0-9a-f]{64}$/u.test(digest)) {
+    throw new ProjectManifestError(manifestPath, `${label}.digest must be a 64-character lowercase SHA-256 digest`);
+  }
+  return Object.freeze({ algorithm: "sha256", digest });
+}
+
+function parseInstallation(value: unknown, source: ProjectSource, manifestPath: string, index: number): ProjectSkillInstallation {
   const label = `skills[${index}].installation`;
   if (!isRecord(value)) {
     throw new ProjectManifestError(manifestPath, `${label} must be an object`);
   }
-  assertKeys(value, ["path", "adopted"], label, manifestPath);
+  assertKeys(value, ["path", "adopted", "resolvedVersion", "baseline"], label, manifestPath);
   if (typeof value.adopted !== "boolean") {
     throw new ProjectManifestError(manifestPath, `${label}.adopted must be a boolean`);
   }
@@ -348,7 +413,18 @@ function parseInstallation(value: unknown, manifestPath: string, index: number):
   if (pathValue === ".") {
     throw new ProjectManifestError(manifestPath, `${label}.path must identify a location within the project`);
   }
-  return Object.freeze({ path: pathValue, adopted: value.adopted });
+  const resolvedVersion = value.resolvedVersion === undefined
+    ? undefined
+    : parseResolvedVersion(value.resolvedVersion, source, `${label}.resolvedVersion`, manifestPath);
+  const baseline = value.baseline === undefined
+    ? undefined
+    : parseInstallationBaseline(value.baseline, `${label}.baseline`, manifestPath);
+  return Object.freeze({
+    path: pathValue,
+    adopted: value.adopted,
+    ...(resolvedVersion === undefined ? {} : { resolvedVersion }),
+    ...(baseline === undefined ? {} : { baseline }),
+  });
 }
 
 function parseMethods(value: unknown, manifestPath: string, index: number): ProjectSkillMethods {
@@ -396,10 +472,28 @@ function parseSelection(value: unknown, manifestPath: string, index: number): Pr
   }
   const installation = value.installation === undefined
     ? undefined
-    : parseInstallation(value.installation, manifestPath, index);
+    : parseInstallation(value.installation, source, manifestPath, index);
   const methods = value.methods === undefined
     ? undefined
     : parseMethods(value.methods, manifestPath, index);
+  if (installation?.resolvedVersion?.kind === "git-commit" && source.kind === "external" &&
+    "url" in source && source.ref !== undefined && isCommitId(source.ref) && installation.resolvedVersion.commit !== source.ref) {
+    throw new ProjectManifestError(
+      manifestPath,
+      `${label}.installation.resolvedVersion.commit must match the immutable Source ref`,
+    );
+  }
+  if (installation?.resolvedVersion !== undefined && version.policy === "fixed") {
+    const resolved = installation.resolvedVersion.kind === "git-commit"
+      ? installation.resolvedVersion.commit
+      : installation.resolvedVersion.version;
+    if (resolved !== version.version) {
+      throw new ProjectManifestError(
+        manifestPath,
+        `${label}.installation.resolvedVersion must match the fixed version policy`,
+      );
+    }
+  }
   return Object.freeze({
     source,
     path: normalizeSkillPath(value.path, `${label}.path`, manifestPath),

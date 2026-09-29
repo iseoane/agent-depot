@@ -5,11 +5,15 @@ import path from "node:path";
 import type { ProjectHost, ProjectSkillSelection } from "./project-manifest.js";
 import { compareSkillTrees, readExistingSkillTree } from "./skill-adoption.js";
 import type { SkillTreeFileSystem } from "./skill-adoption.js";
-import type { SkillTreeFile } from "./skill-discovery.js";
+import { skillTreeBaseline } from "./skill-discovery.js";
+import type { SkillTreeFile, SourceSkillTreeSnapshot } from "./skill-discovery.js";
+import type { ResolvedVersionEvidence, SkillInstallationBaseline } from "./project-manifest.js";
 import type { Source } from "./sources.js";
 
 export interface ProjectSkillTreeAccess {
   readSkillTree(source: Source, skillPath: string): Promise<readonly SkillTreeFile[]>;
+  /** Optional combined read that keeps version evidence tied to the returned bytes. */
+  readSkillTreeSnapshot?(source: Source, skillPath: string): Promise<SourceSkillTreeSnapshot>;
 }
 
 export interface ProjectInstallationFileSystem {
@@ -47,6 +51,8 @@ export interface ProjectSkillInstallationRequest {
   readonly compatibility?: Partial<Record<ProjectHost, boolean | string>>;
   /** Separate confirmation for creating an additional known Host location during adoption. */
   readonly confirmAdditionalHostExposure?: boolean;
+  /** Version evidence captured from the same immutable Source snapshot as the tree. */
+  readonly resolvedVersion?: ResolvedVersionEvidence;
 }
 
 export interface ProjectInstallationOptions {
@@ -65,6 +71,10 @@ export interface ProjectSkillInstallationResult {
   readonly adopted: boolean;
   /** Existing known project locations retained by an adoption. */
   readonly adoptedPaths: readonly string[];
+  /** Content baseline for detecting later local modifications. */
+  readonly baseline: SkillInstallationBaseline;
+  /** Resolved Source evidence, when the caller supplied trustworthy evidence. */
+  readonly resolvedVersion?: ResolvedVersionEvidence;
 }
 
 /** A successful install that can be reversed if a later transaction step fails. */
@@ -144,6 +154,7 @@ export async function installProjectSkillTransaction(
       ? undefined
       : validateCompatibility(request, skillName, undefined);
   const files = await readAndValidateTree(request, skillName, options.sourceAccess);
+  const baseline = skillTreeBaseline(files.map((file) => file.source));
   const hosts = earlyHosts ?? validateCompatibility(request, skillName, files);
 
   const canonicalSkillsPath = path.join(projectRoot, ".agents", "skills");
@@ -183,6 +194,8 @@ export async function installProjectSkillTransaction(
           files: Object.freeze(files.map((file) => file.relativePath)),
           adopted: true,
           adoptedPaths: Object.freeze([...adoption.paths]),
+          baseline,
+          ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
         }),
         rollback: async () => {
           const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
@@ -251,6 +264,8 @@ export async function installProjectSkillTransaction(
       files: Object.freeze(files.map((file) => file.relativePath)),
       adopted: false,
       adoptedPaths: Object.freeze([]),
+      baseline,
+      ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
     });
     return Object.freeze({
       result,

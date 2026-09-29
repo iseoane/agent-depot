@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -7,7 +8,13 @@ import {
   GitSourceSnapshotAccess,
   SKILL_TREE_LIMITS,
   validateSkillDirectoryPath,
+  type GitSourceSkillTreeSnapshot,
 } from "./git-source.js";
+import {
+  AGENT_DEPOT_PACKAGE_VERSION,
+  type ResolvedVersionEvidence,
+  type SkillInstallationBaseline,
+} from "./project-manifest.js";
 import type { Source } from "./sources.js";
 
 export const EXCLUDED_LIFECYCLE_SEGMENTS = Object.freeze([
@@ -42,10 +49,19 @@ export interface SkillTreeFile {
   readonly executable: boolean;
 }
 
+export interface SourceSkillTreeSnapshot {
+  readonly files: readonly SkillTreeFile[];
+  /** Version evidence captured from the same immutable Source view as files. */
+  readonly resolvedVersion?: ResolvedVersionEvidence;
+}
+
 /** Reads one immutable view of a Source without refreshing or changing it. */
 export interface SourceContentAccess {
   readSnapshot(source: Source): Promise<readonly SourceContentFile[]>;
   readonly readSkillTree?: (source: Source, skillPath: string) => Promise<readonly SkillTreeFile[]>;
+  readonly readSkillTreeSnapshot?: (source: Source, skillPath: string) => Promise<SourceSkillTreeSnapshot>;
+  /** Reads trustworthy version evidence without replacing the immutable Source view. */
+  readonly readResolvedVersion?: (source: Source) => Promise<ResolvedVersionEvidence | undefined>;
 }
 
 export interface SourceContentAccessOptions {
@@ -87,16 +103,69 @@ export class NodeSourceContentAccess implements SourceContentAccess {
   }
 
   async readSkillTree(source: Source, skillPath: string): Promise<readonly SkillTreeFile[]> {
+    return (await this.readSkillTreeSnapshot(source, skillPath)).files;
+  }
+
+  async readSkillTreeSnapshot(source: Source, skillPath: string): Promise<SourceSkillTreeSnapshot> {
     const selectedPath = validateSkillDirectoryPath(skillPath);
     if (source.kind === "builtin") {
-      return readSelectedSkillDirectory(this.builtInRoot, selectedPath, this.readBinaryFile);
+      return Object.freeze({
+        files: await readSelectedSkillDirectory(this.builtInRoot, selectedPath, this.readBinaryFile),
+        ...(AGENT_DEPOT_PACKAGE_VERSION === undefined
+          ? {}
+          : { resolvedVersion: Object.freeze({ kind: "builtin-package", version: AGENT_DEPOT_PACKAGE_VERSION }) }),
+      });
     }
-    return this.gitSnapshots.readSkillTree(source, selectedPath);
+    const snapshot: GitSourceSkillTreeSnapshot = await this.gitSnapshots.readSkillTreeSnapshot(source, selectedPath);
+    return Object.freeze({
+      files: snapshot.files,
+      resolvedVersion: Object.freeze({ kind: "git-commit", commit: snapshot.resolvedVersion }),
+    });
+  }
+
+  async readResolvedVersion(source: Source): Promise<ResolvedVersionEvidence | undefined> {
+    if (source.kind === "builtin") {
+      return AGENT_DEPOT_PACKAGE_VERSION === undefined
+        ? undefined
+        : Object.freeze({ kind: "builtin-package", version: AGENT_DEPOT_PACKAGE_VERSION });
+    }
+    return Object.freeze({
+      kind: "git-commit",
+      commit: await this.gitSnapshots.readResolvedCommit(source),
+    });
   }
 }
 
 export function createSourceContentAccess(options: SourceContentAccessOptions = {}): SourceContentAccess {
   return new NodeSourceContentAccess(options);
+}
+
+/**
+ * Creates a deterministic content baseline for a safely captured Skill tree.
+ * Paths and bytes are included; executable mode is intentionally excluded so
+ * adoption and update checks use the same content identity across platforms.
+ */
+export function skillTreeBaseline(files: readonly SkillTreeFile[]): SkillInstallationBaseline {
+  const sorted = [...files].sort((left, right) => Buffer.compare(
+    Buffer.from(left.path, "utf8"),
+    Buffer.from(right.path, "utf8"),
+  ));
+  const seen = new Set<string>();
+  const hash = createHash("sha256");
+  hash.update("agent-depot-skill-tree-v1\0", "utf8");
+  for (const file of sorted) {
+    if (seen.has(file.path)) {
+      throw new Error(`Skill tree contains a duplicate path: ${file.path}`);
+    }
+    seen.add(file.path);
+    const pathBytes = Buffer.from(file.path, "utf8");
+    hash.update(`${pathBytes.byteLength}:`, "utf8");
+    hash.update(pathBytes);
+    hash.update(`${file.content.byteLength}:`, "utf8");
+    hash.update(file.content);
+    hash.update("\0", "utf8");
+  }
+  return Object.freeze({ algorithm: "sha256", digest: hash.digest("hex") });
 }
 
 /** Discovers candidates from explicitly selected Sources in selection order. */

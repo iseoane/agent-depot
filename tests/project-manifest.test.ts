@@ -108,6 +108,83 @@ test("accepts an optional actual installation record while preserving older mani
   );
 });
 
+test("records trustworthy resolved version evidence and a content baseline", () => {
+  const [builtin, git] = validManifest().skills;
+  const manifest = parseProjectManifest({
+    version: 1,
+    skills: [
+      {
+        ...builtin,
+        installation: {
+          path: ".agents/skills/architecture",
+          adopted: false,
+          resolvedVersion: { kind: "builtin-package", version: AGENT_DEPOT_PACKAGE_VERSION },
+          baseline: { algorithm: "sha256", digest: "a".repeat(64) },
+        },
+      },
+      {
+        ...git,
+        installation: {
+          path: ".agents/skills/code-review",
+          adopted: true,
+          resolvedVersion: { kind: "git-commit", commit: "a".repeat(40) },
+          baseline: { algorithm: "sha256", digest: "b".repeat(64) },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(manifest.skills.map((skill) => skill.installation), [
+    {
+      path: ".agents/skills/architecture",
+      adopted: false,
+      resolvedVersion: { kind: "builtin-package", version: AGENT_DEPOT_PACKAGE_VERSION },
+      baseline: { algorithm: "sha256", digest: "a".repeat(64) },
+    },
+    {
+      path: ".agents/skills/code-review",
+      adopted: true,
+      resolvedVersion: { kind: "git-commit", commit: "a".repeat(40) },
+      baseline: { algorithm: "sha256", digest: "b".repeat(64) },
+    },
+  ]);
+
+  const legacy = parseProjectManifest({
+    version: 1,
+    skills: [{ ...builtin, installation: { path: ".agents/skills/architecture", adopted: true } }],
+  });
+  assert.equal(legacy.skills[0]?.installation?.resolvedVersion, undefined);
+  assert.equal(legacy.skills[0]?.installation?.baseline, undefined);
+});
+
+test("rejects version evidence that cannot identify the selected Source or baseline", () => {
+  const builtin = validManifest().skills[0];
+  const git = validManifest().skills[1];
+  for (const installation of [
+    {
+      path: ".agents/skills/architecture",
+      adopted: false,
+      resolvedVersion: { kind: "git-commit", commit: "a".repeat(40) },
+    },
+    {
+      path: ".agents/skills/architecture",
+      adopted: false,
+      baseline: { algorithm: "sha256", digest: "not-a-digest" },
+    },
+    {
+      path: ".agents/skills/code-review",
+      adopted: false,
+      resolvedVersion: { kind: "git-commit", commit: "b".repeat(40) },
+    },
+  ]) {
+    const selection = installation.path.endsWith("architecture") ? builtin : git;
+    assert.throws(
+      () => parseProjectManifest({ version: 1, skills: [{ ...selection, installation }] }),
+      ProjectManifestError,
+    );
+  }
+});
+
 test("requires an explicit non-empty supported Host set", () => {
   const base = {
     version: 1,

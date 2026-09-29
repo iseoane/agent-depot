@@ -223,6 +223,22 @@ test("reports Git failures through a clean Source access error", async () => {
   });
 });
 
+test("resolves trustworthy Git commit evidence from the selected ref without refreshing", async () => {
+  await withCache(async (cachePath) => {
+    const source = {
+      id: sourceIdForUrl("https://github.com/example/skills.git"),
+      kind: "git" as const,
+      url: "https://github.com/example/skills.git",
+      ref: "refs/tags/v1.2.3",
+    };
+    await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
+    const runner = new FakeSelectedSnapshotRunner("", new Map(), "f".repeat(40));
+
+    assert.equal(await new GitSourceSnapshotAccess({ cachePath, runner }).readResolvedCommit(source), "f".repeat(40));
+    assert.equal(runner.calls[0]?.args.at(-1), "refs/tags/v1.2.3^{commit}");
+  });
+});
+
 test("reads the cached bare mirror HEAD without refreshing and ignores Git symlink entries", async () => {
   await withCache(async (cachePath) => {
     const source = {
@@ -243,6 +259,32 @@ test("reads the cached bare mirror HEAD without refreshing and ignores Git symli
       "a".repeat(40),
       `${"a".repeat(40)}:good/SKILL.md`,
     ]);
+  });
+});
+
+test("ties selected Git Skill bytes and revision to one snapshot", async () => {
+  await withCache(async (cachePath) => {
+    const source = {
+      id: sourceIdForUrl("https://github.com/example/skills.git"),
+      kind: "git" as const,
+      url: "https://github.com/example/skills.git",
+    };
+    await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
+    const objectId = "a".repeat(40);
+    const runner = new FakeSelectedSnapshotRunner(
+      `100644 blob ${objectId}\tselected/SKILL.md\0`,
+      new Map([[objectId, "skill"]]),
+      "e".repeat(40),
+    );
+
+    const snapshot = await new GitSourceSnapshotAccess({ cachePath, runner }).readSkillTreeSnapshot(source, "selected");
+
+    assert.equal(snapshot.resolvedVersion, "e".repeat(40));
+    assert.deepEqual(snapshot.files.map((file) => file.path), ["selected/SKILL.md"]);
+    assert.equal(runner.calls.filter((call) => call.args.includes("rev-parse")).length, 1);
+    const treeCall = runner.calls.find((call) => call.args.includes("ls-tree"));
+    assert.ok(treeCall);
+    assert.equal(treeCall.args.includes("e".repeat(40)), true);
   });
 });
 

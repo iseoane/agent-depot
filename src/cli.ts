@@ -19,6 +19,7 @@ import {
   type SourceOperations,
 } from "./sources.js";
 import {
+  AGENT_DEPOT_PACKAGE_VERSION,
   defaultProjectManifestPath,
   parseProjectManifest,
   ProjectManifestStore,
@@ -27,6 +28,7 @@ import {
   type ProjectManifest,
   type ProjectSkillSelection,
   type ProjectSource,
+  type ResolvedVersionEvidence,
   type VersionPolicy,
 } from "./project-manifest.js";
 import {
@@ -181,7 +183,7 @@ async function runInstall(
     let methodFailed = false;
     try {
       for (const item of resolved) {
-        const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, options.confirmAdditionalHostExposure);
+        const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, item.resolvedVersion, options.confirmAdditionalHostExposure);
         if (transaction) {
           transactions.push(transaction);
           installed.push({ item, result: transaction.result });
@@ -253,7 +255,7 @@ async function runInstall(
   outputInstallPreview(selection, source, projectRoot, output, resolved.files, resolved.method, "project");
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
 
-  const transaction = await installOne(selection, resolvedSource, sourceAccess, projectRoot, dependencies, resolved.method, options.portableV1, resolved.files, options.confirmAdditionalHostExposure);
+  const transaction = await installOne(selection, resolvedSource, sourceAccess, projectRoot, dependencies, resolved.method, options.portableV1, resolved.files, resolved.resolvedVersion, options.confirmAdditionalHostExposure);
   const nextManifest = parseProjectManifest({
     version: 1,
     skills: [...existing.skills, selectionWithInstallation(selection, transaction.result, projectRoot)],
@@ -332,6 +334,7 @@ async function runUserGlobalInstall(
     resolved.method,
     options.portableV1,
     resolved.files,
+    resolved.resolvedVersion,
     options.confirmAdditionalHostExposure,
   );
   const record = selectionWithInstallation(selection, transaction.result, homeDirectory);
@@ -484,6 +487,7 @@ interface ResolvedManifestSelection {
   readonly selection: ProjectSkillSelection;
   readonly source: Source;
   readonly files: readonly SkillTreeFile[];
+  readonly resolvedVersion?: ResolvedVersionEvidence;
   readonly method?: SourceInstallationMethod;
 }
 
@@ -510,11 +514,23 @@ async function resolveSelection(
   operations: SourceOperations,
   sourceAccess: ProjectSkillTreeAccess,
 ): Promise<ResolvedManifestSelection> {
-  const files = await readPreviewTree(sourceAccess, source, selection);
+  const preview = await readPreviewTree(sourceAccess, source, selection);
   // An explicitly configured method is authoritative. Avoid reading source metadata
   // when it is present so an invalid fallback cannot override user intent.
-  const method = selection.methods?.install ?? await readStructuredMethod(operations, source, selection.path, files);
-  return Object.freeze({ selection, source, files, method });
+  const method = selection.methods?.install ?? await readStructuredMethod(operations, source, selection.path, preview.files);
+  // The default Source access returns this evidence with the immutable tree. The
+  // resolver fallback preserves compatibility for embedders with the older seam.
+  const resolvedVersion = preview.resolvedVersion
+    ?? await operations.resolveSourceVersion?.(source)
+    ?? (source.kind === "builtin" && AGENT_DEPOT_PACKAGE_VERSION !== undefined
+      ? Object.freeze({ kind: "builtin-package", version: AGENT_DEPOT_PACKAGE_VERSION })
+      : undefined);
+  return Object.freeze({ selection, source, files: preview.files, resolvedVersion, method });
+}
+
+interface PreviewTree {
+  readonly files: readonly SkillTreeFile[];
+  readonly resolvedVersion?: ResolvedVersionEvidence;
 }
 
 async function refreshResolvedSource(
@@ -533,9 +549,12 @@ async function readPreviewTree(
   sourceAccess: ProjectSkillTreeAccess,
   source: Source,
   selection: ProjectSkillSelection,
-): Promise<readonly SkillTreeFile[]> {
-  const files = await sourceAccess.readSkillTree(source, selection.path);
+): Promise<PreviewTree> {
+  const captured = sourceAccess.readSkillTreeSnapshot
+    ? await sourceAccess.readSkillTreeSnapshot(source, selection.path)
+    : { files: await sourceAccess.readSkillTree(source, selection.path) };
   const prefix = `${selection.path}/`;
+  const files = captured.files;
   if (!files.some((file) => file.path === `${selection.path}/SKILL.md`)) {
     throw new Error(`Selected Skill ${JSON.stringify(selection.path)} does not contain SKILL.md`);
   }
@@ -552,7 +571,7 @@ async function readPreviewTree(
       executable: file.executable,
     });
   });
-  return Object.freeze(snapshot);
+  return Object.freeze({ files: Object.freeze(snapshot), resolvedVersion: captured.resolvedVersion });
 }
 
 function isSafePreviewPath(value: string): boolean {
@@ -624,6 +643,8 @@ function selectionWithInstallation(
       installation: {
         path: relativeProjectPath(projectRoot, result.canonicalPath),
         adopted: result.adopted,
+        ...(result.resolvedVersion === undefined ? {} : { resolvedVersion: result.resolvedVersion }),
+        baseline: result.baseline,
       },
     }],
   }).skills[0]!;
@@ -660,6 +681,7 @@ async function installOne(
   method: SourceInstallationMethod | undefined,
   portableV1: boolean,
   files: readonly SkillTreeFile[],
+  resolvedVersion: ResolvedVersionEvidence | undefined,
   confirmAdditionalHostExposure: boolean,
 ): Promise<ProjectSkillInstallationTransaction> {
   return installProjectSkillTransaction({
@@ -667,6 +689,7 @@ async function installOne(
     source,
     previewTree: files,
     portableV1,
+    resolvedVersion,
     confirmAdditionalHostExposure,
   }, {
     projectRoot,
@@ -725,6 +748,9 @@ function defaultProjectSkillTreeAccess(): ProjectSkillTreeAccess {
   }
   return {
     readSkillTree: (source, skillPath) => access.readSkillTree!(source, skillPath),
+    ...(access.readSkillTreeSnapshot === undefined
+      ? {}
+      : { readSkillTreeSnapshot: (source: Source, skillPath: string) => access.readSkillTreeSnapshot!(source, skillPath) }),
   };
 }
 

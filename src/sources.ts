@@ -18,9 +18,11 @@ import {
   type SourceContentAccess,
 } from "./skill-discovery.js";
 import {
+  AGENT_DEPOT_PACKAGE_VERSION,
   parsePortableInstallationMethod,
   type ProjectSkillSelection,
   type ProjectSource,
+  type ResolvedVersionEvidence,
   type SourceInstallationMethod,
 } from "./project-manifest.js";
 import type { UserGlobalSkillInstallation } from "./source-state.js";
@@ -121,6 +123,8 @@ export interface SourceOperations {
   ) => Promise<void>;
   /** Optional for embedders that only expose source management. */
   discoverSkills?: (sourceIds: readonly string[]) => Promise<readonly SkillCandidate[]>;
+  /** Reads trustworthy resolved version evidence without refreshing a Source. */
+  resolveSourceVersion?: (source: Source) => Promise<ResolvedVersionEvidence | undefined>;
   /** Shared per-user records for user-global Skill installations. */
   listUserGlobalInstallations?: () => Promise<readonly UserGlobalSkillInstallation[]>;
   addUserGlobalInstallation?: (selection: ProjectSkillSelection) => Promise<void>;
@@ -230,6 +234,15 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
 
     async executeInstallationMethod(method, context): Promise<void> {
       await executeSourceInstallationMethod(method, context);
+    },
+
+    async resolveSourceVersion(source: Source): Promise<ResolvedVersionEvidence | undefined> {
+      if (sourceContentAccess.readResolvedVersion) {
+        return sourceContentAccess.readResolvedVersion(source);
+      }
+      return source.kind === "builtin" && AGENT_DEPOT_PACKAGE_VERSION !== undefined
+        ? Object.freeze({ kind: "builtin-package", version: AGENT_DEPOT_PACKAGE_VERSION })
+        : undefined;
     },
 
     async discoverSkills(sourceIds: readonly string[]): Promise<readonly SkillCandidate[]> {

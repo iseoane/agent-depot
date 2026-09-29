@@ -13,7 +13,7 @@ import {
   SourceNotFoundError,
   type SourceOperations,
 } from "../src/sources.js";
-import { NodeSourceContentAccess, type SkillTreeFile } from "../src/skill-discovery.js";
+import { NodeSourceContentAccess, skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
 import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "../src/project-manifest.js";
 import { runCli } from "../src/cli.js";
 
@@ -305,6 +305,8 @@ const cliTree: readonly SkillTreeFile[] = [
   { path: "portable/demo/SKILL.md", content: Uint8Array.from([0x23, 0x23, 0x20, 0x44]), executable: false },
   { path: "portable/demo/scripts/run.sh", content: Uint8Array.from([0x23, 0x21, 0x2f, 0x62]), executable: true },
 ];
+const cliBaseline = skillTreeBaseline(cliTree);
+const cliResolvedVersion = { kind: "builtin-package" as const, version: AGENT_DEPOT_PACKAGE_VERSION! };
 
 function cliSourceAccess(tree: readonly SkillTreeFile[] = cliTree) {
   return {
@@ -312,6 +314,11 @@ function cliSourceAccess(tree: readonly SkillTreeFile[] = cliTree) {
       assert.equal(source.id, BUILT_IN_SOURCE.id);
       assert.equal(skillPath, "portable/demo");
       return tree;
+    },
+    async readSkillTreeSnapshot(source: typeof BUILT_IN_SOURCE, skillPath: string) {
+      assert.equal(source.id, BUILT_IN_SOURCE.id);
+      assert.equal(skillPath, "portable/demo");
+      return { files: tree, resolvedVersion: cliResolvedVersion };
     },
   };
 }
@@ -345,7 +352,12 @@ test("previews project selection before confirmation, then installs and persists
       path: "portable/demo",
       version: { policy: "latest" },
       hosts: ["pi", "claude"],
-      installation: { path: ".agents/skills/demo", adopted: false },
+      installation: {
+        path: ".agents/skills/demo",
+        adopted: false,
+        resolvedVersion: cliResolvedVersion,
+        baseline: cliBaseline,
+      },
     });
     assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
     assert.equal(errors.length, 1);
@@ -401,6 +413,8 @@ test("previews and installs a user-global Skill in the injected home while shari
     assert.deepEqual(state.userGlobalInstallations[0]?.installation, {
       path: ".agents/skills/demo",
       adopted: false,
+      resolvedVersion: cliResolvedVersion,
+      baseline: cliBaseline,
     });
     const sharedOperations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
     assert.ok(sharedOperations.listUserGlobalInstallations);
@@ -487,6 +501,8 @@ test("requires separate adoption confirmation and persists the actual adopted lo
     assert.deepEqual(manifest.skills[0]?.installation, {
       path: ".agents/skills/demo",
       adopted: true,
+      resolvedVersion: cliResolvedVersion,
+      baseline: cliBaseline,
     });
     assert.match(output.join("\\n"), /Adopted Skill.*\.agents[\\\\/]skills[\\\\/]demo/);
   } finally {
@@ -539,6 +555,8 @@ test("previews selected source files and known locations before adopting a Claud
     assert.deepEqual(manifest.skills[0]?.installation, {
       path: ".claude/skills/demo",
       adopted: true,
+      resolvedVersion: cliResolvedVersion,
+      baseline: cliBaseline,
     });
     assert.equal(await readFile(path.join(claudePath, "SKILL.md"), "utf8"), originalSkill);
     await assert.rejects(lstat(path.join(projectRoot, ".agents", "skills", "demo")), { code: "ENOENT" });
@@ -705,7 +723,12 @@ test("prefers a configured install method, previews it without execution, and pe
       install: { kind: "command", argv: ["node", "--configured-install"], cwd: "tools" },
       update: { kind: "command", argv: ["node", "--configured-update"] },
     });
-    assert.deepEqual(manifest.skills[0]?.installation, { path: ".agents/skills/demo", adopted: false });
+    assert.deepEqual(manifest.skills[0]?.installation, {
+      path: ".agents/skills/demo",
+      adopted: false,
+      resolvedVersion: cliResolvedVersion,
+      baseline: cliBaseline,
+    });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -749,10 +772,18 @@ test("preserves configured methods when a project manifest install is a batch", 
       { update: { kind: "command", argv: ["node", "--update-one"] } },
       { update: { kind: "command", argv: ["node", "--update-two"] } },
     ]);
-    assert.deepEqual(manifest.skills.map((skill) => skill.installation), [
+    const installations = manifest.skills.map((skill) => skill.installation as {
+      path: string;
+      adopted: boolean;
+      resolvedVersion?: unknown;
+      baseline?: unknown;
+    });
+    assert.deepEqual(installations.map(({ path: installationPath, adopted }) => ({ path: installationPath, adopted })), [
       { path: ".agents/skills/one", adopted: false },
       { path: ".agents/skills/two", adopted: false },
     ]);
+    assert.deepEqual(installations.map(({ resolvedVersion }) => resolvedVersion), [cliResolvedVersion, cliResolvedVersion]);
+    assert.ok(installations.every(({ baseline }) => baseline && typeof baseline === "object"));
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -803,6 +834,8 @@ test("previews and executes a source method for user-global installation", async
     assert.deepEqual((records[0] as { installation?: unknown }).installation, {
       path: ".agents/skills/demo",
       adopted: false,
+      resolvedVersion: cliResolvedVersion,
+      baseline: cliBaseline,
     });
   } finally {
     await rm(homeDirectory, { recursive: true, force: true });

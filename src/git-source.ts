@@ -46,6 +46,14 @@ export interface GitSourceSkillTreeFile {
   readonly executable: boolean;
 }
 
+/** The immutable commit selected by a Git Source ref or its current HEAD. */
+export type GitSourceResolvedVersion = string;
+
+export interface GitSourceSkillTreeSnapshot {
+  readonly resolvedVersion: GitSourceResolvedVersion;
+  readonly files: readonly GitSourceSkillTreeFile[];
+}
+
 export const SKILL_TREE_LIMITS = Object.freeze({
   maxFiles: 256,
   maxFileBytes: 1024 * 1024,
@@ -237,6 +245,11 @@ export class GitSourceSnapshotAccess {
   }
 
   async readSkillTree(source: GitSource, skillPath: string): Promise<readonly GitSourceSkillTreeFile[]> {
+    return (await this.readSkillTreeSnapshot(source, skillPath)).files;
+  }
+
+  /** Reads Skill bytes and the commit they came from as one immutable snapshot. */
+  async readSkillTreeSnapshot(source: GitSource, skillPath: string): Promise<GitSourceSkillTreeSnapshot> {
     const relativeSkillPath = validateSkillDirectoryPath(skillPath);
     const destination = cachePathForSource(this.cachePath, source);
     if ((await pathType(destination)) !== "directory") {
@@ -244,7 +257,7 @@ export class GitSourceSnapshotAccess {
     }
     await assertNoSymlinkPath(destination);
 
-    const commit = await this.readHeadCommit(destination, source);
+    const commit = await this.readResolvedCommit(source);
     const tree = await this.runner.run("git", [
       "--git-dir",
       destination,
@@ -309,10 +322,20 @@ export class GitSourceSnapshotAccess {
     if (!hasSkillManifest) {
       throw new Error(`Selected Skill directory does not contain ${relativeSkillPath}/SKILL.md`);
     }
-    return Object.freeze(files);
+    return Object.freeze({
+      resolvedVersion: commit,
+      files: Object.freeze(files),
+    });
   }
 
-  private async readHeadCommit(destination: string, source: GitSource): Promise<string> {
+  /** Resolves the selected ref to an immutable commit without refreshing the mirror. */
+  async readResolvedCommit(source: GitSource): Promise<GitSourceResolvedVersion> {
+    const destination = cachePathForSource(this.cachePath, source);
+    if ((await pathType(destination)) !== "directory") {
+      throw new Error(`Git Source mirror is not available: ${destination}`);
+    }
+    await assertNoSymlinkPath(destination);
+
     const revision = source.ref === undefined ? "HEAD" : validateGitRef(source.ref);
     const commit = (await this.runner.run("git", [
       "--git-dir",
@@ -334,18 +357,7 @@ export class GitSourceSnapshotAccess {
     }
     await assertNoSymlinkPath(destination);
 
-    const revision = source.ref === undefined ? "HEAD" : validateGitRef(source.ref);
-    const commit = (await this.runner.run("git", [
-      "--git-dir",
-      destination,
-      "rev-parse",
-      "--verify",
-      `${revision}^{commit}`,
-    ])).trim();
-    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(commit)) {
-      throw new Error(`Git Source mirror has no safe HEAD snapshot: ${source.id}`);
-    }
-
+    const commit = await this.readResolvedCommit(source);
     const tree = await this.runner.run("git", ["--git-dir", destination, "ls-tree", "-r", "-z", commit]);
     const files: GitSourceSnapshotFile[] = [];
     for (const record of tree.split("\0")) {

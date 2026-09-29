@@ -64,7 +64,12 @@ test("installs a full project Skill tree at the canonical path and exposes Claud
       throw error;
     }
 
-    const result = await installProjectSkill({ selection, source, portableV1: true }, {
+    const result = await installProjectSkill({
+      selection,
+      source,
+      portableV1: true,
+      resolvedVersion: { kind: "builtin-package", version: "0.1.0" },
+    }, {
       projectRoot,
       sourceAccess: accessFor(),
     });
@@ -75,6 +80,9 @@ test("installs a full project Skill tree at the canonical path and exposes Claud
     assert.equal(result.claudePath, claudePath);
     assert.deepEqual(result.files, ["SKILL.md", "assets/data.bin", "scripts/run.sh"]);
     assert.deepEqual([...result.hosts], ["pi", "claude", "codex", "opencode"]);
+    assert.deepEqual(result.resolvedVersion, { kind: "builtin-package", version: "0.1.0" });
+    assert.equal(result.baseline.algorithm, "sha256");
+    assert.match(result.baseline.digest, /^[0-9a-f]{64}$/u);
     assert.deepEqual(await readFile(path.join(canonicalPath, "assets", "data.bin")), Buffer.from([0x00, 0xff, 0x80]));
     assert.equal((await lstat(path.join(canonicalPath, "SKILL.md"))).mode & 0o777, 0o644);
     assert.equal((await lstat(path.join(canonicalPath, "scripts", "run.sh"))).mode & 0o111, 0o111);

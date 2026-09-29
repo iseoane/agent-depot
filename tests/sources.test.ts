@@ -15,7 +15,7 @@ import {
 } from "../src/sources.js";
 import { defaultSourceStatePath, SourceStateError, SourceStateStore } from "../src/source-state.js";
 import type { GitSource, GitSourceAccess } from "../src/git-source.js";
-import type { SourceContentAccess } from "../src/skill-discovery.js";
+import { skillTreeBaseline, type SourceContentAccess } from "../src/skill-discovery.js";
 
 class FakeGitAccess implements GitSourceAccess {
   readonly refreshed: GitSource[] = [];
@@ -41,6 +41,53 @@ test("lists the package-owned built-in Source without registering it", async () 
     assert.deepEqual(await operations.listSources(), [BUILT_IN_SOURCE]);
     assert.equal(await readFile(statePath).catch(() => undefined), undefined);
   });
+});
+
+test("resolves package and Git version evidence without refreshing Sources", async () => {
+  await withState(async (statePath, gitAccess) => {
+    const externalUrl = "https://github.com/example/skills.git";
+    let external: GitSource | undefined;
+    const operations = createSourceOperations({
+      statePath,
+      gitAccess,
+      sourceContentAccess: {
+        async readSnapshot() {
+          return [];
+        },
+        async readResolvedVersion(source) {
+          if (source.kind === "builtin") {
+            return { kind: "builtin-package", version: "0.1.0" };
+          }
+          assert.equal(source.id, external?.id);
+          return { kind: "git-commit", commit: "c".repeat(40) };
+        },
+      },
+    });
+    external = await operations.addGitSource(externalUrl);
+
+    assert.deepEqual(await operations.resolveSourceVersion!(BUILT_IN_SOURCE), {
+      kind: "builtin-package",
+      version: "0.1.0",
+    });
+    assert.deepEqual(await operations.resolveSourceVersion!(external), {
+      kind: "git-commit",
+      commit: "c".repeat(40),
+    });
+    assert.deepEqual(gitAccess.refreshed, []);
+  });
+});
+
+test("sorts installation baseline paths by UTF-8 byte order", () => {
+  const files = [
+    { path: "é/SKILL.md", content: Uint8Array.from([0x65]), executable: false },
+    { path: "z/SKILL.md", content: Uint8Array.from([0x7a]), executable: false },
+  ];
+
+  assert.deepEqual(skillTreeBaseline(files), {
+    algorithm: "sha256",
+    digest: "996bfd1874a42ae5adbfaf461c9a8803f9692a85d5c1bd6249bcc46831c394ee",
+  });
+  assert.deepEqual(skillTreeBaseline([...files].reverse()), skillTreeBaseline(files));
 });
 
 test("adds a Git Source, keeps its URL identity stable, and does not refresh on registration", async () => {
