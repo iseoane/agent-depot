@@ -2,8 +2,55 @@ import { Box, Text } from "ink";
 
 import { describeSkills, HOST_CHOICES, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
 import { skillKey } from "./catalog-tree.js";
+import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
+import type { FilterState } from "./catalog-filter.js";
+import { describeRow, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
 import { HostChecklist, PreviewLines } from "./panel-parts.js";
+import { rowStyle } from "./theme.js";
+import type { VisibleRow } from "./tree.js";
 import { theme } from "./theme.js";
+
+/** Scope and counts, the filter line, and why the list may be empty. */
+export function CatalogHeader({ scope, listed, installable, total, filter }: {
+  readonly scope: string;
+  readonly listed: number;
+  readonly installable: number;
+  readonly total: number;
+  readonly filter: FilterState;
+}) {
+  return (
+    <>
+      <Text color={theme.muted}>
+        Scope: {scope}  {listed} of {installable}
+      </Text>
+      {filter.editing || filter.query !== "" ? (
+        <Text>Filter: {filter.query}{filter.editing ? "_" : ""}</Text>
+      ) : null}
+      {total === 0 ? <Text>No skills</Text> : null}
+      {total > 0 && installable === 0 ? <Text>All skills are installed</Text> : null}
+      {installable > 0 && listed === 0 ? <Text>No matching skills</Text> : null}
+    </>
+  );
+}
+
+/** One line of the Catalog tree: cursor, indent, mark box, label and the unmanaged-copy marker. */
+export function CatalogRowLine({ row, selected, marked, installed }: {
+  readonly row: VisibleRow<NodeData>;
+  readonly selected: boolean;
+  readonly marked: boolean;
+  readonly installed: InstalledSkills;
+}) {
+  const { data } = row.node;
+  const isSource = data.kind === "source";
+  return (
+    <Text {...rowStyle(selected)} color={isSource ? theme.group : undefined}>
+      {selected ? "> " : "  "}{"  ".repeat(row.depth)}{isSource ? "" : marked ? "[x] " : "[ ] "}{describeRow(row)}
+      {data.kind === "skill" && hasUnmanagedCopy(data.skill, installed)
+        ? <Text color={theme.marker}>{"  "}{UNMANAGED_MARKER}</Text>
+        : null}
+    </Text>
+  );
+}
 
 /** The prompt of the install flow; browsing shows nothing. */
 export function ActionPanel({ mode }: { readonly mode: ActionMode }) {

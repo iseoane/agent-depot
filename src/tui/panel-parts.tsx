@@ -40,6 +40,21 @@ export function PreviewLines({ lines, warnFirst = false }: { readonly lines: rea
   );
 }
 
+/** Under a list: the window indicator, how many items are marked, and the last result. */
+export function ListFooter({ indicator, selectedCount, message }: {
+  readonly indicator: string | undefined;
+  readonly selectedCount: number;
+  readonly message: { readonly kind: "ok" | "error"; readonly text: string } | undefined;
+}) {
+  return (
+    <>
+      {indicator ? <Text color={theme.muted}>{indicator}</Text> : null}
+      {selectedCount > 0 ? <Text color={theme.muted}>{selectedCount} selected</Text> : null}
+      {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
+    </>
+  );
+}
+
 /** A preview followed by a y/n question. */
 export function PreviewConfirm({ lines, question, warnFirst }: {
   readonly lines: readonly string[];

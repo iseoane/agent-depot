@@ -43,3 +43,17 @@ export function toggledMark(marks: ReadonlySet<string>, id: string): ReadonlySet
   if (!next.delete(id)) next.add(id);
   return next;
 }
+
+/**
+ * State mirrored in a ref that is updated first, so keys delivered in one burst
+ * act on the latest value. The setter is stable.
+ */
+export function useMirrored<T>(initial: T): readonly [T, MutableRefObject<T>, (next: T) => void] {
+  const [value, setValue] = useState(initial);
+  const ref = useRef(initial);
+  const set = useCallback((next: T) => {
+    ref.current = next;
+    setValue(next);
+  }, []);
+  return [value, ref, set];
+}

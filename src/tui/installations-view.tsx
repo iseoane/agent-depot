@@ -13,6 +13,7 @@ import { handleManageKey, type ManageContext } from "./manage-actions.js";
 import { ModePanel } from "./installations-panel.js";
 import { TreeRowLine } from "./installations-rows.js";
 import { buildTree, leavesOf, markersOf, type NodeData } from "./installations-tree.js";
+import { ListFooter } from "./panel-parts.js";
 import { useTreeNavigation } from "./tree-navigation.js";
 import { defaultExpanded } from "./tree.js";
 import { theme } from "./theme.js";
@@ -142,9 +143,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       {listed.map((row, offset) => (
         <TreeRowLine key={row.node.id} row={row} selected={window.start + offset === index} marked={marks.marked.has(row.node.id)} />
       ))}
-      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
-      {selectedCount > 0 ? <Text color={theme.muted}>{selectedCount} selected</Text> : null}
-      {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
+      <ListFooter indicator={window.indicator} selectedCount={selectedCount} message={message} />
       {legendNeeded ? <Text color={theme.muted}>{LEGEND}</Text> : null}
       <ModePanel mode={mode} />
     </Box>
