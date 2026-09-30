@@ -1,9 +1,7 @@
 import { Box, Text, type Key } from "ink";
-import path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
-import type { SkillCandidate } from "../skill-discovery.js";
 import { isValidFixedVersion } from "../skill-install.js";
 import type { SourceOperations } from "../sources.js";
 import { HOST_CHOICES } from "./catalog-actions.js";
@@ -14,13 +12,16 @@ import {
   findAdoptionCandidates,
   loadInstallations,
   prepareAdoption,
+  skillOf,
   sourceIdOf,
   type InstallationRow,
   type InstallationsData,
   type UnmanagedGroup,
 } from "./installations.js";
 import { BROWSE, type InstallationsMode } from "./installations-mode.js";
-import { errorText, handleManageKey, startHostAddition, startUninstall, type ManageContext } from "./manage-actions.js";
+import { errorText } from "./batch.js";
+import { startBulkHostAddition, startBulkUninstall, type BulkTarget } from "./bulk-actions.js";
+import { handleManageKey, startHostAddition, startUninstall, type ManageContext } from "./manage-actions.js";
 import { ManagePanel } from "./manage-panel.js";
 import { startUnmanagedRemoval } from "./unmanaged-actions.js";
 import {
@@ -123,9 +124,16 @@ const GROUP_ROW_MESSAGE: Record<"A" | "u" | "h" | "i", string> = {
 
 const LEGEND = "adopted: tracked in place · modified: changed on disk";
 
-/** The Skill of an installation, as the shared manage flows expect it. */
-function skillOf(row: InstallationRow, sourceId: string): SkillCandidate {
-  return { sourceId, path: row.selection.path, name: path.posix.basename(row.selection.path), description: "" };
+/** Every leaf of the tree in display order, whether or not its group is open. */
+function leavesOf(roots: readonly InstallationNode[]): readonly InstallationNode[] {
+  return roots.flatMap((node) => (node.children === undefined ? (node.data.kind === "group" ? [] : [node]) : leavesOf(node.children)));
+}
+
+function targetOf(node: InstallationNode): BulkTarget | undefined {
+  const { data } = node;
+  if (data.kind === "installation") return { id: node.id, leaf: { kind: "installation", row: data.row } };
+  if (data.kind === "unmanaged") return { id: node.id, leaf: { kind: "unmanaged", group: data.group } };
+  return undefined;
 }
 
 function describeNode(row: VisibleRow<NodeData>): string {
@@ -153,6 +161,13 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const [mode, setModeState] = useState<InstallationsMode>(BROWSE);
   // Mirrors the mode synchronously so later keystrokes and the shell never see stale state.
   const modeRef = useRef<InstallationsMode>(BROWSE);
+  // Leaves marked for a bulk action, by node id. The ref is updated first so keys in one burst see every mark.
+  const [markedState, setMarkedState] = useState<ReadonlySet<string>>(new Set());
+  const markedRef = useRef<ReadonlySet<string>>(new Set());
+  const setMarked = (next: ReadonlySet<string>) => {
+    markedRef.current = next;
+    setMarkedState(next);
+  };
   const mounted = useRef(true);
   const [message, setMessage] = useState<Message | undefined>();
 
@@ -209,6 +224,10 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     setSelection({ id: visible[bounded]?.node.id, index: bounded });
   };
 
+  /** The marked leaves in display order; marks whose rows no longer exist are ignored. */
+  const markedTargets = (): readonly BulkTarget[] =>
+    leavesOf(rootsRef.current).filter((node) => markedRef.current.has(node.id)).flatMap((node) => targetOf(node) ?? []);
+
   const cancel = (text: string) => {
     setMessage({ kind: "ok", text });
     setMode(BROWSE);
@@ -238,6 +257,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     browse: () => setMode(BROWSE),
     setMessage,
     isMounted: () => mounted.current,
+    unmark: (ids) => setMarked(new Set([...markedRef.current].filter((id) => !ids.includes(id)))),
     finish: async (result) => {
       await reload();
       if (!mounted.current) return;
@@ -370,6 +390,33 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       const next = collapseOrParent(open, visible, at);
       setExpanded(next.expanded);
       setSelection({ id: next.selectedId, index: at });
+    } else if (input === " ") {
+      if (!row) return;
+      if (row.node.data.kind === "group") {
+        setMessage({ kind: "error", text: "Mark skills, not group rows" });
+        return;
+      }
+      setMessage(undefined);
+      const next = new Set(markedRef.current);
+      if (!next.delete(row.node.id)) next.add(row.node.id);
+      setMarked(next);
+    } else if (input === "a") {
+      const leaves = visible.filter((candidate) => candidate.node.data.kind !== "group").map((candidate) => candidate.node.id);
+      if (leaves.length === 0) {
+        setMessage({ kind: "error", text: "There are no skills to select" });
+        return;
+      }
+      setMessage(undefined);
+      const all = leaves.every((id) => markedRef.current.has(id));
+      setMarked(all
+        ? new Set([...markedRef.current].filter((id) => !leaves.includes(id)))
+        : new Set([...markedRef.current, ...leaves]));
+    } else if ((input === "u" || input === "h" || input === "i") && data && markedTargets().length > 0) {
+      // Marks, including those on collapsed rows, turn the action into a bulk one.
+      setMessage(undefined);
+      const targets = markedTargets();
+      if (input === "u") void startBulkUninstall(manage, targets);
+      else startBulkHostAddition(manage, targets);
     } else if (input === "A" || key.return || input === "u" || input === "h" || input === "i") {
       if (!row || !data) return;
       const item = row.node.data;
@@ -408,6 +455,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
   const ready = state.data;
   const window = computeWindow(rows.length, index, height);
+  const selectedCount = leavesOf(roots).filter((node) => markedState.has(node.id)).length;
   // The legend explains the markers, so it shows only while a rendered row carries one.
   const legendNeeded = rows.slice(window.start, window.end).some(
     (row) => row.node.data.kind === "installation" && markersOf(row.node.data.row) !== "",
@@ -421,7 +469,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
         const position = window.start + offset;
         const item = row.node.data;
         const leaf = !row.expandable && item.kind !== "group";
-        const prefix = `${position === index ? "> " : "  "}${"  ".repeat(row.depth)}${leaf ? "  " : ""}`;
+        const prefix = `${position === index ? "> " : "  "}${"  ".repeat(row.depth)}${leaf ? (markedState.has(row.node.id) ? "[x] " : "[ ] ") : ""}`;
         return (
           <Text key={row.node.id} {...rowStyle(position === index)} color={item.kind === "group" ? theme.group : undefined}>
             {prefix}{describeNode(row)}
@@ -435,6 +483,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
         );
       })}
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {selectedCount > 0 ? <Text color={theme.muted}>{selectedCount} selected</Text> : null}
       {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
       {legendNeeded ? <Text color={theme.muted}>{LEGEND}</Text> : null}
       <ModePanel mode={mode} />

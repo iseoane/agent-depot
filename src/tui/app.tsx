@@ -37,7 +37,7 @@ function hintsOf(view: ViewName, catalogFocusedOnSource: boolean): string {
     case "catalog":
       return `j/k move · Enter expand · space mark · a all · i install · / filter${catalogFocusedOnSource ? " · s all sources" : ""} · q quit`;
     case "installations":
-      return "j/k move · Enter expand · u uninstall · h add hosts · A adopt · q quit";
+      return "j/k move · Enter expand · space mark · a all · u uninstall · h add hosts · A adopt · q quit";
     case "updates":
       return "j/k move · space mark · a all · Enter preview · r check again · q quit";
   }

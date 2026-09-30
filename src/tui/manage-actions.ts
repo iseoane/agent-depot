@@ -12,12 +12,15 @@ import {
   runHostAddition,
   runHostRemoval,
   runUninstall,
+  UNINSTALL_REFUSALS,
   type InstalledSkills,
   type PreparedHostAddition,
   type PreparedHostRemoval,
   type UninstallPreparation,
 } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
+import { errorText } from "./batch.js";
+import { BULK_KINDS, handleBulkKey, type BulkMode } from "./bulk-actions.js";
 import { handleUnmanagedKey, UNMANAGED_KINDS, type UnmanagedMode } from "./unmanaged-actions.js";
 
 /**
@@ -44,6 +47,7 @@ export type ManageMode =
       readonly prepared: Extract<UninstallPreparation, { kind: "ready" }>;
     }
   | UnmanagedMode
+  | BulkMode
   | { readonly kind: "busy"; readonly label: string };
 
 const MANAGE_KINDS: ReadonlySet<string> = new Set<ManageMode["kind"]>([
@@ -55,6 +59,7 @@ const MANAGE_KINDS: ReadonlySet<string> = new Set<ManageMode["kind"]>([
   "confirm-host-remove",
   "confirm-uninstall",
   ...UNMANAGED_KINDS,
+  ...BULK_KINDS,
   "busy",
 ]);
 
@@ -79,15 +84,11 @@ export interface ManageContext {
   isMounted(): boolean;
   /** Reloads the view's data first so the result and the refreshed rows appear together, then browses. */
   finish(result: ManageMessage): Promise<void>;
+  /** Drops the marks of the items a bulk action applied. */
+  unmark(ids: readonly string[]): void;
 }
 
-const UNINSTALL_REFUSALS = {
-  unsupported: "Uninstall is not supported by the configured operations",
-  "not-installed": "Skill is not installed",
-  "project-only": "Project uninstall is not supported",
-} as const;
-
-export const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+export { errorText };
 
 function cancel(context: ManageContext, text: string): void {
   context.setMessage({ kind: "ok", text });
@@ -169,6 +170,7 @@ export function handleManageKey(context: ManageContext, mode: { readonly kind: s
   if (!isManageMode(mode)) return false;
   const { operations, env } = context;
   if (handleUnmanagedKey(context, mode, input, key)) return true;
+  if (handleBulkKey(context, mode, input, key)) return true;
   switch (mode.kind) {
     case "remove-scope":
       if (key.escape) cancel(context, "Uninstall cancelled");

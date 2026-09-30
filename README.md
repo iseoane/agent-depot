@@ -370,7 +370,7 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | --- | --- |
 | Sources | `space` mark, `a` mark all, `Enter` open the Source in the Catalog, `n` add a Git Source, `r` refresh the marked (or highlighted) Sources, `d` remove |
 | Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marks (or the highlighted skill), `/` filter, `s` toggle one Source or all (when opened from a Source) |
-| Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill |
+| Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill, `space` marks a leaf and `a` marks all visible leaves: with marks, `u` and `h` act on all of them with one combined preview and one confirmation (project installations are skipped with a reason) |
 | Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot assess" line |
 
 Safety model:

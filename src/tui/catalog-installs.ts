@@ -200,6 +200,13 @@ export type UninstallPreparation =
       readonly installations: readonly ProjectSkillSelection[];
     };
 
+/** Why a preparation that is not `ready` refuses, in the words the TUI shows. */
+export const UNINSTALL_REFUSALS = {
+  unsupported: "Uninstall is not supported by the configured operations",
+  "not-installed": "Skill is not installed",
+  "project-only": "Project uninstall is not supported",
+} as const;
+
 /** Plan step for removing the highlighted Skill's user-global installation. */
 export async function prepareUninstall(
   operations: SourceOperations,
