@@ -1,4 +1,4 @@
-import { Box, Text, useInput, type Key } from "ink";
+import { Box, Text, type Key } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
@@ -31,6 +31,7 @@ import {
   type VisibleRow,
 } from "./tree.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
+import { useKeys } from "./keys.js";
 
 const DESCRIPTION_LIMIT = 60;
 const NO_ENVIRONMENT: TuiEnvironment = {};
@@ -334,7 +335,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     }
   };
 
-  useInput((input, key) => {
+  useKeys((input, key) => {
     const mode = actionRef.current;
     if (mode.kind !== "browse") {
       handleActionKey(mode, input, key);

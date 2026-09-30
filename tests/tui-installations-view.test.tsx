@@ -490,3 +490,13 @@ test("Esc in the picker adopts nothing", async (t) => {
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
   view.unmount();
 });
+
+test("several keys delivered in a single write are handled one by one", async (t) => {
+  const f = await fixture(t);
+  await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/alpha"));
+  const view = mount(f);
+  await waitForFrame(view.lastFrame, /▸ builtin:agent-depot \(1\)/);
+  press(view.stdin, "jj");
+  await waitForFrame(view.lastFrame, (frame) => /Managed \(project\)/.test(selectedLine(frame)));
+  view.unmount();
+});

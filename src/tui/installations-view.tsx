@@ -1,4 +1,4 @@
-import { Box, Text, useInput, type Key } from "ink";
+import { Box, Text, type Key } from "ink";
 import path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -36,6 +36,7 @@ import {
 } from "./tree.js";
 import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
+import { useKeys } from "./keys.js";
 
 export interface InstallationsViewProps {
   readonly operations: SourceOperations;
@@ -352,7 +353,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     }
   };
 
-  useInput((input, key) => {
+  useKeys((input, key) => {
     const current = modeRef.current;
     if (current.kind !== "browse") {
       handleModeKey(current, input, key);

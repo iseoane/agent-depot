@@ -159,3 +159,53 @@ test("d stays single-source even with a selection", async () => {
   assert.deepEqual(removals, [first.id]);
   unmount();
 });
+
+test("keys sent in one burst move and mark against the latest state", async () => {
+  const { lastFrame, stdin, unmount } = await open(operationsFor([]));
+  await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
+  for (const data of ["j", "j", " "]) stdin.write(data);
+  const frame = await waitForFrame(lastFrame, (candidate) => /\[x\]/.test(lineOf(candidate, third.id)));
+  assert.match(frame, /1 selected/);
+  assert.match(lineOf(frame, first.id), /\[ \]/);
+  assert.match(highlighted(frame), new RegExp(third.id));
+  unmount();
+});
+
+test("space, j, space in one burst marks two sources", async () => {
+  const { lastFrame, stdin, unmount } = await open(operationsFor([]));
+  await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
+  for (const data of [" ", "j", " "]) stdin.write(data);
+  const frame = await waitForFrame(lastFrame, (candidate) => /2 selected/.test(candidate));
+  assert.match(lineOf(frame, first.id), /\[x\]/);
+  assert.match(lineOf(frame, second.id), /\[x\]/);
+  unmount();
+});
+
+test("a then r in one burst previews every marked source", async () => {
+  const { lastFrame, stdin, unmount } = await open(operationsFor([]));
+  await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
+  stdin.write("a");
+  stdin.write("r");
+  const frame = await waitForFrame(lastFrame, /\[y\/n\]/);
+  for (const source of [first, second, third]) assert.match(frame, new RegExp(`refresh Git Source ${source.id}`));
+  unmount();
+});
+
+test("j, j, r in one burst previews the source the highlight reached", async () => {
+  const { lastFrame, stdin, unmount } = await open(operationsFor([]));
+  await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
+  for (const data of ["j", "j", "r"]) stdin.write(data);
+  const frame = await waitForFrame(lastFrame, /\[y\/n\]/);
+  assert.match(frame, new RegExp(`refresh Git Source ${third.id}`));
+  assert.doesNotMatch(frame, new RegExp(`refresh Git Source ${first.id}`));
+  unmount();
+});
+
+test("several keys delivered in a single write are handled one by one", async () => {
+  const { lastFrame, stdin, unmount } = await open(operationsFor([]));
+  await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
+  stdin.write("jj ");
+  const frame = await waitForFrame(lastFrame, (candidate) => /\[x\]/.test(lineOf(candidate, third.id)));
+  assert.match(frame, /1 selected/);
+  unmount();
+});

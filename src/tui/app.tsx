@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useStdout } from "ink";
 import { useCallback, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
@@ -8,6 +8,7 @@ import { InstallationsView } from "./installations-view.js";
 import { SourcesView } from "./sources-view.js";
 import { separatorLine, theme } from "./theme.js";
 import { UpdatesView } from "./updates-view.js";
+import { useKeys } from "./keys.js";
 
 export interface AppProps {
   /** Source operations the views call directly; injectable for tests. */
@@ -48,7 +49,7 @@ export function App({ operations, environment, onExit }: AppProps) {
   const [catalogSourceId, setCatalogSourceId] = useState<string | undefined>();
   const showView = (next: ViewName) => setView(next);
 
-  useInput((input) => {
+  useKeys((input) => {
     if (capturingRef.current) return;
     if (input === "q") {
       onExit?.();

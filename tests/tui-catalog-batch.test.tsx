@@ -278,3 +278,38 @@ test("i on the highlighted skill without marks installs just that skill", async 
   assert.match(host, /Install beta\./);
   view.unmount();
 });
+
+test("keys sent in one burst move and mark against the latest state", async (t) => {
+  const f = await fixture(t);
+  const view = mount(f);
+  await waitForFrame(view.lastFrame, /alpha skill/);
+  for (const data of ["j", "j", " ", "j", " "]) view.stdin.write(data);
+  const frame = await waitForFrame(view.lastFrame, /2 selected/);
+  assert.match(frame, /\[x\] beta/);
+  assert.match(frame, /\[x\] gamma/);
+  assert.match(frame, /\[ \] alpha/);
+  assert.match(selectedLine(frame), /gamma/);
+  view.unmount();
+});
+
+test("a then i in one burst opens the install steps for every listed skill", async (t) => {
+  const f = await fixture(t);
+  const view = mount(f);
+  await waitForFrame(view.lastFrame, /alpha skill/);
+  view.stdin.write("j");
+  view.stdin.write("a");
+  view.stdin.write("i");
+  const frame = await waitForFrame(view.lastFrame, /Host \(space/);
+  assert.match(frame, /Install 3 skills\./);
+  view.unmount();
+});
+
+test("several keys delivered in a single write are handled one by one", async (t) => {
+  const f = await fixture(t);
+  const view = mount(f);
+  await waitForFrame(view.lastFrame, /alpha skill/);
+  view.stdin.write("jj ");
+  const frame = await waitForFrame(view.lastFrame, /1 selected/);
+  assert.match(frame, /\[x\] beta/);
+  view.unmount();
+});
