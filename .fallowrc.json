@@ -1,0 +1,91 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "minimumVersion": "3.30.0",
+  "entry": [
+    "src/cli.ts",
+    "tests/**/*.test.ts"
+  ],
+  "ignorePatterns": [
+    "dist/**",
+    ".scratch/**",
+    ".codegraph/**",
+    ".atl/**",
+    ".fallow/**",
+    "coverage/**"
+  ],
+  "boundaries": {
+    "zones": [
+      {
+        "name": "cli",
+        "patterns": [
+          "src/cli.ts"
+        ]
+      },
+      {
+        "name": "application",
+        "patterns": [
+          "src/project-installation.ts",
+          "src/skill-update.ts",
+          "src/update-batch.ts",
+          "src/user-global-skill-inventory.ts",
+          "src/skill-adoption.ts",
+          "src/user-method.ts"
+        ]
+      },
+      {
+        "name": "core",
+        "patterns": [
+          "src/sources.ts",
+          "src/source-state.ts",
+          "src/skill-discovery.ts",
+          "src/project-manifest.ts"
+        ]
+      },
+      {
+        "name": "infrastructure",
+        "patterns": [
+          "src/git-source.ts",
+          "src/process-runner.ts",
+          "src/version.ts"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "from": "cli",
+        "allow": [
+          "application",
+          "core",
+          "infrastructure"
+        ]
+      },
+      {
+        "from": "application",
+        "allow": [
+          "core",
+          "infrastructure"
+        ]
+      },
+      {
+        "from": "core",
+        "allow": [
+          "infrastructure"
+        ]
+      },
+      {
+        "from": "infrastructure",
+        "allow": []
+      }
+    ],
+    "coverage": {
+      "requireAllFiles": true,
+      "allowUnmatched": [
+        "tests/**",
+        "eslint.config.js"
+      ]
+    }
+  },
+  "duplicates": {
+    "threshold": 6
+  }
+}

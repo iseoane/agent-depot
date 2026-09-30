@@ -4,3 +4,7 @@
 # Node.js dependencies and generated output
 node_modules/
 dist/
+
+# Static analysis and coverage output
+coverage/
+.fallow/
