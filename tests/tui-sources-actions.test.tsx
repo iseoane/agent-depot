@@ -78,10 +78,10 @@ async function open(h: Harness) {
 const highlights = (lastFrame: () => string | undefined, id: RegExp) =>
   waitForFrame(lastFrame, (frame) => id.test(frame.split("\n").find((line) => line.startsWith("> ")) ?? ""));
 
-test("a opens an input, Enter adds the Git Source, reloads the list and reports success", async () => {
+test("n opens an input, Enter adds the Git Source, reloads the list and reports success", async () => {
   const h = harness();
   const { lastFrame, stdin, unmount } = await open(h);
-  stdin.write("a");
+  stdin.write("n");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write(added.url);
   await waitForFrame(lastFrame, /example\/new\.git/);
@@ -96,7 +96,7 @@ test("a opens an input, Enter adds the Git Source, reloads the list and reports 
 test("Esc cancels the add input without calling operations; backspace edits", async () => {
   const h = harness();
   const { lastFrame, stdin, unmount } = await open(h);
-  stdin.write("a");
+  stdin.write("n");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write("abc");
   stdin.write("\u007F");
@@ -110,7 +110,7 @@ test("Esc cancels the add input without calling operations; backspace edits", as
 test("add errors are shown and keep the list", async () => {
   const h = harness({ async addGitSource() { throw new Error("clone failed"); } });
   const { lastFrame, stdin, unmount } = await open(h);
-  stdin.write("a");
+  stdin.write("n");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write("x");
   stdin.write("\r");
@@ -209,7 +209,7 @@ test("a busy action ignores other keys", async () => {
   stdin.write("y");
   await waitForFrame(lastFrame, /Working/);
   // Keys are handled in order: once "j" (a no-op while busy) had its turn, "a" would already have opened the input.
-  stdin.write("a");
+  stdin.write("n");
   stdin.write("j");
   release?.();
   const frame = await waitForFrame(lastFrame, /Refreshed Git Source/);
@@ -221,8 +221,8 @@ test("App shows key hints and q does not quit while typing or confirming", async
   const h = harness();
   let exits = 0;
   const { lastFrame, stdin, unmount } = render(<App operations={h.operations} onExit={() => { exits += 1; }} />);
-  await waitForFrame(lastFrame, /a add/);
-  stdin.write("a");
+  await waitForFrame(lastFrame, /n add/);
+  stdin.write("n");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write("q");
   await waitForFrame(lastFrame, /URL: q/);
@@ -246,8 +246,8 @@ test("App ignores q and view keys sent in the same burst as a capturing key", as
   const h = harness();
   let exits = 0;
   const { lastFrame, stdin, unmount } = render(<App operations={h.operations} onExit={() => { exits += 1; }} />);
-  await waitForFrame(lastFrame, /a add/);
-  stdin.write("a");
+  await waitForFrame(lastFrame, /n add/);
+  stdin.write("n");
   stdin.write("q");
   stdin.write("2");
   const frame = await waitForFrame(lastFrame, /URL: q2/);
@@ -290,13 +290,13 @@ test("the highlight stays on the same source when a new source sorts before it",
   const { lastFrame, stdin, unmount } = await open(h);
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
-  stdin.write("a");
+  stdin.write("n");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write(added.url);
   await waitForFrame(lastFrame, /example\/new\.git/);
   stdin.write("\r");
   await waitForFrame(lastFrame, /Added Git Source/);
-  await waitForFrame(lastFrame, (frame) => new RegExp(`> ${external.id}`).test(frame) && frame.includes(added.id));
+  await waitForFrame(lastFrame, (frame) => new RegExp(`> (\\[.\\] )?${external.id}`).test(frame) && frame.includes(added.id));
   unmount();
 });
 

@@ -392,12 +392,9 @@ export async function executeOrRejectMethod(
   if (!item.method) {
     return;
   }
-  const executor = operations.executeInstallationMethod ?? executeSourceInstallationMethod;
-  await executor(item.method, {
-    source: item.source,
-    skillPath: item.selection.path,
-    projectRoot,
-  });
+  const context = { source: item.source, skillPath: item.selection.path, projectRoot };
+  if (operations.executeInstallationMethod) await operations.executeInstallationMethod(item.method, context);
+  else await executeSourceInstallationMethod(item.method, context);
 }
 
 export function externalMethodFailure(error: unknown): Error {

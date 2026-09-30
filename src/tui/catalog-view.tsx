@@ -21,6 +21,7 @@ import {
   runUninstall,
   type InstalledSkills,
 } from "./catalog-installs.js";
+import { computeWindow, pageStep, useListHeight } from "./window.js";
 import type { TuiEnvironment } from "./environment.js";
 import type { ProjectHost } from "../project-manifest.js";
 import { isValidFixedVersion } from "../skill-install.js";
@@ -38,6 +39,8 @@ export interface CatalogViewProps {
   readonly environment?: TuiEnvironment;
   /** Highlights a Skill and starts its `u` / `i` flow once, e.g. when opened from the Installations view. */
   readonly focus?: CatalogFocus;
+  /** Rows the list may use; defaults to what the terminal leaves. Injectable for tests. */
+  readonly listHeight?: number;
 }
 
 interface Message {
@@ -58,7 +61,8 @@ function truncate(text: string): string {
   return text.length > DESCRIPTION_LIMIT ? `${text.slice(0, DESCRIPTION_LIMIT - 3)}...` : text;
 }
 
-export function CatalogView({ operations, sourceId, onCapturingChange, environment, focus }: CatalogViewProps) {
+export function CatalogView({ operations, sourceId, onCapturingChange, environment, focus, listHeight }: CatalogViewProps) {
+  const height = useListHeight(listHeight, 6);
   const [all, setAll] = useState(sourceId === undefined);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selected, setSelected] = useState(0);
@@ -103,8 +107,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
 
   useEffect(() => {
     let cancelled = false;
-    const discover = operations.discoverSkills;
-    if (!discover) {
+    if (!operations.discoverSkills) {
       setState({ status: "error", message: "Discovery is not supported by the configured operations" });
       return;
     }
@@ -115,7 +118,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
         const ids = all || sourceId === undefined
           ? (await operations.listSources()).map((source) => source.id)
           : [sourceId];
-        const skills = await discover(ids);
+        const skills = await operations.discoverSkills!(ids);
         if (!cancelled) setState({ status: "ready", skills });
       } catch (error) {
         if (!cancelled) setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
@@ -372,6 +375,8 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     }
     if (key.downArrow || input === "j") setSelected(Math.min(index + 1, Math.max(visible.length - 1, 0)));
     else if (key.upArrow || input === "k") setSelected(Math.max(index - 1, 0));
+    else if (key.pageDown) setSelected(Math.min(index + pageStep(height), Math.max(visible.length - 1, 0)));
+    else if (key.pageUp) setSelected(Math.max(index - pageStep(height), 0));
     else if (input === "/") {
       typed.current = current.query;
       dispatch({ type: "open" });
@@ -416,6 +421,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const scope = all || sourceId === undefined ? "all sources" : sourceId;
   if (state.status === "loading") return <Text>Loading skills...</Text>;
   if (state.status === "error") return <Text color="red">Error: {state.message}</Text>;
+  const window = computeWindow(visible.length, index, height);
 
   return (
     <Box flexDirection="column">
@@ -427,13 +433,14 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       ) : null}
       {skills.length === 0 ? <Text>No skills</Text> : null}
       {skills.length > 0 && visible.length === 0 ? <Text>No matching skills</Text> : null}
-      {visible.map((skill, position) => (
-        <Text key={`${skill.sourceId}:${skill.path}`} bold={position === index}>
-          {position === index ? "> " : "  "}
+      {visible.slice(window.start, window.end).map((skill, offset) => (
+        <Text key={`${skill.sourceId}:${skill.path}`} bold={window.start + offset === index}>
+          {window.start + offset === index ? "> " : "  "}
           {skill.name}  {truncate(skill.description)}  {skill.sourceId}
           {installMarker(skill, installed) === "" ? "" : `  ${installMarker(skill, installed)}`}
         </Text>
       ))}
+      {window.indicator ? <Text dimColor>{window.indicator}</Text> : null}
       {message ? <Text color={message.kind === "error" ? "red" : "green"}>{message.text}</Text> : null}
       <ActionPanel mode={action} />
     </Box>

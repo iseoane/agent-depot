@@ -211,3 +211,59 @@ test("CatalogView starts on all sources when no source is given", async () => {
   assert.deepEqual(requested.at(-1), ["builtin:agent-depot", "git:1234567890abcdef12345678"]);
   unmount();
 });
+
+class ReceiverBoundOperations implements SourceOperations {
+  async addGitSource(): Promise<never> {
+    throw new Error("unused");
+  }
+
+  async listSources() {
+    return [BUILT_IN_SOURCE];
+  }
+
+  async refreshSource(): Promise<never> {
+    throw new Error("unused");
+  }
+
+  async selectSources(ids: readonly string[]) {
+    return (await this.listSources()).filter((source) => ids.includes(source.id));
+  }
+
+  // Like the real operations, this relies on `this`; a detached call loses it.
+  async discoverSkills(ids: readonly string[]): Promise<readonly SkillCandidate[]> {
+    await this.selectSources(ids);
+    return skills.filter((skill) => ids.includes(skill.sourceId));
+  }
+}
+
+test("CatalogView calls discoverSkills with its receiver", async () => {
+  const { lastFrame, unmount } = render(
+    <CatalogView environment={NO_MANIFEST} operations={new ReceiverBoundOperations()} sourceId="builtin:agent-depot" />,
+  );
+  const frame = await waitForFrame(lastFrame, /alpha|Cannot read properties/);
+  assert.doesNotMatch(frame, /Cannot read properties/);
+  assert.match(frame, /alpha/);
+  unmount();
+});
+
+test("CatalogView windows a long list around the highlight and pages with PgUp/PgDn", async () => {
+  const many: readonly SkillCandidate[] = Array.from({ length: 40 }, (_, n) => ({
+    sourceId: "builtin:agent-depot",
+    path: `skills/s${String(n).padStart(2, "0")}`,
+    name: `skill${String(n).padStart(2, "0")}`,
+    description: "d",
+  }));
+  const { lastFrame, stdin, unmount } = render(
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => many)} sourceId="builtin:agent-depot" listHeight={6} />,
+  );
+  const top = await waitForFrame(lastFrame, /1–6 of 40/);
+  assert.match(selectedLine(top) ?? "", /skill00/);
+  assert.ok(!top.includes("skill06"));
+  stdin.write("\u001B[6~");
+  const paged = await waitForFrame(lastFrame, (frame) => /skill06/.test(selectedLine(frame) ?? ""));
+  assert.match(paged, /\d+–\d+ of 40/);
+  assert.equal(paged.split("\n").filter((line) => /skill\d\d/.test(line)).length, 6);
+  stdin.write("\u001B[5~");
+  await waitForFrame(lastFrame, (frame) => /skill00/.test(selectedLine(frame) ?? ""));
+  unmount();
+});

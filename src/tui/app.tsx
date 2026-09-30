@@ -21,9 +21,9 @@ export interface AppProps {
 type ViewName = "sources" | "catalog" | "installations" | "updates";
 
 const HINTS: Record<ViewName, string> = {
-  sources: "j/k move  Enter catalog  a add  r refresh  d remove  2 catalog  3 installations  4 updates  q quit",
+  sources: "j/k move  PgUp/PgDn page  space select  a all git  Enter catalog  n add  r refresh  d remove  2 catalog  3 installations  4 updates  q quit",
   catalog: "j/k move  / filter  i install  u uninstall  s all sources  1 sources  3 installations  4 updates  q quit",
-  installations: "j/k move  A adopt  u uninstall  i hosts  1 sources  2 catalog  4 updates  q quit",
+  installations: "j/k move  PgUp/PgDn page  Enter/right expand  left collapse  A adopt  u uninstall  i hosts  1 sources  2 catalog  4 updates  q quit",
   updates: "j/k move  space toggle  a all  Enter preview  p project  g user-global  r check  1 sources  2 catalog  3 installations  q quit",
 };
 

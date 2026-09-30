@@ -178,12 +178,11 @@ export async function applySkillUpdate(
 
   try {
     if (plan.method !== undefined) {
-      const executor = options.executeMethod ?? options.sourceOperations?.executeInstallationMethod ?? executeSourceInstallationMethod;
-      await executor(plan.method, {
-        source: plan.source,
-        skillPath: plan.selection.path,
-        projectRoot: options.projectRoot,
-      });
+      const context = { source: plan.source, skillPath: plan.selection.path, projectRoot: options.projectRoot };
+      if (options.executeMethod) await options.executeMethod(plan.method, context);
+      else if (options.sourceOperations?.executeInstallationMethod) {
+        await options.sourceOperations.executeInstallationMethod(plan.method, context);
+      } else await executeSourceInstallationMethod(plan.method, context);
     }
     const updatedSelection = selectionWithInstallation(plan.selection, transaction.result, options.projectRoot);
     await persistedState.apply(updatedSelection);
@@ -278,9 +277,9 @@ async function resolveUpdateMethod(
 ): Promise<SourceInstallationMethod | undefined> {
   const configured = selection.methods?.update;
   if (configured !== undefined) return parseSourceInstallationMethod(configured);
-  const reader = options.sourceOperations?.readInstallationMethod;
-  if (!reader || !source) return undefined;
-  const metadata = await reader(source, selection.path, snapshot.files);
+  const operations = options.sourceOperations;
+  if (!operations?.readInstallationMethod || !source) return undefined;
+  const metadata = await operations.readInstallationMethod(source, selection.path, snapshot.files);
   return metadata === undefined ? undefined : parseSourceInstallationMethod(metadata);
 }
 
@@ -318,8 +317,8 @@ async function preparePersistedSelection(
     };
   }
 
-  const updateGlobal = options.sourceOperations?.updateUserGlobalInstallation;
-  if (!updateGlobal) {
+  const operations = options.sourceOperations;
+  if (!operations?.updateUserGlobalInstallation) {
     throw new Error("Configured Source operations cannot persist user-global Skill updates");
   }
   const installations = await options.sourceOperations?.listUserGlobalInstallations?.();
@@ -328,10 +327,10 @@ async function preparePersistedSelection(
   return {
     apply: async (updatedSelection) => {
       applied = true;
-      await updateGlobal(updatedSelection);
+      await operations.updateUserGlobalInstallation!(updatedSelection);
     },
     rollback: async () => {
-      if (applied) await updateGlobal(previous);
+      if (applied) await operations.updateUserGlobalInstallation!(previous);
     },
   };
 }
