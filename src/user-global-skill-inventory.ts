@@ -678,7 +678,15 @@ function isGlobalLocation(candidatePath: string, rootName: ".agents" | ".claude"
 }
 
 function fileIdentity(information: Stats): string {
-  return `${information.dev}:${information.ino}`;
+  const native = `${information.dev}:${information.ino}`;
+  if (!information.isSymbolicLink()) {
+    // A directory's content digest covers a replacement that reuses an inode.
+    return native;
+  }
+  // A link has no content to digest and inode numbers are recycled, so add the
+  // birth time and the link size (mirrors pathIdentityKey in project-installation).
+  const birth = Number.isFinite(information.birthtimeMs) && information.birthtimeMs > 0 ? information.birthtimeMs : 0;
+  return `${native}:${information.size}:${birth}`;
 }
 
 function skip(

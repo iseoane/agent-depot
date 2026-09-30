@@ -19,7 +19,8 @@ Ship every finding of the 0.2.1 review (2026-09-30) as a patch release of @iseoa
   - Evidence: RED (3 help tests failed) -> GREEN. Only the bare explicit forms print help; no args and `--help extra` stay exit 1 usage errors; USAGE text unchanged. README updated. Route: inline.
 - [x] A4 Updates: collapsed "cannot be checked" row names the "newer Agent Depot" reason.
   - Evidence: RED (tui-updates-view test) -> GREEN. Row reads `N cannot be checked ▸ (1 installed by a newer Agent Depot)`; also counts A2's `pinned to another Agent Depot`. Route: inline.
-- [ ] A5 unmanaged symlink identity includes birthtime (`src/user-global-skill-inventory.ts:681`).
+- [x] A5 unmanaged symlink identity includes birthtime (`src/user-global-skill-inventory.ts:681`).
+  - Evidence: RED (2 fake-lstat tests: equal dev:ino, different birthtime / size) -> GREEN. Symlink identity is `dev:ino:size:birthtime`; directories unchanged. Route: inline.
 - [ ] A6 README relative links (CONTEXT.md, docs/adr) → absolute GitHub URLs.
 ### B — Hardening and packaging
 - [ ] B1 tarball: drop `.js.map` (or ship src) and skill `test_*.py` / `testdata`; pack-smoke asserts it.

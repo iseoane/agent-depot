@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -9,6 +10,7 @@ import {
   inspectUserGlobalSymlinkRemoval,
   removeUserGlobalSymlink,
   scanUserGlobalSkillInventory,
+  type UserGlobalSkillFileSystem,
 } from "../src/user-global-skill-inventory.js";
 
 const SKILL_MD = "---\nname: dev\ndescription: Dev skill\n---\n\nBody\n";
@@ -142,3 +144,32 @@ test("does not remove anything when the link is swapped for a real directory aft
   assert.ok((await lstat(linkPath)).isDirectory());
   assert.equal(await readFile(path.join(linkPath, "SKILL.md"), "utf8"), SKILL_MD);
 });
+
+for (const [label, recheck] of [
+  ["birth time", { birthtimeMs: 2_000 }],
+  ["size", { size: 99 }],
+] as const) {
+  test(`does not remove a link replaced by another link that reuses the same dev:ino but has a different ${label}`, async (t) => {
+    const { home, target } = await fixture(t);
+    const linkPath = await link(home, ".claude", "dev", target);
+    // Inode numbers are recycled, so dev:ino alone cannot tell two links apart.
+    let inspections = 0;
+    const fileSystem: UserGlobalSkillFileSystem = {
+      lstat: async (candidatePath) => {
+        const real = await lstat(candidatePath);
+        if (candidatePath !== linkPath) return real;
+        inspections += 1;
+        return Object.assign(Object.create(Object.getPrototypeOf(real) as object) as Stats, real, { birthtimeMs: 1_000 }, inspections > 1 ? recheck : {});
+      },
+      readdir: async (candidatePath) => readdir(candidatePath),
+      readFile,
+      rename,
+      rm,
+    };
+    const options = { homeDirectory: home, managedInstallations: [], fileSystem };
+    const inspection = await inspectUserGlobalSymlinkRemoval(linkPath, options);
+
+    await assert.rejects(removeUserGlobalSymlink(inspection, options), /changed before deletion/);
+    assert.ok((await lstat(linkPath)).isSymbolicLink());
+  });
+}
