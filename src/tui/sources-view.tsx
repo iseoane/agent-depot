@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { GitSource } from "../git-source.js";
 import type { Source, SourceOperations } from "../sources.js";
 import { initialMode, modeReducer, type Mode, type ModeEvent } from "./sources-mode.js";
+import { computeWindow, pageStep, useListHeight } from "./window.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
@@ -11,6 +12,8 @@ export interface SourcesViewProps {
   readonly onCapturingChange?: (capturing: boolean) => void;
   /** Invoked when the user presses Enter on the highlighted source. */
   readonly onOpenCatalog?: (source: Source) => void;
+  /** Rows the list may use; defaults to what the terminal leaves. Injectable for tests. */
+  readonly listHeight?: number;
 }
 
 type LoadState =
@@ -47,7 +50,8 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: SourcesViewProps) {
+export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight }: SourcesViewProps) {
+  const height = useListHeight(listHeight, 6);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
   const [selection, setSelection] = useState<{ readonly id?: string; readonly index: number }>({ index: 0 });
@@ -204,6 +208,10 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: So
       select(selected + 1);
     } else if (key.upArrow || input === "k") {
       select(selected - 1);
+    } else if (key.pageDown) {
+      select(selected + pageStep(height));
+    } else if (key.pageUp) {
+      select(selected - pageStep(height));
     } else if (key.return && current) {
       onOpenCatalog?.(current);
     } else if (input === "n") {
@@ -245,17 +253,23 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: So
   if (state.status === "loading") return <Text>Loading sources...</Text>;
   if (state.status === "error") return <Text color="red">Error: {state.message}</Text>;
 
+  const window = computeWindow(sources.length, selected, height);
+
   return (
     <Box flexDirection="column">
       {sources.length === 0 ? <Text>No sources</Text> : null}
       {sources.length > 0 ? <Text dimColor>{"      "}ID  KIND  URL</Text> : null}
-      {sources.map((source, index) => (
-        <Text key={source.id} bold={index === selected}>
-          {index === selected ? "> " : "  "}
-          {source.kind === "git" ? (marked.has(source.id) ? "[x] " : "[ ] ") : "    "}
-          {source.id}  {source.kind}  {describe(source)}
-        </Text>
-      ))}
+      {sources.slice(window.start, window.end).map((source, offset) => {
+        const index = window.start + offset;
+        return (
+          <Text key={source.id} bold={index === selected}>
+            {index === selected ? "> " : "  "}
+            {source.kind === "git" ? (marked.has(source.id) ? "[x] " : "[ ] ") : "    "}
+            {source.id}  {source.kind}  {describe(source)}
+          </Text>
+        );
+      })}
+      {window.indicator ? <Text dimColor>{window.indicator}</Text> : null}
       {selectedCount > 0 ? <Text>{selectedCount} selected</Text> : null}
       <Prompt mode={mode} />
       {message ? <Text color={message.kind === "error" ? "red" : "green"}>{message.text}</Text> : null}

@@ -245,3 +245,25 @@ test("CatalogView calls discoverSkills with its receiver", async () => {
   assert.match(frame, /alpha/);
   unmount();
 });
+
+test("CatalogView windows a long list around the highlight and pages with PgUp/PgDn", async () => {
+  const many: readonly SkillCandidate[] = Array.from({ length: 40 }, (_, n) => ({
+    sourceId: "builtin:agent-depot",
+    path: `skills/s${String(n).padStart(2, "0")}`,
+    name: `skill${String(n).padStart(2, "0")}`,
+    description: "d",
+  }));
+  const { lastFrame, stdin, unmount } = render(
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => many)} sourceId="builtin:agent-depot" listHeight={6} />,
+  );
+  const top = await waitForFrame(lastFrame, /1–6 of 40/);
+  assert.match(selectedLine(top) ?? "", /skill00/);
+  assert.ok(!top.includes("skill06"));
+  stdin.write("\u001B[6~");
+  const paged = await waitForFrame(lastFrame, (frame) => /skill06/.test(selectedLine(frame) ?? ""));
+  assert.match(paged, /\d+–\d+ of 40/);
+  assert.equal(paged.split("\n").filter((line) => /skill\d\d/.test(line)).length, 6);
+  stdin.write("\u001B[5~");
+  await waitForFrame(lastFrame, (frame) => /skill00/.test(selectedLine(frame) ?? ""));
+  unmount();
+});

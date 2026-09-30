@@ -381,3 +381,19 @@ test("key 4 opens the Updates view; q and number keys are ignored while confirmi
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   unmount();
 });
+
+test("windows a long list of updates around the highlight and pages with PgDn", async (t) => {
+  const f = await fixture(t);
+  const specs = Array.from({ length: 12 }, (_, n): SkillSpec => ({ name: `skill${String(n).padStart(2, "0")}`, state: "outdated" }));
+  await seedProject(f, specs);
+  const { lastFrame, stdin, unmount } = render(
+    <UpdatesView operations={f.operations} environment={f.environment} listHeight={4} />,
+  );
+  const top = await waitForFrame(lastFrame, /1–4 of 12/);
+  assert.equal(top.split("\n").filter((line) => /skill\d\d/.test(line)).length, 4);
+  press(stdin, "\u001B[6~");
+  const paged = await waitForFrame(lastFrame, (frame) => /> .*skill04/.test(frame));
+  assert.match(paged, /\d+–\d+ of 12/);
+  assert.ok(!paged.includes("skill00"));
+  unmount();
+});

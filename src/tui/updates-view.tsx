@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
 import type { TuiEnvironment } from "./environment.js";
+import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { BROWSE, type UpdatesMode } from "./updates-mode.js";
 import {
   loadUpdateRows,
@@ -18,6 +19,8 @@ export interface UpdatesViewProps {
   readonly environment?: TuiEnvironment;
   /** Reports whether the view is capturing keys, so the shell can suspend global keys. */
   readonly onCapturingChange?: (capturing: boolean) => void;
+  /** Rows the list may use; defaults to what the terminal leaves. Injectable for tests. */
+  readonly listHeight?: number;
 }
 
 const NO_ENVIRONMENT: TuiEnvironment = {};
@@ -36,7 +39,8 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function UpdatesView({ operations, environment, onCapturingChange }: UpdatesViewProps) {
+export function UpdatesView({ operations, environment, onCapturingChange, listHeight }: UpdatesViewProps) {
+  const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
   const [scope, setScope] = useState<UpdateScope>("project");
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -138,6 +142,8 @@ export function UpdatesView({ operations, environment, onCapturingChange }: Upda
       case "browse":
         if (key.downArrow || input === "j") setCursor(Math.min(index + 1, Math.max(rows.length - 1, 0)));
         else if (key.upArrow || input === "k") setCursor(Math.max(index - 1, 0));
+        else if (key.pageDown) setCursor(Math.min(index + pageStep(height), Math.max(rows.length - 1, 0)));
+        else if (key.pageUp) setCursor(Math.max(index - pageStep(height), 0));
         else if (input === " ") {
           const row = rows[index];
           if (row?.item.status !== "updateable") return;
@@ -172,13 +178,16 @@ export function UpdatesView({ operations, environment, onCapturingChange }: Upda
     }
   });
 
+  const window = computeWindow(rows.length, index, height);
+
   return (
     <Box flexDirection="column">
       <Text bold>Updates (scope: {scope})  p project  g user-global  r check again</Text>
       {state.status === "loading" ? <Text>Checking for updates...</Text> : null}
       {state.status === "error" ? <Text color="red">Error: {state.message}</Text> : null}
       {data && rows.length === 0 ? <Text>No installations</Text> : null}
-      {rows.map((row, position) => {
+      {rows.slice(window.start, window.end).map((row, offset) => {
+        const position = window.start + offset;
         const box = row.item.status === "updateable" ? (checked.includes(row.item.id) ? "[x]" : "[ ]") : "   ";
         return (
           <Box key={row.item.id} flexDirection="column">
@@ -189,6 +198,7 @@ export function UpdatesView({ operations, environment, onCapturingChange }: Upda
           </Box>
         );
       })}
+      {window.indicator ? <Text dimColor>{window.indicator}</Text> : null}
       {data && rows.length > 0 ? <Text dimColor>{checked.length} selected</Text> : null}
       {message ? (
         <Box flexDirection="column">
