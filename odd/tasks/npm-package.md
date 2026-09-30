@@ -22,4 +22,5 @@ Make Agent Depot installable and runnable with `npx @iseoane/agent-depot`, `pnpm
 - [ ] P3 — Version `0.2.0` and CHANGELOG (new `tui`, `skill remove`, `skill host add`; breaking: Node >= 24).
 - [ ] P4 — `npm pack` dry run: inspect the tarball contents, install the `.tgz` in a clean temp directory, and verify `agent-depot --help`, `agent-depot tui` (manual), built-in skill discovery and the Ink load from dependencies.
 - [ ] P5 — README: install/run instructions for npx / pnpm dlx / global install.
+- [ ] P7 — Single version source: `package.json` only; remove `src/version.ts` (only used by tests/version.test.ts) or derive it from `AGENT_DEPOT_PACKAGE_VERSION`; add `agent-depot --version`; show the version in the TUI header (`Agent Depot v0.2.0`).
 - [ ] P6 — (User-confirmed step) `npm publish`.
