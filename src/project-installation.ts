@@ -623,6 +623,21 @@ export async function installProjectSkill(
 }
 
 /**
+ * Explicit host evidence can reject before reading source bytes. The portable
+ * baseline is different: its evidence is the validated tree itself, never a
+ * caller's assertion alone.
+ */
+function validateEarlyCompatibility(request: ProjectSkillInstallationRequest, skillName: string): ReturnType<typeof validateCompatibility> | undefined {
+  const hasDeclaredIncompatibility = Object.values(request.compatibility ?? {}).some((value) => value === false || typeof value === "string");
+  const hasUnsupportedSelectedHost = request.compatibleHosts !== undefined &&
+    request.selection.hosts.some((host) => !request.compatibleHosts?.includes(host));
+  if (hasUnsupportedSelectedHost || hasDeclaredIncompatibility || request.portableV1 !== true) {
+    return validateCompatibility(request, skillName, undefined);
+  }
+  return undefined;
+}
+
+/**
  * Installs one Skill and retains a transaction receipt for a surrounding
  * manifest/state transaction. Explicit overwrite moves the original directory
  * aside atomically so rollback can restore it if persistence fails.
@@ -636,17 +651,7 @@ export async function installProjectSkillTransaction(
   const projectRoot = path.resolve(options.projectRoot);
   await assertNoSymlinkComponents(projectRoot, fileSystem);
   await assertDirectory(projectRoot, fileSystem, "project root");
-  // Explicit host evidence can reject before reading source bytes. The portable
-  // baseline is different: its evidence is the validated tree itself, never a
-  // caller's assertion alone.
-  const hasDeclaredIncompatibility = Object.values(request.compatibility ?? {}).some((value) => value === false || typeof value === "string");
-  const hasUnsupportedSelectedHost = request.compatibleHosts !== undefined &&
-    request.selection.hosts.some((host) => !request.compatibleHosts?.includes(host));
-  const earlyHosts = hasUnsupportedSelectedHost || hasDeclaredIncompatibility
-    ? validateCompatibility(request, skillName, undefined)
-    : request.portableV1 === true
-      ? undefined
-      : validateCompatibility(request, skillName, undefined);
+  const earlyHosts = validateEarlyCompatibility(request, skillName);
   const files = await readAndValidateTree(request, skillName, options.sourceAccess);
   const baseline = skillTreeBaseline(files.map((file) => file.source));
   const hosts = earlyHosts ?? validateCompatibility(request, skillName, files);
@@ -665,13 +670,7 @@ export async function installProjectSkillTransaction(
     }
     if (inspection.collision !== undefined) {
       assertOverwriteCollision(inspection);
-      return overwriteProjectSkillTransaction(
-        request,
-        options,
-        files,
-        hosts,
-        inspection,
-      );
+      return overwriteProjectSkillTransaction(request, options, files, hosts, inspection);
     }
   }
   const createdPaths: CreatedPath[] = [];
@@ -699,26 +698,11 @@ export async function installProjectSkillTransaction(
     );
     if (adoption) {
       return Object.freeze({
-        result: Object.freeze({
-          skillName,
-          canonicalPath: adoption.canonicalPath,
-          ...(hosts.includes("claude") ? { claudePath } : {}),
-          hosts: Object.freeze([...hosts]),
-          files: Object.freeze(files.map((file) => file.relativePath)),
-          adopted: true,
-          adoptedPaths: Object.freeze([...adoption.paths]),
-          baseline,
-          ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
+        result: buildInstallationResult({
+          request, skillName, canonicalPath: adoption.canonicalPath, claudePath, hosts, files, baseline,
+          adoptedPaths: adoption.paths,
         }),
-        rollback: async () => {
-          const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
-          if (cleanupErrors.length > 0) {
-            throw new ProjectInstallationError(
-              "rollback-failed",
-              `Rollback was incomplete: ${cleanupErrors.join("; ")}`,
-            );
-          }
-        },
+        rollback: createCreatedPathsRollback(createdPaths, uncertainCreates, fileSystem),
       });
     }
 
@@ -734,63 +718,15 @@ export async function installProjectSkillTransaction(
 
     await createDirectory(canonicalPath, createdPaths, uncertainCreates, fileSystem);
     for (const file of files) {
-      const destination = path.join(canonicalPath, ...file.relativePath.split("/"));
-      await ensureDirectoryTree(canonicalPath, file.relativePath.split("/").slice(0, -1), createdPaths, uncertainCreates, fileSystem);
-      uncertainCreates.add(destination);
-      await fileSystem.writeFile(destination, file.source.content);
-      const information = await fileSystem.lstat(destination);
-      if (information.isSymbolicLink() || !information.isFile()) {
-        throw new ProjectInstallationError("unsafe-target", `Installed file is not a regular file: ${destination}`);
-      }
-      createdPaths.push({ path: destination, kind: "file", identity: pathIdentity(information) });
-      uncertainCreates.delete(destination);
-      await fileSystem.chmod(destination, file.source.executable ? 0o755 : 0o644);
+      await writeInstalledFile(canonicalPath, file, createdPaths, uncertainCreates, fileSystem);
     }
-
     if (hosts.includes("claude")) {
-      const linkTarget = path.relative(path.dirname(claudePath), canonicalPath);
-      uncertainCreates.add(claudePath);
-      try {
-        await fileSystem.symlink(linkTarget, claudePath, "dir");
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new ProjectInstallationError(
-          "claude-symlink-failed",
-          `Cannot create the Claude Skill symlink at ${JSON.stringify(claudePath)}: ${reason}. ` +
-          "Grant this process permission to create directory symlinks (on Windows, enable Developer Mode or the required symlink privilege) and retry. " +
-          "No duplicate managed copy was created; the canonical installation was rolled back.",
-        );
-      }
-      const information = await fileSystem.lstat(claudePath);
-      if (!information.isSymbolicLink()) {
-        throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${claudePath}`);
-      }
-      createdPaths.push({ path: claudePath, kind: "symlink", identity: pathIdentity(information) });
-      uncertainCreates.delete(claudePath);
+      await createClaudeSkillSymlink(claudePath, canonicalPath, createdPaths, uncertainCreates, fileSystem);
     }
 
-    const result = Object.freeze({
-      skillName,
-      canonicalPath,
-      ...(hosts.includes("claude") ? { claudePath } : {}),
-      hosts: Object.freeze([...hosts]),
-      files: Object.freeze(files.map((file) => file.relativePath)),
-      adopted: false,
-      adoptedPaths: Object.freeze([]),
-      baseline,
-      ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
-    });
     return Object.freeze({
-      result,
-      rollback: async () => {
-        const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
-        if (cleanupErrors.length > 0) {
-          throw new ProjectInstallationError(
-            "rollback-failed",
-            `Rollback was incomplete: ${cleanupErrors.join("; ")}`,
-          );
-        }
-      },
+      result: buildInstallationResult({ request, skillName, canonicalPath, claudePath, hosts, files, baseline, adoptedPaths: undefined }),
+      rollback: createCreatedPathsRollback(createdPaths, uncertainCreates, fileSystem),
     });
   } catch (error) {
     const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
@@ -803,6 +739,97 @@ export async function installProjectSkillTransaction(
     }
     throw error;
   }
+}
+
+interface InstallationResultParts {
+  readonly request: ProjectSkillInstallationRequest;
+  readonly skillName: string;
+  readonly canonicalPath: string;
+  readonly claudePath: string;
+  readonly hosts: readonly ProjectHost[];
+  readonly files: readonly { readonly relativePath: string }[];
+  readonly baseline: ProjectSkillInstallationResult["baseline"];
+  /** Present only when an existing identical installation was adopted. */
+  readonly adoptedPaths: readonly string[] | undefined;
+}
+
+function buildInstallationResult(parts: InstallationResultParts): ProjectSkillInstallationResult {
+  const { request, skillName, canonicalPath, claudePath, hosts, files, baseline, adoptedPaths } = parts;
+  return Object.freeze({
+    skillName,
+    canonicalPath,
+    ...(hosts.includes("claude") ? { claudePath } : {}),
+    hosts: Object.freeze([...hosts]),
+    files: Object.freeze(files.map((file) => file.relativePath)),
+    adopted: adoptedPaths !== undefined,
+    adoptedPaths: Object.freeze([...(adoptedPaths ?? [])]),
+    baseline,
+    ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
+  });
+}
+
+function createCreatedPathsRollback(
+  createdPaths: CreatedPath[],
+  uncertainCreates: Set<string>,
+  fileSystem: ProjectInstallationFileSystem,
+): () => Promise<void> {
+  return async () => {
+    const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
+    if (cleanupErrors.length > 0) {
+      throw new ProjectInstallationError(
+        "rollback-failed",
+        `Rollback was incomplete: ${cleanupErrors.join("; ")}`,
+      );
+    }
+  };
+}
+
+async function writeInstalledFile(
+  canonicalPath: string,
+  file: ValidatedTreeFile,
+  createdPaths: CreatedPath[],
+  uncertainCreates: Set<string>,
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<void> {
+  const destination = path.join(canonicalPath, ...file.relativePath.split("/"));
+  await ensureDirectoryTree(canonicalPath, file.relativePath.split("/").slice(0, -1), createdPaths, uncertainCreates, fileSystem);
+  uncertainCreates.add(destination);
+  await fileSystem.writeFile(destination, file.source.content);
+  const information = await fileSystem.lstat(destination);
+  if (information.isSymbolicLink() || !information.isFile()) {
+    throw new ProjectInstallationError("unsafe-target", `Installed file is not a regular file: ${destination}`);
+  }
+  createdPaths.push({ path: destination, kind: "file", identity: pathIdentity(information) });
+  uncertainCreates.delete(destination);
+  await fileSystem.chmod(destination, file.source.executable ? 0o755 : 0o644);
+}
+
+async function createClaudeSkillSymlink(
+  claudePath: string,
+  canonicalPath: string,
+  createdPaths: CreatedPath[],
+  uncertainCreates: Set<string>,
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<void> {
+  const linkTarget = path.relative(path.dirname(claudePath), canonicalPath);
+  uncertainCreates.add(claudePath);
+  try {
+    await fileSystem.symlink(linkTarget, claudePath, "dir");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new ProjectInstallationError(
+      "claude-symlink-failed",
+      `Cannot create the Claude Skill symlink at ${JSON.stringify(claudePath)}: ${reason}. ` +
+      "Grant this process permission to create directory symlinks (on Windows, enable Developer Mode or the required symlink privilege) and retry. " +
+      "No duplicate managed copy was created; the canonical installation was rolled back.",
+    );
+  }
+  const information = await fileSystem.lstat(claudePath);
+  if (!information.isSymbolicLink()) {
+    throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${claudePath}`);
+  }
+  createdPaths.push({ path: claudePath, kind: "symlink", identity: pathIdentity(information) });
+  uncertainCreates.delete(claudePath);
 }
 
 function assertOverwriteCollision(inspection: ProjectSkillInstallationInspection): void {
