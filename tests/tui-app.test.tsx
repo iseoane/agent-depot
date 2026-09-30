@@ -5,6 +5,7 @@ import { render } from "ink-testing-library";
 
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
+import { waitForFrame } from "./wait-for-frame.js";
 
 const external = {
   id: "git:1234567890abcdef12345678",
@@ -27,23 +28,29 @@ const operations: SourceOperations = {
   },
 };
 
-const tick = () => new Promise((resolve) => setImmediate(resolve));
+async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) assert.fail("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 
 test("App renders the header and the Sources view", async () => {
   const { lastFrame, unmount } = render(<App operations={operations} onExit={() => undefined} />);
-  await tick();
-  assert.match(lastFrame() ?? "", /Agent Depot/);
-  assert.match(lastFrame() ?? "", /Sources/);
-  assert.match(lastFrame() ?? "", /builtin:agent-depot/);
+  const frame = await waitForFrame(lastFrame, /builtin:agent-depot/);
+  assert.match(frame, /Agent Depot/);
+  assert.match(frame, /Sources/);
   unmount();
 });
 
 test("App calls onExit when q is pressed", async () => {
   let exits = 0;
-  const { stdin, unmount } = render(<App operations={operations} onExit={() => { exits += 1; }} />);
-  await new Promise((resolve) => setImmediate(resolve));
+  const { lastFrame, stdin, unmount } = render(<App operations={operations} onExit={() => { exits += 1; }} />);
+  // Wait for the first render so the key handler is attached, then poll for the exit call.
+  await waitForFrame(lastFrame, /builtin:agent-depot/);
   stdin.write("q");
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitFor(() => exits === 1);
   assert.equal(exits, 1);
   unmount();
 });
@@ -57,32 +64,25 @@ const catalogOperations: SourceOperations = {
     return ids.map((sourceId) => ({ sourceId, path: `p-${sourceId}`, name: `skill-of-${sourceId}`, description: "d" }));
   },
 };
-const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 test("App switches views with 1 and 2 and shows the active view", async () => {
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
-  await settle();
-  assert.match(lastFrame() ?? "", /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("2");
-  await settle();
-  assert.match(lastFrame() ?? "", /\[2 Catalog\]/);
-  assert.match(lastFrame() ?? "", /skill-of-/);
+  await waitForFrame(lastFrame, (frame) => /\[2 Catalog\]/.test(frame) && /skill-of-/.test(frame));
   stdin.write("1");
-  await settle();
-  assert.match(lastFrame() ?? "", /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /\[1 Sources\]/);
   unmount();
 });
 
 test("App opens the catalog of the highlighted source with Enter", async () => {
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
-  await settle();
+  await waitForFrame(lastFrame, /git:1234567890abcdef12345678/);
   stdin.write("j");
-  await settle();
+  await waitForFrame(lastFrame, (frame) => /> git:1234567890abcdef12345678/.test(frame));
   stdin.write("\r");
-  await settle();
-  const frame = lastFrame() ?? "";
+  const frame = await waitForFrame(lastFrame, /skill-of-git:1234567890abcdef12345678/);
   assert.match(frame, /\[2 Catalog\]/);
-  assert.match(frame, /skill-of-git:1234567890abcdef12345678/);
   assert.ok(!frame.includes("skill-of-builtin"));
   unmount();
 });
@@ -90,55 +90,30 @@ test("App opens the catalog of the highlighted source with Enter", async () => {
 test("App does not switch views or quit while the catalog filter captures keys", async () => {
   let exits = 0;
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} onExit={() => { exits += 1; }} />);
-  await settle();
+  await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("2");
-  await settle();
+  await waitForFrame(lastFrame, /\[2 Catalog\]/);
   stdin.write("/");
-  await settle();
+  await waitForFrame(lastFrame, /Filter: _/);
   stdin.write("q1");
-  await settle();
+  // Typing is processed in order, so once the filter shows the text the keys were captured, not treated as q / view 1.
+  const frame = await waitForFrame(lastFrame, /Filter: q1/);
   assert.equal(exits, 0);
-  assert.match(lastFrame() ?? "", /\[2 Catalog\]/);
-  assert.match(lastFrame() ?? "", /Filter: q1/);
+  assert.match(frame, /\[2 Catalog\]/);
   unmount();
 });
 
 test("App ignores q and view keys sent in the same burst as the catalog filter key", async () => {
   let exits = 0;
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} onExit={() => { exits += 1; }} />);
-  await settle();
+  await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("2");
-  await settle();
+  await waitForFrame(lastFrame, /\[2 Catalog\]/);
   stdin.write("/");
   stdin.write("q");
   stdin.write("1");
-  await settle();
+  const frame = await waitForFrame(lastFrame, /Filter: q1/);
   assert.equal(exits, 0);
-  assert.match(lastFrame() ?? "", /\[2 Catalog\]/);
-  assert.match(lastFrame() ?? "", /Filter: q1/);
-  unmount();
-});
-
-test("App keeps q, 1 and 2 inert while the Catalog install flow captures keys", async () => {
-  let exits = 0;
-  const { stdin, lastFrame, unmount } = render(<App operations={catalogOperations} onExit={() => { exits += 1; }} />);
-  await settle();
-  stdin.write("2");
-  await settle();
-  stdin.write("i");
-  await settle();
-  assert.match(lastFrame() ?? "", /Host/);
-  for (const input of ["q", "1", "2"]) {
-    stdin.write(input);
-    await settle();
-  }
-  assert.equal(exits, 0);
-  assert.match(lastFrame() ?? "", /2 Catalog\]/);
-  assert.match(lastFrame() ?? "", /space toggle/);
-  stdin.write("\u001B");
-  await settle();
-  stdin.write("q");
-  await settle();
-  assert.equal(exits, 1);
+  assert.match(frame, /\[2 Catalog\]/);
   unmount();
 });

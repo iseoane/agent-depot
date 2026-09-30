@@ -3,16 +3,28 @@ import { test } from "node:test";
 
 import { render } from "ink-testing-library";
 
+import { parseProjectManifest, ProjectManifestStore } from "../src/project-manifest.js";
 import type { SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
+import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const DOWN = "\u001B[B";
 const UP = "\u001B[A";
 const ESC = "\u001B";
-/** Only for "nothing changed" checks; every positive assertion waits with `waitForFrame`. */
-const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+/** Serves an empty project manifest so these tests never read the real cwd manifest. */
+class EmptyManifestStore extends ProjectManifestStore {
+  constructor() {
+    super("/nonexistent/agent-depot-test/agent-depot.json");
+  }
+
+  override async load() {
+    return parseProjectManifest({ version: 1, skills: [] });
+  }
+}
+const NO_MANIFEST: TuiEnvironment = { projectManifestStore: new EmptyManifestStore() };
 
 const skills: readonly SkillCandidate[] = [
   { sourceId: "builtin:agent-depot", path: "skills/alpha", name: "alpha", description: "Does Alpha things" },
@@ -44,7 +56,7 @@ function selectedLine(frame: string | undefined): string | undefined {
 
 test("CatalogView shows a loading state", () => {
   const { lastFrame, unmount } = render(
-    <CatalogView operations={operationsFor(() => new Promise(() => undefined))} sourceId="builtin:agent-depot" />,
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(() => new Promise(() => undefined))} sourceId="builtin:agent-depot" />,
   );
   assert.match(lastFrame() ?? "", /Loading skills/);
   unmount();
@@ -53,7 +65,7 @@ test("CatalogView shows a loading state", () => {
 test("CatalogView lists name, description and source id for the requested source", async () => {
   const requested: (readonly string[])[] = [];
   const { lastFrame, unmount } = render(
-    <CatalogView
+    <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async (ids) => {
         requested.push(ids);
         return skills.slice(0, 2);
@@ -72,7 +84,7 @@ test("CatalogView lists name, description and source id for the requested source
 test("CatalogView truncates long descriptions", async () => {
   const long = { ...skills[0], description: "x".repeat(200) };
   const { lastFrame, unmount } = render(
-    <CatalogView operations={operationsFor(async () => [long])} sourceId="builtin:agent-depot" />,
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => [long])} sourceId="builtin:agent-depot" />,
   );
   const frame = await waitForFrame(lastFrame, /x{20,}/);
   assert.ok(!frame.includes("x".repeat(100)));
@@ -81,12 +93,12 @@ test("CatalogView truncates long descriptions", async () => {
 });
 
 test("CatalogView shows empty, error and unsupported states", async () => {
-  const empty = render(<CatalogView operations={operationsFor(async () => [])} sourceId="s" />);
+  const empty = render(<CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => [])} sourceId="s" />);
   await waitForFrame(empty.lastFrame, /No skills/);
   empty.unmount();
 
   const failing = render(
-    <CatalogView
+    <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async () => {
         throw new Error("boom");
       })}
@@ -96,20 +108,19 @@ test("CatalogView shows empty, error and unsupported states", async () => {
   await waitForFrame(failing.lastFrame, /Error: boom/);
   failing.unmount();
 
-  const unsupported = render(<CatalogView operations={operationsFor()} sourceId="s" />);
+  const unsupported = render(<CatalogView environment={NO_MANIFEST} operations={operationsFor()} sourceId="s" />);
   await waitForFrame(unsupported.lastFrame, /not supported/);
   unsupported.unmount();
 });
 
 test("CatalogView navigates with j/k and arrows, clamped", async () => {
   const { lastFrame, stdin, unmount } = render(
-    <CatalogView operations={operationsFor(async () => skills)} sourceId="builtin:agent-depot" />,
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} sourceId="builtin:agent-depot" />,
   );
   const selects = (name: RegExp) => waitForFrame(lastFrame, (frame) => name.test(selectedLine(frame) ?? ""));
   await selects(/alpha/);
+  // Up at the top is clamped: if it moved the selection, "j" would land back on alpha instead of beta.
   stdin.write(UP);
-  await tick();
-  await selects(/alpha/);
   stdin.write("j");
   await selects(/beta/);
   stdin.write(DOWN);
@@ -124,7 +135,7 @@ test("CatalogView navigates with j/k and arrows, clamped", async () => {
 test("CatalogView filters case-insensitively on name and description with an n of m count", async () => {
   const capturing: boolean[] = [];
   const { lastFrame, stdin, unmount } = render(
-    <CatalogView
+    <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async () => skills)}
       sourceId="s"
       onCapturingChange={(value) => capturing.push(value)}
@@ -153,7 +164,7 @@ test("CatalogView filters case-insensitively on name and description with an n o
 
 test("CatalogView matches descriptions and shows no matches", async () => {
   const { lastFrame, stdin, unmount } = render(
-    <CatalogView operations={operationsFor(async () => skills)} sourceId="s" />,
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} sourceId="s" />,
   );
   await waitForFrame(lastFrame, /3 of 3/);
   stdin.write("/");
@@ -168,7 +179,7 @@ test("CatalogView matches descriptions and shows no matches", async () => {
 test("CatalogView toggles all sources with s", async () => {
   const requested: (readonly string[])[] = [];
   const { lastFrame, stdin, unmount } = render(
-    <CatalogView
+    <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async (ids) => {
         requested.push(ids);
         return skills;
@@ -189,7 +200,7 @@ test("CatalogView toggles all sources with s", async () => {
 test("CatalogView starts on all sources when no source is given", async () => {
   const requested: (readonly string[])[] = [];
   const { lastFrame, unmount } = render(
-    <CatalogView
+    <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async (ids) => {
         requested.push(ids);
         return [];

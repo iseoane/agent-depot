@@ -11,6 +11,7 @@ import { skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "../s
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
+import { waitForFrame } from "./wait-for-frame.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -63,15 +64,6 @@ async function fixture(t: TestContext, hosts: readonly ProjectHost[]): Promise<F
   return { operations, home, environment: { homeDirectory: home, projectRoot: home } };
 }
 
-async function waitFor(frame: () => string | undefined, pattern: RegExp): Promise<string> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const current = frame() ?? "";
-    if (pattern.test(current)) return current;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  assert.fail(`Timed out waiting for ${pattern}; last frame:\n${frame()}`);
-}
-
 const key = async (stdin: { write(data: string): void }, data: string) => {
   stdin.write(data);
   await new Promise((resolve) => setTimeout(resolve, 15));
@@ -88,11 +80,11 @@ function mount(f: Fixture, onCapturingChange?: (capturing: boolean) => void) {
 test("u on an installation with several hosts asks for all hosts or a host checklist", async (t) => {
   const f = await fixture(t, ["pi", "claude"]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi, claude\]/);
+  await waitForFrame(lastFrame, /\[global: pi, claude\]/);
   await key(stdin, "u");
-  await waitFor(lastFrame, /1 all hosts.*2 choose hosts/s);
+  await waitForFrame(lastFrame, /1 all hosts.*2 choose hosts/s);
   await key(stdin, "1");
-  const preview = await waitFor(lastFrame, /removes the whole user-global installation, from hosts: pi, claude/);
+  const preview = await waitForFrame(lastFrame, /removes the whole user-global installation, from hosts: pi, claude/);
   assert.match(preview, /y\/n/);
   unmount();
 });
@@ -100,9 +92,9 @@ test("u on an installation with several hosts asks for all hosts or a host check
 test("u with one host goes straight to the full removal preview", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi\]/);
+  await waitForFrame(lastFrame, /\[global: pi\]/);
   await key(stdin, "u");
-  const preview = await waitFor(lastFrame, /y\/n/);
+  const preview = await waitForFrame(lastFrame, /y\/n/);
   assert.ok(!preview.includes("all hosts"));
   assert.match(preview, /removes the whole user-global installation/);
   unmount();
@@ -111,17 +103,17 @@ test("u with one host goes straight to the full removal preview", async (t) => {
 test("choosing hosts removes only those hosts and reloads the marker", async (t) => {
   const f = await fixture(t, ["pi", "claude"]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi, claude\]/);
+  await waitForFrame(lastFrame, /\[global: pi, claude\]/);
   await key(stdin, "u");
   await key(stdin, "2");
-  await waitFor(lastFrame, /\[ \] 1 pi.*\[ \] 2 claude/s);
+  await waitForFrame(lastFrame, /\[ \] 1 pi.*\[ \] 2 claude/s);
   await key(stdin, "2");
   await key(stdin, ENTER);
-  const preview = await waitFor(lastFrame, /y\/n/);
+  const preview = await waitForFrame(lastFrame, /y\/n/);
   assert.match(preview, /remove hosts claude from "portable\/demo"; remaining hosts: pi/);
   assert.ok(await exists(claude(f.home)));
   await key(stdin, "y");
-  const done = await waitFor(lastFrame, /Removed hosts claude/);
+  const done = await waitForFrame(lastFrame, /Removed hosts claude/);
   assert.match(done, /\[global: pi\]/);
   assert.equal(await exists(claude(f.home)), false);
   assert.ok(await exists(canonical(f.home)));
@@ -132,15 +124,15 @@ test("choosing hosts removes only those hosts and reloads the marker", async (t)
 test("selecting every host in the checklist is a full removal", async (t) => {
   const f = await fixture(t, ["pi", "claude"]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi, claude\]/);
+  await waitForFrame(lastFrame, /\[global: pi, claude\]/);
   await key(stdin, "u");
   await key(stdin, "2");
   await key(stdin, "1");
   await key(stdin, "2");
   await key(stdin, ENTER);
-  await waitFor(lastFrame, /y\/n/);
+  await waitForFrame(lastFrame, /y\/n/);
   await key(stdin, "y");
-  const done = await waitFor(lastFrame, /Removed demo/);
+  const done = await waitForFrame(lastFrame, /Removed demo/);
   assert.ok(!done.includes("[global"));
   assert.equal(await exists(canonical(f.home)), false);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
@@ -151,14 +143,14 @@ test("the removal host checklist requires a host and Esc cancels without changes
   const f = await fixture(t, ["pi", "claude"]);
   const changes: boolean[] = [];
   const { lastFrame, stdin, unmount } = mount(f, (value) => changes.push(value));
-  await waitFor(lastFrame, /\[global: pi, claude\]/);
+  await waitForFrame(lastFrame, /\[global: pi, claude\]/);
   await key(stdin, "u");
   await key(stdin, "2");
   await key(stdin, ENTER);
-  await waitFor(lastFrame, /Select at least one host/);
+  await waitForFrame(lastFrame, /Select at least one host/);
   assert.equal(changes.at(-1), true);
   await key(stdin, ESC);
-  await waitFor(lastFrame, /Uninstall cancelled/);
+  await waitForFrame(lastFrame, /Uninstall cancelled/);
   assert.equal(changes.at(-1), false);
   assert.deepEqual(await hostsOf(f.operations), ["pi", "claude"]);
   unmount();
@@ -167,23 +159,23 @@ test("the removal host checklist requires a host and Esc cancels without changes
 test("i on a globally installed Skill offers adding only the missing hosts, with two confirmations", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi\]/);
+  await waitForFrame(lastFrame, /\[global: pi\]/);
   await key(stdin, "i");
-  await waitFor(lastFrame, /1 add hosts.*2 new install/s);
+  await waitForFrame(lastFrame, /1 add hosts.*2 new install/s);
   await key(stdin, "1");
-  const checklist = await waitFor(lastFrame, /\[ \] 1 claude/);
+  const checklist = await waitForFrame(lastFrame, /\[ \] 1 claude/);
   assert.ok(!/\d pi/.test(checklist));
   await key(stdin, "1");
   await key(stdin, ENTER);
-  const preview = await waitFor(lastFrame, /y\/n/);
+  const preview = await waitForFrame(lastFrame, /y\/n/);
   assert.match(preview, /add hosts claude to "portable\/demo"/);
   assert.match(preview, /\.claude\/skills\/demo/);
   assert.equal(await exists(claude(f.home)), false);
   await key(stdin, "y");
-  await waitFor(lastFrame, /needs separate confirmation/);
+  await waitForFrame(lastFrame, /needs separate confirmation/);
   assert.equal(await exists(claude(f.home)), false);
   await key(stdin, "y");
-  const done = await waitFor(lastFrame, /Added hosts claude/);
+  const done = await waitForFrame(lastFrame, /Added hosts claude/);
   assert.match(done, /\[global: pi, claude\]/);
   assert.ok(await exists(claude(f.home)));
   assert.deepEqual(await hostsOf(f.operations), ["pi", "claude"]);
@@ -193,16 +185,16 @@ test("i on a globally installed Skill offers adding only the missing hosts, with
 test("declining the additional-host confirmation changes nothing", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi\]/);
+  await waitForFrame(lastFrame, /\[global: pi\]/);
   await key(stdin, "i");
   await key(stdin, "1");
   await key(stdin, "1");
   await key(stdin, ENTER);
-  await waitFor(lastFrame, /y\/n/);
+  await waitForFrame(lastFrame, /y\/n/);
   await key(stdin, "y");
-  await waitFor(lastFrame, /needs separate confirmation/);
+  await waitForFrame(lastFrame, /needs separate confirmation/);
   await key(stdin, "n");
-  await waitFor(lastFrame, /cancelled/i);
+  await waitForFrame(lastFrame, /cancelled/i);
   assert.equal(await exists(claude(f.home)), false);
   assert.deepEqual(await hostsOf(f.operations), ["pi"]);
   unmount();
@@ -213,12 +205,12 @@ test("adding a host over a conflicting location shows the error and changes noth
   await mkdir(claude(f.home), { recursive: true });
   await writeFile(path.join(claude(f.home), "SKILL.md"), "different", "utf8");
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi\]/);
+  await waitForFrame(lastFrame, /\[global: pi\]/);
   await key(stdin, "i");
   await key(stdin, "1");
   await key(stdin, "1");
   await key(stdin, ENTER);
-  await waitFor(lastFrame, /already exists/);
+  await waitForFrame(lastFrame, /already exists/);
   assert.deepEqual(await hostsOf(f.operations), ["pi"]);
   unmount();
 });
@@ -226,18 +218,18 @@ test("adding a host over a conflicting location shows the error and changes noth
 test("choosing new install on a globally installed Skill continues the ordinary install steps", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi\]/);
+  await waitForFrame(lastFrame, /\[global: pi\]/);
   await key(stdin, "i");
   await key(stdin, "2");
-  await waitFor(lastFrame, /Host \(space/);
+  await waitForFrame(lastFrame, /Host \(space/);
   unmount();
 });
 
 test("i on a Skill that already has every host goes straight to the ordinary install steps", async (t) => {
   const f = await fixture(t, ["pi", "claude", "codex", "opencode"]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitFor(lastFrame, /\[global: pi, claude, codex, opencode\]/);
+  await waitForFrame(lastFrame, /\[global: pi, claude, codex, opencode\]/);
   await key(stdin, "i");
-  await waitFor(lastFrame, /Host \(space/);
+  await waitForFrame(lastFrame, /Host \(space/);
   unmount();
 });
