@@ -229,7 +229,7 @@ test("never offers a built-in Skill installed by a newer Agent Depot and says wh
   const { lastFrame, stdin, unmount } = mount(f);
   const frame = await waitForFrame(lastFrame, /portable\/outdated/);
   assert.ok(!frame.includes("portable/ahead"), "the newer-installed Skill is not offered");
-  assert.match(frame, /1 cannot be checked ▸/);
+  assert.match(frame, /1 cannot be checked ▸ \(1 installed by a newer Agent Depot\)/);
   press(stdin, "j");
   await waitForFrame(lastFrame, (current) => /> .*cannot be checked/.test(current));
   press(stdin, ENTER);
@@ -274,6 +274,20 @@ test("the scope filter defaults to all and t, p and g switch it without checking
   press(stdin, "t");
   await waitForFrame(lastFrame, (frame) => /scope: all/.test(frame) && frame.includes("portable/globalonly") && frame.includes("portable/projonly"));
   assert.equal(f.readCalls.length, reads, "changing the filter does not assess again");
+  unmount();
+});
+
+test("a pasted prototype property name never changes the scope filter", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "projonly", state: "outdated" }]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /portable\/projonly/);
+  press(stdin, "constructor");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.match(lastFrame() ?? "", /scope: all/);
+  press(stdin, "p");
+  const frame = await waitForFrame(lastFrame, /scope: project/);
+  assert.match(frame, /portable\/projonly/);
   unmount();
 });
 

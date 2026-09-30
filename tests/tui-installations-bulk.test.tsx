@@ -485,3 +485,86 @@ test("the bulk flows capture keys and Esc cancels the host checklist without cha
   assert.deepEqual(await records(f), { "portable/alpha": ["pi"] });
   view.unmount();
 });
+
+/** Operations that run `afterFirst` once, right after the first record change of the batch. */
+function withExternalChange(f: Fixture, method: "removeUserGlobalInstallations" | "updateUserGlobalInstallation", afterFirst: () => Promise<void>): SourceOperations {
+  let done = false;
+  const original = f.operations[method]! as (...args: unknown[]) => Promise<unknown>;
+  return {
+    ...f.operations,
+    [method]: async (...args: unknown[]) => {
+      await original.apply(f.operations, args);
+      if (!done) {
+        done = true;
+        await afterFirst();
+      }
+    },
+  };
+}
+
+test("an external record change between items fails the remaining uninstalls with a drift reason and leaves their files", async (t) => {
+  const f = await fixture(t);
+  for (const name of ["alpha", "beta", "gamma"]) await install(f, name, ["pi", "claude"]);
+  const view = render(
+    <InstallationsView
+      operations={withExternalChange(f, "removeUserGlobalInstallations", () => install(f, "intruder", ["pi"]))}
+      environment={f.environment}
+    />,
+  );
+  await waitForFrame(view.lastFrame, /builtin:agent-depot \(3\)/);
+  await open(view, [/builtin:agent-depot \(3\)/]);
+  view.stdin.write("a");
+  await waitForFrame(view.lastFrame, /3 selected/);
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /Uninstall 3 items\? y\/n/);
+  view.stdin.write("y");
+  const done = await waitForFrame(view.lastFrame, /Failed portable\/\w+: .*changed outside this batch/);
+  assert.equal(done.match(/Removed portable\//g)?.length, 1, done);
+  assert.equal(done.match(/changed outside this batch/g)?.length, 2, done);
+  const remaining = Object.keys(await records(f)).sort();
+  assert.equal(remaining.length, 3, `${remaining}`);
+  assert.ok(remaining.includes("portable/intruder"));
+  for (const name of ["alpha", "beta", "gamma"]) {
+    const kept = remaining.includes(`portable/${name}`);
+    assert.equal(await exists(agentsDir(f.home, name)), kept, name);
+    assert.equal(await exists(claudeDir(f.home, name)), kept, name);
+  }
+  assert.equal(await exists(agentsDir(f.home, "intruder")), true);
+  view.unmount();
+});
+
+test("an external record change between items fails the remaining host additions with a drift reason and leaves their files", async (t) => {
+  const f = await fixture(t);
+  await install(f, "alpha", ["pi"]);
+  await install(f, "beta", ["pi"]);
+  await install(f, "gamma", ["pi"]);
+  const view = render(
+    <InstallationsView
+      operations={withExternalChange(f, "updateUserGlobalInstallation", () => install(f, "intruder", ["pi"]))}
+      environment={f.environment}
+    />,
+  );
+  await waitForFrame(view.lastFrame, /builtin:agent-depot \(3\)/);
+  await open(view, [/builtin:agent-depot \(3\)/]);
+  view.stdin.write("a");
+  await waitForFrame(view.lastFrame, /3 selected/);
+  view.stdin.write("h");
+  await waitForFrame(view.lastFrame, /\[ \] 1 claude/);
+  view.stdin.write("1");
+  await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
+  view.stdin.write(ENTER);
+  await waitForFrame(view.lastFrame, /Add hosts to 3 items\? y\/n/);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  view.stdin.write("y");
+  const done = await waitForFrame(view.lastFrame, /Failed portable\/\w+: .*changed outside this batch/);
+  assert.equal(done.match(/Added hosts claude to /g)?.length, 1, done);
+  assert.equal(done.match(/changed outside this batch/g)?.length, 2, done);
+  const current = await records(f);
+  for (const name of ["alpha", "beta", "gamma"]) {
+    const added = current[`portable/${name}`]!.includes("claude");
+    assert.equal(await exists(claudeDir(f.home, name)), added, name);
+  }
+  assert.equal(Object.values(current).filter((hosts) => hosts.includes("claude")).length, 1);
+  view.unmount();
+});

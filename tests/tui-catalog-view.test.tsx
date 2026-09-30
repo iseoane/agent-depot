@@ -202,6 +202,16 @@ test("CatalogView navigates the tree with j/k and arrows, clamped, and expands o
   unmount();
 });
 
+test("CatalogView filter keeps pasted text that starts like an escape remnant", async () => {
+  const { lastFrame, stdin, unmount } = render(<CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} sourceId="s" />);
+  await waitForFrame(lastFrame, /3 of 3/);
+  stdin.write("/");
+  await waitForFrame(lastFrame, /Filter: _/);
+  stdin.write("OK");
+  await waitForFrame(lastFrame, /Filter: OK/);
+  unmount();
+});
+
 test("CatalogView filters leaves case-insensitively, keeps their sources and shows an n of m count", async () => {
   const capturing: boolean[] = [];
   const { lastFrame, stdin, unmount } = render(

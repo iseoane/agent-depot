@@ -47,7 +47,9 @@ Agent Depot is reported as not updatable (update Agent Depot first).
 
 ## Usage
 
-With the package installed (or via `npx @iseoane/agent-depot`):
+With the package installed (or via `npx @iseoane/agent-depot`). `agent-depot --help`
+(also `-h` or `help`) prints the usage and exits 0; running it without arguments
+or with an unknown command is a usage error and exits 1.
 
 ```sh
 agent-depot source list
@@ -249,7 +251,10 @@ Sources require a fixed 40- or 64-character Git commit. For the built-in
 Source, `latest` tracks the installed Agent Depot package, while a fixed policy
 is accepted only when its value exactly equals that package's current version;
 other values fail closed because the requested package version cannot be
-reproduced. The built-in Source does not support `--ref`, and the CLI rejects it
+reproduced. A manifest written by another Agent Depot stays loadable: a built-in
+Skill pinned to a different version shows as unknown in `update check` ("pinned
+to Agent Depot X; running Y") and is skipped by `install --manifest`, while the
+other Skills keep working. The built-in Source does not support `--ref`, and the CLI rejects it
 explicitly. External `latest` may track an explicit mutable safe ref, but an
 immutable commit ref must use a fixed policy matching that commit. The
 `--portable-v1` flag requires the validated portable format rule; compatibility
@@ -410,7 +415,7 @@ Safety model:
 - Batch installs and removals apply item by item; one failure does not stop the
   others and each item reports its own result.
 
-See [CONTEXT.md](CONTEXT.md) for the domain terms and [docs/adr](docs/adr) for the
+See [CONTEXT.md](https://github.com/iseoane/agent-depot/blob/main/CONTEXT.md) for the domain terms and [docs/adr](https://github.com/iseoane/agent-depot/tree/main/docs/adr) for the
 decisions behind the TUI.
 
 ## Configuration and cache

@@ -20,12 +20,12 @@ import {
 import {
   AGENT_DEPOT_PACKAGE_NAME,
   AGENT_DEPOT_PACKAGE_VERSION,
+  builtinPinMismatch,
   defaultProjectManifestPath,
   parseProjectManifest,
   ProjectManifestStore,
   PROJECT_HOSTS,
   type ProjectHost,
-  type ProjectManifest,
   type ProjectSkillSelection,
   type VersionPolicy,
 } from "./project-manifest.js";
@@ -253,6 +253,11 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
       if (argv.length !== 1) throw new CliUsageError(USAGE);
       if (AGENT_DEPOT_PACKAGE_VERSION === undefined) throw new Error("Unable to determine the Agent Depot package version");
       output(AGENT_DEPOT_PACKAGE_VERSION);
+      return 0;
+    }
+    if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+      if (argv.length !== 1) throw new CliUsageError(USAGE);
+      output(USAGE);
       return 0;
     }
     const command = COMMANDS.get(argv[0] ?? "");
@@ -1102,7 +1107,25 @@ async function runManifestInstall(context: ProjectInstallContext): Promise<void>
   if (!options.portableV1) {
     throw new CliUsageError("Compatibility is not known for a manifest install; rerun with --portable-v1 after reviewing the Skill");
   }
-  const resolved = await resolveManifestSelections(manifest, operations, sourceAccess, options.confirmed);
+  // A built-in Skill pinned to another Agent Depot cannot be reproduced here:
+  // skip it with its reason and keep installing the others.
+  const installable: ProjectSkillSelection[] = [];
+  for (const selection of manifest.skills) {
+    const mismatch = builtinPinMismatch(selection);
+    if (mismatch === undefined) {
+      installable.push(selection);
+    } else {
+      output(`Skipped ${selection.path}: ${mismatch}`);
+    }
+  }
+  if (installable.length === 0) {
+    throw new CliUsageError("Nothing to install: every Skill in the manifest is pinned to another Agent Depot version");
+  }
+  const skipped = manifest.skills.length - installable.length;
+  if (skipped > 0) {
+    output(`Skipped ${skipped} of ${manifest.skills.length} Skills pinned to another Agent Depot version`);
+  }
+  const resolved = await resolveManifestSelections(installable, operations, sourceAccess, options.confirmed);
   if (resolved.some((item) => item.method !== undefined) && resolved.length > 1) {
     throw new SourceMetadataError("A batch install containing an external method is refused because command side effects cannot be rolled back safely; install that Skill separately");
   }
@@ -1345,13 +1368,13 @@ function requireOptionValue(argv: readonly string[], index: number, option: stri
 }
 
 async function resolveManifestSelections(
-  manifest: ProjectManifest,
+  selections: readonly ProjectSkillSelection[],
   operations: SourceOperations,
   sourceAccess: ProjectSkillTreeAccess,
   confirmed: boolean,
 ): Promise<readonly ResolvedManifestSelection[]> {
   const resolved: ResolvedManifestSelection[] = [];
-  for (const selection of manifest.skills) {
+  for (const selection of selections) {
     const initialSource = operations.resolveProjectSource
       ? await operations.resolveProjectSource(selection.source)
       : resolveProjectSource(selection.source);

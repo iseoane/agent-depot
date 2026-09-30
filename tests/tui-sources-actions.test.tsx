@@ -93,6 +93,16 @@ test("n opens an input, Enter adds the Git Source, reloads the list and reports 
   unmount();
 });
 
+test("pasting text that starts like an escape remnant keeps it in the URL input", async () => {
+  const h = harness();
+  const { lastFrame, stdin, unmount } = await open(h);
+  stdin.write("n");
+  await waitForFrame(lastFrame, /URL:/);
+  stdin.write("Ok");
+  await waitForFrame(lastFrame, /URL: Ok/);
+  unmount();
+});
+
 test("Esc cancels the add input without calling operations; backspace edits", async () => {
   const h = harness();
   const { lastFrame, stdin, unmount } = await open(h);

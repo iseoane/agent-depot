@@ -323,6 +323,24 @@ function parseSource(value: unknown, manifestPath: string, index: number): Proje
   throw new ProjectManifestError(manifestPath, `${label} must define exactly one external url or path`);
 }
 
+/**
+ * Why a built-in Skill with a fixed policy cannot be reproduced by the running
+ * Agent Depot, or undefined when it can. The built-in tree always matches the
+ * running package, so only an equal fixed version is reproducible.
+ */
+export function builtinPinMismatch(
+  selection: Pick<ProjectSkillSelection, "source" | "version">,
+  running: string | undefined = AGENT_DEPOT_PACKAGE_VERSION,
+): string | undefined {
+  if (selection.source.kind !== "builtin" || selection.version.policy !== "fixed") {
+    return undefined;
+  }
+  if (running === undefined || selection.version.version === running) {
+    return undefined;
+  }
+  return `pinned to Agent Depot ${selection.version.version}; running ${running}`;
+}
+
 function parseVersionPolicy(value: unknown, source: ProjectSource, manifestPath: string, index: number): VersionPolicy {
   const label = `skills[${index}].version`;
   if (!isRecord(value)) {
@@ -342,12 +360,9 @@ function parseVersionPolicy(value: unknown, source: ProjectSource, manifestPath:
           `${label}.version cannot be fixed because the current Agent Depot package version is unavailable`,
         );
       }
-      if (version !== AGENT_DEPOT_PACKAGE_VERSION) {
-        throw new ProjectManifestError(
-          manifestPath,
-          `${label}.version must equal the current Agent Depot package version ${JSON.stringify(AGENT_DEPOT_PACKAGE_VERSION)}; ${JSON.stringify(version)} cannot be reproduced by this package`,
-        );
-      }
+      // A different version is not a manifest error: a manifest written by another
+      // Agent Depot stays loadable and each consumer handles that Skill on its own
+      // (see builtinPinMismatch).
     } else if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(version)) {
       throw new ProjectManifestError(manifestPath, `${label}.version must be a 40- or 64-character commit ID for a fixed policy`);
     }

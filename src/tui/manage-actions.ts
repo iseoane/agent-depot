@@ -21,6 +21,7 @@ import {
 import type { TuiEnvironment } from "./environment.js";
 import { errorText } from "./batch.js";
 import { BULK_KINDS, handleBulkKey, type BulkMode } from "./bulk-actions.js";
+import { answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
 import { handleUnmanagedKey, UNMANAGED_KINDS, type UnmanagedMode } from "./unmanaged-actions.js";
 
 /**
@@ -162,60 +163,76 @@ async function execute(context: ManageContext, label: string, action: () => Prom
   await context.finish(result);
 }
 
+type ModeOf<K extends ManageMode["kind"]> = Extract<ManageMode, { kind: K }>;
+
+function handleHostChecklistKey(context: ManageContext, mode: ModeOf<"hosts-add" | "hosts-remove">, input: string, key: Key): void {
+  applyChecklistOutcome(hostChecklistKey(mode, mode.choices, input, key), {
+    cancel: () => cancel(context, mode.kind === "hosts-add" ? "Install cancelled" : "Uninstall cancelled"),
+    update: (state) => context.setMode({ ...mode, ...state }),
+    submit: () => void startHostChange(context, mode),
+    setMessage: context.setMessage,
+  });
+}
+
+function handleRemoveScopeKey(context: ManageContext, mode: ModeOf<"remove-scope">, input: string, key: Key): void {
+  if (key.escape) cancel(context, "Uninstall cancelled");
+  else if (input === "1") void startFullUninstall(context, mode.skill);
+  else if (input === "2") context.setMode({ kind: "hosts-remove", skill: mode.skill, choices: mode.hosts, cursor: 0, selected: [] });
+}
+
+/** Keys of the confirmation modes: `y` runs the step (or asks for exposure consent first), `n`/Esc cancels. */
+function handleConfirmKey(context: ManageContext, mode: ModeOf<"confirm-host-add" | "confirm-host-exposure" | "confirm-host-remove" | "confirm-uninstall">, input: string, key: Key): void {
+  const { operations, env } = context;
+  const cancelWith = (text: string) => () => cancel(context, text);
+  switch (mode.kind) {
+    case "confirm-host-add":
+      answerYesNo(input, key, () => context.setMode({ ...mode, kind: "confirm-host-exposure" }), cancelWith("Install cancelled"));
+      return;
+    case "confirm-host-exposure":
+      answerYesNo(input, key, () => {
+        void execute(context, `Changing hosts of ${mode.skill.name}...`, () => runHostAddition(mode.prepared, operations, env));
+      }, cancelWith("Install cancelled"));
+      return;
+    case "confirm-host-remove":
+      answerYesNo(input, key, () => {
+        void execute(context, `Changing hosts of ${mode.skill.name}...`, () => runHostRemoval(mode.prepared, operations, env, mode.skill));
+      }, cancelWith("Uninstall cancelled"));
+      return;
+    case "confirm-uninstall":
+      answerYesNo(input, key, () => {
+        void execute(context, `Removing ${mode.skill.name}...`, async () => {
+          await runUninstall(mode.prepared, operations, env);
+          return `Removed ${mode.skill.name} (${mode.skill.path})`;
+        });
+      }, cancelWith("Uninstall cancelled"));
+      return;
+  }
+}
+
 /**
  * Handles a key in one of the manage modes. Returns false when the mode is not
  * a manage mode, so the host view can handle its own modes.
  */
 export function handleManageKey(context: ManageContext, mode: { readonly kind: string }, input: string, key: Key): boolean {
   if (!isManageMode(mode)) return false;
-  const { operations, env } = context;
   if (handleUnmanagedKey(context, mode, input, key)) return true;
   if (handleBulkKey(context, mode, input, key)) return true;
   switch (mode.kind) {
     case "remove-scope":
-      if (key.escape) cancel(context, "Uninstall cancelled");
-      else if (input === "1") void startFullUninstall(context, mode.skill);
-      else if (input === "2") context.setMode({ kind: "hosts-remove", skill: mode.skill, choices: mode.hosts, cursor: 0, selected: [] });
-      return true;
+      handleRemoveScopeKey(context, mode, input, key);
+      break;
     case "hosts-add":
-    case "hosts-remove": {
-      const toggle = (host: ProjectHost) =>
-        mode.choices.filter((candidate) => candidate === host ? !mode.selected.includes(candidate) : mode.selected.includes(candidate));
-      const numbered = mode.choices[Number(input) - 1];
-      if (key.escape) cancel(context, mode.kind === "hosts-add" ? "Install cancelled" : "Uninstall cancelled");
-      else if (key.downArrow || input === "j") context.setMode({ ...mode, cursor: Math.min(mode.cursor + 1, mode.choices.length - 1) });
-      else if (key.upArrow || input === "k") context.setMode({ ...mode, cursor: Math.max(mode.cursor - 1, 0) });
-      else if (input === " ") context.setMode({ ...mode, selected: toggle(mode.choices[mode.cursor]!) });
-      else if (numbered) context.setMode({ ...mode, selected: toggle(numbered) });
-      else if (key.return) {
-        if (mode.selected.length > 0) void startHostChange(context, mode);
-        else context.setMessage({ kind: "error", text: "Select at least one host" });
-      }
-      return true;
-    }
+    case "hosts-remove":
+      handleHostChecklistKey(context, mode, input, key);
+      break;
     case "confirm-host-add":
-      if (input === "y") context.setMode({ ...mode, kind: "confirm-host-exposure" });
-      else if (input === "n" || key.escape) cancel(context, "Install cancelled");
-      return true;
     case "confirm-host-exposure":
-      if (input === "y") {
-        void execute(context, `Changing hosts of ${mode.skill.name}...`, () => runHostAddition(mode.prepared, operations, env));
-      } else if (input === "n" || key.escape) cancel(context, "Install cancelled");
-      return true;
     case "confirm-host-remove":
-      if (input === "y") {
-        void execute(context, `Changing hosts of ${mode.skill.name}...`, () => runHostRemoval(mode.prepared, operations, env, mode.skill));
-      } else if (input === "n" || key.escape) cancel(context, "Uninstall cancelled");
-      return true;
     case "confirm-uninstall":
-      if (input === "y") {
-        void execute(context, `Removing ${mode.skill.name}...`, async () => {
-          await runUninstall(mode.prepared, operations, env);
-          return `Removed ${mode.skill.name} (${mode.skill.path})`;
-        });
-      } else if (input === "n" || key.escape) cancel(context, "Uninstall cancelled");
-      return true;
+      handleConfirmKey(context, mode, input, key);
+      break;
     default:
-      return true;
+      break;
   }
+  return true;
 }
