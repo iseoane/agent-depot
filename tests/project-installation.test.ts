@@ -797,6 +797,50 @@ test("does not delete a concurrently replaced file during rollback and reports i
   }
 });
 
+test("detects a replaced file during rollback even when the inode is reused", async () => {
+  const projectRoot = await makeProject();
+  let writes = 0;
+  let replaced = false;
+  const baseFileSystem: ProjectInstallationFileSystem = {
+    // Same dev/ino as the created file, but a different size: models an
+    // ext4-style inode reuse without depending on the host filesystem.
+    lstat: async (candidate) => {
+      const information = await lstat(candidate);
+      if (replaced && candidate.endsWith(path.join("demo", "SKILL.md"))) {
+        return Object.assign(Object.create(Object.getPrototypeOf(information)), information, { size: information.size + 7 });
+      }
+      return information;
+    },
+    mkdir: async (candidate) => { await mkdir(candidate); },
+    writeFile: async (candidate, content) => {
+      writes += 1;
+      if (writes === 2) throw new Error("injected write failure");
+      await writeFile(candidate, content, { flag: "wx" });
+    },
+    chmod: async (candidate, mode) => {
+      await chmod(candidate, mode);
+      if (candidate.endsWith(path.join("demo", "SKILL.md"))) replaced = true;
+    },
+    symlink: async (target, candidate, type) => { await symlink(target, candidate, type); },
+    readlink,
+    rm: async (candidate) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+  };
+  try {
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi"] }, source, portableV1: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: baseFileSystem,
+      }),
+      /injected write failure.*rollback was incomplete.*concurrently replaced/i,
+    );
+    await lstat(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"));
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("surfaces cleanup failures instead of hiding them", async () => {
   const projectRoot = await makeProject();
   let writes = 0;
