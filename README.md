@@ -415,7 +415,7 @@ Safety model:
 - Batch installs and removals apply item by item; one failure does not stop the
   others and each item reports its own result.
 
-See [CONTEXT.md](CONTEXT.md) for the domain terms and [docs/adr](docs/adr) for the
+See [CONTEXT.md](https://github.com/iseoane/agent-depot/blob/main/CONTEXT.md) for the domain terms and [docs/adr](https://github.com/iseoane/agent-depot/tree/main/docs/adr) for the
 decisions behind the TUI.
 
 ## Configuration and cache
