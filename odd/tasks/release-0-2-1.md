@@ -38,6 +38,10 @@ Ship every finding of the 0.2.1 review (2026-09-30) as a patch release of @iseoa
 - [x] C3 tests for the complex untested functions in `src/path-safety.ts`.
   - Evidence: 4 characterization tests added (traversal normalization, relative paths, symlinked leaf/dangling/ancestor chain, root, ENOTDIR); they passed immediately. Commit 8de0ecd.
 ### D — Release
-- [ ] D1 version 0.2.1, CHANGELOG entry, tag after merge, GitHub release.
+- [x] D1 version 0.2.1, CHANGELOG entry (tag and GitHub release after merge, still pending).
+  - Evidence: `package.json` 0.2.1; CHANGELOG `## [0.2.1] - 2026-09-30` covers groups A, B, C and the two review minors (nothing-to-install exit 1 with a summary line on partial skips; Updates scope keys in a Map). Version test and TUI header read `package.json`, so they follow automatically. Route: inline.
 
 ## Progress
+
+Summary: groups A, B, C and D1 are done on `release/0.2.1`; the two minors from the independent review are fixed. Remaining after merge: tag `v0.2.1` and the GitHub release.
+
