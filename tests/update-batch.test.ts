@@ -131,6 +131,49 @@ test("treats a latest installation with matching version and baseline as current
   assert.equal(assessment.items[0]?.status, "current");
 });
 
+test("never proposes a downgrade when the running Agent Depot is older than the installed built-in Skill", async () => {
+  const currentFiles = [file("demo/SKILL.md", "older content")];
+  const newer = { kind: "builtin-package" as const, version: "0.10.0" };
+  const running = { kind: "builtin-package" as const, version: "0.9.0" };
+  const assessment = await assessUpdateBatch([
+    selection({
+      source: BUILT_IN_SOURCE,
+      path: "demo",
+      installation: installed(newer, "a".repeat(64)),
+    }),
+  ], {
+    resolveSource: async () => BUILT_IN_SOURCE,
+    sourceAccess: withSnapshot(BUILT_IN_SOURCE, "demo", { files: currentFiles, resolvedVersion: running }),
+  });
+
+  assert.equal(assessment.items[0]?.status, "unknown");
+  assert.equal(assessment.updateable.length, 0);
+  assert.match(
+    assessment.items[0]?.reason ?? "",
+    /installed by a newer Agent Depot \(0\.10\.0\); running 0\.9\.0 .* update Agent Depot/i,
+  );
+});
+
+test("compares built-in versions as semver, so a prerelease installed before its release still updates", async () => {
+  const assess = async (installedVersion: string, runningVersion: string) => (await assessUpdateBatch([
+    selection({
+      source: BUILT_IN_SOURCE,
+      path: "demo",
+      installation: installed({ kind: "builtin-package", version: installedVersion }, "a".repeat(64)),
+    }),
+  ], {
+    resolveSource: async () => BUILT_IN_SOURCE,
+    sourceAccess: withSnapshot(BUILT_IN_SOURCE, "demo", {
+      files: [file("demo/SKILL.md", "x")],
+      resolvedVersion: { kind: "builtin-package", version: runningVersion },
+    }),
+  })).items[0]?.status;
+
+  assert.equal(await assess("0.3.0-rc.1", "0.3.0"), "updateable");
+  assert.equal(await assess("0.3.0", "0.3.0-rc.1"), "unknown");
+  assert.equal(await assess("0.2.0", "0.10.0"), "updateable");
+});
+
 test("uses the supplied baseline calculator and detects changed content at the same version", async () => {
   const currentFiles = [file("demo/SKILL.md", "changed")];
   const assessment = await assessUpdateBatch([

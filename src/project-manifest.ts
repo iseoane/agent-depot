@@ -9,6 +9,8 @@ export const PROJECT_MANIFEST_VERSION = 1 as const;
 export const PROJECT_MANIFEST_FILENAME = "agent-depot.json" as const;
 /** The package release that supplies the built-in Source, when it can be read. */
 export const AGENT_DEPOT_PACKAGE_VERSION = readAgentDepotPackageVersion();
+/** The published package name, read from package.json so it is never hard-coded twice. */
+export const AGENT_DEPOT_PACKAGE_NAME = readAgentDepotPackageField("name");
 
 export const PROJECT_HOSTS = Object.freeze(["pi", "claude", "codex", "opencode"] as const);
 export type ProjectHost = (typeof PROJECT_HOSTS)[number];
@@ -622,12 +624,15 @@ export class ProjectManifestStore {
 }
 
 function readAgentDepotPackageVersion(): string | undefined {
+  return readAgentDepotPackageField("version");
+}
+
+function readAgentDepotPackageField(field: "name" | "version"): string | undefined {
   try {
     const packageJson = createRequire(import.meta.url)("../../package.json") as unknown;
-    if (!isRecord(packageJson) || typeof packageJson.version !== "string" || packageJson.version.length === 0) {
-      return undefined;
-    }
-    return packageJson.version;
+    if (!isRecord(packageJson)) return undefined;
+    const value = packageJson[field];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
   } catch {
     return undefined;
   }

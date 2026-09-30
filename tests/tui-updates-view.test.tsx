@@ -25,6 +25,7 @@ const ESC = "\u001B";
 const ENTER = "\r";
 const NEW_VERSION = { kind: "builtin-package" as const, version: AGENT_DEPOT_PACKAGE_VERSION! };
 const OLD_VERSION = { kind: "builtin-package" as const, version: "0.0.1" };
+const NEWER_VERSION = { kind: "builtin-package" as const, version: "999.0.0" };
 const GIT_NEW = { kind: "git-commit" as const, commit: "b".repeat(40) };
 const GIT_OLD = { kind: "git-commit" as const, commit: "a".repeat(40) };
 const GIT_URL = "https://example.com/skills.git";
@@ -40,7 +41,7 @@ function tree(name: string, content: string): readonly SkillTreeFile[] {
 interface SkillSpec {
   readonly name: string;
   /** `outdated` is updateable, `current` matches the Source, `unknown` has no version evidence. */
-  readonly state: "outdated" | "current" | "unknown";
+  readonly state: "outdated" | "current" | "unknown" | "newer";
   readonly installPath?: string;
   /** Git URL of the Skill's Source; the built-in Source when absent. */
   readonly url?: string;
@@ -134,7 +135,7 @@ async function record(root: string, spec: SkillSpec): Promise<ProjectSkillSelect
   await mkdir(path.join(root, installPath), { recursive: true });
   await writeFile(path.join(root, installPath, "SKILL.md"), spec.diskContent ?? installedContent, "utf8");
   const versions = spec.url === undefined
-    ? { current: NEW_VERSION, old: OLD_VERSION }
+    ? { current: NEW_VERSION, old: spec.state === "newer" ? NEWER_VERSION : OLD_VERSION }
     : { current: GIT_NEW, old: GIT_OLD };
   return parseProjectManifest({
     version: 1,
@@ -216,6 +217,25 @@ test("Enter on the cannot-be-checked line lists each item with its reason, and l
   await waitForFrame(lastFrame, (frame) => /cannot be checked ▸/.test(frame) && !frame.includes("portable/mystery"));
   press(stdin, "\u001B[C");
   await waitForFrame(lastFrame, /portable\/mystery/);
+  unmount();
+});
+
+test("never offers a built-in Skill installed by a newer Agent Depot and says why", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "outdated", state: "outdated" },
+    { name: "ahead", state: "newer" },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  const frame = await waitForFrame(lastFrame, /portable\/outdated/);
+  assert.ok(!frame.includes("portable/ahead"), "the newer-installed Skill is not offered");
+  assert.match(frame, /1 cannot be checked ▸/);
+  press(stdin, "j");
+  await waitForFrame(lastFrame, (current) => /> .*cannot be checked/.test(current));
+  press(stdin, ENTER);
+  const open = await waitForFrame(lastFrame, /portable\/ahead/);
+  assert.match(open, /Installed by a newer Agent Depot \(999\.0\.0\)/);
+  assert.match(open, /update Agent Depot/);
   unmount();
 });
 

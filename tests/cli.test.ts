@@ -491,6 +491,10 @@ test("removes catalog data without deleting retained Skills and only prints CLI 
     }), 0);
     assert.match(output.join("\\n"), /package-manager handoff only/i);
     assert.match(output.join("\\n"), /will not invoke or infer/i);
+    assert.ok(output.includes("  npm uninstall --global @iseoane/agent-depot"));
+    assert.ok(output.includes("  pnpm remove --global @iseoane/agent-depot"));
+    assert.ok(output.includes("  npx/pnpm dlx runs need no uninstall (only a cache entry)"));
+    assert.match(output.join("\\n"), /no package manager was invoked or inferred/);
   } finally {
     await rm(homeDirectory, { recursive: true, force: true });
     await rm(stateDirectory, { recursive: true, force: true });

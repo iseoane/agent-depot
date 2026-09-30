@@ -29,4 +29,6 @@ Make Agent Depot installable and runnable with `npx @iseoane/agent-depot`, `pnpm
   - Done: README "Install" section (npx, pnpm dlx, global).
 - [x] P7 — Single version source: `package.json` only; remove `src/version.ts` (only used by tests/version.test.ts) or derive it from `AGENT_DEPOT_PACKAGE_VERSION`; add `agent-depot --version`; show the version in the TUI header (`Agent Depot v0.2.0`).
   - Done: `src/version.ts` removed; `AGENT_DEPOT_PACKAGE_VERSION` (from package.json) is the only source; `--version`/`-v` in `runCli`; TUI header `Agent Depot v<version>`. RED: 3 failing tests (header, `--version`, `-v`); GREEN: 474 pass x2.
+- [x] P8 — npx/global update and uninstall UX (user decision 2026-09-30)
+  - Done: README "Updating" (`npx ...@latest`, `pnpm dlx ...@latest`, global update), `agent-depot` examples with `node dist/src/cli.js` only under "Development"; `uninstall --cli` prints `npm uninstall --global` / `pnpm remove --global` with the name from package.json (`AGENT_DEPOT_PACKAGE_NAME`); `assessEvidence` uses semver so a built-in Skill installed by a newer Agent Depot is `unknown` with "update Agent Depot" reason (never updateable; shared by CLI and TUI). RED: 3 failing tests (handoff, batch downgrade, TUI); GREEN: 497 pass x2, e2e 2 pass, pack smoke pass, typecheck and lint clean.
 - [ ] P6 — (User-confirmed step) `npm publish`.

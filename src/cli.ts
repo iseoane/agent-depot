@@ -18,6 +18,7 @@ import {
   type UserGlobalSkillMigration,
 } from "./sources.js";
 import {
+  AGENT_DEPOT_PACKAGE_NAME,
   AGENT_DEPOT_PACKAGE_VERSION,
   defaultProjectManifestPath,
   parseProjectManifest,
@@ -798,6 +799,12 @@ function outputUninstallSummary(options: UninstallOptions, removedManagedCount: 
   }
   if (options.cli) {
     output("Handoff: remove the persistent Agent Depot CLI with the package manager that installed it; no package manager was invoked or inferred");
+    if (AGENT_DEPOT_PACKAGE_NAME !== undefined) {
+      output("Run the command for the package manager you used:");
+      output(`  npm uninstall --global ${AGENT_DEPOT_PACKAGE_NAME}`);
+      output(`  pnpm remove --global ${AGENT_DEPOT_PACKAGE_NAME}`);
+    }
+    output("  npx/pnpm dlx runs need no uninstall (only a cache entry)");
   }
 }
 
