@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, readFile, readlink, readdir, rename, rmdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readlink, readdir, rename, rmdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import path from "node:path";
@@ -27,6 +27,8 @@ export interface ProjectInstallationFileSystem {
   readlink(candidate: string): Promise<string>;
   rm(candidate: string): Promise<void>;
   rmdir(candidate: string): Promise<void>;
+  /** Removes exactly one non-directory entry (a symlink); never recursive. Defaults to the Node implementation. */
+  unlink?(candidate: string): Promise<void>;
   /** Optional atomic move used by transactional updates. */
   readonly rename?: (from: string, to: string) => Promise<void>;
   /** Optional read methods used only when adopting an existing Skill. */
@@ -305,8 +307,29 @@ export async function removeProjectSkill(
     throw new ProjectInstallationError("removal-changed", "A path selected for removal is not part of the inspected Skill installation; no path was removed");
   }
   for (const candidate of [...current.paths].reverse().filter((candidate) => selected.includes(candidate))) {
-    await fileSystem.rm(candidate);
+    if (deletePaths === undefined) {
+      await fileSystem.rm(candidate);
+    } else {
+      await unlinkManagedSymlink(candidate, fileSystem);
+    }
   }
+}
+
+/**
+ * Deletes one managed symlink without ever following or recursing into it:
+ * look at the path immediately before, require a symlink, then unlink it.
+ * Partial Host removal only ever deletes the Claude symlink, so it uses this
+ * instead of the recursive `rm` that full removal needs for the canonical directory.
+ */
+async function unlinkManagedSymlink(candidate: string, fileSystem: ProjectInstallationFileSystem): Promise<void> {
+  const information = await fileSystem.lstat(candidate);
+  if (!information.isSymbolicLink()) {
+    throw new ProjectInstallationError(
+      "unsafe-target",
+      `Refusing to delete ${JSON.stringify(candidate)} because it is no longer a symlink; no path was changed`,
+    );
+  }
+  await (fileSystem.unlink ?? unlink)(candidate);
 }
 
 /** Read-only receipt for exposing an installed user-global Skill to more Hosts. */
@@ -595,6 +618,7 @@ const nodeFileSystem: ProjectInstallationFileSystem = {
   },
   rename,
   readlink,
+  unlink,
   rm: async (candidate) => {
     await rm(candidate, { recursive: true, force: true });
   },

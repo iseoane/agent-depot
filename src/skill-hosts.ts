@@ -56,6 +56,10 @@ export type HostRemovalPlan =
       readonly preview: readonly string[];
     };
 
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function uniqueHosts(hosts: readonly ProjectHost[], verb: string): readonly ProjectHost[] {
   const unique = [...new Set(hosts)];
   if (unique.length === 0) throw new SkillSelectionError(`Name at least one Host to ${verb}`);
@@ -104,7 +108,14 @@ export async function executeHostAddition(
   try {
     await update.call(operations, plan.updated);
   } catch (error) {
-    await transaction.rollback();
+    try {
+      await transaction.rollback();
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        `Updating the installation record failed (${describe(error)}) and rolling back the new Host locations also failed (${describe(rollbackError)}); check the Claude location by hand`,
+      );
+    }
     throw error;
   }
 }
@@ -158,5 +169,14 @@ export async function executeHostRemoval(
   assertRemovalInspectionUnchanged(plan.inspection, await inspectProjectSkillRemoval(plan.selection, options));
   assertManagedInstallationRecordsUnchanged(initialManaged, await list.call(operations));
   await removeProjectSkill(plan.selection, plan.inspection, options, plan.deletePaths);
-  await update.call(operations, { ...plan.selection, hosts: plan.remaining });
+  try {
+    await update.call(operations, { ...plan.selection, hosts: plan.remaining });
+  } catch (error) {
+    if (plan.deletePaths.length === 0) throw error;
+    throw new Error(
+      `Deleted ${plan.deletePaths.join(", ")} but the installation record was not updated (${describe(error)}); the record still lists ${plan.removed.join(", ")}. ` +
+        `Rerun \`agent-depot skill remove ${JSON.stringify(plan.selection.path)} --host ${plan.removed.join(" --host ")}\` to reconcile the record; the missing location is tolerated.`,
+      { cause: error },
+    );
+  }
 }

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, readlink, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import type { ProjectInstallationFileSystem } from "../src/project-installation.js";
 import type { ProjectHost, ProjectSkillSelection } from "../src/project-manifest.js";
 import { executeHostAddition, executeHostRemoval, planHostAddition, planHostRemoval } from "../src/skill-hosts.js";
 import { userGlobalRemovalOptions } from "../src/skill-removal.js";
@@ -180,4 +181,170 @@ test("removing claude from a Claude-only real directory installation is refused"
       /only copy/u,
     );
   }, { installationPath: ".claude/skills/one", withClaudeLink: false });
+});
+
+/** A real-filesystem adapter whose individual operations can be overridden per test. */
+function realFileSystem(overrides: Partial<ProjectInstallationFileSystem> = {}): ProjectInstallationFileSystem {
+  return {
+    lstat,
+    readdir: async (candidate) => readdir(candidate),
+    readFile: async (candidate) => readFile(candidate),
+    mkdir: async (candidate) => {
+      await mkdir(candidate);
+    },
+    writeFile: async (candidate, content) => {
+      await writeFile(candidate, content, { flag: "wx" });
+    },
+    chmod,
+    symlink: async (target, candidate, type) => {
+      await symlink(target, candidate, type);
+    },
+    rename,
+    readlink,
+    rm: async (candidate) => {
+      await rm(candidate, { recursive: true, force: true });
+    },
+    rmdir,
+    unlink,
+    ...overrides,
+  };
+}
+
+const failingUpdate = (message: string): Partial<SourceOperations> => ({
+  updateUserGlobalInstallation: async () => {
+    throw new Error(message);
+  },
+});
+
+test("adding claude removes the new symlink again when the record update fails", async () => {
+  await withInstallation(["pi"], async ({ home, operations, options, record }) => {
+    const plan = await planHostAddition(record, ["claude"], options);
+    const failing = { ...operations, ...failingUpdate("record write failed") } as SourceOperations;
+    await assert.rejects(
+      executeHostAddition(plan, failing, options, await operations.listUserGlobalInstallations!(), true),
+      /record write failed/u,
+    );
+    await assert.rejects(lstat(claude(home)), { code: "ENOENT" });
+    assert.deepEqual(await recordedHosts(operations), ["pi"]);
+  });
+});
+
+test("adding claude reports both errors when the record update and the rollback fail", async () => {
+  await withInstallation(["pi"], async ({ home, operations }) => {
+    const options = userGlobalRemovalOptions(home, {
+      fileSystem: realFileSystem({
+        rm: async (candidate) => {
+          if (candidate === claude(home)) throw new Error("rm denied");
+          await rm(candidate, { recursive: true, force: true });
+        },
+      }),
+    });
+    const record = (await operations.listUserGlobalInstallations!())[0]!;
+    const plan = await planHostAddition(record, ["claude"], options);
+    const failing = { ...operations, ...failingUpdate("record write failed") } as SourceOperations;
+    await assert.rejects(
+      executeHostAddition(plan, failing, options, await operations.listUserGlobalInstallations!(), true),
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        assert.match(message, /record write failed/u);
+        assert.match(message, /rm denied/u);
+        return true;
+      },
+    );
+  });
+});
+
+test("adding claude refuses a foreign symlink at the claude location and leaves it untouched", async () => {
+  await withInstallation(["pi"], async ({ home, options, record }) => {
+    await mkdir(path.dirname(claude(home)), { recursive: true });
+    await symlink("/somewhere/else", claude(home), "dir");
+    await assert.rejects(planHostAddition(record, ["claude"], options), /already exists/u);
+    assert.equal(await readlink(claude(home)), "/somewhere/else");
+  });
+});
+
+test("removing claude refuses a foreign symlink at the claude location and leaves it untouched", async () => {
+  await withInstallation(["pi", "claude"], async ({ home, options, record }) => {
+    await rm(claude(home));
+    await symlink("/somewhere/else", claude(home), "dir");
+    await assert.rejects(planHostRemoval(record, ["claude"], options), /does not point to the canonical/u);
+    assert.equal(await readlink(claude(home)), "/somewhere/else");
+  });
+});
+
+test("removing claude replaced by a foreign symlink after the plan deletes nothing", async () => {
+  await withInstallation(["pi", "claude"], async ({ home, operations, options, record }) => {
+    const plan = await planHostRemoval(record, ["claude"], options);
+    await rm(claude(home));
+    await symlink("/somewhere/else", claude(home), "dir");
+    await assert.rejects(executeHostRemoval(plan, operations, options, await operations.listUserGlobalInstallations!()));
+    assert.equal(await readlink(claude(home)), "/somewhere/else");
+    assert.deepEqual(await recordedHosts(operations), ["pi", "claude"]);
+  });
+});
+
+test("removing claude deletes the symlink without a recursive removal", async () => {
+  await withInstallation(["pi", "claude"], async ({ home, operations }) => {
+    const options = userGlobalRemovalOptions(home, {
+      fileSystem: realFileSystem({
+        rm: async (candidate) => {
+          throw new Error(`recursive rm must not be used for ${candidate}`);
+        },
+      }),
+    });
+    const record = (await operations.listUserGlobalInstallations!())[0]!;
+    const plan = await planHostRemoval(record, ["claude"], options);
+    await executeHostRemoval(plan, operations, options, await operations.listUserGlobalInstallations!());
+    assert.equal(await exists(claude(home)), false);
+    assert.equal(await readFile(path.join(canonical(home), "SKILL.md"), "utf8"), "one");
+  });
+});
+
+test("removing claude refuses to unlink a path that became a real directory just before deletion", async () => {
+  await withInstallation(["pi", "claude"], async ({ home, operations }) => {
+    let claudeLstats = 0;
+    const options = userGlobalRemovalOptions(home, {
+      fileSystem: realFileSystem({
+        lstat: async (candidate) => {
+          // Execution inspects the claude path twice (recheck, then removal recheck); swap it right before the third look.
+          if (candidate === claude(home) && ++claudeLstats === 3) {
+            await rm(claude(home));
+            await mkdir(claude(home));
+            await writeFile(path.join(claude(home), "keep.txt"), "keep", "utf8");
+          }
+          return lstat(candidate);
+        },
+      }),
+    });
+    const record = (await operations.listUserGlobalInstallations!())[0]!;
+    const plan = await planHostRemoval(record, ["claude"], options);
+    claudeLstats = 0;
+    await assert.rejects(executeHostRemoval(plan, operations, options, await operations.listUserGlobalInstallations!()), /symlink/u);
+    assert.equal(claudeLstats, 3);
+    assert.equal(await readFile(path.join(claude(home), "keep.txt"), "utf8"), "keep");
+    assert.deepEqual(await recordedHosts(operations), ["pi", "claude"]);
+  });
+});
+
+test("removing claude explains how to recover when the record update fails after the symlink is gone", async () => {
+  await withInstallation(["pi", "claude"], async ({ home, operations, options, record }) => {
+    const plan = await planHostRemoval(record, ["claude"], options);
+    const failing = { ...operations, ...failingUpdate("record write failed") } as SourceOperations;
+    await assert.rejects(
+      executeHostRemoval(plan, failing, options, await operations.listUserGlobalInstallations!()),
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        assert.match(message, /record write failed/u);
+        assert.match(message, /was not updated/u);
+        assert.match(message, /skill remove "portable\/one" --host claude/u);
+        return true;
+      },
+    );
+    assert.equal(await exists(claude(home)), false);
+    assert.deepEqual(await recordedHosts(operations), ["pi", "claude"]);
+    // The advertised recovery works: the missing symlink is tolerated and the record is reconciled.
+    const retry = await planHostRemoval((await operations.listUserGlobalInstallations!())[0]!, ["claude"], options);
+    await executeHostRemoval(retry, operations, options, await operations.listUserGlobalInstallations!());
+    assert.deepEqual(await recordedHosts(operations), ["pi"]);
+  });
 });
