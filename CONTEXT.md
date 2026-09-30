@@ -35,11 +35,31 @@ _Avoid_: Prompt (for a reusable installed skill)
 The act of bringing an existing skill installation under tracking without replacing or moving it when its content exactly matches the selected source; its existing location remains tracked. Exposing it to an additional host location later requires explicit confirmation.
 _Avoid_: Import (when referring to tracking an existing installation)
 
+**Unmanaged skill**:
+A skill directory or symlink found in a user-global skill root that Agent Depot has no installation record for. It is reported but never updated or looked up through a Source. It can be adopted (brought under tracking when it exactly matches a Source) or removed by explicit path; removing it deletes only what was listed in the preview and never follows a symlink to its target.
+_Avoid_: Orphan, untracked install; Adoption (that is tracking an unmanaged skill, not the skill itself)
+
 **Installation method**:
 The procedure used to install or update a skill, taken from its upstream project or provided by the user.
 
 **Installation**:
 A managed skill made available to a selected host and scope. Installations of the same skill in different scopes are independent and may have different versions.
+
+**Host exposure**:
+Making an installed skill available to a Host, or withdrawing it, without changing its content or version. Adding Hosts to an installation needs an explicit additional-host confirmation; removing some Hosts keeps the installation, and removing the last one is a full removal.
+_Avoid_: Reinstall (exposure never copies or re-resolves content)
+
+**Canonical location**:
+The one directory that holds an installed skill's files for user-global use: `~/.agents/skills/<skill>`, shared by the Pi, Codex, and OpenCode Hosts. Claude Code is exposed through a managed symlink to it. Removal keeps the canonical location while any Host still uses it.
+_Avoid_: Primary copy, master copy
+
+**Built-in source**:
+The Source shipped with Agent Depot (`builtin:agent-depot`). It is fixed: it cannot be refreshed, removed, or migrated.
+_Avoid_: Default source
+
+**Refresh before preview**:
+For any operation that can write, the Source is refreshed before the preview is shown, so the content the user confirms is exactly the content that is applied.
+_Avoid_: Refresh on confirm
 
 **Installation scope**:
 Where an installation is available: project-scoped or user-global. The selected scope must be explicit in automation and may be prompted for in interactive use.
@@ -48,6 +68,9 @@ _Avoid_: Environment (ambiguous with runtime environment)
 **Version policy**:
 The chosen version target for an installation: a fixed version or the latest available version.
 _Avoid_: Version (when the policy, rather than the installed version, is meant)
+
+**Removal scope**:
+Uninstalling is supported for user-global installations only. Project installations can be listed and updated, but removing them is out of scope for now.
 
 **Update batch**:
 A single review of installed skills with newer versions available, presented together so the user can choose to update all or a selected subset using each skill's applicable method.
