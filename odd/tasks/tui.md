@@ -34,6 +34,7 @@ The CLI requires remembering subcommands, ids and `--yes` confirmations; a TUI m
 
 ## Progress
 - Branch: `feat/tui-sources`. Route: delegated direct (writer trigger: 2+ non-trivial files).
+- Node minimum raised to >=24 (Active LTS) because Ink 7 requires Node >=22; @types/node ^24.
 
 ## Evidence
 - T1: RED = `pnpm typecheck` failed (missing `src/tui/app.js`, `renderTui` not in `CliDependencies`); GREEN = typecheck, lint, test (246 pass) all clean. Route: delegated direct writer. Added `ink`, `react`, `@types/react`, `ink-testing-library`; `src/tui/app.tsx`, `src/tui/render.tsx` (lazy-imported by `tui` command); usage test updated. Commit: see git log (`feat(tui): scaffold Ink app and tui command`).
