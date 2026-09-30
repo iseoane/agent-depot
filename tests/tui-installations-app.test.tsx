@@ -73,12 +73,33 @@ async function fixture(t: TestContext, hosts: readonly ("pi" | "claude")[]): Pro
   };
 }
 
+type Stdin = { write(data: string): void };
+
+/** Presses j until the selected line matches, waiting for each move to render. */
+async function moveDownTo(lastFrame: () => string | undefined, stdin: Stdin, pattern: RegExp): Promise<void> {
+  for (let moves = 0; moves < 20; moves += 1) {
+    const frame = lastFrame() ?? "";
+    if ((frame.split("\n").find((line) => line.startsWith("> ")) ?? "").match(pattern)) return;
+    stdin.write("j");
+    await waitForFrame(lastFrame, (next) => next !== frame);
+  }
+  assert.fail("selection never reached the expected line");
+}
+
+/** Opens the first Source of the expanded first group and highlights its Skill. */
+async function revealSkill(lastFrame: () => string | undefined, stdin: Stdin): Promise<void> {
+  await moveDownTo(lastFrame, stdin, /> .*builtin:agent-depot/);
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /portable\/demo/);
+  await moveDownTo(lastFrame, stdin, /> .*portable\/demo/);
+}
+
 test("key 3 opens the Installations view, listed in the header and footer hints", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("3");
-  const frame = await waitForFrame(lastFrame, /User-global \(1\)/);
+  const frame = await waitForFrame(lastFrame, /Managed \(user-global\) \(1\)/);
   assert.match(frame, /\[3 Installations\]/);
   assert.match(frame, /A adopt/);
   assert.match(frame, /2 Catalog/);
@@ -92,7 +113,8 @@ test("u on a user-global installation opens the Catalog uninstall flow for that 
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("3");
-  await waitForFrame(lastFrame, /> .*portable\/demo/);
+  await waitForFrame(lastFrame, /builtin:agent-depot \(1\)/);
+  await revealSkill(lastFrame, stdin);
   stdin.write("u");
   const frame = await waitForFrame(lastFrame, /Uninstall demo\? y\/n/);
   assert.match(frame, /\[2 Catalog\]/);
@@ -105,7 +127,8 @@ test("i on an installation with missing hosts opens the Catalog host flow", asyn
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("3");
-  await waitForFrame(lastFrame, /> .*portable\/demo/);
+  await waitForFrame(lastFrame, /builtin:agent-depot \(1\)/);
+  await revealSkill(lastFrame, stdin);
   stdin.write("i");
   const frame = await waitForFrame(lastFrame, /1 add hosts/);
   assert.match(frame, /\[2 Catalog\]/);
@@ -127,9 +150,11 @@ test("q and number keys are blocked while the adoption flow captures keys", asyn
   );
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("3");
-  await waitForFrame(lastFrame, /Unmanaged user-global \(1\)/);
-  stdin.write("j");
-  await waitForFrame(lastFrame, /> demo2/);
+  await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
+  await moveDownTo(lastFrame, stdin, /> .*Unmanaged \(user-global\)/);
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /demo2 {2}unmanaged/);
+  await moveDownTo(lastFrame, stdin, /> .*demo2/);
   stdin.write("A");
   await waitForFrame(lastFrame, /Host \(space/);
   stdin.write("q");

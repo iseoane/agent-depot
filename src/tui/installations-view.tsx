@@ -1,5 +1,5 @@
 import { Box, Text, useInput, type Key } from "ink";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { isValidFixedVersion } from "../skill-install.js";
@@ -18,6 +18,18 @@ import {
   type InstallationsData,
 } from "./installations.js";
 import { BROWSE, type InstallationsMode } from "./installations-mode.js";
+import {
+  collapseOrParent,
+  defaultExpanded,
+  expandNode,
+  flattenVisible,
+  resolveSelection,
+  toggleNode,
+  type Expanded,
+  type TreeNode,
+  type VisibleRow,
+} from "./tree.js";
+import { computeWindow, pageStep, useListHeight } from "./window.js";
 
 export type { CatalogFocus };
 
@@ -28,6 +40,8 @@ export interface InstallationsViewProps {
   readonly onCapturingChange?: (capturing: boolean) => void;
   /** `u` / `i` on a user-global installation reuse the Catalog flows for that Skill. */
   readonly onOpenCatalog?: (focus: CatalogFocus) => void;
+  /** Rows the tree may use; defaults to what the terminal leaves. Injectable for tests. */
+  readonly listHeight?: number;
 }
 
 const NO_ENVIRONMENT: TuiEnvironment = {};
@@ -42,32 +56,76 @@ type LoadState =
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly data: InstallationsData };
 
-/** A selectable line: a managed installation or an unmanaged Skill. */
-type Item =
+/** What a tree node stands for: a scope or source group, a managed installation or an unmanaged Skill. */
+type NodeData =
+  | { readonly kind: "group"; readonly label: string }
   | { readonly kind: "installation"; readonly row: InstallationRow }
   | { readonly kind: "unmanaged"; readonly entry: UserGlobalSkillInventoryEntry };
+
+type InstallationNode = TreeNode<NodeData>;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function itemsOf(data: InstallationsData): readonly Item[] {
-  return [
-    ...(data.global ?? []).map((row): Item => ({ kind: "installation", row })),
-    ...data.project.map((row): Item => ({ kind: "installation", row })),
-    ...data.unmanaged.map((entry): Item => ({ kind: "unmanaged", entry })),
-  ];
+/** Managed installations of one scope, grouped by Source in first-seen order. */
+function sourceNodes(scope: InstallationRow["scope"], rows: readonly InstallationRow[]): readonly InstallationNode[] {
+  const bySource = new Map<string, InstallationRow[]>();
+  for (const row of rows) bySource.set(row.source, [...(bySource.get(row.source) ?? []), row]);
+  return [...bySource].map(([source, members]): InstallationNode => ({
+    id: `source:${scope}:${source}`,
+    data: { kind: "group", label: `${source} (${members.length})` },
+    children: members.map((row): InstallationNode => ({
+      id: `installation:${scope}:${source}:${row.selection.installation?.path ?? row.selection.path}`,
+      data: { kind: "installation", row },
+    })),
+  }));
+}
+
+/** Scope, then Source, then Skills; Unmanaged is its own group. Counts come from data already loaded. */
+function buildTree(data: InstallationsData): readonly InstallationNode[] {
+  const roots: InstallationNode[] = [];
+  if (data.global !== undefined) {
+    roots.push({
+      id: "scope:user-global",
+      data: { kind: "group", label: `Managed (user-global) (${data.global.length})` },
+      children: sourceNodes("user-global", data.global),
+    });
+  }
+  roots.push({
+    id: "scope:project",
+    data: { kind: "group", label: `Managed (project) (${data.project.length})` },
+    children: sourceNodes("project", data.project),
+  });
+  roots.push({
+    id: "scope:unmanaged",
+    data: { kind: "group", label: `Unmanaged (user-global) (${data.unmanaged.length})` },
+    children: data.unmanaged.map((entry): InstallationNode => ({ id: `unmanaged:${entry.path}`, data: { kind: "unmanaged", entry } })),
+  });
+  return roots;
 }
 
 function describeRow({ selection, source, policy, installed, adopted, modified }: InstallationRow): string {
   const flags = [adopted ? "[adopted]" : "", modified ? "[modified]" : ""].filter((flag) => flag !== "").join(" ");
-  return `${selection.path}  ${source}  ${policy} (installed ${installed})  hosts: ${selection.hosts.join(", ")}${flags === "" ? "" : `  ${flags}`}`;
+  return `${selection.path}  ${installed} (${policy})  [${selection.hosts.join(", ")}]  managed by ${source}${flags === "" ? "" : `  ${flags}`}`;
 }
 
-export function InstallationsView({ operations, environment, onCapturingChange, onOpenCatalog }: InstallationsViewProps) {
+function describeNode(row: VisibleRow<NodeData>): string {
+  const { data } = row.node;
+  if (data.kind === "group") return `${row.expandable ? (row.expanded ? "▾" : "▸") : " "} ${data.label}`;
+  if (data.kind === "installation") return describeRow(data.row);
+  return `${data.entry.name}  unmanaged  ${data.entry.path}`;
+}
+
+export function InstallationsView({ operations, environment, onCapturingChange, onOpenCatalog, listHeight }: InstallationsViewProps) {
+  const height = useListHeight(listHeight, 6);
   const env = environment ?? NO_ENVIRONMENT;
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [selected, setSelected] = useState(0);
+  // Expansion and selection are mirrored in refs so keys delivered in one burst act on the latest state.
+  const [expandedState, setExpandedState] = useState<Expanded | undefined>();
+  const expandedRef = useRef<Expanded | undefined>(undefined);
+  const [selection, setSelectionState] = useState<{ readonly id?: string; readonly index: number }>({ index: 0 });
+  const selectionRef = useRef<{ readonly id?: string; readonly index: number }>({ index: 0 });
   const [mode, setModeState] = useState<InstallationsMode>(BROWSE);
   // Mirrors the mode synchronously so later keystrokes and the shell never see stale state.
   const modeRef = useRef<InstallationsMode>(BROWSE);
@@ -101,8 +159,31 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   }, [reload]);
 
   const data = state.status === "ready" ? state.data : undefined;
-  const items = data ? itemsOf(data) : [];
-  const index = Math.min(selected, Math.max(items.length - 1, 0));
+  const roots = useMemo(() => (data ? buildTree(data) : []), [data]);
+  const rootsRef = useRef(roots);
+  rootsRef.current = roots;
+  const expanded = expandedState ?? defaultExpanded(roots);
+  const rows = flattenVisible(roots, expanded);
+  const index = resolveSelection(rows, selection);
+
+  const setExpanded = (next: Expanded) => {
+    expandedRef.current = next;
+    setExpandedState(next);
+  };
+  const setSelection = (next: { readonly id?: string; readonly index: number }) => {
+    selectionRef.current = next;
+    setSelectionState(next);
+  };
+  /** Visible rows and the selected index as of the latest keystroke. */
+  const latest = () => {
+    const open = expandedRef.current ?? defaultExpanded(rootsRef.current);
+    const visible = flattenVisible(rootsRef.current, open);
+    return { open, visible, at: resolveSelection(visible, selectionRef.current) };
+  };
+  const moveTo = (visible: readonly VisibleRow<NodeData>[], target: number) => {
+    const bounded = Math.min(Math.max(target, 0), Math.max(visible.length - 1, 0));
+    setSelection({ id: visible[bounded]?.node.id, index: bounded });
+  };
 
   const cancel = (text: string) => {
     setMessage({ kind: "ok", text });
@@ -221,11 +302,24 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       handleModeKey(current, input, key);
       return;
     }
-    if (key.downArrow || input === "j") setSelected(Math.min(index + 1, Math.max(items.length - 1, 0)));
-    else if (key.upArrow || input === "k") setSelected(Math.max(index - 1, 0));
-    else if (input === "A" || key.return || input === "u" || input === "i") {
-      const item = items[index];
-      if (!item || !data) return;
+    const { open, visible, at } = latest();
+    const row = visible[at];
+    if (key.downArrow || input === "j") moveTo(visible, at + 1);
+    else if (key.upArrow || input === "k") moveTo(visible, at - 1);
+    else if (key.pageDown) moveTo(visible, at + pageStep(height));
+    else if (key.pageUp) moveTo(visible, at - pageStep(height));
+    else if (key.rightArrow && row) setExpanded(expandNode(open, row));
+    else if (key.leftArrow && row) {
+      const next = collapseOrParent(open, visible, at);
+      setExpanded(next.expanded);
+      setSelection({ id: next.selectedId, index: at });
+    } else if (input === "A" || key.return || input === "u" || input === "i") {
+      if (!row || !data) return;
+      const item = row.node.data;
+      if (item.kind === "group") {
+        if (key.return) setExpanded(toggleNode(open, row));
+        return;
+      }
       setMessage(undefined);
       if (item.kind === "unmanaged") {
         if (input === "A" || key.return) void startAdoption(item.entry);
@@ -248,36 +342,22 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   if (state.status === "loading") return <Text>Loading installations...</Text>;
   if (state.status === "error") return <Text color="red">Error: {state.message}</Text>;
   const ready = state.data;
-  let position = 0;
-  const line = (text: string) => {
-    const marker = position === index ? "> " : "  ";
-    const bold = position === index;
-    position += 1;
-    return { marker, bold, text };
-  };
+  const window = computeWindow(rows.length, index, height);
 
   return (
     <Box flexDirection="column">
-      <Text bold>User-global ({ready.global?.length ?? 0})</Text>
       {ready.global === undefined ? <Text>User-global installations are not supported by the configured operations</Text> : null}
-      {ready.global?.length === 0 ? <Text>No installations</Text> : null}
-      {(ready.global ?? []).map((row) => {
-        const { marker, bold, text } = line(describeRow(row));
-        return <Text key={`g:${row.source}:${row.selection.path}`} bold={bold}>{marker}{text}</Text>;
-      })}
-      <Text bold>Project ({ready.project.length})</Text>
       {ready.projectError === undefined ? null : <Text color="red">Error: {ready.projectError}</Text>}
-      {ready.projectError === undefined && ready.project.length === 0 ? <Text>No installations</Text> : null}
-      {ready.project.map((row) => {
-        const { marker, bold, text } = line(describeRow(row));
-        return <Text key={`p:${row.source}:${row.selection.path}`} bold={bold}>{marker}{text}</Text>;
+      {rows.slice(window.start, window.end).map((row, offset) => {
+        const position = window.start + offset;
+        const leaf = !row.expandable && row.node.data.kind !== "group";
+        return (
+          <Text key={row.node.id} bold={position === index || row.depth === 0}>
+            {position === index ? "> " : "  "}{"  ".repeat(row.depth)}{leaf ? "  " : ""}{describeNode(row)}
+          </Text>
+        );
       })}
-      <Text bold>Unmanaged user-global ({ready.unmanaged.length})</Text>
-      {ready.unmanaged.length === 0 ? <Text>No unmanaged Skills</Text> : null}
-      {ready.unmanaged.map((entry) => {
-        const { marker, bold, text } = line(`${entry.name}  ${entry.path}`);
-        return <Text key={`u:${entry.path}`} bold={bold}>{marker}{text}</Text>;
-      })}
+      {window.indicator ? <Text dimColor>{window.indicator}</Text> : null}
       {message ? <Text color={message.kind === "error" ? "red" : "green"}>{message.text}</Text> : null}
       <ModePanel mode={mode} />
     </Box>
