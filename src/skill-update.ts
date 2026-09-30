@@ -28,6 +28,7 @@ import {
   type UserMethodPreview,
 } from "./user-method.js";
 import {
+  freezeSnapshot,
   immutableUpdateSnapshot,
   type UpdateBatchAssessment,
   type UpdateBatchAssessmentItem,
@@ -341,17 +342,6 @@ function immutableSelection(selection: ProjectSkillSelection): ProjectSkillSelec
   const parsed = parseProjectManifest({ version: 1, skills: [selection] }).skills[0];
   if (!parsed) throw new Error("Skill update selection is missing");
   return parsed;
-}
-
-function freezeSnapshot(snapshot: SourceSkillTreeSnapshot): SourceSkillTreeSnapshot {
-  return Object.freeze({
-    files: Object.freeze(snapshot.files.map((file) => Object.freeze({
-      path: file.path,
-      content: Uint8Array.from(file.content),
-      executable: file.executable,
-    }))),
-    ...(snapshot.resolvedVersion === undefined ? {} : { resolvedVersion: Object.freeze({ ...snapshot.resolvedVersion }) }),
-  });
 }
 
 function errorMessage(error: unknown): string {

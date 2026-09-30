@@ -406,7 +406,7 @@ export function immutableUpdateSnapshot(item: UpdateBatchAssessmentItem): Source
   return snapshot === undefined ? undefined : freezeSnapshot(snapshot);
 }
 
-function freezeSnapshot(snapshot: SourceSkillTreeSnapshot): SourceSkillTreeSnapshot {
+export function freezeSnapshot(snapshot: SourceSkillTreeSnapshot): SourceSkillTreeSnapshot {
   return Object.freeze({
     files: Object.freeze(snapshot.files.map((file) => Object.freeze({
       path: file.path,
