@@ -1,7 +1,50 @@
 import { Box, Text } from "ink";
 
+import type { BulkHostPlan, BulkUninstallPlan, SkippedTarget } from "./bulk-actions.js";
 import type { ManageMode } from "./manage-actions.js";
 import { theme } from "./theme.js";
+
+const plural = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
+
+function SkippedLines({ skipped }: { readonly skipped: readonly SkippedTarget[] }) {
+  return (
+    <>
+      {skipped.map(({ id, label, reason }) => <Text key={id} color={theme.warning}>Skipped {label}: {reason}</Text>)}
+    </>
+  );
+}
+
+function UninstallPreview({ plan }: { readonly plan: BulkUninstallPlan }) {
+  return (
+    <Box flexDirection="column">
+      {plan.items.map((item) => (
+        <Box key={item.id} flexDirection="column">
+          <Text color={theme.group}>{item.label}</Text>
+          {(item.kind === "managed" ? item.prepared.plan.preview : item.prepared.preview).map((line, position) => (
+            <Text key={position} color={item.kind === "unmanaged" && position === 0 ? theme.warning : undefined}>{line}</Text>
+          ))}
+        </Box>
+      ))}
+      <SkippedLines skipped={plan.skipped} />
+      <Text>Uninstall {plural(plan.items.length)}? y/n</Text>
+    </Box>
+  );
+}
+
+function HostsPreview({ plan }: { readonly plan: BulkHostPlan }) {
+  return (
+    <Box flexDirection="column">
+      {plan.items.map((item) => (
+        <Box key={item.id} flexDirection="column">
+          <Text color={theme.group}>{item.label}</Text>
+          {item.prepared.preview.map((line, position) => <Text key={position}>{line}</Text>)}
+        </Box>
+      ))}
+      <SkippedLines skipped={plan.skipped} />
+      <Text>Add hosts to {plural(plan.items.length)}? y/n</Text>
+    </Box>
+  );
+}
 
 /** Renders the prompt of a manage mode: host lists, previews and confirmations. */
 export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
@@ -69,6 +112,28 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
           {mode.prepared.preview.map((line, position) => <Text key={position} color={position === 0 ? theme.warning : undefined}>{line}</Text>)}
           <Text>Remove {mode.group.name}? y/n</Text>
         </Box>
+      );
+    case "bulk-hosts":
+      return (
+        <Box flexDirection="column">
+          <Text>Add hosts to {plural(mode.targets.length)}. Host (space/1-{mode.choices.length} toggle, j/k move, Enter continue, Esc cancel):</Text>
+          {mode.choices.map((host, position) => (
+            <Text key={host}>
+              {position === mode.cursor ? "> " : "  "}[{mode.selected.includes(host) ? "x" : " "}] {position + 1} {host}
+            </Text>
+          ))}
+          <SkippedLines skipped={mode.skipped} />
+        </Box>
+      );
+    case "confirm-bulk-uninstall":
+      return <UninstallPreview plan={mode.plan} />;
+    case "confirm-bulk-hosts":
+      return <HostsPreview plan={mode.plan} />;
+    case "confirm-bulk-exposure":
+      return (
+        <Text color={theme.warning}>
+          Adding hosts exposes the installed {mode.plan.items.map((item) => item.label).join(", ")} to more hosts and needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
+        </Text>
       );
     case "busy":
       return <Text>{mode.label}</Text>;

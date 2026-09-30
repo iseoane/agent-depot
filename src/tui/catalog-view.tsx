@@ -17,7 +17,7 @@ import {
   type InstalledSkills,
 } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
-import { errorText } from "./manage-actions.js";
+import { errorText, runBatch } from "./batch.js";
 import { rowStyle, theme } from "./theme.js";
 import {
   collapseOrParent,
@@ -259,21 +259,12 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   /** Applies the prepared items one by one; a failure is reported for that item and the rest still run. */
   const confirmInstall = async (items: readonly BatchItem[], exposure: boolean) => {
     setAction({ kind: "busy", label: `Installing ${describeSkills(items.map((item) => item.skill))}...` });
-    const lines: string[] = [];
-    const failed = new Set<string>();
-    for (const { skill, prepared, error } of items) {
-      if (prepared === undefined) {
-        failed.add(skillKey(skill));
-        lines.push(`Failed ${skill.name}: ${error}`);
-        continue;
-      }
-      try {
-        lines.push((await runInstall(prepared, operations, exposure && prepared.additionalHostExposure)).join(" "));
-      } catch (caught) {
-        failed.add(skillKey(skill));
-        lines.push(`Failed ${skill.name}: ${errorText(caught)}`);
-      }
-    }
+    const outcomes = await runBatch(items, async ({ prepared, error }) => {
+      if (prepared === undefined) throw new Error(error);
+      return (await runInstall(prepared, operations, exposure && prepared.additionalHostExposure)).join(" ");
+    }, ({ skill }, caught) => `Failed ${skill.name}: ${errorText(caught)}`);
+    const lines = outcomes.map((outcome) => outcome.line);
+    const failed = new Set(outcomes.filter((outcome) => !outcome.ok).map((outcome) => skillKey(outcome.item.skill)));
     // Installed Skills leave the list; only the failed ones stay marked for another try.
     setMarked(failed);
     await finish({ kind: failed.size > 0 ? "error" : "ok", text: lines.join("\n") });

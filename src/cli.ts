@@ -18,6 +18,8 @@ import {
   type UserGlobalSkillMigration,
 } from "./sources.js";
 import {
+  AGENT_DEPOT_PACKAGE_NAME,
+  AGENT_DEPOT_PACKAGE_VERSION,
   defaultProjectManifestPath,
   parseProjectManifest,
   ProjectManifestStore,
@@ -122,6 +124,7 @@ const USAGE = [
   "  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]",
   "  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]",
   "  agent-depot tui",
+  "  agent-depot --version",
 ].join("\n");
 const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
@@ -246,6 +249,12 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
   const operations = dependencies.operations ?? createSourceOperations({ homeDirectory: dependencies.homeDirectory });
 
   try {
+    if (argv[0] === "--version" || argv[0] === "-v") {
+      if (argv.length !== 1) throw new CliUsageError(USAGE);
+      if (AGENT_DEPOT_PACKAGE_VERSION === undefined) throw new Error("Unable to determine the Agent Depot package version");
+      output(AGENT_DEPOT_PACKAGE_VERSION);
+      return 0;
+    }
     const command = COMMANDS.get(argv[0] ?? "");
     if (!command) {
       throw new CliUsageError(USAGE);
@@ -790,6 +799,12 @@ function outputUninstallSummary(options: UninstallOptions, removedManagedCount: 
   }
   if (options.cli) {
     output("Handoff: remove the persistent Agent Depot CLI with the package manager that installed it; no package manager was invoked or inferred");
+    if (AGENT_DEPOT_PACKAGE_NAME !== undefined) {
+      output("Run the command for the package manager you used:");
+      output(`  npm uninstall --global ${AGENT_DEPOT_PACKAGE_NAME}`);
+      output(`  pnpm remove --global ${AGENT_DEPOT_PACKAGE_NAME}`);
+    }
+    output("  npx/pnpm dlx runs need no uninstall (only a cache entry)");
   }
 }
 

@@ -119,7 +119,8 @@ test("shows symlinks with their target", async (t) => {
   const view = mount(f);
   const opened = await openUnmanaged(view, /doctor-md-agents \[/);
   assert.match(opened, /doctor-md-agents \[claude, pi, codex, opencode\]/);
-  assert.ok(opened.includes(`symlink → ${target}`), opened);
+  // The mark prefix can wrap a long temp path at the test width, so compare without whitespace.
+  assert.ok(opened.replace(/\s+/g, "").includes(`symlink→${target}`.replace(/\s+/g, "")), opened);
   view.unmount();
 });
 

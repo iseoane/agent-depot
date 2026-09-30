@@ -267,6 +267,14 @@ function assessEvidence(
         reason: "The installed Skill is behind its fixed version target",
       };
     }
+  } else if (
+    installedVersion.kind === "builtin-package" && currentVersion.kind === "builtin-package" &&
+    compareSemver(installedVersion.version, currentVersion.version) > 0
+  ) {
+    return {
+      status: "unknown",
+      reason: `Installed by a newer Agent Depot (${installedVersion.version}); running ${currentVersion.version} — update Agent Depot`,
+    };
   } else if (!sameVersion(installedVersion, currentVersion)) {
     return {
       status: "updateable",
@@ -399,6 +407,37 @@ function trustworthyVersionForSelection(source: Source, version: ResolvedVersion
 
 function versionValue(version: ResolvedVersionEvidence): string {
   return version.kind === "builtin-package" ? version.version : version.commit;
+}
+
+/** Compares two semver strings (prerelease aware); an unparsable input compares as 0 so it never blocks an update. */
+function compareSemver(left: string, right: string): number {
+  const a = parseSemver(left);
+  const b = parseSemver(right);
+  if (a === undefined || b === undefined) return 0;
+  for (let index = 0; index < 3; index += 1) {
+    const difference = a.core[index]! - b.core[index]!;
+    if (difference !== 0) return Math.sign(difference);
+  }
+  if (a.pre.length === 0 || b.pre.length === 0) return Math.sign(b.pre.length - a.pre.length);
+  for (let index = 0; index < Math.max(a.pre.length, b.pre.length); index += 1) {
+    const x = a.pre[index];
+    const y = b.pre[index];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    const xNumeric = /^\d+$/u.test(x);
+    const yNumeric = /^\d+$/u.test(y);
+    if (xNumeric && yNumeric) return Math.sign(Number(x) - Number(y));
+    if (xNumeric !== yNumeric) return xNumeric ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+function parseSemver(value: string): { readonly core: readonly number[]; readonly pre: readonly string[] } | undefined {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u.exec(value);
+  if (!match) return undefined;
+  return { core: [Number(match[1]), Number(match[2]), Number(match[3])], pre: match[4] === undefined ? [] : match[4].split(".") };
 }
 
 function sameVersion(left: ResolvedVersionEvidence, right: ResolvedVersionEvidence): boolean {

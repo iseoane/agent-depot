@@ -1680,6 +1680,7 @@ interface PathIdentity {
   readonly ctimeMs: number;
   readonly size: number;
   readonly mode: number;
+  readonly directory: boolean;
 }
 
 interface CreatedPath {
@@ -1833,16 +1834,36 @@ function pathIdentity(information: Stats): PathIdentity {
     ctimeMs: information.ctimeMs,
     size: information.size,
     mode: information.mode,
+    directory: information.isDirectory(),
   };
+}
+
+function hasNativeIdentity(identity: PathIdentity): boolean {
+  return Number.isFinite(identity.device) && Number.isFinite(identity.inode) &&
+    (identity.device !== 0 || identity.inode !== 0);
+}
+
+/**
+ * Filesystems such as ext4 reuse a freed inode immediately, so a replacement
+ * file can share dev/ino with the one we created. For non-directories the
+ * native identity is therefore paired with `size` and a non-zero `birthtimeMs`:
+ * both stay fixed between creation and rollback (chmod changes neither, and
+ * identity is recorded before it), while a replacement almost always changes
+ * at least one. `mode` and `ctime` are deliberately excluded because chmod and
+ * rename legitimately change them.
+ */
+function nativeFileSuffix(identity: PathIdentity): string {
+  if (identity.directory) return "";
+  const birth = Number.isFinite(identity.birthtimeMs) && identity.birthtimeMs > 0 ? identity.birthtimeMs : 0;
+  return `:${identity.size}:${birth}`;
 }
 
 function pathIdentityKey(identity: PathIdentity): string {
   // Rename may update ctime while preserving the native directory identity.
   // Use dev/inode when the platform provides them; only the fallback needs the
   // additional metadata because it has no native identity to compare.
-  if (Number.isFinite(identity.device) && Number.isFinite(identity.inode) &&
-    (identity.device !== 0 || identity.inode !== 0)) {
-    return `native:${identity.device}:${identity.inode}`;
+  if (hasNativeIdentity(identity)) {
+    return `native:${identity.device}:${identity.inode}${nativeFileSuffix(identity)}`;
   }
   return `fallback:${identity.birthtimeMs}:${identity.size}:${identity.mode}`;
 }
@@ -1851,9 +1872,8 @@ function samePathIdentity(left: PathIdentity, right: PathIdentity): boolean {
   // Prefer native device/inode identity. The birth/ctime fallback supports
   // hosts where the native values are unavailable while still failing closed
   // when no stable identity can be established.
-  if (Number.isFinite(left.device) && Number.isFinite(left.inode) &&
-    (left.device !== 0 || left.inode !== 0)) {
-    return left.device === right.device && left.inode === right.inode;
+  if (hasNativeIdentity(left)) {
+    return pathIdentityKey(left) === pathIdentityKey(right);
   }
   return Number.isFinite(left.birthtimeMs) && left.birthtimeMs > 0 &&
     left.birthtimeMs === right.birthtimeMs && left.ctimeMs === right.ctimeMs &&

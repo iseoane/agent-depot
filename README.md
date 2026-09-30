@@ -5,36 +5,76 @@ Agent Depot keeps a global catalog of Git Sources for future skill discovery.
 Requires Node.js >= 24 (Active LTS). The [interactive TUI](#interactive-tui)
 needs an interactive terminal.
 
-## Usage
+## Install
 
-Build the package, then run the CLI:
+Agent Depot is published as the scoped package `@iseoane/agent-depot` and exposes the
+`agent-depot` command. It requires Node.js >= 24.
 
 ```sh
-pnpm build
-node dist/src/cli.js source list
-node dist/src/cli.js source add https://github.com/example/skills.git
-node dist/src/cli.js source refresh git:<source-id>
-node dist/src/cli.js source refresh git:<source-id> --yes
-node dist/src/cli.js source remove git:<source-id> --yes
-node dist/src/cli.js source remove git:<source-id> --skill <id|path> --yes
-node dist/src/cli.js source migrate git:<old-source-id> git:<new-source-id> --skill <path> --yes
-node dist/src/cli.js discover builtin:agent-depot git:<source-id>
-node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
-node dist/src/cli.js install --scope user-global --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
+# Run without installing
+npx @iseoane/agent-depot --version
+npx @iseoane/agent-depot tui
+pnpm dlx @iseoane/agent-depot tui
+
+# Or install globally
+npm install --global @iseoane/agent-depot
+pnpm add --global @iseoane/agent-depot
+agent-depot --version
+```
+
+The examples below use the `agent-depot` command; `npx @iseoane/agent-depot <args>`
+works the same way without a global install.
+
+### Updating
+
+`npx` may reuse a cached copy of an older version. Add `@latest` to force the newest
+release:
+
+```sh
+npx @iseoane/agent-depot@latest tui
+pnpm dlx @iseoane/agent-depot@latest tui
+```
+
+A global install is updated with the package manager that installed it:
+
+```sh
+npm install --global @iseoane/agent-depot@latest
+pnpm add --global @iseoane/agent-depot@latest
+```
+
+A running Agent Depot never downgrades built-in Skills: a Skill installed by a newer
+Agent Depot is reported as not updatable (update Agent Depot first).
+
+## Usage
+
+With the package installed (or via `npx @iseoane/agent-depot`):
+
+```sh
+agent-depot source list
+agent-depot source add https://github.com/example/skills.git
+agent-depot source refresh git:<source-id>
+agent-depot source refresh git:<source-id> --yes
+agent-depot source remove git:<source-id> --yes
+agent-depot source remove git:<source-id> --skill <id|path> --yes
+agent-depot source migrate git:<old-source-id> git:<new-source-id> --skill <path> --yes
+agent-depot discover builtin:agent-depot git:<source-id>
+agent-depot install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
+agent-depot install --scope user-global --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
 # Only for an explicitly reviewed, untracked real-directory conflict:
-node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --overwrite --yes
-node dist/src/cli.js install --scope project --manifest --portable-v1 --yes
-node dist/src/cli.js update check --scope project
-node dist/src/cli.js update apply --scope project --all --yes
-node dist/src/cli.js update apply --scope user-global --skill 0 --yes
-node dist/src/cli.js skill remove <id|path>... --yes
-node dist/src/cli.js skill remove <id|path> --host <host>... --yes
-node dist/src/cli.js skill host add <id|path> --host <host>... --yes --confirm-additional-host
-node dist/src/cli.js uninstall --cli
-node dist/src/cli.js uninstall --skills --yes
-node dist/src/cli.js uninstall --unmanaged-skill <exact-global-path> --yes
-node dist/src/cli.js uninstall --data --yes
-node dist/src/cli.js tui
+agent-depot install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --overwrite --yes
+agent-depot install --scope project --manifest --portable-v1 --yes
+agent-depot update check --scope project
+agent-depot update apply --scope project --all --yes
+agent-depot update apply --scope user-global --skill 0 --yes
+agent-depot skill remove <id|path>... --yes
+agent-depot skill remove <id|path> --host <host>... --yes
+agent-depot skill host add <id|path> --host <host>... --yes --confirm-additional-host
+agent-depot uninstall --cli
+agent-depot uninstall --skills --yes
+agent-depot uninstall --unmanaged-skill <exact-global-path> --yes
+agent-depot uninstall --data --yes
+agent-depot tui
+agent-depot --version
 ```
 
 Refresh first prints the registered URL as a preview. It requires explicit
@@ -109,15 +149,17 @@ store serializes cooperating updates, but a non-cooperating process can still ra
 between the final check and filesystem rename/delete; staging failures restore the
 original path when the result is known and otherwise retain the staged path with an
 uncertain-status error. Agent Depot never invokes or infers a package manager, and
-Git Source caches are retained.
+Git Source caches are retained. `uninstall --cli` prints the exact commands
+(`npm uninstall --global @iseoane/agent-depot`, `pnpm remove --global @iseoane/agent-depot`);
+`npx`/`pnpm dlx` runs need no uninstall, only a cache entry.
 
 ## Batch updates
 
 Check either independent installation scope before applying updates:
 
 ```sh
-node dist/src/cli.js update check --scope project
-node dist/src/cli.js update check --scope user-global
+agent-depot update check --scope project
+agent-depot update check --scope user-global
 ```
 
 The check reports `Updateable`, `Current`, and `Unknown` managed Skills separately. `Unknown`
@@ -139,8 +181,8 @@ Apply all updateable Skills or select one or more by their printed update ID, nu
 index, or an unambiguous Skill path:
 
 ```sh
-node dist/src/cli.js update apply --scope project --all --yes
-node dist/src/cli.js update apply --scope user-global --skill 0 --yes
+agent-depot update apply --scope project --all --yes
+agent-depot update apply --scope user-global --skill 0 --yes
 ```
 
 A Skill tracked at a non-canonical project path (outside `.agents/skills/<name>` and
@@ -148,7 +190,7 @@ A Skill tracked at a non-canonical project path (outside `.agents/skills/<name>`
 preview prints the relative path; repeat it with `--confirm-path` (once per such path):
 
 ```sh
-node dist/src/cli.js update apply --scope project --all --yes --confirm-path vendor/alpha
+agent-depot update apply --scope project --all --yes --confirm-path vendor/alpha
 ```
 
 Applying always previews each selected candidate first. `--yes` is required and
@@ -187,7 +229,7 @@ first installation with `--method <json>`. The value must be one strict JSON
 method object, for example:
 
 ```sh
-node dist/src/cli.js install --scope user-global --source builtin:agent-depot \
+agent-depot install --scope user-global --source builtin:agent-depot \
   --skill architecture --host pi --version latest \
   --method '{"kind":"command","argv":["node","scripts/install.mjs"],"cwd":"tools"}' \
   --portable-v1 --yes
@@ -243,7 +285,7 @@ overwritten. For an untracked, real directory whose content differs, replacement
 requires both `--overwrite` and `--yes`:
 
 ```sh
-node dist/src/cli.js install --scope project --source builtin:agent-depot \
+agent-depot install --scope project --source builtin:agent-depot \
   --skill architecture --host pi --version latest --portable-v1 --overwrite --yes
 ```
 
@@ -327,7 +369,7 @@ error; URL Sources remain self-contained and resolvable on a fresh machine.
 ## Interactive TUI
 
 ```sh
-node dist/src/cli.js tui
+agent-depot tui
 ```
 
 The TUI is an [Ink](https://github.com/vadimdemedes/ink) (React for terminals)
@@ -349,7 +391,7 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | --- | --- |
 | Sources | `space` mark, `a` mark all, `Enter` open the Source in the Catalog, `n` add a Git Source, `r` refresh the marked (or highlighted) Sources, `d` remove |
 | Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marks (or the highlighted skill), `/` filter, `s` toggle one Source or all (when opened from a Source) |
-| Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill |
+| Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill, `space` marks a leaf and `a` marks all visible leaves: with marks, `u` and `h` act on all of them with one combined preview and one confirmation (project installations are skipped with a reason) |
 | Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot assess" line |
 
 Safety model:
@@ -394,6 +436,16 @@ without a shell. It creates or fetches a bare mirror, explicitly synchronizes
 all refs, and prunes deleted refs; it does not check out files, install skills,
 or choose Sources automatically. Network access is required for a confirmed
 refresh.
+
+## Development
+
+From a source checkout, build and run the CLI directly:
+
+```sh
+pnpm install
+pnpm build
+node dist/src/cli.js --version
+```
 
 ## Static analysis
 

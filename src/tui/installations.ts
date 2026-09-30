@@ -181,6 +181,11 @@ export function sourceIdOf(selection: ProjectSkillSelection, sources: readonly S
   return sources.find((candidate) => candidate.kind === "git" && candidate.url === source.url)?.id;
 }
 
+/** The Skill of an installation, as the shared manage flows expect it. */
+export function skillOf(row: InstallationRow, sourceId: string): SkillCandidate {
+  return { sourceId, path: row.selection.path, name: path.posix.basename(row.selection.path), description: "" };
+}
+
 /** Source Skills whose directory name equals the unmanaged Skill's, across every registered Source. */
 export async function findAdoptionCandidates(
   operations: SourceOperations,

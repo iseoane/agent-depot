@@ -140,7 +140,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]\n  agent-depot skill remove <id|path>... [--yes]\n  agent-depot skill remove <id|path> --host <host>... [--yes]\n  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]\n  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]\n  agent-depot tui",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]\n  agent-depot skill remove <id|path>... [--yes]\n  agent-depot skill remove <id|path> --host <host>... [--yes]\n  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]\n  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]\n  agent-depot tui\n  agent-depot --version",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -491,6 +491,10 @@ test("removes catalog data without deleting retained Skills and only prints CLI 
     }), 0);
     assert.match(output.join("\\n"), /package-manager handoff only/i);
     assert.match(output.join("\\n"), /will not invoke or infer/i);
+    assert.ok(output.includes("  npm uninstall --global @iseoane/agent-depot"));
+    assert.ok(output.includes("  pnpm remove --global @iseoane/agent-depot"));
+    assert.ok(output.includes("  npx/pnpm dlx runs need no uninstall (only a cache entry)"));
+    assert.match(output.join("\\n"), /no package manager was invoked or inferred/);
   } finally {
     await rm(homeDirectory, { recursive: true, force: true });
     await rm(stateDirectory, { recursive: true, force: true });
