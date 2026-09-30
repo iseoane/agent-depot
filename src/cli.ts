@@ -1268,86 +1268,88 @@ async function resolveInstallInspection(
   return { resolvedSource, resolved, installationInspection };
 }
 
-function parseInstallOptions(argv: readonly string[]): InstallOptions {
-  let scope: string | undefined;
-  let sourceId: string | undefined;
-  let skillPath: string | undefined;
-  let versionValue: string | undefined;
-  let ref: string | undefined;
-  let method: unknown;
-  let fromManifest = false;
-  let portableV1 = false;
-  let confirmed = false;
-  let overwrite = false;
-  let confirmAdditionalHostExposure = false;
-  const hosts: ProjectHost[] = [];
+interface InstallDraft {
+  scope?: string;
+  sourceId?: string;
+  skillPath?: string;
+  versionValue?: string;
+  ref?: string;
+  method?: unknown;
+  fromManifest: boolean;
+  portableV1: boolean;
+  confirmed: boolean;
+  overwrite: boolean;
+  confirmAdditionalHostExposure: boolean;
+  readonly hosts: ProjectHost[];
+}
 
+const INSTALL_VALUE_OPTIONS = new Map<string, (draft: InstallDraft, value: string) => void>([
+  ["--scope", (draft, value) => { draft.scope = value; }],
+  ["--source", (draft, value) => { draft.sourceId = value; }],
+  ["--skill", (draft, value) => { draft.skillPath = value; }],
+  ["--host", (draft, value) => {
+    for (const host of value.split(",")) {
+      if (!PROJECT_HOSTS.includes(host as ProjectHost) || draft.hosts.includes(host as ProjectHost)) {
+        throw new CliUsageError(`Unsupported or duplicate Host ${JSON.stringify(host)}`);
+      }
+      draft.hosts.push(host as ProjectHost);
+    }
+  }],
+  ["--version", (draft, value) => { draft.versionValue = value; }],
+  ["--ref", (draft, value) => { draft.ref = value; }],
+  ["--method", (draft, value) => { draft.method = parseMethodOption(value); }],
+]);
+
+const INSTALL_FLAG_OPTIONS = new Map<string, (draft: InstallDraft) => void>([
+  ["--manifest", (draft) => { draft.fromManifest = true; }],
+  ["--portable-v1", (draft) => { draft.portableV1 = true; }],
+  ["--yes", (draft) => { draft.confirmed = true; }],
+  ["--overwrite", (draft) => { draft.overwrite = true; }],
+  ["--confirm-additional-host", (draft) => { draft.confirmAdditionalHostExposure = true; }],
+]);
+
+function parseInstallOptions(argv: readonly string[]): InstallOptions {
+  const draft: InstallDraft = {
+    fromManifest: false,
+    portableV1: false,
+    confirmed: false,
+    overwrite: false,
+    confirmAdditionalHostExposure: false,
+    hosts: [],
+  };
   for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    switch (argument) {
-      case "--scope":
-        scope = requireOptionValue(argv, ++index, "--scope");
-        break;
-      case "--source":
-        sourceId = requireOptionValue(argv, ++index, "--source");
-        break;
-      case "--skill":
-        skillPath = requireOptionValue(argv, ++index, "--skill");
-        break;
-      case "--host":
-        for (const host of requireOptionValue(argv, ++index, "--host").split(",")) {
-          if (!PROJECT_HOSTS.includes(host as ProjectHost) || hosts.includes(host as ProjectHost)) {
-            throw new CliUsageError(`Unsupported or duplicate Host ${JSON.stringify(host)}`);
-          }
-          hosts.push(host as ProjectHost);
-        }
-        break;
-      case "--version":
-        versionValue = requireOptionValue(argv, ++index, "--version");
-        break;
-      case "--ref":
-        ref = requireOptionValue(argv, ++index, "--ref");
-        break;
-      case "--method":
-        method = parseMethodOption(requireOptionValue(argv, ++index, "--method"));
-        break;
-      case "--manifest":
-        fromManifest = true;
-        break;
-      case "--portable-v1":
-        portableV1 = true;
-        break;
-      case "--yes":
-        confirmed = true;
-        break;
-      case "--overwrite":
-        overwrite = true;
-        break;
-      case "--confirm-additional-host":
-        confirmAdditionalHostExposure = true;
-        break;
-      default:
-        throw new CliUsageError(INSTALL_USAGE);
+    const argument = argv[index]!;
+    const applyValue = INSTALL_VALUE_OPTIONS.get(argument);
+    const applyFlag = INSTALL_FLAG_OPTIONS.get(argument);
+    if (applyValue) {
+      applyValue(draft, requireOptionValue(argv, ++index, argument));
+    } else if (applyFlag) {
+      applyFlag(draft);
+    } else {
+      throw new CliUsageError(INSTALL_USAGE);
     }
   }
+  return finalizeInstallOptions(draft);
+}
 
+function finalizeInstallOptions(draft: InstallDraft): InstallOptions {
+  const { scope, sourceId, skillPath, versionValue, ref, method, fromManifest, hosts, overwrite } = draft;
   if (scope !== "project" && scope !== "user-global") {
     throw new CliUsageError("Installation scope must be explicit: use --scope project or --scope user-global");
   }
-  if (fromManifest && scope !== "project") {
-    throw new CliUsageError("--manifest is only supported with --scope project");
-  }
-  if (fromManifest && (sourceId !== undefined || skillPath !== undefined || versionValue !== undefined || ref !== undefined || method !== undefined || hosts.length > 0 || overwrite)) {
-    throw new CliUsageError("--manifest cannot be combined with --source, --skill, --host, --version, --ref, --method, or --overwrite");
-  }
-  if (!fromManifest && !versionValue && (sourceId || skillPath || ref || hosts.length > 0)) {
-    throw new CliUsageError("--version is required for a selected Skill");
-  }
-  if (!fromManifest && versionValue === undefined && sourceId === undefined && skillPath === undefined && ref === undefined && hosts.length === 0) {
-    throw new CliUsageError(INSTALL_USAGE);
+  const selectsSkill = sourceId !== undefined || skillPath !== undefined || ref !== undefined || hosts.length > 0;
+  if (fromManifest) {
+    if (scope !== "project") {
+      throw new CliUsageError("--manifest is only supported with --scope project");
+    }
+    if (selectsSkill || versionValue !== undefined || method !== undefined || overwrite) {
+      throw new CliUsageError("--manifest cannot be combined with --source, --skill, --host, --version, --ref, --method, or --overwrite");
+    }
+  } else if (versionValue === undefined) {
+    throw new CliUsageError(selectsSkill ? "--version is required for a selected Skill" : INSTALL_USAGE);
   }
   return {
-    scope: scope as "project" | "user-global",
+    scope,
     fromManifest,
     sourceId,
     skillPath,
@@ -1355,10 +1357,10 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
     version: versionValue === undefined ? undefined : parseVersionOption(versionValue),
     ref,
     method,
-    portableV1,
-    confirmed,
+    portableV1: draft.portableV1,
+    confirmed: draft.confirmed,
     overwrite,
-    confirmAdditionalHostExposure,
+    confirmAdditionalHostExposure: draft.confirmAdditionalHostExposure,
   };
 }
 
