@@ -1,6 +1,12 @@
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import type { SkillCandidate } from "../skill-discovery.js";
-import type { PreparedInstall, InstallScope, UninstallPreparation } from "./catalog-installs.js";
+import type {
+  InstallScope,
+  PreparedHostAddition,
+  PreparedHostRemoval,
+  PreparedInstall,
+  UninstallPreparation,
+} from "./catalog-installs.js";
 
 /** Host choices in checklist order; labels use the project's host identifiers. */
 export const HOST_CHOICES: readonly ProjectHost[] = PROJECT_HOSTS;
@@ -26,6 +32,20 @@ export type ActionMode =
       readonly skill: SkillCandidate;
       readonly prepared: Extract<UninstallPreparation, { kind: "ready" }>;
     }
+  /** `i` on a Skill already installed user-global: add hosts to it or install anew. */
+  | { readonly kind: "installed-choice"; readonly skill: SkillCandidate; readonly missing: readonly ProjectHost[] }
+  /** `u` on an installation with several hosts: remove all of them or choose. */
+  | { readonly kind: "remove-scope"; readonly skill: SkillCandidate; readonly hosts: readonly ProjectHost[] }
+  | {
+      readonly kind: "hosts-add" | "hosts-remove";
+      readonly skill: SkillCandidate;
+      readonly choices: readonly ProjectHost[];
+      readonly cursor: number;
+      readonly selected: readonly ProjectHost[];
+    }
+  | { readonly kind: "confirm-host-add"; readonly skill: SkillCandidate; readonly prepared: PreparedHostAddition }
+  | { readonly kind: "confirm-host-exposure"; readonly skill: SkillCandidate; readonly prepared: PreparedHostAddition }
+  | { readonly kind: "confirm-host-remove"; readonly skill: SkillCandidate; readonly prepared: PreparedHostRemoval }
   | { readonly kind: "busy"; readonly label: string };
 
 export const BROWSE: ActionMode = { kind: "browse" };

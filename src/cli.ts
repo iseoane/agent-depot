@@ -45,6 +45,7 @@ import {
   type UpdateBatchAssessment,
   type UpdateBatchAssessmentItem,
 } from "./update-batch.js";
+import { executeHostAddition, executeHostRemoval, planHostAddition, planHostRemoval } from "./skill-hosts.js";
 import {
   assertManagedInstallationRecordsUnchanged,
   executeSkillRemoval,
@@ -119,6 +120,8 @@ const USAGE = [
   "  agent-depot update check --scope <project|user-global>",
   "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]",
   "  agent-depot skill remove <id|path>... [--yes]",
+  "  agent-depot skill remove <id|path> --host <host>... [--yes]",
+  "  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]",
   "  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]",
   "  agent-depot tui",
 ].join("\n");
@@ -126,7 +129,8 @@ const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> 
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 const REMOVE_SOURCE_USAGE = "Usage: agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]";
 const MIGRATE_SOURCE_USAGE = "Usage: agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]";
-const SKILL_REMOVE_USAGE = "Usage: agent-depot skill remove <id|path>... [--yes]";
+const SKILL_REMOVE_USAGE = "Usage: agent-depot skill remove <id|path>... [--yes]\n       agent-depot skill remove <id|path> --host <host>... [--yes]";
+const SKILL_HOST_ADD_USAGE = "Usage: agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]";
 const UNINSTALL_USAGE = "Usage: agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]";
 
 interface CommandContext {
@@ -162,8 +166,13 @@ const COMMANDS = new Map<string, CommandHandler>([
   }],
   ["update", (values, { operations, dependencies, output }) => runUpdate(values, operations, dependencies, output)],
   ["skill", async (values, { operations, dependencies, output }) => {
-    if (values[0] !== "remove") throw new CliUsageError(USAGE);
-    await runSkillRemoval(values.slice(1), operations, dependencies, output);
+    if (values[0] === "remove") {
+      await runSkillRemoval(values.slice(1), operations, dependencies, output);
+    } else if (values[0] === "host" && values[1] === "add") {
+      await runSkillHostAdd(values.slice(2), operations, dependencies, output);
+    } else {
+      throw new CliUsageError(USAGE);
+    }
     return 0;
   }],
   ["uninstall", async (values, { operations, dependencies, output }) => {
@@ -514,30 +523,32 @@ async function runSkillRemoval(
   output: (line: string) => void,
 ): Promise<void> {
   const requested: string[] = [];
+  const hosts: ProjectHost[] = [];
   let confirmed = false;
-  for (const argument of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
     if (argument === "--yes") {
       confirmed = true;
+    } else if (argument === "--host") {
+      collectHosts(hosts, requireOptionValue(argv, ++index, argument));
     } else if (argument.startsWith("--")) {
       throw new CliUsageError(SKILL_REMOVE_USAGE);
     } else {
       requested.push(argument);
     }
   }
-  if (requested.length === 0) throw new CliUsageError(SKILL_REMOVE_USAGE);
+  if (requested.length === 0 || (hosts.length > 0 && requested.length !== 1)) throw new CliUsageError(SKILL_REMOVE_USAGE);
   if (!operations.listUserGlobalInstallations || !operations.removeUserGlobalInstallations) {
     throw new Error("Configured Source operations cannot remove user-global Skills");
   }
 
   const installations = await operations.listUserGlobalInstallations();
-  let selected: readonly ProjectSkillSelection[];
-  try {
-    selected = selectUserGlobalSkills(installations, requested);
-  } catch (error) {
-    if (error instanceof SkillSelectionError) throw new CliUsageError(error.message);
-    throw error;
-  }
+  const selected = selectManagedSkills(installations, requested);
   const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), dependencies.installationOptions);
+  if (hosts.length > 0) {
+    await runSkillHostRemoval(selected[0]!, hosts, installations, confirmed, operations, removalOptions, output);
+    return;
+  }
 
   output(`Preview: remove ${selected.length} user-global Skill${selected.length === 1 ? "" : "s"}`);
   const plan = await planSkillRemoval(selected, removalOptions);
@@ -546,6 +557,87 @@ async function runSkillRemoval(
   requireConfirmation(confirmed, "Removal not confirmed; rerun with --yes after reviewing every Skill preview");
   await executeSkillRemoval(plan, operations, removalOptions, installations);
   output(`Removed ${selected.length} user-global Skill${selected.length === 1 ? "" : "s"}`);
+}
+
+/** Resolves `<id|path>` arguments to managed installations, reporting selection problems as usage errors. */
+function selectManagedSkills(
+  installations: readonly ProjectSkillSelection[],
+  requested: readonly string[],
+): readonly ProjectSkillSelection[] {
+  try {
+    return selectUserGlobalSkills(installations, requested);
+  } catch (error) {
+    if (error instanceof SkillSelectionError) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
+
+async function runSkillHostRemoval(
+  selection: ProjectSkillSelection,
+  hosts: readonly ProjectHost[],
+  installations: readonly ProjectSkillSelection[],
+  confirmed: boolean,
+  operations: SourceOperations,
+  options: ProjectInstallationOptions,
+  output: (line: string) => void,
+): Promise<void> {
+  const plan = await planHostRemoval(selection, hosts, options).catch(rethrowSelectionError);
+  output(plan.kind === "full"
+    ? "Preview: remove 1 user-global Skill (every recorded Host is removed)"
+    : `Preview: remove ${hosts.length} Host${hosts.length === 1 ? "" : "s"} from 1 user-global Skill`);
+  for (const line of plan.kind === "full" ? plan.plan.preview : plan.preview) output(line);
+  output("  The installation record is reconciled after the locations are removed");
+  requireConfirmation(confirmed, "Removal not confirmed; rerun with --yes after reviewing the preview");
+  await executeHostRemoval(plan, operations, options, installations);
+  output(plan.kind === "full"
+    ? "Removed 1 user-global Skill"
+    : `Removed hosts ${plan.removed.join(", ")} from ${JSON.stringify(selection.path)}`);
+}
+
+async function runSkillHostAdd(
+  argv: readonly string[],
+  operations: SourceOperations,
+  dependencies: CliDependencies,
+  output: (line: string) => void,
+): Promise<void> {
+  const requested: string[] = [];
+  const hosts: ProjectHost[] = [];
+  let confirmed = false;
+  let confirmAdditionalHost = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (argument === "--yes") {
+      confirmed = true;
+    } else if (argument === "--confirm-additional-host") {
+      confirmAdditionalHost = true;
+    } else if (argument === "--host") {
+      collectHosts(hosts, requireOptionValue(argv, ++index, argument));
+    } else if (argument.startsWith("--")) {
+      throw new CliUsageError(SKILL_HOST_ADD_USAGE);
+    } else {
+      requested.push(argument);
+    }
+  }
+  if (requested.length !== 1 || hosts.length === 0) throw new CliUsageError(SKILL_HOST_ADD_USAGE);
+  if (!operations.listUserGlobalInstallations || !operations.updateUserGlobalInstallation) {
+    throw new Error("Configured Source operations cannot update user-global Skills");
+  }
+
+  const installations = await operations.listUserGlobalInstallations();
+  const [selection] = selectManagedSkills(installations, requested);
+  const options = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), dependencies.installationOptions);
+  const plan = await planHostAddition(selection!, hosts, options).catch(rethrowSelectionError);
+  output("Preview: add Hosts to 1 user-global Skill");
+  for (const line of plan.preview) output(line);
+  requireConfirmation(confirmed, "Host change not confirmed; rerun with --yes after reviewing the preview");
+  requireConfirmation(confirmAdditionalHost, "Adding a Host exposes the installed Skill to more hosts; rerun with --yes --confirm-additional-host");
+  await executeHostAddition(plan, operations, options, installations, true);
+  output(`Added hosts ${plan.hosts.join(", ")} to ${JSON.stringify(plan.selection.path)}`);
+}
+
+function rethrowSelectionError(error: unknown): never {
+  if (error instanceof SkillSelectionError) throw new CliUsageError(error.message);
+  throw error;
 }
 
 interface UninstallOptions {
@@ -1244,18 +1336,21 @@ interface InstallDraft {
   readonly hosts: ProjectHost[];
 }
 
+/** Appends the comma-separated `--host` value, rejecting unknown or repeated Hosts. */
+function collectHosts(hosts: ProjectHost[], value: string): void {
+  for (const host of value.split(",")) {
+    if (!PROJECT_HOSTS.includes(host as ProjectHost) || hosts.includes(host as ProjectHost)) {
+      throw new CliUsageError(`Unsupported or duplicate Host ${JSON.stringify(host)}`);
+    }
+    hosts.push(host as ProjectHost);
+  }
+}
+
 const INSTALL_VALUE_OPTIONS = new Map<string, (draft: InstallDraft, value: string) => void>([
   ["--scope", (draft, value) => { draft.scope = value; }],
   ["--source", (draft, value) => { draft.sourceId = value; }],
   ["--skill", (draft, value) => { draft.skillPath = value; }],
-  ["--host", (draft, value) => {
-    for (const host of value.split(",")) {
-      if (!PROJECT_HOSTS.includes(host as ProjectHost) || draft.hosts.includes(host as ProjectHost)) {
-        throw new CliUsageError(`Unsupported or duplicate Host ${JSON.stringify(host)}`);
-      }
-      draft.hosts.push(host as ProjectHost);
-    }
-  }],
+  ["--host", (draft, value) => { collectHosts(draft.hosts, value); }],
   ["--version", (draft, value) => { draft.versionValue = value; }],
   ["--ref", (draft, value) => { draft.ref = value; }],
   ["--method", (draft, value) => { draft.method = parseMethodOption(value); }],

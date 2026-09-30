@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   defaultProjectManifestPath,
   parseProjectManifest,
+  PROJECT_HOSTS,
   ProjectManifestStore,
   type ProjectHost,
   type ProjectSkillSelection,
@@ -20,8 +21,17 @@ import {
 } from "../skill-install.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import {
+  executeHostAddition,
+  executeHostRemoval,
+  planHostAddition,
+  planHostRemoval,
+  type HostAdditionPlan,
+  type HostRemovalPlan,
+} from "../skill-hosts.js";
+import {
   executeSkillRemoval,
   planSkillRemoval,
+  SkillSelectionError,
   userGlobalRemovalOptions,
   type SkillRemovalPlan,
 } from "../skill-removal.js";
@@ -211,4 +221,100 @@ export async function runUninstall(
 ): Promise<void> {
   const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
   await executeSkillRemoval(prepared.plan, operations, options, prepared.installations);
+}
+
+/** The user-global record of the Skill, when it is installed there. */
+export function globalRecord(skill: SkillCandidate, installed: InstalledSkills): ProjectSkillSelection | undefined {
+  return recordsFor(installed.global, skill, installed.sources)[0];
+}
+
+/** Hosts a user-global record does not serve yet, in checklist order. */
+export function missingHosts(record: ProjectSkillSelection): readonly ProjectHost[] {
+  return PROJECT_HOSTS.filter((host) => !record.hosts.includes(host));
+}
+
+export interface PreparedHostAddition {
+  readonly plan: HostAdditionPlan;
+  readonly installations: readonly ProjectSkillSelection[];
+  readonly preview: readonly string[];
+}
+
+export interface PreparedHostRemoval {
+  readonly plan: HostRemovalPlan;
+  readonly installations: readonly ProjectSkillSelection[];
+  readonly preview: readonly string[];
+}
+
+/** Reads the current records so a host change never acts on a stale checklist. */
+async function currentGlobalRecord(
+  operations: SourceOperations,
+  skill: SkillCandidate,
+  installed: InstalledSkills,
+): Promise<{ readonly record: ProjectSkillSelection; readonly installations: readonly ProjectSkillSelection[] }> {
+  if (!operations.listUserGlobalInstallations || !operations.updateUserGlobalInstallation || !operations.removeUserGlobalInstallations) {
+    throw new Error("Configured Source operations cannot manage user-global installation state");
+  }
+  const installations = await operations.listUserGlobalInstallations();
+  const record = recordsFor(installations, skill, installed.sources)[0];
+  if (!record) throw new Error("Skill is not installed");
+  return { record, installations };
+}
+
+/** A selection problem is a normal message for the TUI, like any other failed step. */
+function asMessage(error: unknown): never {
+  throw error instanceof SkillSelectionError ? new Error(error.message) : error;
+}
+
+/** Plan step for exposing an installed user-global Skill to more hosts. */
+export async function prepareHostAddition(
+  operations: SourceOperations,
+  environment: TuiEnvironment,
+  skill: SkillCandidate,
+  installed: InstalledSkills,
+  hosts: readonly ProjectHost[],
+): Promise<PreparedHostAddition> {
+  const { record, installations } = await currentGlobalRecord(operations, skill, installed);
+  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
+  const plan = await planHostAddition(record, hosts, options).catch(asMessage);
+  return { plan, installations, preview: plan.preview };
+}
+
+/** Execute step: the TUI's separate exposure confirmation stands in for `--confirm-additional-host`. */
+export async function runHostAddition(
+  prepared: PreparedHostAddition,
+  operations: SourceOperations,
+  environment: TuiEnvironment,
+): Promise<string> {
+  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
+  await executeHostAddition(prepared.plan, operations, options, prepared.installations, true);
+  return `Added hosts ${prepared.plan.hosts.join(", ")} to ${prepared.plan.selection.path}`;
+}
+
+/** Plan step for removing some hosts of a user-global Skill; removing all of them is a full removal. */
+export async function prepareHostRemoval(
+  operations: SourceOperations,
+  environment: TuiEnvironment,
+  skill: SkillCandidate,
+  installed: InstalledSkills,
+  hosts: readonly ProjectHost[],
+): Promise<PreparedHostRemoval> {
+  const { record, installations } = await currentGlobalRecord(operations, skill, installed);
+  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
+  const plan = await planHostRemoval(record, hosts, options).catch(asMessage);
+  return { plan, installations, preview: plan.kind === "full" ? plan.plan.preview : plan.preview };
+}
+
+/** Execute step: rechecks, removes only the chosen hosts' locations, then reconciles the record. */
+export async function runHostRemoval(
+  prepared: PreparedHostRemoval,
+  operations: SourceOperations,
+  environment: TuiEnvironment,
+  skill: SkillCandidate,
+): Promise<string> {
+  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
+  await executeHostRemoval(prepared.plan, operations, options, prepared.installations);
+  const { plan } = prepared;
+  return plan.kind === "full"
+    ? `Removed ${skill.name} (${skill.path})`
+    : `Removed hosts ${plan.removed.join(", ")} from ${plan.selection.path}`;
 }

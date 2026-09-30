@@ -25,6 +25,8 @@ node dist/src/cli.js update check --scope project
 node dist/src/cli.js update apply --scope project --all --yes
 node dist/src/cli.js update apply --scope user-global --skill 0 --yes
 node dist/src/cli.js skill remove <id|path>... --yes
+node dist/src/cli.js skill remove <id|path> --host <host>... --yes
+node dist/src/cli.js skill host add <id|path> --host <host>... --yes --confirm-additional-host
 node dist/src/cli.js uninstall --cli
 node dist/src/cli.js uninstall --skills --yes
 node dist/src/cli.js uninstall --data --yes
@@ -54,6 +56,23 @@ changes. It previews every deletion (with adopted/modified warnings), requires
 `--yes`, rechecks the targets, then deletes the files and their installation
 records. It is user-global only: project installations and manifests are never
 read or changed, and the Git cache is retained.
+
+`skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]`
+exposes an already installed user-global Skill to more Hosts without changing its
+content or version, then records the new Hosts. Non-Claude Hosts share the
+canonical `~/.agents/skills/<skill>` location and Claude is a symlink to it, so
+only a missing Claude symlink is ever created. The preview lists the new
+locations; because it exposes the Skill to more Hosts it needs both `--yes` and
+`--confirm-additional-host`. It refuses a Claude location that already holds
+anything other than the managed symlink, and a Skill that is not installed at the
+canonical location (exposing it would require copying it).
+
+`skill remove <id|path> --host <host>... [--yes]` removes only those Hosts. Only
+the managed Claude symlink can be deleted this way; the canonical directory backs
+every remaining Host (including the Claude symlink) and stays until the last Host
+is removed. Removing every recorded Host is a full removal with the usual
+adopted/modified warnings. The targets are rechecked before deleting and the
+record is updated afterwards. Project installations are not affected.
 
 To replace a Source URL, register the new Git Source first, then explicitly migrate
 user-global identities with `source migrate <old-id> <new-id> (--skill <path>... |
