@@ -8,6 +8,8 @@ export interface SourcesViewProps {
   readonly operations: SourceOperations;
   /** Reports whether the view is capturing keys (input, confirmation or busy), so the shell can suspend global keys. */
   readonly onCapturingChange?: (capturing: boolean) => void;
+  /** Invoked when the user presses Enter on the highlighted source. */
+  readonly onOpenCatalog?: (source: Source) => void;
 }
 
 type LoadState =
@@ -29,7 +31,7 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function SourcesView({ operations, onCapturingChange }: SourcesViewProps) {
+export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: SourcesViewProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selected, setSelected] = useState(0);
   const [mode, dispatch] = useReducer(modeReducer, initialMode);
@@ -143,6 +145,8 @@ export function SourcesView({ operations, onCapturingChange }: SourcesViewProps)
       setSelected((index) => Math.min(index + 1, Math.max(sources.length - 1, 0)));
     } else if (key.upArrow || input === "k") {
       setSelected((index) => Math.max(index - 1, 0));
+    } else if (key.return && current) {
+      onOpenCatalog?.(current);
     } else if (input === "a") {
       setMessage(undefined);
       typed.current = "";

@@ -26,7 +26,7 @@ The CLI requires remembering subcommands, ids and `--yes` confirmations; a TUI m
 - [x] T1 — Ink scaffolding: deps, tsconfig JSX, `agent-depot tui` command launching an app shell with injectable `SourceOperations`; test renders shell.
 - [x] T2 — Sources view: list sources (id, kind, url), keyboard navigation, empty/error states.
 - [x] T3 — Sources actions: add Git Source (URL input), refresh and remove with confirmation; built-in protected.
-- [ ] T4 — Catalog view: select source(s) → discovered skills with filter.
+- [x] T4 — Catalog view: select source(s) → discovered skills with filter.
 
 ## Acceptance criteria
 - `agent-depot tui` opens, shows sources, and supports add/refresh/remove with confirmation.
@@ -40,6 +40,7 @@ The CLI requires remembering subcommands, ids and `--yes` confirmations; a TUI m
 - T1: RED = `pnpm typecheck` failed (missing `src/tui/app.js`, `renderTui` not in `CliDependencies`); GREEN = typecheck, lint, test (246 pass) all clean. Route: delegated direct writer. Added `ink`, `react`, `@types/react`, `ink-testing-library`; `src/tui/app.tsx`, `src/tui/render.tsx` (lazy-imported by `tui` command); usage test updated. Commit: see git log (`feat(tui): scaffold Ink app and tui command`).
 - T2: RED = typecheck failed (no `src/tui/sources-view.js`, `isInteractive` not in `CliDependencies`); GREEN = typecheck, lint, test (252 pass) clean; `echo q | node dist/src/cli.js tui` prints `Error: agent-depot tui requires an interactive terminal`, exit 1. Added `src/tui/sources-view.tsx`, injectable `isInteractive` guard, `tests/tui-sources-view.test.tsx`. Route: delegated direct writer.
 - T3: RED = new `tests/tui-sources-actions.test.tsx` failed on the old view (no `a add` footer, no URL input/confirmations); GREEN = typecheck, lint, test (263 pass, 3 consecutive runs) clean. Added `src/tui/sources-mode.ts` (mode reducer: browse/input/confirm/busy), actions in `sources-view.tsx`, `onCapturingChange` so `q` quits only in browse mode, key-hint footer in `app.tsx`. Remove safety: TUI never offers dependent-installation choices; if any user-global installation depends on the source (same predicate as CLI), it blocks and points to `agent-depot source remove <id>`; missing `removeGitSource`/`listUserGlobalInstallations` -> "not supported". Route: delegated direct writer.
+- T4: RED = `tests/tui-catalog-view.test.tsx` failed to compile (no `src/tui/catalog-view.js`); GREEN = typecheck, lint, test (275 pass, 2 runs) clean. Added `src/tui/catalog-view.tsx`, `src/tui/catalog-filter.ts` (filter reducer + case-insensitive name/description match), view switching (`1`/`2`) in `app.tsx`, Enter on a source opens its catalog, `s` toggles all sources, `/` filter with "n of m". Missing `discoverSkills` -> "not supported". Route: delegated direct writer.
 
 ## Next step
-T4.
+T3/T4 complete; Installations view (host × scope, adopt) is the next scope item, pending user go-ahead.
