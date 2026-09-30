@@ -33,12 +33,13 @@ export function selectUserGlobalSkills(
 ): readonly ProjectSkillSelection[] {
   const selected: ProjectSkillSelection[] = [];
   for (const value of requested) {
-    const exact = installations.find((selection) => selection.path === value);
+    const exact = installations.filter((selection) => selection.path === value);
     const named = installations.filter((selection) => selection.path.split("/").at(-1) === value);
-    if (!exact && named.length > 1) {
-      throw new SkillSelectionError(`Ambiguous user-global Skill ${JSON.stringify(value)}; use one of: ${named.map((selection) => selection.path).join(", ")}`);
+    const matches = exact.length > 0 ? exact : named;
+    if (matches.length > 1) {
+      throw new SkillSelectionError(`Ambiguous user-global Skill ${JSON.stringify(value)}; use one of: ${matches.map((selection) => selection.path).join(", ")}`);
     }
-    const candidate = exact ?? named[0];
+    const candidate = matches[0];
     if (!candidate) {
       throw new SkillSelectionError(`Unknown user-global Skill ${JSON.stringify(value)}`);
     }

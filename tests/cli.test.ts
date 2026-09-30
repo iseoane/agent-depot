@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -2884,6 +2885,7 @@ test("skill remove accepts a unique skill name and rejects unknown or ambiguous 
     assert.equal(await cli(["skill", "remove", "same", "--yes"]), 1);
     assert.match(errors.join("\n"), /Ambiguous user-global Skill "same"/u);
     assert.equal((await operations.listUserGlobalInstallations!()).length, 2);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "same")));
   });
 });
 
@@ -2894,5 +2896,48 @@ test("skill remove requires a selection and warns about modified content", async
     assert.equal(await cli(["skill", "remove", "portable/one"]), 1);
     assert.match(lines.join("\n"), /WARNING: this Skill is locally modified or has no trusted baseline/u);
     assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
+  });
+});
+
+test("skill remove does not delete a Skill whose directory changed after the preview", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors }) => {
+    const code = await runCli(["skill", "remove", "portable/one", "--yes"], {
+      operations,
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+      stdout: (line) => {
+        if (line.includes("Installation records are reconciled")) {
+          writeFileSync(path.join(skillDirectory(homeDirectory, "one"), "SKILL.md"), "changed after preview", "utf8");
+        }
+      },
+    });
+
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /changed before deletion; no path was removed/u);
+    assert.equal(await readFile(path.join(skillDirectory(homeDirectory, "one"), "SKILL.md"), "utf8"), "changed after preview");
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+  });
+});
+
+test("skill remove aborts without deleting when installation records changed after the preview", async () => {
+  await withUserGlobalSkills(["portable/one", "portable/two"], async ({ operations, homeDirectory, errors }) => {
+    let listCalls = 0;
+    const code = await runCli(["skill", "remove", "portable/one", "--yes"], {
+      operations: {
+        ...operations,
+        listUserGlobalInstallations: async () => {
+          const records = await operations.listUserGlobalInstallations!();
+          listCalls += 1;
+          return listCalls === 1 ? records : records.filter((selection) => selection.path !== "portable/two");
+        },
+      },
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+    });
+
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /Managed Skill installation records changed before deletion; no path was removed/u);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 2);
   });
 });
