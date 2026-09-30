@@ -197,34 +197,44 @@ export function parsePortableInstallationMethod(
   }
 
   const argv = value.argv as string[];
-  const executable = argv[0];
-  if (!/^[A-Za-z0-9._+-]+$/u.test(executable) || isShellInterpreter(executable) || /\.(?:bat|cmd|com|exe|ps1)$/iu.test(executable)) {
-    return fail("executable is not a safe portable no-shell command name");
-  }
-  if (argv.some((part) => /[;&|<>$`]/u.test(part))) {
-    return fail("contains shell syntax");
-  }
-  const credentialFlag = /^(?:--?)(?:access[-_]?key|access[-_]?token|api[-_]?key|auth(?:orization)?|auth[-_]?token|client[-_]?secret|credential|oauth[-_]?token|pass(?:word|wd)?|private[-_]?key|refresh[-_]?token|secret|secret[-_]?key|token)(?:$|[=:])/iu;
-  for (const [index, part] of argv.entries()) {
-    if (containsObviousCredential(part)) {
-      return fail("contains an obvious credential or environment assignment");
-    }
-    if (credentialFlag.test(part) || (index > 0 && credentialFlag.test(argv[index - 1] ?? ""))) {
-      return fail("contains a credential-style argument");
+  for (const rule of ARGV_RULES) {
+    const reason = rule(argv);
+    if (reason !== undefined) {
+      return fail(reason);
     }
   }
-
-  if (value.cwd !== undefined && (typeof value.cwd !== "string" || value.cwd.length === 0 ||
-    (typeof value.cwd === "string" && containsControlCharacter(value.cwd)) || path.posix.isAbsolute(value.cwd) ||
-    /^[A-Za-z]:/u.test(value.cwd) || value.cwd === ".." || value.cwd.startsWith("../") ||
-    value.cwd.includes("\\") || containsObviousCredential(value.cwd))) {
+  if (value.cwd !== undefined && isUnsafeMethodCwd(value.cwd)) {
     return fail("cwd is unsafe");
   }
   return Object.freeze({
     kind: "command",
     argv: Object.freeze([...argv] as [string, ...string[]]),
-    ...(value.cwd === undefined ? {} : { cwd: value.cwd }),
+    ...(value.cwd === undefined ? {} : { cwd: value.cwd as string }),
   });
+}
+
+const CREDENTIAL_FLAG = /^(?:--?)(?:access[-_]?key|access[-_]?token|api[-_]?key|auth(?:orization)?|auth[-_]?token|client[-_]?secret|credential|oauth[-_]?token|pass(?:word|wd)?|private[-_]?key|refresh[-_]?token|secret|secret[-_]?key|token)(?:$|[=:])/iu;
+
+/** Ordered rejection rules for a validated argv; the first rule that returns a reason names the failure. */
+const ARGV_RULES: readonly ((argv: readonly string[]) => string | undefined)[] = [
+  ([executable]) => !/^[A-Za-z0-9._+-]+$/u.test(executable!) || isShellInterpreter(executable!) ||
+      /\.(?:bat|cmd|com|exe|ps1)$/iu.test(executable!)
+    ? "executable is not a safe portable no-shell command name"
+    : undefined,
+  (argv) => argv.some((part) => /[;&|<>$`]/u.test(part)) ? "contains shell syntax" : undefined,
+  // Evaluated per argument, in order, so the first offending argument decides the reason.
+  (argv) => argv.map((part, index) => {
+    if (containsObviousCredential(part)) return "contains an obvious credential or environment assignment";
+    return CREDENTIAL_FLAG.test(part) || (index > 0 && CREDENTIAL_FLAG.test(argv[index - 1] ?? ""))
+      ? "contains a credential-style argument"
+      : undefined;
+  }).find((reason) => reason !== undefined),
+];
+
+function isUnsafeMethodCwd(cwd: unknown): boolean {
+  return typeof cwd !== "string" || cwd.length === 0 || containsControlCharacter(cwd) ||
+    path.posix.isAbsolute(cwd) || /^[A-Za-z]:/u.test(cwd) || cwd === ".." || cwd.startsWith("../") ||
+    cwd.includes("\\") || containsObviousCredential(cwd);
 }
 
 function assertKeysForMethod(
@@ -457,6 +467,13 @@ function parseMethods(value: unknown, manifestPath: string, index: number): Proj
   });
 }
 
+function rejectFirstViolation(manifestPath: string, checks: readonly (readonly [violated: boolean, message: string])[]): void {
+  const violation = checks.find(([violated]) => violated);
+  if (violation) {
+    throw new ProjectManifestError(manifestPath, violation[1]);
+  }
+}
+
 function parseSelection(value: unknown, manifestPath: string, index: number): ProjectSkillSelection {
   const label = `skills[${index}]`;
   if (!isRecord(value)) {
@@ -465,42 +482,35 @@ function parseSelection(value: unknown, manifestPath: string, index: number): Pr
   assertKeys(value, ["source", "path", "version", "hosts", "installation", "methods"], label, manifestPath);
   const source = parseSource(value.source, manifestPath, index);
   const version = parseVersionPolicy(value.version, source, manifestPath, index);
-  if (version.policy === "latest" && source.kind === "external" && "url" in source && source.ref !== undefined && isCommitId(source.ref)) {
-    throw new ProjectManifestError(
-      manifestPath,
+  const pinnedRef = source.kind === "external" && "url" in source ? source.ref : undefined;
+  rejectFirstViolation(manifestPath, [
+    [
+      version.policy === "latest" && pinnedRef !== undefined && isCommitId(pinnedRef),
       `${label}.version cannot use latest with an immutable commit Source ref; use a fixed policy`,
-    );
-  }
-  if (version.policy === "fixed" && source.kind === "external" && "url" in source && source.ref !== version.version) {
-    throw new ProjectManifestError(
-      manifestPath,
+    ],
+    [
+      version.policy === "fixed" && source.kind === "external" && "url" in source && pinnedRef !== version.version,
       `${label}.version must match source.ref so a fixed policy pins the selected commit`,
-    );
-  }
+    ],
+  ]);
   const installation = value.installation === undefined
     ? undefined
     : parseInstallation(value.installation, source, manifestPath, index);
   const methods = value.methods === undefined
     ? undefined
     : parseMethods(value.methods, manifestPath, index);
-  if (installation?.resolvedVersion?.kind === "git-commit" && source.kind === "external" &&
-    "url" in source && source.ref !== undefined && isCommitId(source.ref) && installation.resolvedVersion.commit !== source.ref) {
-    throw new ProjectManifestError(
-      manifestPath,
+  const resolved = installation?.resolvedVersion;
+  rejectFirstViolation(manifestPath, [
+    [
+      resolved?.kind === "git-commit" && pinnedRef !== undefined && isCommitId(pinnedRef) && resolved.commit !== pinnedRef,
       `${label}.installation.resolvedVersion.commit must match the immutable Source ref`,
-    );
-  }
-  if (installation?.resolvedVersion !== undefined && version.policy === "fixed") {
-    const resolved = installation.resolvedVersion.kind === "git-commit"
-      ? installation.resolvedVersion.commit
-      : installation.resolvedVersion.version;
-    if (resolved !== version.version) {
-      throw new ProjectManifestError(
-        manifestPath,
-        `${label}.installation.resolvedVersion must match the fixed version policy`,
-      );
-    }
-  }
+    ],
+    [
+      resolved !== undefined && version.policy === "fixed" &&
+        (resolved.kind === "git-commit" ? resolved.commit : resolved.version) !== version.version,
+      `${label}.installation.resolvedVersion must match the fixed version policy`,
+    ],
+  ]);
   return Object.freeze({
     source,
     path: normalizeSkillPath(value.path, `${label}.path`, manifestPath),

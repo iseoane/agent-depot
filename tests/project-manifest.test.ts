@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
   defaultProjectManifestPath,
+  parsePortableInstallationMethod,
   parseProjectManifest,
   ProjectManifestError,
   ProjectManifestStore,
@@ -409,4 +410,44 @@ test("fails closed on malformed persisted JSON and preserves it", async () => {
     await writeProjectManifest(manifestPath, parseProjectManifest({ version: 1, skills: [] }));
     assert.deepEqual(await readProjectManifest(manifestPath), { version: 1, skills: [] });
   });
+});
+
+test("reports the first failing installation method rule in a stable order", () => {
+  const cases: ReadonlyArray<readonly [unknown, RegExp]> = [
+    [{ kind: "command", argv: ["bash", "x"] }, /executable is not a safe portable no-shell command name/],
+    [{ kind: "command", argv: ["node", "a;b"] }, /contains shell syntax/],
+    [{ kind: "command", argv: ["node", "--token", "x=abc"] }, /contains a credential-style argument/],
+    [{ kind: "command", argv: ["node", "TOKEN=abc", "--token"] }, /contains an obvious credential or environment assignment/],
+    [{ kind: "command", argv: ["node", "x"], cwd: "../up" }, /cwd is unsafe/],
+    [{ kind: "command", argv: ["node", "x"], cwd: 3 }, /cwd is unsafe/],
+    [{ kind: "command", argv: ["node", "x"], extra: true }, /unsupported field "extra"/],
+  ];
+  for (const [method, expected] of cases) {
+    assert.throws(() => parsePortableInstallationMethod(method), expected);
+  }
+});
+
+test("rejects fixed versions and resolved versions that disagree with the Source ref", () => {
+  const selection = validManifest().skills[1]!;
+  const other = "b".repeat(40);
+  assert.throws(
+    () => parseProjectManifest({ version: 1, skills: [{ ...selection, version: { policy: "fixed", version: other } }] }),
+    /version must match source\.ref so a fixed policy pins the selected commit/,
+  );
+  const pinned = { ...selection, version: { policy: "fixed", version: "a".repeat(40) } };
+  assert.throws(
+    () => parseProjectManifest({
+      version: 1,
+      skills: [{
+        ...pinned,
+        installation: {
+          path: ".agents/skills/demo",
+          adopted: false,
+          resolvedVersion: { kind: "git-commit", commit: other },
+          baseline: { algorithm: "sha256", digest: "c".repeat(64) },
+        },
+      }],
+    }),
+    /resolvedVersion\.commit must match the immutable Source ref/,
+  );
 });
