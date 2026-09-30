@@ -327,7 +327,10 @@ test("install shows an error when the Skill is already installed there", async (
   await f.operations.addUserGlobalInstallation!(selection(["claude"]));
   const { lastFrame, stdin, unmount } = mount(f);
   await waitFor(lastFrame, /\[global: claude\]/);
-  await chooseInstall(stdin, ["2"], "2", "1");
+  await key(stdin, "i");
+  // An installed Skill first offers adding hosts; "2" continues to the ordinary install steps.
+  await key(stdin, "2");
+  for (const step of ["2", ENTER, "2", "1"]) await key(stdin, step);
   await waitFor(lastFrame, /already recorded/);
   unmount();
 });
@@ -341,6 +344,8 @@ test("u previews the whole-installation removal, requires confirmation and reloa
   await key(stdin, "y");
   await waitFor(lastFrame, /\[global: claude, codex\]/);
   await key(stdin, "u");
+  await waitFor(lastFrame, /1 all hosts.*2 choose hosts/s);
+  await key(stdin, "1");
   const preview = await waitFor(lastFrame, /remove "portable\/demo"/);
   assert.match(preview, /removes the whole user-global installation, from hosts: claude, codex/);
   assert.match(preview, /y\/n/);
@@ -348,6 +353,7 @@ test("u previews the whole-installation removal, requires confirmation and reloa
   await waitFor(lastFrame, /Uninstall cancelled/);
   assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
   await key(stdin, "u");
+  await key(stdin, "1");
   await waitFor(lastFrame, /y\/n/);
   await key(stdin, "y");
   const done = await waitFor(lastFrame, /Removed/);
