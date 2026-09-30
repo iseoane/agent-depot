@@ -128,7 +128,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     skill: SkillCandidate,
     choice: Parameters<typeof prepareInstall>[3],
   ) => {
-    setAction({ kind: "busy", label: `Preparing install of ${skill.name}...` });
+    setAction({ kind: "busy", label: `Refreshing source and preparing install of ${skill.name}...` });
     try {
       const prepared = await prepareInstall(operations, env, skill, choice);
       if (!mounted.current) return;

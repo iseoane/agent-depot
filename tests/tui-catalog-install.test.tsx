@@ -263,7 +263,7 @@ test("adopting an identical Skill with a missing Host location needs a separate 
 });
 
 /** A fixture whose only Source is an external Git Source, with a recording refresh seam. */
-async function gitFixture(f: Fixture, refresh: (installedBefore: boolean) => Promise<void>): Promise<{ readonly fixture: Fixture; readonly events: string[] }> {
+async function gitFixture(f: Fixture, refresh: (installedBefore: boolean) => Promise<void>, files: () => readonly SkillTreeFile[] = () => tree): Promise<{ readonly fixture: Fixture; readonly events: string[] }> {
   const git = await f.operations.addGitSource("https://example.com/ext.git");
   const events: string[] = [];
   const operations: SourceOperations = {
@@ -280,28 +280,31 @@ async function gitFixture(f: Fixture, refresh: (installedBefore: boolean) => Pro
     },
   };
   const gitAccess = {
-    readSkillTree: sourceAccess.readSkillTree,
-    readSkillTreeSnapshot: async () => ({ files: tree }),
+    readSkillTree: async () => files(),
+    readSkillTreeSnapshot: async () => ({ files: files() }),
   };
   return { fixture: { ...f, operations, environment: { ...f.environment, sourceAccess: gitAccess } }, events };
 }
 
-test("confirming an install refreshes a Git Source first, before anything is written", async (t) => {
+test("the Git Source is refreshed before the preview, which reflects the refreshed content; y does not refresh again", async (t) => {
   const f = await fixture(t);
+  let current: readonly SkillTreeFile[] = tree;
   let installedAtRefresh: boolean | undefined;
   const { fixture: g, events } = await gitFixture(f, async (installed) => {
     installedAtRefresh = installed;
-  });
+    current = [...tree, { path: "portable/demo/extra.md", content: Uint8Array.from([0x45]), executable: false }];
+  }, () => current);
   const { lastFrame, stdin, unmount } = mount({ ...g });
   await waitFor(lastFrame, /demo/);
   await chooseInstall(stdin, ["2"], "2", "1");
-  await waitFor(lastFrame, /y\/n/);
-  assert.deepEqual(events, [], "previewing must not refresh, like the CLI without --yes");
+  const preview = await waitFor(lastFrame, /y\/n/);
+  assert.deepEqual(events, ["refresh"], "the refresh happens before the preview is shown");
+  assert.match(preview, /portable\/demo\/extra\.md/);
+  assert.equal(installedAtRefresh, false);
   await key(stdin, "y");
   await waitFor(lastFrame, /Installed Skill "demo"/);
-  assert.deepEqual(events, ["refresh"]);
-  assert.equal(installedAtRefresh, false);
-  assert.equal(await readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
+  assert.deepEqual(events, ["refresh"], "confirming must not refresh again");
+  assert.equal(await readFile(path.join(f.home, ".agents", "skills", "demo", "extra.md"), "utf8"), "E");
   unmount();
 });
 
@@ -313,8 +316,6 @@ test("a failed refresh aborts the install with an error and writes nothing", asy
   const { lastFrame, stdin, unmount } = mount({ ...g });
   await waitFor(lastFrame, /demo/);
   await chooseInstall(stdin, ["2"], "2", "1");
-  await waitFor(lastFrame, /y\/n/);
-  await key(stdin, "y");
   await waitFor(lastFrame, /network unreachable/);
   await assert.rejects(readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);

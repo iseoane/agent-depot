@@ -12,7 +12,6 @@ import {
 } from "../project-manifest.js";
 import {
   defaultProjectSkillTreeAccess,
-  confirmSingleInstallPlan,
   executeSingleInstall,
   needsAdditionalHostExposure,
   outputSingleInstallPreview,
@@ -97,7 +96,7 @@ export interface PreparedInstall {
   readonly additionalHostExposure: boolean;
 }
 
-/** Plan step: resolves and inspects the install and renders the same preview the CLI prints. */
+/** Plan step: refreshes the Source, resolves and inspects the install and renders the same preview the CLI prints. */
 export async function prepareInstall(
   operations: SourceOperations,
   environment: TuiEnvironment,
@@ -112,7 +111,9 @@ export async function prepareInstall(
     version: choice.version,
     // Confirming the preview is the review the CLI asks for with --portable-v1.
     portableV1: true,
-    confirmed: false,
+    // Planning with confirmed set refreshes a Git Source before resolving, so
+    // the preview shows exactly what y installs (the CLI does this on --yes).
+    confirmed: true,
     overwrite: false,
     confirmAdditionalHostExposure: false,
   };
@@ -160,11 +161,9 @@ export async function runInstall(
 ): Promise<readonly string[]> {
   const lines: string[] = [];
   const { manifestStore } = prepared;
-  // Like `install --yes`: refresh the Source, then resolve and inspect again before writing.
-  const confirmed = await confirmSingleInstallPlan(prepared.plan);
   const plan = confirmAdditionalHostExposure
-    ? { ...confirmed, request: { ...confirmed.request, confirmAdditionalHostExposure: true } }
-    : confirmed;
+    ? { ...prepared.plan, request: { ...prepared.plan.request, confirmAdditionalHostExposure: true } }
+    : prepared.plan;
   const persist = manifestStore
     ? async (record: ProjectSkillSelection) => {
         await manifestStore.save(parseProjectManifest({ version: 1, skills: [...plan.context.existing, record] }));

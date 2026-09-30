@@ -504,15 +504,6 @@ export async function planSingleInstall(
   return { request, context, selection, source, resolvedSource, resolved, inspection: installationInspection };
 }
 
-/**
- * Confirmation step for an interactive front end: the equivalent of the CLI's
- * `--yes`. Re-plans with `confirmed` set, which refreshes a Git Source before
- * resolving and inspecting again. A refresh failure throws before any write.
- */
-export function confirmSingleInstallPlan(plan: SingleInstallPlan): Promise<SingleInstallPlan> {
-  return planSingleInstall({ ...plan.request, confirmed: true }, plan.context);
-}
-
 /** Prints the preview the user confirms before {@link executeSingleInstall}. */
 export function outputSingleInstallPreview(plan: SingleInstallPlan, output: (line: string) => void): void {
   const { request, context, selection, source, resolved, inspection } = plan;
