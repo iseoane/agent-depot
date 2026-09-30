@@ -203,6 +203,68 @@ export async function discoverSkillsFromSources(
   return Object.freeze(candidates);
 }
 
+/** Collects scalar frontmatter values up to the closing delimiter; undefined when malformed or unclosed. */
+function readFrontmatterValues(lines: readonly string[]): Map<string, string | boolean> | undefined {
+  const values = new Map<string, string | boolean>();
+  let index = 1;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (/^(?:---|\.\.\.)\s*$/u.test(line)) {
+      return values;
+    }
+    if (line.trim() === "" || /^\s*#/u.test(line)) {
+      index += 1;
+      continue;
+    }
+    const next = readFrontmatterEntry(lines, index, values);
+    if (next === undefined) {
+      return undefined;
+    }
+    index = next;
+  }
+  return undefined;
+}
+
+/** Reads one top-level entry starting at index and returns the next index, or undefined when malformed. */
+function readFrontmatterEntry(lines: readonly string[], index: number, values: Map<string, string | boolean>): number | undefined {
+  const line = lines[index];
+  const match = /^(?<key>[A-Za-z][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$/u.exec(line);
+  if (!match || line.startsWith(" ") || line.startsWith("\t")) {
+    return undefined;
+  }
+  const key = match.groups?.key;
+  const rawValue = match.groups?.value ?? "";
+  if (!key) {
+    return undefined;
+  }
+
+  if (key === "metadata" && rawValue.trim() === "") {
+    return consumeNestedMapping(lines, index + 1);
+  }
+
+  if (/^[|>][+-]?\d*\s*$/u.test(rawValue)) {
+    const block: string[] = [];
+    let next = index + 1;
+    while (next < lines.length) {
+      const blockLine = lines[next];
+      if (blockLine.trim() !== "" && !/^[ \t]/u.test(blockLine)) {
+        break;
+      }
+      block.push(blockLine);
+      next += 1;
+    }
+    values.set(key, normalizeBlockScalar(block, rawValue.startsWith(">")));
+    return next;
+  }
+
+  const scalar = parseScalar(rawValue);
+  if (scalar === undefined) {
+    return undefined;
+  }
+  values.set(key, scalar);
+  return index + 1;
+}
+
 /** Parses the required YAML frontmatter fields without evaluating arbitrary YAML. */
 export function parseSkillFrontmatter(content: string): { name: string; description: string } | undefined {
   const lines = content.replace(/^\uFEFF/u, "").replace(/\r\n?/gu, "\n").split("\n");
@@ -210,64 +272,8 @@ export function parseSkillFrontmatter(content: string): { name: string; descript
     return undefined;
   }
 
-  const values = new Map<string, string | boolean>();
-  let index = 1;
-  let closed = false;
-  while (index < lines.length) {
-    const line = lines[index];
-    if (/^(?:---|\.\.\.)\s*$/u.test(line)) {
-      closed = true;
-      break;
-    }
-    if (line.trim() === "" || /^\s*#/u.test(line)) {
-      index += 1;
-      continue;
-    }
-
-    const match = /^(?<key>[A-Za-z][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$/u.exec(line);
-    if (!match || line.startsWith(" ") || line.startsWith("\t")) {
-      return undefined;
-    }
-    const key = match.groups?.key;
-    const rawValue = match.groups?.value ?? "";
-    if (!key) {
-      return undefined;
-    }
-
-    if (key === "metadata" && rawValue.trim() === "") {
-      const nextIndex = consumeNestedMapping(lines, index + 1);
-      if (nextIndex === undefined) {
-        return undefined;
-      }
-      index = nextIndex;
-      continue;
-    }
-
-    if (/^[|>][+-]?\d*\s*$/u.test(rawValue)) {
-      const folded = rawValue.startsWith(">");
-      index += 1;
-      const block: string[] = [];
-      while (index < lines.length) {
-        const blockLine = lines[index];
-        if (blockLine.trim() !== "" && !/^[ \t]/u.test(blockLine)) {
-          break;
-        }
-        block.push(blockLine);
-        index += 1;
-      }
-      values.set(key, normalizeBlockScalar(block, folded));
-      continue;
-    }
-
-    const scalar = parseScalar(rawValue);
-    if (scalar === undefined) {
-      return undefined;
-    }
-    values.set(key, scalar);
-    index += 1;
-  }
-
-  if (!closed) {
+  const values = readFrontmatterValues(lines);
+  if (!values) {
     return undefined;
   }
   const nameValue = values.get("name");
@@ -525,52 +531,51 @@ function consumeNestedMapping(lines: readonly string[], start: number, depth = 0
     }
 
     const lineIndentation = line.match(/^ */u)?.[0].length ?? 0;
-    if (indentation === undefined) {
-      indentation = lineIndentation;
-    }
+    indentation ??= lineIndentation;
     if (lineIndentation !== indentation) {
       return undefined;
     }
 
-    const match = /^ +(?<key>[A-Za-z][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$/u.exec(line);
-    if (!match) {
+    const next = consumeNestedEntry(lines, index, indentation, depth);
+    if (next === undefined) {
       return undefined;
     }
-    const rawValue = match.groups?.value ?? "";
-    if (rawValue === "") {
-      const childIndex = consumeNestedMapping(lines, index + 1, depth + 1);
-      if (childIndex === undefined) {
-        return undefined;
-      }
-      index = childIndex;
-      hasEntry = true;
-      continue;
-    }
-
-    if (/^[|>][+-]?\d*\s*$/u.test(rawValue)) {
-      index += 1;
-      while (index < lines.length) {
-        const blockLine = lines[index];
-        if (blockLine.trim() !== "" && (!/^\s/u.test(blockLine) || (blockLine.match(/^ */u)?.[0].length ?? 0) <= indentation)) {
-          break;
-        }
-        if (/^\t/u.test(blockLine)) {
-          return undefined;
-        }
-        index += 1;
-      }
-      hasEntry = true;
-      continue;
-    }
-
-    if (parseScalar(rawValue) === undefined) {
-      return undefined;
-    }
-    index += 1;
+    index = next;
     hasEntry = true;
   }
 
   return hasEntry ? index : undefined;
+}
+
+/** Consumes one nested mapping entry (scalar, block scalar or child mapping); undefined when malformed. */
+function consumeNestedEntry(lines: readonly string[], index: number, indentation: number, depth: number): number | undefined {
+  const match = /^ +(?<key>[A-Za-z][A-Za-z0-9_-]*)\s*:\s*(?<value>.*)$/u.exec(lines[index]);
+  if (!match) {
+    return undefined;
+  }
+  const rawValue = match.groups?.value ?? "";
+  if (rawValue === "") {
+    return consumeNestedMapping(lines, index + 1, depth + 1);
+  }
+  if (/^[|>][+-]?\d*\s*$/u.test(rawValue)) {
+    return consumeNestedBlockScalar(lines, index + 1, indentation);
+  }
+  return parseScalar(rawValue) === undefined ? undefined : index + 1;
+}
+
+function consumeNestedBlockScalar(lines: readonly string[], start: number, indentation: number): number | undefined {
+  let index = start;
+  while (index < lines.length) {
+    const blockLine = lines[index];
+    if (blockLine.trim() !== "" && (!/^\s/u.test(blockLine) || (blockLine.match(/^ */u)?.[0].length ?? 0) <= indentation)) {
+      break;
+    }
+    if (/^\t/u.test(blockLine)) {
+      return undefined;
+    }
+    index += 1;
+  }
+  return index;
 }
 
 function parseScalar(rawValue: string): string | boolean | undefined {
