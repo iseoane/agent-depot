@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { runProcess } from "./process-runner.js";
 
 import {
   canonicalizeGitSourceUrl,
@@ -515,26 +515,14 @@ export async function executeSourceInstallationMethod(
   context: SourceInstallationContext,
 ): Promise<void> {
   const cwd = await resolveSourceInstallationMethodCwd(method, context.projectRoot);
-  return new Promise((resolve, reject) => {
-    const child = spawn(method.argv[0], [...method.argv.slice(1)], {
-      cwd,
-      shell: false,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => { stderr += chunk; });
-    child.on("error", reject);
-    child.on("close", (code, signal) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new SourceMetadataError(
-        `upstream installation method failed${signal ? ` (${signal})` : ` (exit ${code ?? "unknown"})`}${stderr.trim() ? `: ${stderr.trim()}` : ""}`,
-      ));
-    });
-  });
+  const result = await runProcess(method.argv[0], method.argv.slice(1), { cwd });
+  if (result.code === 0) {
+    return;
+  }
+  const { code, signal, stderr } = result;
+  throw new SourceMetadataError(
+    `upstream installation method failed${signal ? ` (${signal})` : ` (exit ${code ?? "unknown"})`}${stderr.trim() ? `: ${stderr.trim()}` : ""}`,
+  );
 }
 
 function errorMessage(error: unknown): string {

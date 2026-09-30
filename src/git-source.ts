@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, rename, rm, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { runProcess, type ProcessRunResult } from "./process-runner.js";
 
 export interface GitSource {
   readonly id: string;
@@ -76,29 +76,17 @@ export class GitSourceAccessError extends Error {
   }
 }
 
+function gitFailureDetail(result: ProcessRunResult): string {
+  return result.stderr.trim()
+    || (result.signal ? `terminated by ${result.signal}` : `exited with code ${result.code ?? "unknown"}`);
+}
+
 class NodeGitCommandRunner implements GitCommandRunner {
-  run(command: string, args: readonly string[], options: GitCommandRunnerOptions = {}): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(command, [...args], {
-        cwd: options.cwd,
-        shell: false,
-        stdio: ["ignore", "ignore", "pipe"],
-      });
-      let stderr = "";
-      child.stderr?.setEncoding("utf8");
-      child.stderr?.on("data", (chunk: string) => {
-        stderr += chunk;
-      });
-      child.on("error", (error) => reject(error));
-      child.on("close", (code, signal) => {
-        if (code === 0) {
-          resolve();
-          return;
-        }
-        const detail = stderr.trim() || (signal ? `terminated by ${signal}` : `exited with code ${code ?? "unknown"}`);
-        reject(new Error(`git command failed: ${detail}`));
-      });
-    });
+  async run(command: string, args: readonly string[], options: GitCommandRunnerOptions = {}): Promise<void> {
+    const result = await runProcess(command, args, options.cwd === undefined ? {} : { cwd: options.cwd });
+    if (result.code !== 0) {
+      throw new Error(`git command failed: ${gitFailureDetail(result)}`);
+    }
   }
 }
 
@@ -107,43 +95,18 @@ class NodeGitSnapshotCommandRunner implements GitSnapshotCommandRunner {
     return Buffer.from(await this.runBinary(command, args, options)).toString("utf8");
   }
 
-  runBinary(command: string, args: readonly string[], options: GitSnapshotCommandRunnerOptions = {}): Promise<Uint8Array> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(command, [...args], {
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      const stdout: Buffer[] = [];
-      let stdoutBytes = 0;
-      let stderr = "";
-      let outputTooLarge = false;
-      child.stdout?.on("data", (chunk: Buffer) => {
-        stdoutBytes += chunk.length;
-        if (options.maxOutputBytes !== undefined && stdoutBytes > options.maxOutputBytes) {
-          outputTooLarge = true;
-          child.kill();
-          return;
-        }
-        stdout.push(chunk);
-      });
-      child.stderr?.setEncoding("utf8");
-      child.stderr?.on("data", (chunk: string) => {
-        stderr += chunk;
-      });
-      child.on("error", (error) => reject(error));
-      child.on("close", (code, signal) => {
-        if (outputTooLarge) {
-          reject(new Error("git command output exceeds the safe size limit"));
-          return;
-        }
-        if (code === 0) {
-          resolve(Buffer.concat(stdout));
-          return;
-        }
-        const detail = stderr.trim() || (signal ? `terminated by ${signal}` : `exited with code ${code ?? "unknown"}`);
-        reject(new Error(`git command failed: ${detail}`));
-      });
+  async runBinary(command: string, args: readonly string[], options: GitSnapshotCommandRunnerOptions = {}): Promise<Uint8Array> {
+    const result = await runProcess(command, args, {
+      captureStdout: true,
+      ...(options.maxOutputBytes === undefined ? {} : { maxOutputBytes: options.maxOutputBytes }),
     });
+    if (result.outputTooLarge) {
+      throw new Error("git command output exceeds the safe size limit");
+    }
+    if (result.code !== 0) {
+      throw new Error(`git command failed: ${gitFailureDetail(result)}`);
+    }
+    return result.stdout;
   }
 }
 
