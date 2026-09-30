@@ -472,3 +472,38 @@ test("uses portable cache locations separate from the Source state location", ()
     "C:\\Users\\alice\\AppData\\Local\\Agent Depot\\git-sources",
   );
 });
+
+test("rejects malformed, unsafe, excessive, and incomplete selected Skill trees", async () => {
+  await withCache(async (cachePath) => {
+    const source = {
+      id: sourceIdForUrl("https://github.com/example/skills.git"),
+      kind: "git" as const,
+      url: "https://github.com/example/skills.git",
+    };
+    await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
+    const objectId = "a".repeat(40);
+    const read = (tree: string, blobs: ReadonlyMap<string, string | Uint8Array> = new Map([[objectId, "x"]])) =>
+      new GitSourceSnapshotAccess({ cachePath, runner: new FakeSelectedSnapshotRunner(tree, blobs) }).readSkillTree(source, "selected");
+    const entry = (relativePath: string, id = objectId, mode = "100644", type = "blob") => `${mode} ${type} ${id}\t${relativePath}\0`;
+
+    await assert.rejects(read("100644 blob without-tab\0"), /malformed Skill tree entry/i);
+    await assert.rejects(read(entry("selected/SKILL.md", "not-an-object-id")), /unsafe object reference/i);
+    await assert.rejects(read(entry("selected/SKILL.md", objectId, "100644", "tree")), /unsupported Git entry: selected\/SKILL\.md/i);
+    await assert.rejects(read(entry("selected/SKILL.md", objectId, "100664")), /unsupported Git entry/i);
+    await assert.rejects(read(entry("other/SKILL.md")), /outside the selected directory/i);
+    await assert.rejects(read(entry("selected")), /outside the selected directory/i);
+    await assert.rejects(read(entry("selected/notes.md")), /does not contain selected\/SKILL\.md/i);
+    await assert.rejects(
+      read(Array.from({ length: SKILL_TREE_LIMITS.maxFiles + 1 }, (_, index) => entry(`selected/file-${index}.md`)).join("")),
+      /too many files/i,
+    );
+    const big = "x".repeat(SKILL_TREE_LIMITS.maxFileBytes);
+    await assert.rejects(
+      read(
+        [entry("selected/SKILL.md"), ...Array.from({ length: 8 }, (_, index) => entry(`selected/part-${index}.bin`))].join(""),
+        new Map([[objectId, big]]),
+      ),
+      /safe total size limit/i,
+    );
+  });
+});

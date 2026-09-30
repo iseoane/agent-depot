@@ -197,6 +197,32 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
 }
 
 /** Reads the current HEAD from an existing bare mirror without refreshing it. */
+interface SkillTreeRecord {
+  readonly relativePath: string;
+  readonly objectId: string;
+  readonly executable: boolean;
+}
+
+/** Validates one `git ls-tree -z` record of a selected Skill directory. */
+function parseSkillTreeRecord(record: string, relativeSkillPath: string): SkillTreeRecord {
+  const separator = record.indexOf("\t");
+  if (separator < 0) {
+    throw new Error("Git Source returned a malformed Skill tree entry");
+  }
+  const [mode, objectType, objectId] = record.slice(0, separator).split(" ");
+  const relativePath = record.slice(separator + 1);
+  if (!relativePath.startsWith(`${relativeSkillPath}/`) || !isSafeSourcePath(relativePath)) {
+    throw new Error("Git Source returned a Skill tree path outside the selected directory");
+  }
+  if (objectType !== "blob" || (mode !== "100644" && mode !== "100755")) {
+    throw new Error(`Selected Skill tree contains an unsupported Git entry: ${relativePath}`);
+  }
+  if (!objectId || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(objectId)) {
+    throw new Error("Git Source returned an unsafe object reference");
+  }
+  return { relativePath, objectId, executable: mode === "100755" };
+}
+
 export class GitSourceSnapshotAccess {
   private readonly cachePath: string;
   private readonly runner: GitSnapshotCommandRunner;
@@ -234,10 +260,8 @@ export class GitSourceSnapshotAccess {
       throw new Error("Selected Skill tree listing exceeds the safe size limit");
     }
 
-    const prefix = `${relativeSkillPath}/`;
     const files: GitSourceSkillTreeFile[] = [];
     let totalBytes = 0;
-    let hasSkillManifest = false;
     for (const record of tree.split("\0")) {
       if (!record) {
         continue;
@@ -245,41 +269,20 @@ export class GitSourceSnapshotAccess {
       if (files.length >= SKILL_TREE_LIMITS.maxFiles) {
         throw new Error("Selected Skill tree contains too many files");
       }
-      const separator = record.indexOf("\t");
-      if (separator < 0) {
-        throw new Error("Git Source returned a malformed Skill tree entry");
-      }
-      const metadata = record.slice(0, separator).split(" ");
-      const mode = metadata[0];
-      const objectType = metadata[1];
-      const objectId = metadata[2];
-      const relativePath = record.slice(separator + 1);
-      if (!relativePath.startsWith(prefix) || !isSafeSourcePath(relativePath) || relativePath === prefix.slice(0, -1)) {
-        throw new Error("Git Source returned a Skill tree path outside the selected directory");
-      }
-      if (mode === "120000" || objectType !== "blob" || (mode !== "100644" && mode !== "100755")) {
-        throw new Error(`Selected Skill tree contains an unsupported Git entry: ${relativePath}`);
-      }
-      if (!objectId || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(objectId)) {
-        throw new Error("Git Source returned an unsafe object reference");
-      }
-
-      const content = await this.runner.runBinary("git", ["--git-dir", destination, "cat-file", "blob", objectId], {
+      const entry = parseSkillTreeRecord(record, relativeSkillPath);
+      const content = await this.runner.runBinary("git", ["--git-dir", destination, "cat-file", "blob", entry.objectId], {
         maxOutputBytes: SKILL_TREE_LIMITS.maxFileBytes,
       });
-      const byteLength = content.byteLength;
-      if (byteLength > SKILL_TREE_LIMITS.maxFileBytes) {
-        throw new Error(`Selected Skill file exceeds the safe size limit: ${relativePath}`);
+      if (content.byteLength > SKILL_TREE_LIMITS.maxFileBytes) {
+        throw new Error(`Selected Skill file exceeds the safe size limit: ${entry.relativePath}`);
       }
-      totalBytes += byteLength;
+      totalBytes += content.byteLength;
       if (totalBytes > SKILL_TREE_LIMITS.maxTotalBytes) {
         throw new Error("Selected Skill tree exceeds the safe total size limit");
       }
-      if (relativePath === `${relativeSkillPath}/SKILL.md`) {
-        hasSkillManifest = true;
-      }
-      files.push({ path: relativePath, content, executable: mode === "100755" });
+      files.push({ path: entry.relativePath, content, executable: entry.executable });
     }
+    const hasSkillManifest = files.some((file) => file.path === `${relativeSkillPath}/SKILL.md`);
 
     if (!hasSkillManifest) {
       throw new Error(`Selected Skill directory does not contain ${relativeSkillPath}/SKILL.md`);
