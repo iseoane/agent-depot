@@ -16,7 +16,7 @@ import {
 } from "../src/project-manifest.js";
 import { skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
-import { InstallationsView, type CatalogFocus } from "../src/tui/installations-view.js";
+import { InstallationsView } from "../src/tui/installations-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
@@ -122,7 +122,7 @@ async function open(view: View, pattern: RegExp): Promise<string> {
   return step(view, ENTER_KEY);
 }
 
-function mount(f: Fixture, extra: { onOpenCatalog?: (focus: CatalogFocus) => void; onCapturingChange?: (capturing: boolean) => void } = {}) {
+function mount(f: Fixture, extra: { onCapturingChange?: (capturing: boolean) => void } = {}) {
   return render(
     <InstallationsView operations={f.operations} environment={f.environment} {...extra} />,
   );
@@ -141,7 +141,8 @@ test("shows a tree of scope, then Source, then Skills with counts, source and ma
   assert.ok(collapsed.indexOf("Managed (user-global)") < collapsed.indexOf("Managed (project)"));
   const expanded = await open(view, /builtin:agent-depot/);
   const globalLine = expanded.split("\n").find((line) => line.includes("portable/demo")) ?? "";
-  assert.match(globalLine, /managed by builtin:agent-depot/);
+  assert.ok(!globalLine.includes("managed by"), "the parent Source node already says it");
+  assert.ok(!globalLine.includes("builtin:agent-depot"));
   assert.match(globalLine, /latest/);
   assert.match(globalLine, new RegExp(AGENT_DEPOT_PACKAGE_VERSION!.replace(/\./gu, "\\.")));
   assert.match(globalLine, /claude, codex/);
@@ -151,6 +152,8 @@ test("shows a tree of scope, then Source, then Skills with counts, source and ma
   const projectLine = projectFrame.split("\n").find((line) => line.includes("portable/other")) ?? "";
   assert.match(projectLine, /pi/);
   assert.ok(!projectLine.includes("adopted"));
+  assert.ok(!projectLine.includes("modified"));
+  assert.match(projectFrame, /adopted = tracked in place, not copied by agent-depot · modified = changed on disk/);
   view.unmount();
 });
 
@@ -265,33 +268,6 @@ test("lists unmanaged user-global Skills in their own section", async (t) => {
   const line = frame.split("\n").find((candidate) => candidate.includes("unmanaged  ")) ?? "";
   assert.match(line, /demo/);
   assert.match(line, new RegExp(path.join(f.home, ".agents", "skills", "demo").replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));
-  unmount();
-});
-
-test("u and i on a user-global installation hand over to the Catalog flow; project rows refuse u", async (t) => {
-  const f = await fixture(t);
-  await f.operations.addUserGlobalInstallation!(record(["pi"]));
-  await f.manifestStore.save(parseProjectManifest({ version: 1, skills: [record(["pi"], false, "portable/other")] }));
-  const focuses: CatalogFocus[] = [];
-  const view = mount(f, { onOpenCatalog: (focus) => focuses.push(focus) });
-  const { lastFrame, stdin, unmount } = view;
-  await waitForFrame(lastFrame, /builtin:agent-depot \(1\)/);
-  await open(view, /builtin:agent-depot/);
-  await goto(view, /portable\/demo/);
-  press(stdin, "u");
-  await waitForFrame(lastFrame, () => focuses.length === 1);
-  press(stdin, "i");
-  await waitForFrame(lastFrame, () => focuses.length === 2);
-  assert.deepEqual(focuses.map((focus) => [focus.sourceId, focus.path, focus.action]), [
-    [BUILT_IN_SOURCE.id, "portable/demo", "uninstall"],
-    [BUILT_IN_SOURCE.id, "portable/demo", "install"],
-  ]);
-  await open(view, /Managed \(project\)/);
-  await open(view, /builtin:agent-depot \(1\)$/);
-  await goto(view, /portable\/other/);
-  press(stdin, "u");
-  await waitForFrame(lastFrame, /Project uninstall is not supported/);
-  assert.equal(focuses.length, 2);
   unmount();
 });
 

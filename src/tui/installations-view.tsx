@@ -1,12 +1,14 @@
 import { Box, Text, useInput, type Key } from "ink";
+import path from "node:path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
+import type { SkillCandidate } from "../skill-discovery.js";
 import { isValidFixedVersion } from "../skill-install.js";
 import type { UserGlobalSkillInventoryEntry } from "../user-global-skill-inventory.js";
 import type { SourceOperations } from "../sources.js";
-import { HOST_CHOICES, type CatalogFocus } from "./catalog-actions.js";
-import { runInstall } from "./catalog-installs.js";
+import { HOST_CHOICES } from "./catalog-actions.js";
+import { runInstall, type InstalledSkills } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
 import {
   defaultAdoptionHosts,
@@ -18,6 +20,8 @@ import {
   type InstallationsData,
 } from "./installations.js";
 import { BROWSE, type InstallationsMode } from "./installations-mode.js";
+import { errorText, handleManageKey, startHostAddition, startUninstall, type ManageContext } from "./manage-actions.js";
+import { ManagePanel } from "./manage-panel.js";
 import {
   collapseOrParent,
   defaultExpanded,
@@ -32,15 +36,11 @@ import {
 import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 
-export type { CatalogFocus };
-
 export interface InstallationsViewProps {
   readonly operations: SourceOperations;
   readonly environment?: TuiEnvironment;
   /** Reports whether the view is capturing keys, so the shell can suspend global keys. */
   readonly onCapturingChange?: (capturing: boolean) => void;
-  /** `u` / `i` on a user-global installation reuse the Catalog flows for that Skill. */
-  readonly onOpenCatalog?: (focus: CatalogFocus) => void;
   /** Rows the tree may use; defaults to what the terminal leaves. Injectable for tests. */
   readonly listHeight?: number;
 }
@@ -64,10 +64,6 @@ type NodeData =
   | { readonly kind: "unmanaged"; readonly entry: UserGlobalSkillInventoryEntry };
 
 type InstallationNode = TreeNode<NodeData>;
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** Managed installations of one scope, grouped by Source in first-seen order. */
 function sourceNodes(scope: InstallationRow["scope"], rows: readonly InstallationRow[]): readonly InstallationNode[] {
@@ -106,20 +102,31 @@ function buildTree(data: InstallationsData): readonly InstallationNode[] {
   return roots;
 }
 
-function describeRow({ selection, source, policy, installed, adopted, modified }: InstallationRow): string {
-  const flags = [adopted ? "[adopted]" : "", modified ? "[modified]" : ""].filter((flag) => flag !== "").join(" ");
-  return `${selection.path}  ${installed} (${policy})  [${selection.hosts.join(", ")}]  managed by ${source}${flags === "" ? "" : `  ${flags}`}`;
+/** Version, policy and hosts of a leaf; `adopted` / `modified` only when true (the legend explains them). */
+function describeDetails({ selection, policy, installed }: InstallationRow): string {
+  return `${installed} (${policy})  [${selection.hosts.join(", ")}]`;
+}
+
+function markersOf({ adopted, modified }: InstallationRow): string {
+  return [adopted ? "adopted" : "", modified ? "modified" : ""].filter((flag) => flag !== "").join(" ");
+}
+
+const LEGEND = "adopted = tracked in place, not copied by agent-depot · modified = changed on disk";
+
+/** The Skill of an installation, as the shared manage flows expect it. */
+function skillOf(row: InstallationRow, sourceId: string): SkillCandidate {
+  return { sourceId, path: row.selection.path, name: path.posix.basename(row.selection.path), description: "" };
 }
 
 function describeNode(row: VisibleRow<NodeData>): string {
   const { data } = row.node;
   if (data.kind === "group") return `${row.expandable ? (row.expanded ? "▾" : "▸") : " "} ${data.label}`;
-  if (data.kind === "installation") return describeRow(data.row);
+  if (data.kind === "installation") return data.row.selection.path;
   return `${data.entry.name}  unmanaged  ${data.entry.path}`;
 }
 
-export function InstallationsView({ operations, environment, onCapturingChange, onOpenCatalog, listHeight }: InstallationsViewProps) {
-  const height = useListHeight(listHeight, 6);
+export function InstallationsView({ operations, environment, onCapturingChange, listHeight }: InstallationsViewProps) {
+  const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // Expansion and selection are mirrored in refs so keys delivered in one burst act on the latest state.
@@ -197,6 +204,31 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     setMode(BROWSE);
   };
 
+  const installed = useMemo<InstalledSkills>(
+    () => ({
+      global: (data?.global ?? []).map((row) => row.selection),
+      project: (data?.project ?? []).map((row) => row.selection),
+      sources: data?.sources ?? [],
+    }),
+    [data],
+  );
+
+  const manage: ManageContext = {
+    operations,
+    env,
+    installed,
+    setMode,
+    browse: () => setMode(BROWSE),
+    setMessage,
+    isMounted: () => mounted.current,
+    finish: async (result) => {
+      await reload();
+      if (!mounted.current) return;
+      setMessage(result);
+      setMode(BROWSE);
+    },
+  };
+
   const startAdoption = async (entry: UserGlobalSkillInventoryEntry) => {
     setMessage(undefined);
     setMode({ kind: "busy", label: `Looking for a Source Skill named ${entry.name}...` });
@@ -245,6 +277,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   };
 
   const handleModeKey = (current: InstallationsMode, input: string, key: Key) => {
+    if (handleManageKey(manage, current, input, key)) return;
     switch (current.kind) {
       case "pick":
         if (key.escape) cancel("Adoption cancelled");
@@ -314,7 +347,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       const next = collapseOrParent(open, visible, at);
       setExpanded(next.expanded);
       setSelection({ id: next.selectedId, index: at });
-    } else if (input === "A" || key.return || input === "u" || input === "i") {
+    } else if (input === "A" || key.return || input === "u" || input === "h" || input === "i") {
       if (!row || !data) return;
       const item = row.node.data;
       if (item.kind === "group") {
@@ -326,7 +359,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
         if (input === "A" || key.return) void startAdoption(item.entry);
         return;
       }
-      if (input !== "u" && input !== "i") return;
+      if (input !== "u" && input !== "h" && input !== "i") return;
       if (item.row.scope === "project") {
         setMessage({ kind: "error", text: input === "u" ? "Project uninstall is not supported" : "Project installations are managed with the CLI" });
         return;
@@ -336,7 +369,9 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
         setMessage({ kind: "error", text: "The Source of this installation is no longer registered" });
         return;
       }
-      onOpenCatalog?.({ sourceId, path: item.row.selection.path, action: input === "u" ? "uninstall" : "install" });
+      const skill = skillOf(item.row, sourceId);
+      if (input === "u") startUninstall(manage, skill);
+      else startHostAddition(manage, skill);
     }
   });
 
@@ -351,15 +386,21 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       {ready.projectError === undefined ? null : <Text color={theme.error}>Error: {ready.projectError}</Text>}
       {rows.slice(window.start, window.end).map((row, offset) => {
         const position = window.start + offset;
-        const leaf = !row.expandable && row.node.data.kind !== "group";
+        const item = row.node.data;
+        const leaf = !row.expandable && item.kind !== "group";
+        const prefix = `${position === index ? "> " : "  "}${"  ".repeat(row.depth)}${leaf ? "  " : ""}`;
         return (
-          <Text key={row.node.id} {...rowStyle(position === index)} color={row.node.data.kind === "group" ? theme.group : undefined}>
-            {position === index ? "> " : "  "}{"  ".repeat(row.depth)}{leaf ? "  " : ""}{describeNode(row)}
+          <Text key={row.node.id} {...rowStyle(position === index)} color={item.kind === "group" ? theme.group : undefined}>
+            {prefix}{describeNode(row)}
+            {item.kind === "installation" ? (
+              <Text color={theme.marker}>{"  "}{describeDetails(item.row)}{markersOf(item.row) === "" ? "" : `  ${markersOf(item.row)}`}</Text>
+            ) : null}
           </Text>
         );
       })}
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
       {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
+      <Text color={theme.muted}>{LEGEND}</Text>
       <ModePanel mode={mode} />
     </Box>
   );
@@ -369,8 +410,6 @@ function ModePanel({ mode }: { readonly mode: InstallationsMode }) {
   switch (mode.kind) {
     case "browse":
       return null;
-    case "busy":
-      return <Text>{mode.label}</Text>;
     case "pick":
       return (
         <Box flexDirection="column">
@@ -412,5 +451,7 @@ function ModePanel({ mode }: { readonly mode: InstallationsMode }) {
           Adopting {mode.entry.name} adds the missing Host location and exposes it to more hosts; this needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
         </Text>
       );
+    default:
+      return <ManagePanel mode={mode} />;
   }
 }

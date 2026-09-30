@@ -2,7 +2,6 @@ import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
-import type { CatalogFocus } from "./catalog-actions.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
 import { InstallationsView } from "./installations-view.js";
@@ -31,7 +30,7 @@ const TABS: readonly (readonly [ViewName, string])[] = [
 const HINTS: Record<ViewName, string> = {
   sources: "j/k move  PgUp/PgDn page  space select  a all git  Enter catalog  n add  r refresh  d remove  2 catalog  3 installations  4 updates  q quit",
   catalog: "j/k move  / filter  i install  u uninstall  s all sources  1 sources  3 installations  4 updates  q quit",
-  installations: "j/k move  PgUp/PgDn page  Enter/right expand  left collapse  A adopt  u uninstall  i hosts  1 sources  2 catalog  4 updates  q quit",
+  installations: "j/k move  PgUp/PgDn page  Enter/right expand  left collapse  A adopt  u uninstall  h add hosts  1 sources  2 catalog  4 updates  q quit",
   updates: "j/k move  space toggle  a all  Enter preview  p project  g user-global  r check  1 sources  2 catalog  3 installations  q quit",
 };
 
@@ -47,12 +46,7 @@ export function App({ operations, environment, onExit }: AppProps) {
   }, []);
   const [view, setView] = useState<ViewName>("sources");
   const [catalogSourceId, setCatalogSourceId] = useState<string | undefined>();
-  // Set when the Installations view hands a Skill over to the Catalog flows; cleared on manual navigation.
-  const [catalogFocus, setCatalogFocus] = useState<CatalogFocus | undefined>();
-  const showView = (next: ViewName) => {
-    setCatalogFocus(undefined);
-    setView(next);
-  };
+  const showView = (next: ViewName) => setView(next);
 
   useInput((input) => {
     if (capturingRef.current) return;
@@ -90,11 +84,6 @@ export function App({ operations, environment, onExit }: AppProps) {
           operations={operations}
           environment={environment}
           onCapturingChange={onCapturingChange}
-          onOpenCatalog={(focus) => {
-            setCatalogSourceId(focus.sourceId);
-            setCatalogFocus(focus);
-            setView("catalog");
-          }}
         />
       ) : view === "updates" ? (
         <UpdatesView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
@@ -103,7 +92,6 @@ export function App({ operations, environment, onExit }: AppProps) {
           operations={operations}
           sourceId={catalogSourceId}
           environment={environment}
-          focus={catalogFocus}
           onCapturingChange={onCapturingChange}
         />
       )}

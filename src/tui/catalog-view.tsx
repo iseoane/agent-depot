@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
-import { BROWSE, HOST_CHOICES, SCOPE_CHOICES, type ActionMode, type CatalogFocus } from "./catalog-actions.js";
+import { BROWSE, HOST_CHOICES, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
 import { filterReducer, filterSkills, initialFilter, type FilterEvent, type FilterState } from "./catalog-filter.js";
 import {
   globalRecord,
@@ -11,16 +11,12 @@ import {
   loadInstalledSkills,
   missingHosts,
   NO_INSTALLED,
-  prepareHostAddition,
-  prepareHostRemoval,
   prepareInstall,
-  prepareUninstall,
-  runHostAddition,
-  runHostRemoval,
   runInstall,
-  runUninstall,
   type InstalledSkills,
 } from "./catalog-installs.js";
+import { errorText, handleManageKey, startUninstall, type ManageContext } from "./manage-actions.js";
+import { ManagePanel } from "./manage-panel.js";
 import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 import type { TuiEnvironment } from "./environment.js";
@@ -38,8 +34,6 @@ export interface CatalogViewProps {
   readonly onCapturingChange?: (capturing: boolean) => void;
   /** Where installs and uninstalls happen; defaults to the real home and working directory. */
   readonly environment?: TuiEnvironment;
-  /** Highlights a Skill and starts its `u` / `i` flow once, e.g. when opened from the Installations view. */
-  readonly focus?: CatalogFocus;
   /** Rows the list may use; defaults to what the terminal leaves. Injectable for tests. */
   readonly listHeight?: number;
 }
@@ -47,10 +41,6 @@ export interface CatalogViewProps {
 interface Message {
   readonly kind: "ok" | "error";
   readonly text: string;
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 type LoadState =
@@ -62,7 +52,7 @@ function truncate(text: string): string {
   return text.length > DESCRIPTION_LIMIT ? `${text.slice(0, DESCRIPTION_LIMIT - 3)}...` : text;
 }
 
-export function CatalogView({ operations, sourceId, onCapturingChange, environment, focus, listHeight }: CatalogViewProps) {
+export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight }: CatalogViewProps) {
   const height = useListHeight(listHeight, 6);
   const [all, setAll] = useState(sourceId === undefined);
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -73,7 +63,6 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   // Mirrors the typed query synchronously so keystrokes delivered in one burst are not lost to stale closures.
   const typed = useRef("");
   const [installed, setInstalled] = useState<InstalledSkills>(NO_INSTALLED);
-  const [installedLoaded, setInstalledLoaded] = useState(false);
   const [action, setActionState] = useState<ActionMode>(BROWSE);
   // Mirrors the action mode synchronously, like the filter, so later keystrokes and the shell never see stale state.
   const actionRef = useRef<ActionMode>(BROWSE);
@@ -90,10 +79,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
 
   const reloadInstalled = useCallback(async () => {
     const loaded = await loadInstalledSkills(operations, env);
-    if (mounted.current) {
-      setInstalled(loaded);
-      setInstalledLoaded(true);
-    }
+    if (mounted.current) setInstalled(loaded);
   }, [operations, env]);
 
   useEffect(() => {
@@ -156,30 +142,6 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     }
   };
 
-  /** `u`: one host goes straight to full removal; several ask whether to remove all or choose. */
-  const startUninstall = (skill: SkillCandidate) => {
-    const record = globalRecord(skill, installed);
-    if (record && record.hosts.length > 1) setAction({ kind: "remove-scope", skill, hosts: record.hosts });
-    else void startFullUninstall(skill);
-  };
-
-  const startFullUninstall = async (skill: SkillCandidate) => {
-    setAction({ kind: "busy", label: `Preparing uninstall of ${skill.name}...` });
-    try {
-      const prepared = await prepareUninstall(operations, env, skill, installed);
-      if (!mounted.current) return;
-      if (prepared.kind === "ready") {
-        setAction({ kind: "confirm-uninstall", skill, prepared });
-        return;
-      }
-      setMessage({ kind: "error", text: UNINSTALL_REFUSALS[prepared.kind] });
-    } catch (error) {
-      if (!mounted.current) return;
-      setMessage({ kind: "error", text: errorText(error) });
-    }
-    setAction(BROWSE);
-  };
-
   /** Reloads the markers first so the result and the markers appear together. */
   const finish = async (result: Message) => {
     await reloadInstalled();
@@ -199,54 +161,15 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     await finish(result);
   };
 
-  const confirmUninstall = async (mode: Extract<ActionMode, { kind: "confirm-uninstall" }>) => {
-    setAction({ kind: "busy", label: `Removing ${mode.skill.name}...` });
-    let result: Message;
-    try {
-      await runUninstall(mode.prepared, operations, env);
-      result = { kind: "ok", text: `Removed ${mode.skill.name} (${mode.skill.path})` };
-    } catch (error) {
-      result = { kind: "error", text: errorText(error) };
-    }
-    await finish(result);
-  };
-
-  const startHostChange = async (
-    mode: Extract<ActionMode, { kind: "hosts-add" | "hosts-remove" }>,
-  ) => {
-    const adding = mode.kind === "hosts-add";
-    setAction({ kind: "busy", label: `Preparing host change of ${mode.skill.name}...` });
-    try {
-      if (adding) {
-        const prepared = await prepareHostAddition(operations, env, mode.skill, installed, mode.selected);
-        if (!mounted.current) return;
-        setAction({ kind: "confirm-host-add", skill: mode.skill, prepared });
-      } else {
-        const prepared = await prepareHostRemoval(operations, env, mode.skill, installed, mode.selected);
-        if (!mounted.current) return;
-        setAction({ kind: "confirm-host-remove", skill: mode.skill, prepared });
-      }
-    } catch (error) {
-      if (!mounted.current) return;
-      setMessage({ kind: "error", text: errorText(error) });
-      setAction(BROWSE);
-    }
-  };
-
-  const confirmHostChange = async (
-    mode: Extract<ActionMode, { kind: "confirm-host-exposure" | "confirm-host-remove" }>,
-  ) => {
-    setAction({ kind: "busy", label: `Changing hosts of ${mode.skill.name}...` });
-    let result: Message;
-    try {
-      const text = mode.kind === "confirm-host-exposure"
-        ? await runHostAddition(mode.prepared, operations, env)
-        : await runHostRemoval(mode.prepared, operations, env, mode.skill);
-      result = { kind: "ok", text };
-    } catch (error) {
-      result = { kind: "error", text: errorText(error) };
-    }
-    await finish(result);
+  const manage: ManageContext = {
+    operations,
+    env,
+    installed,
+    setMode: setAction,
+    browse: () => setAction(BROWSE),
+    setMessage,
+    isMounted: () => mounted.current,
+    finish,
   };
 
   const cancel = (text: string) => {
@@ -255,6 +178,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   };
 
   const handleActionKey = (mode: ActionMode, input: string, key: Key) => {
+    if (handleManageKey(manage, mode, input, key)) return;
     switch (mode.kind) {
       case "host": {
         const toggle = (host: ProjectHost) =>
@@ -275,41 +199,6 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
         else if (input === "1") {
           setAction({ kind: "hosts-add", skill: mode.skill, choices: mode.missing, cursor: 0, selected: [] });
         } else if (input === "2") setAction({ kind: "host", skill: mode.skill, cursor: 0, selected: [] });
-        return;
-      case "remove-scope":
-        if (key.escape) cancel("Uninstall cancelled");
-        else if (input === "1") void startFullUninstall(mode.skill);
-        else if (input === "2") {
-          setAction({ kind: "hosts-remove", skill: mode.skill, choices: mode.hosts, cursor: 0, selected: [] });
-        }
-        return;
-      case "hosts-add":
-      case "hosts-remove": {
-        const toggle = (host: ProjectHost) =>
-          mode.choices.filter((candidate) => candidate === host ? !mode.selected.includes(candidate) : mode.selected.includes(candidate));
-        const numbered = mode.choices[Number(input) - 1];
-        if (key.escape) cancel(mode.kind === "hosts-add" ? "Install cancelled" : "Uninstall cancelled");
-        else if (key.downArrow || input === "j") setAction({ ...mode, cursor: Math.min(mode.cursor + 1, mode.choices.length - 1) });
-        else if (key.upArrow || input === "k") setAction({ ...mode, cursor: Math.max(mode.cursor - 1, 0) });
-        else if (input === " ") setAction({ ...mode, selected: toggle(mode.choices[mode.cursor]!) });
-        else if (numbered) setAction({ ...mode, selected: toggle(numbered) });
-        else if (key.return) {
-          if (mode.selected.length > 0) void startHostChange(mode);
-          else setMessage({ kind: "error", text: "Select at least one host" });
-        }
-        return;
-      }
-      case "confirm-host-add":
-        if (input === "y") setAction({ ...mode, kind: "confirm-host-exposure" });
-        else if (input === "n" || key.escape) cancel("Install cancelled");
-        return;
-      case "confirm-host-exposure":
-        if (input === "y") void confirmHostChange(mode);
-        else if (input === "n" || key.escape) cancel("Install cancelled");
-        return;
-      case "confirm-host-remove":
-        if (input === "y") void confirmHostChange(mode);
-        else if (input === "n" || key.escape) cancel("Uninstall cancelled");
         return;
       case "scope": {
         const scope = SCOPE_CHOICES[Number(input) - 1];
@@ -340,10 +229,6 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       case "confirm-exposure":
         if (input === "y") void confirmInstall(mode, true);
         else if (input === "n" || key.escape) cancel("Install cancelled");
-        return;
-      case "confirm-uninstall":
-        if (input === "y") void confirmUninstall(mode);
-        else if (input === "n" || key.escape) cancel("Uninstall cancelled");
         return;
       default:
         return;
@@ -389,35 +274,15 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       const skill = visible[index];
       if (!skill) return;
       setMessage(undefined);
-      startAction(skill, input === "u" ? "uninstall" : "install");
+      if (input === "u") startUninstall(manage, skill);
+      else {
+        const record = globalRecord(skill, installed);
+        const missing = record ? missingHosts(record) : [];
+        if (record && missing.length > 0) setAction({ kind: "installed-choice", skill, missing });
+        else setAction({ kind: "host", skill, cursor: 0, selected: [] });
+      }
     }
   });
-
-  /** `u` / `i` on a Skill; also used to start the flow requested through `focus`. */
-  function startAction(skill: SkillCandidate, kind: CatalogFocus["action"]) {
-    if (kind === "uninstall") startUninstall(skill);
-    else {
-      const record = globalRecord(skill, installed);
-      const missing = record ? missingHosts(record) : [];
-      if (record && missing.length > 0) setAction({ kind: "installed-choice", skill, missing });
-      else setAction({ kind: "host", skill, cursor: 0, selected: [] });
-    }
-  }
-
-  // Runs the requested flow once, after both the Skills and the installation records are loaded.
-  const focused = useRef(false);
-  useEffect(() => {
-    if (!focus || focused.current || state.status !== "ready" || !installedLoaded) return;
-    focused.current = true;
-    const position = state.skills.findIndex((skill) => skill.sourceId === focus.sourceId && skill.path === focus.path);
-    const skill = state.skills[position];
-    if (!skill) {
-      setMessage({ kind: "error", text: `Skill ${focus.path} was not found in ${focus.sourceId}` });
-      return;
-    }
-    setSelected(position);
-    startAction(skill, focus.action);
-  }, [focus, state, installedLoaded]);
 
   const scope = all || sourceId === undefined ? "all sources" : sourceId;
   if (state.status === "loading") return <Text>Loading skills...</Text>;
@@ -448,12 +313,6 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   );
 }
 
-const UNINSTALL_REFUSALS = {
-  unsupported: "Uninstall is not supported by the configured operations",
-  "not-installed": "Skill is not installed",
-  "project-only": "Project uninstall is not supported",
-} as const;
-
 function ActionPanel({ mode }: { readonly mode: ActionMode }) {
   switch (mode.kind) {
     case "browse":
@@ -475,50 +334,12 @@ function ActionPanel({ mode }: { readonly mode: ActionMode }) {
           {mode.skill.name} is installed user-global. 1 add hosts ({mode.missing.join(", ")})  2 new install (project or other scope)  (Esc cancel)
         </Text>
       );
-    case "remove-scope":
-      return <Text>Uninstall {mode.skill.name} (hosts: {mode.hosts.join(", ")}): 1 all hosts  2 choose hosts  (Esc cancel)</Text>;
-    case "hosts-add":
-    case "hosts-remove":
-      return (
-        <Box flexDirection="column">
-          <Text>
-            {mode.kind === "hosts-add" ? "Add hosts to" : "Remove hosts from"} {mode.skill.name}. Host (space/1-{mode.choices.length} toggle, j/k move, Enter continue, Esc cancel):
-          </Text>
-          {mode.choices.map((host, position) => (
-            <Text key={host}>
-              {position === mode.cursor ? "> " : "  "}[{mode.selected.includes(host) ? "x" : " "}] {position + 1} {host}
-            </Text>
-          ))}
-        </Box>
-      );
-    case "confirm-host-add":
-      return (
-        <Box flexDirection="column">
-          {mode.prepared.preview.map((line, position) => <Text key={position}>{line}</Text>)}
-          <Text>Add hosts to {mode.skill.name}? y/n</Text>
-        </Box>
-      );
-    case "confirm-host-exposure":
-      return (
-        <Text color={theme.warning}>
-          Adding hosts exposes the installed {mode.skill.name} to more hosts and needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
-        </Text>
-      );
-    case "confirm-host-remove":
-      return (
-        <Box flexDirection="column">
-          {mode.prepared.preview.map((line, position) => <Text key={position}>{line}</Text>)}
-          <Text>Remove hosts from {mode.skill.name}? y/n</Text>
-        </Box>
-      );
     case "scope":
       return <Text>Scope: {SCOPE_CHOICES.map((scope, i) => `${i + 1} ${scope}`).join("  ")}  (Esc cancel)</Text>;
     case "version":
       return <Text>Version: 1 latest  2 fixed  (Esc cancel)</Text>;
     case "fixed":
       return <Text>Fixed version: {mode.value}_  (Enter confirm, Esc cancel)</Text>;
-    case "busy":
-      return <Text>{mode.label}</Text>;
     case "confirm-install":
       return (
         <Box flexDirection="column">
@@ -533,12 +354,7 @@ function ActionPanel({ mode }: { readonly mode: ActionMode }) {
           An identical {mode.skill.name} already exists; adding the missing Host location needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
         </Text>
       );
-    case "confirm-uninstall":
-      return (
-        <Box flexDirection="column">
-          {mode.prepared.plan.preview.map((line, position) => <Text key={position}>{line}</Text>)}
-          <Text>Uninstall {mode.skill.name}? y/n</Text>
-        </Box>
-      );
+    default:
+      return <ManagePanel mode={mode} />;
   }
 }
