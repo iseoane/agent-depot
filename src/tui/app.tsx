@@ -1,6 +1,7 @@
 import { Box, Text, useApp, useStdout } from "ink";
 import { useCallback, useRef, useState } from "react";
 
+import { AGENT_DEPOT_PACKAGE_VERSION } from "../project-manifest.js";
 import type { SourceOperations } from "../sources.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
@@ -69,7 +70,7 @@ export function App({ operations, environment, onExit }: AppProps) {
 
   return (
     <Box flexDirection="column">
-      <Text bold color={theme.accent}>Agent Depot</Text>
+      <Text bold color={theme.accent}>Agent Depot{AGENT_DEPOT_PACKAGE_VERSION === undefined ? "" : ` v${AGENT_DEPOT_PACKAGE_VERSION}`}</Text>
       <Text>
         {TABS.map(([name, label], position) => (
           <Text key={name} color={view === name ? theme.accent : theme.inactive} bold={view === name}>

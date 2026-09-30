@@ -1,7 +1,7 @@
 # Feature: Publish Agent Depot as an npm package
 
 ## Status
-Planned — do NOT start until the TUI work (odd/tasks/tui.md) is finished and reviewed with the user (user decision 2026-09-30).
+In progress — TUI work finished; P1-P5, P7 done on branch chore/ci-e2e-package, P6 (publish) pending user confirmation.
 
 ## Objective
 Make Agent Depot installable and runnable with `npx @iseoane/agent-depot`, `pnpm dlx @iseoane/agent-depot` or a global install exposing the `agent-depot` command.
@@ -22,5 +22,6 @@ Make Agent Depot installable and runnable with `npx @iseoane/agent-depot`, `pnpm
 - [ ] P3 — Version `0.2.0` and CHANGELOG (new `tui`, `skill remove`, `skill host add`; breaking: Node >= 24).
 - [ ] P4 — `npm pack` dry run: inspect the tarball contents, install the `.tgz` in a clean temp directory, and verify `agent-depot --help`, `agent-depot tui` (manual), built-in skill discovery and the Ink load from dependencies.
 - [ ] P5 — README: install/run instructions for npx / pnpm dlx / global install.
-- [ ] P7 — Single version source: `package.json` only; remove `src/version.ts` (only used by tests/version.test.ts) or derive it from `AGENT_DEPOT_PACKAGE_VERSION`; add `agent-depot --version`; show the version in the TUI header (`Agent Depot v0.2.0`).
+- [x] P7 — Single version source: `package.json` only; remove `src/version.ts` (only used by tests/version.test.ts) or derive it from `AGENT_DEPOT_PACKAGE_VERSION`; add `agent-depot --version`; show the version in the TUI header (`Agent Depot v0.2.0`).
+  - Done: `src/version.ts` removed; `AGENT_DEPOT_PACKAGE_VERSION` (from package.json) is the only source; `--version`/`-v` in `runCli`; TUI header `Agent Depot v<version>`. RED: 3 failing tests (header, `--version`, `-v`); GREEN: 474 pass x2.
 - [ ] P6 — (User-confirmed step) `npm publish`.

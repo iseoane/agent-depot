@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { render } from "ink-testing-library";
 
-import { ProjectManifestStore } from "../src/project-manifest.js";
+import { AGENT_DEPOT_PACKAGE_VERSION, ProjectManifestStore } from "../src/project-manifest.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
@@ -46,6 +46,13 @@ test("App renders the header and the Sources view", async () => {
   const frame = await waitForFrame(lastFrame, /builtin:agent-depot/);
   assert.match(frame, /Agent Depot/);
   assert.match(frame, /Sources/);
+  unmount();
+});
+
+test("App shows the package version in the header", async () => {
+  const { lastFrame, unmount } = render(<App operations={operations} onExit={() => undefined} />);
+  const frame = await waitForFrame(lastFrame, /builtin:agent-depot/);
+  assert.ok(frame.includes(`Agent Depot v${AGENT_DEPOT_PACKAGE_VERSION}`), frame);
   unmount();
 });
 
