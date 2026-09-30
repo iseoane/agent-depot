@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectHost } from "../project-manifest.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import { isValidFixedVersion } from "../skill-install.js";
-import type { UserGlobalSkillInventoryEntry } from "../user-global-skill-inventory.js";
 import type { SourceOperations } from "../sources.js";
 import { HOST_CHOICES } from "./catalog-actions.js";
 import { runInstall, type InstalledSkills } from "./catalog-installs.js";
@@ -18,10 +17,12 @@ import {
   sourceIdOf,
   type InstallationRow,
   type InstallationsData,
+  type UnmanagedGroup,
 } from "./installations.js";
 import { BROWSE, type InstallationsMode } from "./installations-mode.js";
 import { errorText, handleManageKey, startHostAddition, startUninstall, type ManageContext } from "./manage-actions.js";
 import { ManagePanel } from "./manage-panel.js";
+import { startUnmanagedRemoval } from "./unmanaged-actions.js";
 import {
   collapseOrParent,
   defaultExpanded,
@@ -61,7 +62,7 @@ type LoadState =
 type NodeData =
   | { readonly kind: "group"; readonly label: string }
   | { readonly kind: "installation"; readonly row: InstallationRow }
-  | { readonly kind: "unmanaged"; readonly entry: UserGlobalSkillInventoryEntry };
+  | { readonly kind: "unmanaged"; readonly group: UnmanagedGroup };
 
 type InstallationNode = TreeNode<NodeData>;
 
@@ -97,7 +98,7 @@ function buildTree(data: InstallationsData): readonly InstallationNode[] {
   roots.push({
     id: "scope:unmanaged",
     data: { kind: "group", label: `Unmanaged (user-global) (${data.unmanaged.length})` },
-    children: data.unmanaged.map((entry): InstallationNode => ({ id: `unmanaged:${entry.path}`, data: { kind: "unmanaged", entry } })),
+    children: data.unmanaged.map((group): InstallationNode => ({ id: `unmanaged:${group.name}`, data: { kind: "unmanaged", group } })),
   });
   return roots;
 }
@@ -111,6 +112,14 @@ function markersOf({ adopted, modified }: InstallationRow): string {
   return [adopted ? "adopted" : "", modified ? "modified" : ""].filter((flag) => flag !== "").join(" ");
 }
 
+/** Why a key does nothing on a group row. */
+const GROUP_ROW_MESSAGE: Record<"A" | "u" | "h" | "i", string> = {
+  A: "Adoption is not available for group rows",
+  u: "Uninstall is not available for group rows",
+  h: "Host changes are not available for group rows",
+  i: "Host changes are not available for group rows",
+};
+
 const LEGEND = "adopted = tracked in place, not copied by agent-depot · modified = changed on disk";
 
 /** The Skill of an installation, as the shared manage flows expect it. */
@@ -122,7 +131,13 @@ function describeNode(row: VisibleRow<NodeData>): string {
   const { data } = row.node;
   if (data.kind === "group") return `${row.expandable ? (row.expanded ? "▾" : "▸") : " "} ${data.label}`;
   if (data.kind === "installation") return data.row.selection.path;
-  return `${data.entry.name}  unmanaged  ${data.entry.path}`;
+  return `${data.group.name} [${data.group.hosts.join(", ")}]`;
+}
+
+/** `symlink → <target>` for the locations that are links, one entry per distinct target. */
+function describeLinks(group: UnmanagedGroup): string {
+  const targets = [...new Set(group.locations.flatMap((location) => location.linkTarget === undefined ? [] : [location.linkTarget]))];
+  return targets.length === 0 ? "" : `symlink → ${targets.join(", ")}`;
 }
 
 export function InstallationsView({ operations, environment, onCapturingChange, listHeight }: InstallationsViewProps) {
@@ -229,7 +244,13 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     },
   };
 
-  const startAdoption = async (entry: UserGlobalSkillInventoryEntry) => {
+  const startAdoption = async (group: UnmanagedGroup) => {
+    // Adoption keeps an existing directory in place, so it needs a real directory (the shared root first).
+    const entry = group.locations.find((location) => location.entry !== undefined)?.entry;
+    if (entry === undefined) {
+      setMessage({ kind: "error", text: "Adoption is not available for symlinks" });
+      return;
+    }
     setMessage(undefined);
     setMode({ kind: "busy", label: `Looking for a Source Skill named ${entry.name}...` });
     try {
@@ -352,14 +373,20 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       const item = row.node.data;
       if (item.kind === "group") {
         if (key.return) setExpanded(toggleNode(open, row));
+        else setMessage({ kind: "error", text: GROUP_ROW_MESSAGE[input as keyof typeof GROUP_ROW_MESSAGE] });
         return;
       }
       setMessage(undefined);
       if (item.kind === "unmanaged") {
-        if (input === "A" || key.return) void startAdoption(item.entry);
+        if (input === "u") startUnmanagedRemoval(manage, item.group);
+        else if (input === "A" || key.return) void startAdoption(item.group);
+        else setMessage({ kind: "error", text: "Host changes are not available for unmanaged skills" });
         return;
       }
-      if (input !== "u" && input !== "h" && input !== "i") return;
+      if (input === "A" || key.return) {
+        setMessage({ kind: "error", text: "Adoption applies to unmanaged skills; u uninstalls and h adds hosts here" });
+        return;
+      }
       if (item.row.scope === "project") {
         setMessage({ kind: "error", text: input === "u" ? "Project uninstall is not supported" : "Project installations are managed with the CLI" });
         return;
@@ -394,6 +421,9 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
             {prefix}{describeNode(row)}
             {item.kind === "installation" ? (
               <Text color={theme.marker}>{"  "}{describeDetails(item.row)}{markersOf(item.row) === "" ? "" : `  ${markersOf(item.row)}`}</Text>
+            ) : null}
+            {item.kind === "unmanaged" && describeLinks(item.group) !== "" ? (
+              <Text color={theme.marker}>{"  "}{describeLinks(item.group)}</Text>
             ) : null}
           </Text>
         );

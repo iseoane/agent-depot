@@ -154,7 +154,7 @@ test("q and number keys are blocked while the adoption flow captures keys", asyn
   await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await moveDownTo(lastFrame, stdin, /> .*Unmanaged \(user-global\)/);
   stdin.write("\r");
-  await waitForFrame(lastFrame, /demo2 {2}unmanaged/);
+  await waitForFrame(lastFrame, /demo2 \[claude\]/);
   await moveDownTo(lastFrame, stdin, /> .*demo2/);
   stdin.write("A");
   await waitForFrame(lastFrame, /Host \(space/);

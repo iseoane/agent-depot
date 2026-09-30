@@ -1,0 +1,179 @@
+import type { Key } from "ink";
+
+import type { ProjectSkillSelection } from "../project-manifest.js";
+import type { SourceOperations } from "../sources.js";
+import {
+  describeUnmanagedRemoval,
+  describeUnmanagedSymlinkRemoval,
+  removeInspectedUnmanagedSkill,
+  removeInspectedUnmanagedSymlink,
+} from "../unmanaged-removal.js";
+import {
+  inspectUserGlobalSkillRemoval,
+  inspectUserGlobalSymlinkRemoval,
+  type UserGlobalSkillRemovalInspection,
+  type UserGlobalSymlinkRemovalInspection,
+} from "../user-global-skill-inventory.js";
+import type { TuiEnvironment } from "./environment.js";
+import { homeOf, type UnmanagedGroup, type UnmanagedLocation } from "./installations.js";
+
+/** One location ready to be removed: a real directory or only a symbolic link. */
+export type PlannedUnmanagedRemoval =
+  | { readonly kind: "directory"; readonly inspection: UserGlobalSkillRemovalInspection }
+  | { readonly kind: "link"; readonly inspection: UserGlobalSymlinkRemovalInspection };
+
+export interface PreparedUnmanagedRemoval {
+  readonly items: readonly PlannedUnmanagedRemoval[];
+  /** The records as they were when the preview was made; removal fails closed when they change. */
+  readonly installations: readonly ProjectSkillSelection[];
+  readonly preview: readonly string[];
+}
+
+/** Interaction modes of the unmanaged removal flow; like every manage mode they capture keys. */
+export type UnmanagedMode =
+  | { readonly kind: "unmanaged-scope"; readonly group: UnmanagedGroup }
+  | { readonly kind: "unmanaged-pick"; readonly group: UnmanagedGroup; readonly cursor: number; readonly selected: readonly string[] }
+  | { readonly kind: "confirm-unmanaged"; readonly group: UnmanagedGroup; readonly prepared: PreparedUnmanagedRemoval };
+
+export const UNMANAGED_KINDS: readonly UnmanagedMode["kind"][] = ["unmanaged-scope", "unmanaged-pick", "confirm-unmanaged"];
+
+interface Message {
+  readonly kind: "ok" | "error";
+  readonly text: string;
+}
+
+/** What the flow needs from the hosting view; the Installations view's manage context satisfies it. */
+export interface UnmanagedContext {
+  readonly operations: SourceOperations;
+  readonly env: TuiEnvironment;
+  setMode(mode: UnmanagedMode | { readonly kind: "busy"; readonly label: string }): void;
+  browse(): void;
+  setMessage(message: Message | undefined): void;
+  isMounted(): boolean;
+  finish(result: Message): Promise<void>;
+}
+
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** Links first, so a Claude link never outlives the canonical directory it points to. */
+function linksFirst(locations: readonly UnmanagedLocation[]): readonly UnmanagedLocation[] {
+  return [...locations].sort((left, right) => Number(left.linkTarget === undefined) - Number(right.linkTarget === undefined));
+}
+
+/** Plan step: inspects every chosen location exactly as the CLI does; changes nothing. */
+export async function prepareUnmanagedRemoval(
+  operations: SourceOperations,
+  environment: TuiEnvironment,
+  group: UnmanagedGroup,
+  locations: readonly UnmanagedLocation[],
+): Promise<PreparedUnmanagedRemoval> {
+  if (!operations.listUserGlobalInstallations) throw new Error("Uninstall is not supported by the configured operations");
+  const installations = await operations.listUserGlobalInstallations();
+  const options = { homeDirectory: homeOf(environment), managedInstallations: installations };
+  const items: PlannedUnmanagedRemoval[] = [];
+  const preview = [`WARNING: agent-depot did not create these files (unmanaged skill ${group.name})`];
+  for (const location of linksFirst(locations)) {
+    if (location.linkTarget !== undefined) {
+      const inspection = await inspectUserGlobalSymlinkRemoval(location.path, options);
+      items.push({ kind: "link", inspection });
+      preview.push(...describeUnmanagedSymlinkRemoval(inspection));
+    } else {
+      const inspection = await inspectUserGlobalSkillRemoval(location.path, options);
+      items.push({ kind: "directory", inspection });
+      preview.push(...describeUnmanagedRemoval(inspection));
+    }
+  }
+  return { items, installations, preview };
+}
+
+/** Execute step: each location is rechecked and removed on its own, so one failure does not stop the others. */
+export async function runUnmanagedRemoval(
+  prepared: PreparedUnmanagedRemoval,
+  operations: SourceOperations,
+  environment: TuiEnvironment,
+): Promise<Message> {
+  const context = { operations, homeDirectory: homeOf(environment) };
+  const lines: string[] = [];
+  let failed = false;
+  for (const item of prepared.items) {
+    const { path: location } = item.inspection;
+    try {
+      if (item.kind === "link") await removeInspectedUnmanagedSymlink(context, item.inspection, prepared.installations);
+      else await removeInspectedUnmanagedSkill(context, item.inspection, prepared.installations);
+      lines.push(`Removed ${location}`);
+    } catch (error) {
+      failed = true;
+      lines.push(`Failed ${location}: ${errorText(error)}`);
+    }
+  }
+  return { kind: failed ? "error" : "ok", text: lines.join("\n") };
+}
+
+async function startPreview(context: UnmanagedContext, group: UnmanagedGroup, locations: readonly UnmanagedLocation[]): Promise<void> {
+  context.setMode({ kind: "busy", label: `Preparing removal of ${group.name}...` });
+  try {
+    const prepared = await prepareUnmanagedRemoval(context.operations, context.env, group, locations);
+    if (!context.isMounted()) return;
+    context.setMode({ kind: "confirm-unmanaged", group, prepared });
+  } catch (error) {
+    if (!context.isMounted()) return;
+    context.setMessage({ kind: "error", text: errorText(error) });
+    context.browse();
+  }
+}
+
+/** `u` on an unmanaged skill: one location goes straight to the preview; several ask all or choose. */
+export function startUnmanagedRemoval(context: UnmanagedContext, group: UnmanagedGroup): void {
+  if (group.locations.length > 1) context.setMode({ kind: "unmanaged-scope", group });
+  else void startPreview(context, group, group.locations);
+}
+
+function cancel(context: UnmanagedContext): void {
+  context.setMessage({ kind: "ok", text: "Uninstall cancelled" });
+  context.browse();
+}
+
+async function execute(context: UnmanagedContext, group: UnmanagedGroup, prepared: PreparedUnmanagedRemoval): Promise<void> {
+  context.setMode({ kind: "busy", label: `Removing ${group.name}...` });
+  await context.finish(await runUnmanagedRemoval(prepared, context.operations, context.env));
+}
+
+/** Handles a key in an unmanaged removal mode; returns false for any other mode. */
+export function handleUnmanagedKey(context: UnmanagedContext, mode: { readonly kind: string }, input: string, key: Key): boolean {
+  const current = mode as UnmanagedMode;
+  switch (current.kind) {
+    case "unmanaged-scope":
+      if (key.escape) cancel(context);
+      else if (input === "1") void startPreview(context, current.group, current.group.locations);
+      else if (input === "2") context.setMode({ kind: "unmanaged-pick", group: current.group, cursor: 0, selected: [] });
+      return true;
+    case "unmanaged-pick": {
+      const { locations } = current.group;
+      const toggle = (index: number) => {
+        const location = locations[index];
+        if (!location) return;
+        const selected = current.selected.includes(location.path)
+          ? current.selected.filter((candidate) => candidate !== location.path)
+          : [...current.selected, location.path];
+        context.setMode({ ...current, selected });
+      };
+      if (key.escape) cancel(context);
+      else if (key.downArrow || input === "j") context.setMode({ ...current, cursor: Math.min(current.cursor + 1, locations.length - 1) });
+      else if (key.upArrow || input === "k") context.setMode({ ...current, cursor: Math.max(current.cursor - 1, 0) });
+      else if (input === " ") toggle(current.cursor);
+      else if (Number(input) >= 1 && Number(input) <= locations.length) toggle(Number(input) - 1);
+      else if (key.return) {
+        const chosen = locations.filter((location) => current.selected.includes(location.path));
+        if (chosen.length > 0) void startPreview(context, current.group, chosen);
+        else context.setMessage({ kind: "error", text: "Select at least one location" });
+      }
+      return true;
+    }
+    case "confirm-unmanaged":
+      if (input === "y") void execute(context, current.group, current.prepared);
+      else if (input === "n" || key.escape) cancel(context);
+      return true;
+    default:
+      return false;
+  }
+}

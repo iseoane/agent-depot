@@ -4,7 +4,9 @@ import type { SourceOperations } from "./sources.js";
 import {
   inspectUserGlobalSkillRemoval,
   removeUserGlobalSkill,
+  removeUserGlobalSymlink,
   type UserGlobalSkillRemovalInspection,
+  type UserGlobalSymlinkRemovalInspection,
 } from "./user-global-skill-inventory.js";
 
 /** The preview lines the CLI prints under each exact unmanaged path it will delete. */
@@ -13,6 +15,14 @@ export function describeUnmanagedRemoval(inspection: UserGlobalSkillRemovalInspe
     `  remove exact path ${JSON.stringify(inspection.path)}`,
     "    WARNING: this is a permanent deletion; Agent Depot will not retain a backup",
     "    WARNING: recovery through Agent Depot requires a resolvable Source and is not guaranteed",
+  ];
+}
+
+/** Preview lines for a symbolic link: only the link is removed, never what it points to. */
+export function describeUnmanagedSymlinkRemoval(inspection: UserGlobalSymlinkRemovalInspection): readonly string[] {
+  return [
+    `  remove symbolic link ${JSON.stringify(inspection.path)} -> ${JSON.stringify(inspection.target)}`,
+    "    only the link is removed; the path it points to is kept",
   ];
 }
 
@@ -36,6 +46,23 @@ export async function removeInspectedUnmanagedSkill(
   });
   assertUnmanagedInspectionUnchanged(inspection, latestInspection);
   await removeUserGlobalSkill(inspection, {
+    homeDirectory,
+    managedInstallations: latestManagedInstallations,
+    readManagedInstallations: async () => operations.listUserGlobalInstallations!(),
+    expectedManagedInstallations,
+  });
+}
+
+/** Rechecks the records and the inspected link, then unlinks only the link. */
+export async function removeInspectedUnmanagedSymlink(
+  context: UnmanagedRemovalContext,
+  inspection: UserGlobalSymlinkRemovalInspection,
+  expectedManagedInstallations: readonly ProjectSkillSelection[],
+): Promise<void> {
+  const { operations, homeDirectory } = context;
+  const latestManagedInstallations = await operations.listUserGlobalInstallations!();
+  assertManagedInstallationRecordsUnchanged(expectedManagedInstallations, latestManagedInstallations);
+  await removeUserGlobalSymlink(inspection, {
     homeDirectory,
     managedInstallations: latestManagedInstallations,
     readManagedInstallations: async () => operations.listUserGlobalInstallations!(),
