@@ -16,3 +16,4 @@ Run typecheck, lint, unit tests and a real-PTY TUI e2e test on every pull reques
 - C1: YAML parses (python yaml); actionlint unavailable via npx (no executable).
 - C2 tool: `@homebridge/node-pty-prebuilt-multiarch` 0.14.1 (devDependency). It ships prebuilt binaries for linux x64/arm64 and node ABIs 111-147 inside the package, so no compiler or install script is needed (`allowBuilds: false` in pnpm-workspace.yaml; pnpm 11 otherwise refuses the install script). `node-pty` was not chosen: it compiles with node-gyp. `script -qfec` fallback not needed, so the test is not Linux-only.
 - C2: `pnpm test:e2e` x3 -> 2 pass / 0 fail (~1s). Unit glob narrowed to `dist/tests/*.test.js` so e2e stays out of `pnpm test`.
+- Pack job added to ci.yml with P4 (`pnpm test:pack`). actionlint unavailable; YAML parses.

@@ -1,10 +1,37 @@
 {
-  "name": "agent-depot",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@iseoane/agent-depot",
+  "version": "0.2.0",
   "description": "A cross-platform catalog for reusable coding-agent skills.",
+  "license": "MIT",
+  "author": "iseoane",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iseoane/agent-depot.git"
+  },
+  "homepage": "https://github.com/iseoane/agent-depot#readme",
+  "bugs": {
+    "url": "https://github.com/iseoane/agent-depot/issues"
+  },
+  "keywords": [
+    "agent",
+    "skills",
+    "coding-agent",
+    "cli",
+    "tui",
+    "catalog"
+  ],
   "bin": {
     "agent-depot": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "skills",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "type": "module",
   "engines": {
@@ -21,7 +48,9 @@
     "audit:dupes": "npx --yes fallow@3.30.0 dupes",
     "audit:health": "pnpm test:coverage && npx --yes fallow@3.30.0 health --coverage coverage/v8 --min-score 85",
     "audit:all": "pnpm audit:dead-code && pnpm audit:dupes && pnpm audit:health",
-    "test:e2e": "pnpm build && node --test --test-timeout=120000 \"dist/tests/e2e/*.e2e.test.js\""
+    "test:e2e": "pnpm build && node --test --test-timeout=120000 \"dist/tests/e2e/*.e2e.test.js\"",
+    "prepublishOnly": "pnpm build && pnpm test",
+    "test:pack": "pnpm build && node scripts/pack-smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

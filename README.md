@@ -5,6 +5,26 @@ Agent Depot keeps a global catalog of Git Sources for future skill discovery.
 Requires Node.js >= 24 (Active LTS). The [interactive TUI](#interactive-tui)
 needs an interactive terminal.
 
+## Install
+
+Agent Depot is published as the scoped package `@iseoane/agent-depot` and exposes the
+`agent-depot` command. It requires Node.js >= 24.
+
+```sh
+# Run without installing
+npx @iseoane/agent-depot --version
+npx @iseoane/agent-depot tui
+pnpm dlx @iseoane/agent-depot tui
+
+# Or install globally
+npm install --global @iseoane/agent-depot
+pnpm add --global @iseoane/agent-depot
+agent-depot --version
+```
+
+The examples below use `node dist/src/cli.js` from a source checkout; with the package
+installed, replace that prefix with `agent-depot`.
+
 ## Usage
 
 Build the package, then run the CLI:
@@ -35,6 +55,7 @@ node dist/src/cli.js uninstall --skills --yes
 node dist/src/cli.js uninstall --unmanaged-skill <exact-global-path> --yes
 node dist/src/cli.js uninstall --data --yes
 node dist/src/cli.js tui
+node dist/src/cli.js --version
 ```
 
 Refresh first prints the registered URL as a preview. It requires explicit
