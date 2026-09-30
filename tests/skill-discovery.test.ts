@@ -75,6 +75,12 @@ test("parses quoted and folded required frontmatter fields and rejects incomplet
   assert.equal(parseSkillFrontmatter("---\n  name: indented\ndescription: text\n---\n"), undefined);
 });
 
+test("skips nested block scalars inside a metadata mapping and rejects tabs within them", () => {
+  const parsed = parseSkillFrontmatter("---\nname: Nested\ndescription: With nested block\nmetadata:\n  notes: |\n    first\n\n    second\n  folded: >-\n    text\n  other: value\n---\n");
+  assert.deepEqual(parsed, { name: "Nested", description: "With nested block" });
+  assert.equal(parseSkillFrontmatter("---\nname: Nested\ndescription: With nested block\nmetadata:\n  notes: |\n    first\n\tsecond\n---\n"), undefined);
+});
+
 test("accepts optional boolean metadata without weakening required fields", () => {
   assert.deepEqual(parseSkillFrontmatter("---\nname: Discoverable\ndescription: A discoverable skill\ndisable-model-invocation: true\n---\n"), {
     name: "Discoverable",

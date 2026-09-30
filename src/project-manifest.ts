@@ -631,7 +631,8 @@ function isMissingFile(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
+const WINDOWS_RENAME_CONFLICT_CODES: ReadonlySet<unknown> = new Set(["EEXIST", "EPERM", "ENOTEMPTY"]);
+
 function isWindowsRenameConflict(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error &&
-    (error.code === "EEXIST" || error.code === "EPERM" || error.code === "ENOTEMPTY");
+  return typeof error === "object" && error !== null && "code" in error && WINDOWS_RENAME_CONFLICT_CODES.has(error.code);
 }
