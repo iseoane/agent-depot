@@ -1,6 +1,7 @@
 import type { Key } from "ink";
 
 import type { ProjectHost } from "../project-manifest.js";
+import { isValidFixedVersion } from "../skill-install.js";
 
 /** The cursor after a down/up key (arrows or j/k), or undefined when the key does not move it. */
 export function moveCursor(cursor: number, length: number, input: string, key: Key): number | undefined {
@@ -53,4 +54,20 @@ export function hostChecklistKey(
 export function answerYesNo(input: string, key: Key, onYes: () => void, onNo: () => void): void {
   if (input === "y") onYes();
   else if (input === "n" || key.escape) onNo();
+}
+
+/** What a key did to the fixed-version text input. */
+export type VersionInputOutcome =
+  | { readonly kind: "cancel" }
+  | { readonly kind: "submit" }
+  | { readonly kind: "edit"; readonly value: string }
+  | { readonly kind: "ignore" };
+
+/** Esc cancels, Enter submits a valid version, backspace deletes, any other plain key is typed. */
+export function versionInputKey(value: string, input: string, key: Key): VersionInputOutcome {
+  if (key.escape) return { kind: "cancel" };
+  if (key.return) return isValidFixedVersion(value) ? { kind: "submit" } : { kind: "ignore" };
+  if (key.backspace || key.delete) return { kind: "edit", value: value.slice(0, -1) };
+  if (input !== "" && !key.ctrl && !key.meta) return { kind: "edit", value: value + input };
+  return { kind: "ignore" };
 }
