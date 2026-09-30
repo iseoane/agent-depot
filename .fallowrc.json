@@ -11,7 +11,8 @@
     ".codegraph/**",
     ".atl/**",
     ".fallow/**",
-    "coverage/**"
+    "coverage/**",
+    "skills/doctor-md-skill/assets/pierre-diffs.js"
   ],
   "boundaries": {
     "zones": [
@@ -22,6 +23,12 @@
         ]
       },
       {
+        "name": "tui",
+        "patterns": [
+          "src/tui/**"
+        ]
+      },
+      {
         "name": "application",
         "patterns": [
           "src/project-installation.ts",
@@ -29,7 +36,12 @@
           "src/update-batch.ts",
           "src/user-global-skill-inventory.ts",
           "src/skill-adoption.ts",
-          "src/user-method.ts"
+          "src/user-method.ts",
+          "src/skill-hosts.ts",
+          "src/skill-install.ts",
+          "src/skill-removal.ts",
+          "src/unmanaged-removal.ts",
+          "src/update-flow.ts"
         ]
       },
       {
@@ -47,13 +59,29 @@
           "src/git-source.ts",
           "src/path-safety.ts",
           "src/process-runner.ts",
-          "src/version.ts"
+          "src/version.ts",
+          "src/usage-error.ts"
+        ]
+      },
+      {
+        "name": "tooling",
+        "patterns": [
+          "scripts/**"
         ]
       }
     ],
     "rules": [
       {
         "from": "cli",
+        "allow": [
+          "tui",
+          "application",
+          "core",
+          "infrastructure"
+        ]
+      },
+      {
+        "from": "tui",
         "allow": [
           "application",
           "core",
@@ -75,6 +103,10 @@
       },
       {
         "from": "infrastructure",
+        "allow": []
+      },
+      {
+        "from": "tooling",
         "allow": []
       }
     ],

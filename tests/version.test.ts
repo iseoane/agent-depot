@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +8,7 @@ import { runCli } from "../src/cli.js";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 
 // Compiled location: dist/tests -> package.json two levels up.
-const PACKAGE_JSON = fileURLToPath(new URL("../../package.json", import.meta.url));
+const PACKAGE_JSON = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
 
 async function packageJsonVersion(): Promise<string> {
   return (JSON.parse(await readFile(PACKAGE_JSON, "utf8")) as { version: string }).version;

@@ -11,7 +11,8 @@ Ship every finding of the 0.2.1 review (2026-09-30) as a patch release of @iseoa
 
 ## Tasks
 ### A — Fixes
-- [ ] A1 audit green: `tests/version.test.ts:10` path form not read as an import; `.fallowrc.json` ignore `skills/doctor-md-skill/assets/pierre-diffs.js`; boundary zones for the 31 uncovered files.
+- [x] A1 audit green: `tests/version.test.ts:10` path form not read as an import; `.fallowrc.json` ignore `skills/doctor-md-skill/assets/pierre-diffs.js`; boundary zones for the 31 uncovered files.
+  - Evidence: `pnpm audit:all` failed (1 unresolved import, 31 uncovered files) -> exit 0. New zone `tui` (src/tui/**, allows application/core/infrastructure), `tooling` (scripts/**, allows nothing); cli may use tui; skill-hosts/skill-install/skill-removal/unmanaged-removal/update-flow joined `application`, usage-error joined `infrastructure`. No real violation surfaced. Route: inline.
 - [ ] A2 fixed-policy built-in with a different version must not invalidate the whole project manifest (`src/project-manifest.ts:345`); per-skill "newer Agent Depot / not reproducible" state.
 - [ ] A3 `--help` / `-h` / `help` print usage to stdout and exit 0.
 - [ ] A4 Updates: collapsed "cannot be checked" row names the "newer Agent Depot" reason.
