@@ -15,7 +15,8 @@ Ship every finding of the 0.2.1 review (2026-09-30) as a patch release of @iseoa
   - Evidence: `pnpm audit:all` failed (1 unresolved import, 31 uncovered files) -> exit 0. New zone `tui` (src/tui/**, allows application/core/infrastructure), `tooling` (scripts/**, allows nothing); cli may use tui; skill-hosts/skill-install/skill-removal/unmanaged-removal/update-flow joined `application`, usage-error joined `infrastructure`. No real violation surfaced. Route: inline.
 - [x] A2 fixed-policy built-in with a different version must not invalidate the whole project manifest (`src/project-manifest.ts:345`); per-skill "newer Agent Depot / not reproducible" state.
   - Evidence: RED (3 tests failed: manifest parse, update-batch reason, `install --manifest` skip) -> GREEN (`pnpm test` 499 pass). Parser accepts the mismatch; `builtinPinMismatch()` drives update check (unknown, "Pinned to Agent Depot X; running Y") and manifest install (skipped with reason, others install). `install --version fixed:<other>` for a new install is still rejected in `selectInstallSource`. Route: inline.
-- [ ] A3 `--help` / `-h` / `help` print usage to stdout and exit 0.
+- [x] A3 `--help` / `-h` / `help` print usage to stdout and exit 0.
+  - Evidence: RED (3 help tests failed) -> GREEN. Only the bare explicit forms print help; no args and `--help extra` stay exit 1 usage errors; USAGE text unchanged. README updated. Route: inline.
 - [ ] A4 Updates: collapsed "cannot be checked" row names the "newer Agent Depot" reason.
 - [ ] A5 unmanaged symlink identity includes birthtime (`src/user-global-skill-inventory.ts:681`).
 - [ ] A6 README relative links (CONTEXT.md, docs/adr) → absolute GitHub URLs.

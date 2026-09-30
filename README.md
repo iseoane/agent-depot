@@ -47,7 +47,9 @@ Agent Depot is reported as not updatable (update Agent Depot first).
 
 ## Usage
 
-With the package installed (or via `npx @iseoane/agent-depot`):
+With the package installed (or via `npx @iseoane/agent-depot`). `agent-depot --help`
+(also `-h` or `help`) prints the usage and exits 0; running it without arguments
+or with an unknown command is a usage error and exits 1.
 
 ```sh
 agent-depot source list

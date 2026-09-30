@@ -255,6 +255,11 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
       output(AGENT_DEPOT_PACKAGE_VERSION);
       return 0;
     }
+    if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+      if (argv.length !== 1) throw new CliUsageError(USAGE);
+      output(USAGE);
+      return 0;
+    }
     const command = COMMANDS.get(argv[0] ?? "");
     if (!command) {
       throw new CliUsageError(USAGE);
