@@ -153,7 +153,22 @@ test("shows a tree of scope, then Source, then Skills with counts, source and ma
   assert.match(projectLine, /pi/);
   assert.ok(!projectLine.includes("adopted"));
   assert.ok(!projectLine.includes("modified"));
-  assert.match(projectFrame, /adopted = tracked in place, not copied by agent-depot · modified = changed on disk/);
+  assert.match(projectFrame, /adopted: tracked in place · modified: changed on disk/);
+  view.unmount();
+});
+
+test("the legend appears only while a visible row carries adopted or modified", async (t) => {
+  const f = await fixture(t);
+  await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/plain"));
+  await f.operations.addUserGlobalInstallation!(record(["pi"], true, "portable/kept"));
+  const view = mount(f);
+  const collapsed = await waitForFrame(view.lastFrame, /▸ builtin:agent-depot \(2\)/);
+  assert.ok(!collapsed.includes("tracked in place"), "no visible row carries a marker yet");
+  const expanded = await open(view, /builtin:agent-depot/);
+  assert.match(expanded, /portable\/kept.*adopted/);
+  assert.match(expanded, /adopted: tracked in place · modified: changed on disk/);
+  const closed = await step(view, LEFT);
+  assert.ok(!closed.includes("tracked in place"), "collapsing hides the rows, so the legend goes");
   view.unmount();
 });
 
@@ -260,21 +275,20 @@ test("a long tree renders only the rows that fit, keeps the highlight visible an
   view.unmount();
 });
 
-test("lists unmanaged user-global Skills in their own section", async (t) => {
+test("lists unmanaged user-global Skills in their own section, one leaf per name with its hosts", async (t) => {
   const f = await fixture(t);
   await writeUnmanaged(f.home);
   const { lastFrame, unmount } = mount(f);
   const frame = await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
-  const line = frame.split("\n").find((candidate) => candidate.includes("unmanaged  ")) ?? "";
-  assert.match(line, /demo/);
-  assert.match(line, new RegExp(path.join(f.home, ".agents", "skills", "demo").replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));
+  const line = frame.split("\n").find((candidate) => /(^|\s)demo \[/.test(candidate)) ?? "";
+  assert.match(line, /demo \[pi, codex, opencode\]/);
   unmount();
 });
 
 async function startAdoption(f: Fixture, keys: readonly string[] = [ENTER]) {
   const view = mount(f);
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
-  await goto(view, /demo {2}unmanaged/);
+  await goto(view, /(^|\s)demo \[/);
   press(view.stdin, "A");
   await waitForFrame(view.lastFrame, /Adopt demo/);
   for (const data of keys) press(view.stdin, data);
@@ -291,7 +305,7 @@ test("A adopts an identical unmanaged Skill after host, version, preview and y",
   );
   const { lastFrame, stdin, unmount } = view;
   await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
-  await goto(view, /demo {2}unmanaged/);
+  await goto(view, /(^|\s)demo \[/);
   press(stdin, "A");
   await waitForFrame(lastFrame, /Host \(space/);
   assert.equal(captures.at(-1), true);
@@ -334,7 +348,7 @@ test("adoption without a Source Skill of the same name explains why", async (t) 
   const view = mount(f);
   const { lastFrame, stdin, unmount } = view;
   await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
-  await goto(view, /demo {2}unmanaged/);
+  await goto(view, /(^|\s)demo \[/);
   press(stdin, "A");
   await waitForFrame(lastFrame, /No Source Skill named "demo"/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
@@ -347,7 +361,7 @@ test("adopting with an extra host needs a separate exposure confirmation; n writ
   const view = mount(f);
   const { lastFrame, stdin, unmount } = view;
   await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
-  await goto(view, /demo {2}unmanaged/);
+  await goto(view, /(^|\s)demo \[/);
   press(stdin, ENTER);
   await waitForFrame(lastFrame, /Host \(space/);
   // Defaults are the shared hosts; also selecting Claude (4th is opencode, 2nd is claude) exposes another location.
@@ -489,5 +503,15 @@ test("Esc in the picker adopts nothing", async (t) => {
   press(view.stdin, ESC);
   await waitForFrame(view.lastFrame, /Adoption cancelled/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  view.unmount();
+});
+
+test("several keys delivered in a single write are handled one by one", async (t) => {
+  const f = await fixture(t);
+  await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/alpha"));
+  const view = mount(f);
+  await waitForFrame(view.lastFrame, /▸ builtin:agent-depot \(1\)/);
+  press(view.stdin, "jj");
+  await waitForFrame(view.lastFrame, (frame) => /Managed \(project\)/.test(selectedLine(frame)));
   view.unmount();
 });

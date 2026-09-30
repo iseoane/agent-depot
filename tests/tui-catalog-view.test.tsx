@@ -105,7 +105,7 @@ test("CatalogView lists skills as a tree under their source, with the installabl
   const group = lines.findIndex((line) => /▾ builtin:agent-depot \(2\)/.test(line));
   const alpha = lines.findIndex((line) => /alpha\s+Does Alpha things/.test(line));
   assert.ok(group >= 0 && alpha > group, `unexpected layout:\n${frame}`);
-  assert.match(lines[alpha]!, /^\s{3,}alpha/, "skills are indented under their source");
+  assert.match(lines[alpha]!, /^\s{3,}\[ \] alpha/, "skills are indented under their source");
   assert.ok(!lines[alpha]!.includes("builtin:agent-depot"), "the source is not repeated on each skill");
   assert.match(frame, /beta/);
   unmount();

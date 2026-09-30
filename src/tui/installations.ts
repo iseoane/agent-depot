@@ -15,6 +15,7 @@ import type { SkillCandidate } from "../skill-discovery.js";
 import { inspectSkillRemovals, userGlobalRemovalOptions } from "../skill-removal.js";
 import {
   scanUserGlobalSkillInventory,
+  type UserGlobalSkillInventory,
   type UserGlobalSkillInventoryEntry,
 } from "../user-global-skill-inventory.js";
 import type { Source, SourceOperations } from "../sources.js";
@@ -35,16 +36,64 @@ export interface InstallationRow {
   readonly modified?: boolean;
 }
 
+/** One place on disk that holds an unmanaged Skill: a real directory or a symlink. */
+export interface UnmanagedLocation {
+  readonly path: string;
+  readonly root: UserGlobalSkillInventoryEntry["root"];
+  /** Where the link points; present when the location is a symlink. */
+  readonly linkTarget?: string;
+  /** The inventory entry; present when the location is a real Skill directory. */
+  readonly entry?: UserGlobalSkillInventoryEntry;
+}
+
+/** The unmanaged locations that share a Skill name, with the hosts that read them. */
+export interface UnmanagedGroup {
+  readonly name: string;
+  readonly locations: readonly UnmanagedLocation[];
+  readonly hosts: readonly ProjectHost[];
+}
+
+/** Hosts in display order; the Claude root serves Claude Code, the shared root serves the others. */
+const HOST_DISPLAY_ORDER: readonly ProjectHost[] = ["claude", "pi", "codex", "opencode"];
+const ROOT_HOSTS: Record<UnmanagedLocation["root"], readonly ProjectHost[]> = {
+  agents: ["pi", "codex", "opencode"],
+  claude: ["claude"],
+};
+
+/**
+ * Groups the unmanaged directories, the unmanaged symlinks and the Claude links that
+ * expose an unmanaged canonical directory by Skill name. Hosts come from the root kinds.
+ */
+export function groupUnmanaged(inventory: UserGlobalSkillInventory): readonly UnmanagedGroup[] {
+  const byName = new Map<string, UnmanagedLocation[]>();
+  const add = (name: string, location: UnmanagedLocation) => byName.set(name, [...(byName.get(name) ?? []), location]);
+  for (const entry of inventory.unmanaged) add(entry.name, { path: entry.path, root: entry.root, entry });
+  for (const link of inventory.symlinks) add(link.name, { path: link.path, root: link.root, linkTarget: link.target });
+  const unmanagedPaths = new Set(inventory.unmanaged.map((entry) => path.resolve(entry.path)));
+  for (const exposure of inventory.exposures) {
+    if (unmanagedPaths.has(path.resolve(exposure.target))) {
+      add(exposure.name, { path: exposure.path, root: exposure.root, linkTarget: exposure.target });
+    }
+  }
+  return [...byName]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, locations]): UnmanagedGroup => {
+      const ordered = [...locations].sort((left, right) => Number(left.root === "claude") - Number(right.root === "claude"));
+      const hosts = HOST_DISPLAY_ORDER.filter((host) => ordered.some((location) => ROOT_HOSTS[location.root].includes(host)));
+      return { name, locations: ordered, hosts };
+    });
+}
+
 export interface InstallationsData {
   /** Undefined when the configured operations cannot read user-global state. */
   readonly global?: readonly InstallationRow[];
   readonly project: readonly InstallationRow[];
   readonly projectError?: string;
-  readonly unmanaged: readonly UserGlobalSkillInventoryEntry[];
+  readonly unmanaged: readonly UnmanagedGroup[];
   readonly sources: readonly Source[];
 }
 
-function homeOf(environment: TuiEnvironment): string {
+export function homeOf(environment: TuiEnvironment): string {
   return path.resolve(environment.homeDirectory ?? homedir());
 }
 
@@ -118,7 +167,7 @@ export async function loadInstallations(
   const project = await Promise.all(projectRecords.map((record) => toRow("project", record, projectOptions)));
 
   const unmanaged = globalRecords
-    ? (await scanUserGlobalSkillInventory({ homeDirectory: home, managedInstallations: globalRecords })).unmanaged
+    ? groupUnmanaged(await scanUserGlobalSkillInventory({ homeDirectory: home, managedInstallations: globalRecords }))
     : [];
   const sources = await operations.listSources().catch(() => []);
   return { global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources };

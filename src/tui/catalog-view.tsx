@@ -1,13 +1,14 @@
-import { Box, Text, useInput, type Key } from "ink";
+import { Box, Text, type Key } from "ink";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import { isValidFixedVersion } from "../skill-install.js";
 import type { SourceOperations } from "../sources.js";
-import { BROWSE, HOST_CHOICES, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
+import { BROWSE, describeSkills, HOST_CHOICES, SCOPE_CHOICES, type ActionMode, type BatchItem } from "./catalog-actions.js";
 import { filterReducer, filterSkills, initialFilter, type FilterEvent, type FilterState } from "./catalog-filter.js";
 import {
+  hasUnmanagedCopy,
   isInstalled,
   loadInstalledSkills,
   NO_INSTALLED,
@@ -30,6 +31,7 @@ import {
   type VisibleRow,
 } from "./tree.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
+import { useKeys } from "./keys.js";
 
 const DESCRIPTION_LIMIT = 60;
 const NO_ENVIRONMENT: TuiEnvironment = {};
@@ -75,7 +77,7 @@ function buildTree(skills: readonly SkillCandidate[]): readonly CatalogNode[] {
   return [...bySource].map(([sourceId, members]): CatalogNode => ({
     id: `source:${sourceId}`,
     data: { kind: "source", sourceId, count: members.length },
-    children: members.map((skill): CatalogNode => ({ id: `skill:${skill.sourceId}:${skill.path}`, data: { kind: "skill", skill } })),
+    children: members.map((skill): CatalogNode => ({ id: skillKey(skill), data: { kind: "skill", skill } })),
   }));
 }
 
@@ -89,6 +91,15 @@ function describeRow(row: VisibleRow<NodeData>): string {
   return `${data.skill.name}  ${truncate(data.skill.description)}`;
 }
 
+const UNMANAGED_MARKER = "on disk, unmanaged · adopt it from Installations";
+
+const skillKey = (skill: SkillCandidate): string => `skill:${skill.sourceId}:${skill.path}`;
+
+/** The Skills under the tree's Sources, in display order. */
+function leavesOf(roots: readonly CatalogNode[]): readonly SkillCandidate[] {
+  return roots.flatMap((root) => (root.children ?? []).flatMap((child) => child.data.kind === "skill" ? [child.data.skill] : []));
+}
+
 export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight }: CatalogViewProps) {
   const height = useListHeight(listHeight, 6);
   const [all, setAll] = useState(sourceId === undefined);
@@ -98,6 +109,13 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const expandedRef = useRef<Expanded | undefined>(undefined);
   const [selection, setSelectionState] = useState<Selection>({ index: 0 });
   const selectionRef = useRef<Selection>({ index: 0 });
+  // Skills marked for a batch install, by node id. The ref is updated first so keys in one burst see every mark.
+  const [markedState, setMarkedState] = useState<ReadonlySet<string>>(new Set());
+  const markedRef = useRef<ReadonlySet<string>>(new Set());
+  const setMarked = (next: ReadonlySet<string>) => {
+    markedRef.current = next;
+    setMarkedState(next);
+  };
   const [filter, dispatchFilter] = useReducer(filterReducer, initialFilter);
   // Mirrors the filter synchronously so the shell never sees a stale capturing state.
   const filterRef = useRef<FilterState>(initialFilter);
@@ -208,22 +226,29 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   };
 
   const startInstall = async (
-    skill: SkillCandidate,
+    skills: readonly SkillCandidate[],
     choice: Parameters<typeof prepareInstall>[3],
   ) => {
-    setAction({ kind: "busy", label: `Refreshing source and preparing install of ${skill.name}...` });
-    try {
-      const prepared = await prepareInstall(operations, env, skill, choice);
-      if (!mounted.current) return;
-      setAction({ kind: "confirm-install", skill, prepared });
-    } catch (error) {
-      if (!mounted.current) return;
-      setMessage({ kind: "error", text: errorText(error) });
-      setAction(BROWSE);
+    setAction({ kind: "busy", label: `Refreshing source and preparing install of ${describeSkills(skills)}...` });
+    const items: BatchItem[] = [];
+    for (const skill of skills) {
+      try {
+        items.push({ skill, prepared: await prepareInstall(operations, env, skill, choice) });
+      } catch (error) {
+        items.push({ skill, error: errorText(error) });
+      }
     }
+    if (!mounted.current) return;
+    if (items.every((item) => item.prepared === undefined)) {
+      const text = items.length === 1 ? items[0]!.error! : items.map((item) => `Failed ${item.skill.name}: ${item.error}`).join("\n");
+      setMessage({ kind: "error", text });
+      setAction(BROWSE);
+      return;
+    }
+    setAction({ kind: "confirm-install", items });
   };
 
-  /** Reloads the installed set first so the result and the vanished Skill appear together. */
+  /** Reloads the installed set first so the result and the vanished Skills appear together. */
   const finish = async (result: Message) => {
     await reloadInstalled();
     if (!mounted.current) return;
@@ -231,15 +256,27 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     setAction(BROWSE);
   };
 
-  const confirmInstall = async (mode: Extract<ActionMode, { kind: "confirm-install" | "confirm-exposure" }>, exposure: boolean) => {
-    setAction({ kind: "busy", label: `Installing ${mode.skill.name}...` });
-    let result: Message;
-    try {
-      result = { kind: "ok", text: (await runInstall(mode.prepared, operations, exposure)).join(" ") };
-    } catch (error) {
-      result = { kind: "error", text: errorText(error) };
+  /** Applies the prepared items one by one; a failure is reported for that item and the rest still run. */
+  const confirmInstall = async (items: readonly BatchItem[], exposure: boolean) => {
+    setAction({ kind: "busy", label: `Installing ${describeSkills(items.map((item) => item.skill))}...` });
+    const lines: string[] = [];
+    const failed = new Set<string>();
+    for (const { skill, prepared, error } of items) {
+      if (prepared === undefined) {
+        failed.add(skillKey(skill));
+        lines.push(`Failed ${skill.name}: ${error}`);
+        continue;
+      }
+      try {
+        lines.push((await runInstall(prepared, operations, exposure && prepared.additionalHostExposure)).join(" "));
+      } catch (caught) {
+        failed.add(skillKey(skill));
+        lines.push(`Failed ${skill.name}: ${errorText(caught)}`);
+      }
     }
-    await finish(result);
+    // Installed Skills leave the list; only the failed ones stay marked for another try.
+    setMarked(failed);
+    await finish({ kind: failed.size > 0 ? "error" : "ok", text: lines.join("\n") });
   };
 
   const cancel = (text: string) => {
@@ -258,7 +295,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
         else if (input === " ") setAction({ ...mode, selected: toggle(HOST_CHOICES[mode.cursor]!) });
         else if (HOST_CHOICES[Number(input) - 1]) setAction({ ...mode, selected: toggle(HOST_CHOICES[Number(input) - 1]!) });
         else if (key.return) {
-          if (mode.selected.length > 0) setAction({ kind: "scope", skill: mode.skill, hosts: mode.selected });
+          if (mode.selected.length > 0) setAction({ kind: "scope", skills: mode.skills, hosts: mode.selected });
           else setMessage({ kind: "error", text: "Select at least one host" });
         }
         return;
@@ -266,31 +303,31 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       case "scope": {
         const scope = SCOPE_CHOICES[Number(input) - 1];
         if (key.escape) cancel("Install cancelled");
-        else if (scope) setAction({ kind: "version", skill: mode.skill, hosts: mode.hosts, scope });
+        else if (scope) setAction({ kind: "version", skills: mode.skills, hosts: mode.hosts, scope });
         return;
       }
       case "version":
         if (key.escape) cancel("Install cancelled");
-        else if (input === "1") void startInstall(mode.skill, { hosts: mode.hosts, scope: mode.scope, version: { policy: "latest" } });
+        else if (input === "1") void startInstall(mode.skills, { hosts: mode.hosts, scope: mode.scope, version: { policy: "latest" } });
         else if (input === "2") setAction({ ...mode, kind: "fixed", value: "" });
         return;
       case "fixed":
         if (key.escape) cancel("Install cancelled");
         else if (key.return) {
           if (isValidFixedVersion(mode.value)) {
-            void startInstall(mode.skill, { hosts: mode.hosts, scope: mode.scope, version: { policy: "fixed", version: mode.value } });
+            void startInstall(mode.skills, { hosts: mode.hosts, scope: mode.scope, version: { policy: "fixed", version: mode.value } });
           }
         } else if (key.backspace || key.delete) setAction({ ...mode, value: mode.value.slice(0, -1) });
         else if (input !== "" && !key.ctrl && !key.meta) setAction({ ...mode, value: mode.value + input });
         return;
       case "confirm-install":
         if (input === "y") {
-          if (mode.prepared.additionalHostExposure) setAction({ ...mode, kind: "confirm-exposure" });
-          else void confirmInstall(mode, false);
+          if (mode.items.some((item) => item.prepared?.additionalHostExposure)) setAction({ ...mode, kind: "confirm-exposure" });
+          else void confirmInstall(mode.items, false);
         } else if (input === "n" || key.escape) cancel("Install cancelled");
         return;
       case "confirm-exposure":
-        if (input === "y") void confirmInstall(mode, true);
+        if (input === "y") void confirmInstall(mode.items, true);
         else if (input === "n" || key.escape) cancel("Install cancelled");
         return;
       default:
@@ -298,7 +335,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     }
   };
 
-  useInput((input, key) => {
+  useKeys((input, key) => {
     const mode = actionRef.current;
     if (mode.kind !== "browse") {
       handleActionKey(mode, input, key);
@@ -344,9 +381,33 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       restartList();
       dispatch({ type: "clear" });
     } else if (input === "s" && sourceId !== undefined) setAll((value) => !value);
-    else if (input === "i" && state.status === "ready" && row?.node.data.kind === "skill") {
+    else if (input === " " && row) {
+      if (row.node.data.kind !== "skill") {
+        setMessage({ kind: "error", text: "Mark skills, not source rows" });
+        return;
+      }
       setMessage(undefined);
-      setAction({ kind: "host", skill: row.node.data.skill, cursor: 0, selected: [] });
+      const next = new Set(markedRef.current);
+      if (!next.delete(row.node.id)) next.add(row.node.id);
+      setMarked(next);
+    } else if (input === "a") {
+      const leaves = leavesOf(rootsRef.current);
+      if (leaves.length === 0) {
+        setMessage({ kind: "error", text: "There are no skills to select" });
+        return;
+      }
+      setMessage(undefined);
+      setMarked(leaves.every((skill) => markedRef.current.has(skillKey(skill))) ? new Set() : new Set(leaves.map(skillKey)));
+    } else if (input === "i" && state.status === "ready" && row) {
+      // Only what is listed installs: marks on Skills hidden by the filter are ignored.
+      const marked = leavesOf(rootsRef.current).filter((skill) => markedRef.current.has(skillKey(skill)));
+      const chosen = marked.length > 0 ? marked : row.node.data.kind === "skill" ? [row.node.data.skill] : [];
+      if (chosen.length === 0) {
+        setMessage({ kind: "error", text: "Install is not available for source rows; highlight a skill or mark some with space" });
+        return;
+      }
+      setMessage(undefined);
+      setAction({ kind: "host", skills: chosen, cursor: 0, selected: [] });
     }
   });
 
@@ -354,6 +415,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   if (state.status === "loading" || (state.status === "ready" && !installedReady)) return <Text>Loading skills...</Text>;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
   const window = computeWindow(rows.length, index, height);
+  const selectedCount = leavesOf(roots).filter((skill) => markedState.has(skillKey(skill))).length;
 
   return (
     <Box flexDirection="column">
@@ -371,11 +433,15 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
         const isSource = row.node.data.kind === "source";
         return (
           <Text key={row.node.id} {...rowStyle(position === index)} color={isSource ? theme.group : undefined}>
-            {position === index ? "> " : "  "}{"  ".repeat(row.depth)}{isSource ? "" : "  "}{describeRow(row)}
+            {position === index ? "> " : "  "}{"  ".repeat(row.depth)}{isSource ? "" : markedState.has(row.node.id) ? "[x] " : "[ ] "}{describeRow(row)}
+            {row.node.data.kind === "skill" && hasUnmanagedCopy(row.node.data.skill, installed)
+              ? <Text color={theme.marker}>{"  "}{UNMANAGED_MARKER}</Text>
+              : null}
           </Text>
         );
       })}
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {selectedCount > 0 ? <Text color={theme.muted}>{selectedCount} selected</Text> : null}
       {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
       <ActionPanel mode={action} />
     </Box>
@@ -389,7 +455,7 @@ function ActionPanel({ mode }: { readonly mode: ActionMode }) {
     case "host":
       return (
         <Box flexDirection="column">
-          <Text>Install {mode.skill.name}. Host (space/1-4 toggle, j/k move, Enter continue, Esc cancel):</Text>
+          <Text>Install {describeSkills(mode.skills)}. Host (space/1-4 toggle, j/k move, Enter continue, Esc cancel):</Text>
           {HOST_CHOICES.map((host, position) => (
             <Text key={host}>
               {position === mode.cursor ? "> " : "  "}[{mode.selected.includes(host) ? "x" : " "}] {position + 1} {host}
@@ -403,20 +469,33 @@ function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       return <Text>Version: 1 latest  2 fixed  (Esc cancel)</Text>;
     case "fixed":
       return <Text>Fixed version: {mode.value}_  (Enter confirm, Esc cancel)</Text>;
-    case "confirm-install":
+    case "confirm-install": {
+      const ready = mode.items.filter((item) => item.prepared !== undefined);
+      const single = mode.items.length === 1;
       return (
         <Box flexDirection="column">
-          {mode.prepared.preview.map((line, position) => <Text key={position}>{line}</Text>)}
-          {mode.prepared.runsExternalCommand ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
-          <Text>Install {mode.skill.name}? y/n</Text>
+          {mode.items.map(({ skill, prepared, error }) =>
+            prepared === undefined ? (
+              <Text key={skillKey(skill)} color={theme.error}>Cannot install {skill.name}: {error}</Text>
+            ) : (
+              <Box key={skillKey(skill)} flexDirection="column">
+                {single ? null : <Text color={theme.group}>{skill.name}</Text>}
+                {prepared.preview.map((line, position) => <Text key={position}>{line}</Text>)}
+              </Box>
+            ))}
+          {ready.some((item) => item.prepared?.runsExternalCommand) ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
+          <Text>Install {describeSkills(ready.map((item) => item.skill))}? y/n</Text>
         </Box>
       );
-    case "confirm-exposure":
+    }
+    case "confirm-exposure": {
+      const names = mode.items.filter((item) => item.prepared?.additionalHostExposure).map((item) => item.skill.name);
       return (
         <Text color={theme.warning}>
-          An identical {mode.skill.name} already exists; adding the missing Host location needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
+          {names.length === 1 ? `An identical ${names[0]} already exists` : `Identical copies of ${names.join(", ")} already exist`}; adding the missing Host location needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
         </Text>
       );
+    }
     case "busy":
       return <Text>{mode.label}</Text>;
   }

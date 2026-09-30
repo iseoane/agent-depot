@@ -18,6 +18,7 @@ import {
   type UninstallPreparation,
 } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
+import { handleUnmanagedKey, UNMANAGED_KINDS, type UnmanagedMode } from "./unmanaged-actions.js";
 
 /**
  * Interaction modes for managing an installed user-global Skill (uninstall and
@@ -42,6 +43,7 @@ export type ManageMode =
       readonly skill: SkillCandidate;
       readonly prepared: Extract<UninstallPreparation, { kind: "ready" }>;
     }
+  | UnmanagedMode
   | { readonly kind: "busy"; readonly label: string };
 
 const MANAGE_KINDS: ReadonlySet<string> = new Set<ManageMode["kind"]>([
@@ -52,6 +54,7 @@ const MANAGE_KINDS: ReadonlySet<string> = new Set<ManageMode["kind"]>([
   "confirm-host-exposure",
   "confirm-host-remove",
   "confirm-uninstall",
+  ...UNMANAGED_KINDS,
   "busy",
 ]);
 
@@ -165,6 +168,7 @@ async function execute(context: ManageContext, label: string, action: () => Prom
 export function handleManageKey(context: ManageContext, mode: { readonly kind: string }, input: string, key: Key): boolean {
   if (!isManageMode(mode)) return false;
   const { operations, env } = context;
+  if (handleUnmanagedKey(context, mode, input, key)) return true;
   switch (mode.kind) {
     case "remove-scope":
       if (key.escape) cancel(context, "Uninstall cancelled");
@@ -209,7 +213,7 @@ export function handleManageKey(context: ManageContext, mode: { readonly kind: s
         });
       } else if (input === "n" || key.escape) cancel(context, "Uninstall cancelled");
       return true;
-    case "busy":
+    default:
       return true;
   }
 }

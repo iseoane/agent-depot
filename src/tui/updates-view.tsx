@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
@@ -18,6 +18,7 @@ import {
   type UpdatesData,
   type UpdatesPhase,
 } from "./updates.js";
+import { useKeys } from "./keys.js";
 
 export interface UpdatesViewProps {
   readonly operations: SourceOperations;
@@ -56,6 +57,20 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
 
 const matchesScope = (row: UpdateRow, filter: UpdateScopeFilter): boolean => filter === "all" || row.scope === filter;
 
+/** The rows the list shows for a scope filter and fold state, and the cursor positions they make up. */
+function viewOf(data: UpdatesData | undefined, scope: UpdateScopeFilter, showUnknown: boolean) {
+  const shown = (data?.rows ?? []).filter((row) => matchesScope(row, scope));
+  const updatable = shown.filter((row) => row.item.status === "updateable");
+  const unknown = shown.filter((row) => row.item.status === "unknown");
+  const upToDate = shown.filter((row) => row.item.status === "current").length;
+  const entries: readonly Entry[] = [
+    ...updatable.map((row): Entry => ({ kind: "update", row })),
+    ...(unknown.length > 0 ? [{ kind: "summary" } as const] : []),
+    ...(unknown.length > 0 && showUnknown ? unknown.map((row): Entry => ({ kind: "unknown", row })) : []),
+  ];
+  return { shown, updatable, unknown, upToDate, entries };
+}
+
 function describeRefresh(data: UpdatesData): string {
   const { attempted, refreshed, failed, unreadable } = data.refresh;
   if (!attempted) return "sources not fetched again";
@@ -72,10 +87,26 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const height = useListHeight(listHeight, 9);
   const env = environment ?? NO_ENVIRONMENT;
   const clock = now ?? Date.now;
-  const [scope, setScope] = useState<UpdateScopeFilter>("all");
+  // Scope, cursor and fold are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
+  const [scope, setScopeState] = useState<UpdateScopeFilter>("all");
+  const scopeRef = useRef<UpdateScopeFilter>("all");
+  const setScope = (next: UpdateScopeFilter) => {
+    scopeRef.current = next;
+    setScopeState(next);
+  };
   const [state, setState] = useState<LoadState>({ status: "loading", label: REFRESHING });
-  const [cursor, setCursor] = useState(0);
-  const [showUnknown, setShowUnknown] = useState(false);
+  const [cursor, setCursorState] = useState(0);
+  const cursorRef = useRef(0);
+  const setCursor = useCallback((next: number) => {
+    cursorRef.current = next;
+    setCursorState(next);
+  }, []);
+  const [showUnknown, setShowUnknownState] = useState(false);
+  const showUnknownRef = useRef(false);
+  const setShowUnknown = (next: boolean) => {
+    showUnknownRef.current = next;
+    setShowUnknownState(next);
+  };
   const [checked, setCheckedState] = useState<readonly string[]>([]);
   // Mirrors the selection synchronously so a key pressed right after a toggle sees it.
   const checkedRef = useRef<readonly string[]>([]);
@@ -129,7 +160,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
     if (!mounted.current || token !== loadToken.current) return;
     setState(next);
     setMode(BROWSE);
-  }, [operations, env, setMode, setChecked, clock]);
+  }, [operations, env, setMode, setChecked, setCursor, clock]);
 
   // Entering the view refreshes the Git sources first, like `r`.
   useEffect(() => {
@@ -137,20 +168,19 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   }, [load]);
 
   const data = state.status === "ready" ? state.data : undefined;
-  const shown = (data?.rows ?? []).filter((row) => matchesScope(row, scope));
-  const updatable = shown.filter((row) => row.item.status === "updateable");
-  const unknown = shown.filter((row) => row.item.status === "unknown");
-  const upToDate = shown.filter((row) => row.item.status === "current").length;
-  const entries: readonly Entry[] = [
-    ...updatable.map((row): Entry => ({ kind: "update", row })),
-    ...(unknown.length > 0 ? [{ kind: "summary" } as const] : []),
-    ...(unknown.length > 0 && showUnknown ? unknown.map((row): Entry => ({ kind: "unknown", row })) : []),
-  ];
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const { shown, updatable, unknown, upToDate, entries } = viewOf(data, scope, showUnknown);
   const index = Math.min(cursor, Math.max(entries.length - 1, 0));
-  const summaryAt = updatable.length;
+
+  /** The list, the cursor and the fold as of the latest keystroke. */
+  const latest = () => {
+    const view = viewOf(dataRef.current, scopeRef.current, showUnknownRef.current);
+    return { ...view, data: dataRef.current, at: Math.min(cursorRef.current, Math.max(view.entries.length - 1, 0)) };
+  };
 
   const changeScope = (next: UpdateScopeFilter) => {
-    if (next === scope) return;
+    if (next === scopeRef.current) return;
     // Selected items that the new filter hides would otherwise be applied unseen.
     setChecked([]);
     setCursor(0);
@@ -164,8 +194,9 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   };
 
   const startPreview = async () => {
-    if (!data) return;
-    const selected = updatable.filter((row) => checkedRef.current.includes(row.key));
+    const { data: current, updatable: listed } = latest();
+    if (!current) return;
+    const selected = listed.filter((row) => checkedRef.current.includes(row.key));
     if (selected.length === 0) {
       setMessage({ kind: "error", lines: ["Select at least one update with space or a"] });
       return;
@@ -173,7 +204,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
     setMessage(undefined);
     setMode({ kind: "busy", label: "Preparing preview..." });
     try {
-      const prepared = await prepareUpdates(data, selected);
+      const prepared = await prepareUpdates(current, selected);
       if (mounted.current) setMode({ kind: "preview", selected: selected.map((row) => row.item), prepared });
     } catch (error) {
       if (!mounted.current) return;
@@ -197,20 +228,22 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
     await load(false);
   };
 
-  useInput((input, key) => {
+  useKeys((input, key) => {
     const current = modeRef.current;
     switch (current.kind) {
       case "browse": {
-        const entry = entries[index];
-        if (key.downArrow || input === "j") setCursor(Math.min(index + 1, Math.max(entries.length - 1, 0)));
-        else if (key.upArrow || input === "k") setCursor(Math.max(index - 1, 0));
-        else if (key.pageDown) setCursor(Math.min(index + pageStep(height), Math.max(entries.length - 1, 0)));
-        else if (key.pageUp) setCursor(Math.max(index - pageStep(height), 0));
+        const { entries: listed, updatable: updates, at, data: loaded } = latest();
+        const last = Math.max(listed.length - 1, 0);
+        const entry = listed[at];
+        if (key.downArrow || input === "j") setCursor(Math.min(at + 1, last));
+        else if (key.upArrow || input === "k") setCursor(Math.max(at - 1, 0));
+        else if (key.pageDown) setCursor(Math.min(at + pageStep(height), last));
+        else if (key.pageUp) setCursor(Math.max(at - pageStep(height), 0));
         else if (input === " ") {
           if (entry?.kind !== "update") return;
           const now = checkedRef.current;
           setChecked(now.includes(entry.row.key) ? now.filter((id) => id !== entry.row.key) : [...now, entry.row.key]);
-        } else if (input === "a") setChecked(updatable.map((row) => row.key));
+        } else if (input === "a") setChecked(updates.map((row) => row.key));
         else if (input === "t") changeScope("all");
         else if (input === "p") changeScope("project");
         else if (input === "g") changeScope("user-global");
@@ -221,11 +254,11 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
         } else if (key.rightArrow) {
           if (entry?.kind === "summary") setShowUnknown(true);
         } else if (key.leftArrow) {
-          if (entry?.kind === "unknown") setCursor(summaryAt);
+          if (entry?.kind === "unknown") setCursor(updates.length);
           if (entry?.kind === "summary" || entry?.kind === "unknown") setShowUnknown(false);
         } else if (key.return) {
-          if (entry?.kind === "summary") setShowUnknown(!showUnknown);
-          else if (entry?.kind !== "unknown") void startPreview();
+          if (entry?.kind === "summary") setShowUnknown(!showUnknownRef.current);
+          else if (entry?.kind !== "unknown" && loaded) void startPreview();
         }
         return;
       }
@@ -251,7 +284,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   return (
     <Box flexDirection="column">
-      <Text color={theme.accent} bold>Updates (scope: {scope})  t all  p project  g user-global  r check again</Text>
+      <Text color={theme.accent} bold>Updates (scope: {scope})  t all · p project · g user-global</Text>
       {state.status === "loading" ? <Text>{state.label}</Text> : null}
       {data ? (
         <Text color={theme.muted}>checked {formatAgo(clock() - data.checkedAt)} · {describeRefresh(data)}</Text>

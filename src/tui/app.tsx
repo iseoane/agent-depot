@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useStdout } from "ink";
 import { useCallback, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
@@ -8,6 +8,7 @@ import { InstallationsView } from "./installations-view.js";
 import { SourcesView } from "./sources-view.js";
 import { separatorLine, theme } from "./theme.js";
 import { UpdatesView } from "./updates-view.js";
+import { useKeys } from "./keys.js";
 
 export interface AppProps {
   /** Source operations the views call directly; injectable for tests. */
@@ -27,12 +28,19 @@ const TABS: readonly (readonly [ViewName, string])[] = [
   ["updates", "4 Updates"],
 ];
 
-const HINTS: Record<ViewName, string> = {
-  sources: "j/k move  PgUp/PgDn page  space select  a all git  Enter catalog  n add  r refresh  d remove  2 catalog  3 installations  4 updates  q quit",
-  catalog: "j/k move  PgUp/PgDn page  Enter/right expand  left collapse  / filter  i install  s all sources  1 sources  3 installations  4 updates  q quit",
-  installations: "j/k move  PgUp/PgDn page  Enter/right expand  left collapse  A adopt  u uninstall  h add hosts  1 sources  2 catalog  4 updates  q quit",
-  updates: "j/k move  space toggle  a all  Enter preview/expand  t all  p project  g user-global  r check again  1 sources  2 catalog  3 installations  q quit",
-};
+/** Compact keys of the current view; the tab bar already shows how to switch views. */
+function hintsOf(view: ViewName, catalogFocusedOnSource: boolean): string {
+  switch (view) {
+    case "sources":
+      return "j/k move · space mark · a all · Enter catalog · n add · r refresh · d remove · q quit";
+    case "catalog":
+      return `j/k move · Enter expand · space mark · a all · i install · / filter${catalogFocusedOnSource ? " · s all sources" : ""} · q quit`;
+    case "installations":
+      return "j/k move · Enter expand · u uninstall · h add hosts · A adopt · q quit";
+    case "updates":
+      return "j/k move · space mark · a all · Enter preview · r check again · q quit";
+  }
+}
 
 export function App({ operations, environment, onExit }: AppProps) {
   const { exit } = useApp();
@@ -48,7 +56,7 @@ export function App({ operations, environment, onExit }: AppProps) {
   const [catalogSourceId, setCatalogSourceId] = useState<string | undefined>();
   const showView = (next: ViewName) => setView(next);
 
-  useInput((input) => {
+  useKeys((input) => {
     if (capturingRef.current) return;
     if (input === "q") {
       onExit?.();
@@ -95,7 +103,7 @@ export function App({ operations, environment, onExit }: AppProps) {
           onCapturingChange={onCapturingChange}
         />
       )}
-      <Text color={theme.muted}>{capturing ? "Enter submit  Esc cancel  y/n confirm  space toggle" : HINTS[view]}</Text>
+      <Text color={theme.muted}>{capturing ? "Enter submit · Esc cancel · y/n confirm · space toggle" : hintsOf(view, catalogSourceId !== undefined)}</Text>
     </Box>
   );
 }

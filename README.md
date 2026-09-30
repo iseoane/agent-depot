@@ -2,6 +2,9 @@
 
 Agent Depot keeps a global catalog of Git Sources for future skill discovery.
 
+Requires Node.js >= 24 (Active LTS). The [interactive TUI](#interactive-tui)
+needs an interactive terminal.
+
 ## Usage
 
 Build the package, then run the CLI:
@@ -29,7 +32,9 @@ node dist/src/cli.js skill remove <id|path> --host <host>... --yes
 node dist/src/cli.js skill host add <id|path> --host <host>... --yes --confirm-additional-host
 node dist/src/cli.js uninstall --cli
 node dist/src/cli.js uninstall --skills --yes
+node dist/src/cli.js uninstall --unmanaged-skill <exact-global-path> --yes
 node dist/src/cli.js uninstall --data --yes
+node dist/src/cli.js tui
 ```
 
 Refresh first prints the registered URL as a preview. It requires explicit
@@ -318,6 +323,53 @@ containing batch installs are refused because arbitrary child-process side
 effects are non-rollbackable. Manifest entries that identify an external local
 path are refused by the Git-only resolver with an actionable unsupported-source
 error; URL Sources remain self-contained and resolvable on a fresh machine.
+
+## Interactive TUI
+
+```sh
+node dist/src/cli.js tui
+```
+
+The TUI is an [Ink](https://github.com/vadimdemedes/ink) (React for terminals)
+front end over the same operations as the CLI. It needs Node.js >= 24 and an
+interactive terminal; otherwise `tui` fails with an error. Switch views with
+`1`-`4`, quit with `q` (not while a prompt is open). Every list scrolls when it is
+taller than the terminal. `j`/`k` or the arrow keys move.
+
+| View | Purpose |
+| --- | --- |
+| 1 Sources | Where skills come from: the fixed built-in Source plus registered Git Sources. |
+| 2 Catalog | Skills that can be installed: those not installed yet, as Source, then Skills. |
+| 3 Installations | What is on disk: managed installations (user-global and project) and unmanaged user-global skills. |
+| 4 Updates | Managed skills with a newer version available, for user-global and project scope. |
+
+Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
+
+| View | Keys |
+| --- | --- |
+| Sources | `space` mark, `a` mark all, `Enter` open the Source in the Catalog, `n` add a Git Source, `r` refresh the marked (or highlighted) Sources, `d` remove |
+| Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marks (or the highlighted skill), `/` filter, `s` toggle one Source or all (when opened from a Source) |
+| Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill |
+| Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot assess" line |
+
+Safety model:
+
+- Nothing is written before a preview and an explicit `y`. Exposing a skill to an
+  additional Host needs a second, separate confirmation, like `--confirm-additional-host`.
+- An install refreshes its Git Source before the preview, so the content you
+  confirm is the content that is applied. The Updates view refreshes
+  the Git Sources in use when you enter it and on `r`.
+- The built-in Source is fixed: it is shown as an unselectable row and cannot be
+  refreshed or removed.
+- Removal is user-global only. Project installations are listed, but project
+  uninstall is not supported (`u` on a project row shows a message).
+- Unmanaged skills are removed only from the paths listed in the preview. A symlink
+  is removed as a link; its target is never touched.
+- Batch installs and removals apply item by item; one failure does not stop the
+  others and each item reports its own result.
+
+See [CONTEXT.md](CONTEXT.md) for the domain terms and [docs/adr](docs/adr) for the
+decisions behind the TUI.
 
 ## Configuration and cache
 

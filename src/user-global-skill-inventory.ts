@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile, readlink, rename, rm } from "node:fs/promises";
+import { lstat, readdir, readFile, readlink, rename, rm, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import { homedir } from "node:os";
@@ -68,6 +68,19 @@ export interface UserGlobalSkillExposure {
   readonly target: string;
 }
 
+/**
+ * A symlink entry in a supported root that Agent Depot does not recognise as its own
+ * exposure (for example a link to a local development repository). Informational:
+ * it is never an `unmanaged` removal candidate of the directory-removal path.
+ */
+export interface UserGlobalSkillInventorySymlink {
+  readonly name: string;
+  readonly path: string;
+  readonly root: GlobalSkillRootKind;
+  /** Where the link points, resolved against the link's directory. */
+  readonly target: string;
+}
+
 export interface UserGlobalSkillInventory {
   readonly homeDirectory: string;
   readonly entries: readonly UserGlobalSkillInventoryEntry[];
@@ -76,6 +89,8 @@ export interface UserGlobalSkillInventory {
   readonly skipped: readonly UserGlobalSkillInventorySkippedEntry[];
   /** Same-name host symlinks to a listed canonical Skill; informational, never removal candidates. */
   readonly exposures: readonly UserGlobalSkillExposure[];
+  /** Other symlinks under the roots; they are also reported in `skipped` and are never `unmanaged` entries. */
+  readonly symlinks: readonly UserGlobalSkillInventorySymlink[];
 }
 
 export interface UserGlobalSkillInventoryOptions {
@@ -122,7 +137,8 @@ export async function scanUserGlobalSkillInventory(
   const entries: UserGlobalSkillInventoryEntry[] = [];
   const skipped: UserGlobalSkillInventorySkippedEntry[] = [];
   const exposures: UserGlobalSkillExposure[] = [];
-  const state: ScanState = { managedPaths, managedCanonicalPaths, entries, skipped, exposures };
+  const symlinks: UserGlobalSkillInventorySymlink[] = [];
+  const state: ScanState = { managedPaths, managedCanonicalPaths, entries, skipped, exposures, symlinks };
   for (const root of GLOBAL_SKILL_ROOTS) {
     const rootPath = path.join(homeDirectory, ...root.relativePath);
     await scanRoot(root, rootPath, homeDirectory, state);
@@ -137,6 +153,7 @@ export async function scanUserGlobalSkillInventory(
     unmanaged: Object.freeze(unmanaged),
     skipped: Object.freeze(skipped),
     exposures: Object.freeze(exposures),
+    symlinks: Object.freeze(symlinks),
   });
 }
 
@@ -149,6 +166,7 @@ interface ScanState {
   readonly entries: UserGlobalSkillInventoryEntry[];
   readonly skipped: UserGlobalSkillInventorySkippedEntry[];
   readonly exposures: UserGlobalSkillExposure[];
+  readonly symlinks: UserGlobalSkillInventorySymlink[];
 }
 
 type GlobalSkillRoot = (typeof GLOBAL_SKILL_ROOTS)[number];
@@ -275,7 +293,7 @@ async function classifySymlink(
   homeDirectory: string,
   state: ScanState,
 ): Promise<void> {
-  const { managedCanonicalPaths, managedPaths, entries, skipped, exposures } = state;
+  const { managedCanonicalPaths, managedPaths, entries, skipped, exposures, symlinks } = state;
   let linkTarget: string;
   try {
     linkTarget = await readlink(candidatePath);
@@ -305,6 +323,7 @@ async function classifySymlink(
     return;
   }
   skipped.push(skip(candidatePath, root, "unsafe-entry", "symbolic-link entries are never removal candidates", name));
+  if (!managedPaths.has(pathKey(candidatePath))) symlinks.push({ name, path: candidatePath, root, target: resolvedTarget });
 }
 
 async function findUnsafeTreeEntry(candidatePath: string, relativeDirectory = ""): Promise<string | undefined> {
@@ -499,6 +518,66 @@ export async function removeUserGlobalSkill(
     }
     throw new Error(`Unmanaged Skill deletion status is uncertain for ${JSON.stringify(inspection.path)}; staged path retained at ${JSON.stringify(stagingPath)} and recovery is not guaranteed: ${errorMessage(error)}`);
   }
+}
+
+export interface UserGlobalSymlinkRemovalInspection {
+  readonly name: string;
+  readonly path: string;
+  /** The link text as read from disk. */
+  readonly target: string;
+  readonly identity: string;
+}
+
+/**
+ * Inspects one explicit symlink below a supported global root. Only the link is
+ * ever removed; the path it points to is never read, followed or changed.
+ */
+export async function inspectUserGlobalSymlinkRemoval(
+  candidatePath: string,
+  options: UserGlobalSkillRemovalOptions,
+): Promise<UserGlobalSymlinkRemovalInspection> {
+  const homeDirectory = path.resolve(options.homeDirectory);
+  const linkPath = validateExplicitGlobalPath(candidatePath, homeDirectory);
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  await assertRealGlobalAncestors(homeDirectory, path.dirname(linkPath), fileSystem);
+  const managedPath = managedProtectionPaths(homeDirectory, options.managedInstallations)
+    .find((protectedPath) => pathsOverlap(pathKey(linkPath), protectedPath));
+  if (managedPath !== undefined) {
+    throw new Error(`Cannot remove ${JSON.stringify(linkPath)} because it is managed or aliases a managed installation at ${JSON.stringify(managedPath)}; no path was changed`);
+  }
+  const information = await fileSystem.lstat(linkPath);
+  if (!information.isSymbolicLink()) {
+    throw new Error(`Selected unmanaged link must be a symbolic link: ${linkPath}; no path was changed`);
+  }
+  return Object.freeze({
+    name: path.basename(linkPath),
+    path: linkPath,
+    target: await readlink(linkPath),
+    identity: fileIdentity(information),
+  });
+}
+
+/** Rechecks the inspected link (and the managed records when given), then unlinks only the link. */
+export async function removeUserGlobalSymlink(
+  inspection: UserGlobalSymlinkRemovalInspection,
+  options: UserGlobalSkillRemovalOptions,
+): Promise<void> {
+  const unchanged = (current: UserGlobalSymlinkRemovalInspection) =>
+    current.name === inspection.name && current.path === inspection.path &&
+    current.target === inspection.target && current.identity === inspection.identity;
+  const changed = () => new Error(`The inspected unmanaged link changed before deletion: ${JSON.stringify(inspection.path)}; no path was changed`);
+  if (!unchanged(await inspectUserGlobalSymlinkRemoval(inspection.path, options))) throw changed();
+  if (options.readManagedInstallations !== undefined) {
+    const latest = await options.readManagedInstallations();
+    if (options.expectedManagedInstallations !== undefined && !sameManagedInstallations(options.expectedManagedInstallations, latest)) {
+      throw new Error(`Managed Skill records changed before deleting unmanaged link ${JSON.stringify(inspection.path)}; no path was changed`);
+    }
+    if (!unchanged(await inspectUserGlobalSymlinkRemoval(inspection.path, { ...options, managedInstallations: latest }))) throw changed();
+  }
+  // A swap for a real directory is caught by the last recheck above or refused by unlink (EISDIR/EPERM).
+  // A remaining window: the link replaced by another symbolic link between that recheck and this unlink
+  // is still removed, because unlink cannot verify identity atomically. Only a link is ever unlinked.
+  await unlink(inspection.path);
 }
 
 async function inspectStagedSkill(candidatePath: string, name: string, fileSystem: UserGlobalSkillFileSystem): Promise<UserGlobalSkillRemovalInspection> {

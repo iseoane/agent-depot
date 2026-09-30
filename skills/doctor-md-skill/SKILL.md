@@ -1,6 +1,9 @@
 ---
 name: "doctor-md-skill"
 description: "Runs only when the user asks for it by name. Grades agent skills by scoring agent conversations against efficiency and code-quality rubrics, using verbatim-quote anchored evidence, then drafts concrete skill edits and a shareable report. Never invoke it on inferred intent, on a related-sounding question — whether a skill is working, whether an agent setup is any good, why a skill never fires — or as a step inside another workflow — only when the user names this skill."
+metadata:
+  author: "iseoane"
+  version: "1.0"
 disable-model-invocation: true
 ---
 # doctor-md-skill

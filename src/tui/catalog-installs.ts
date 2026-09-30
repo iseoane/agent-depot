@@ -36,6 +36,7 @@ import {
   type SkillRemovalPlan,
 } from "../skill-removal.js";
 import type { Source, SourceOperations } from "../sources.js";
+import { scanUserGlobalSkillInventory } from "../user-global-skill-inventory.js";
 import type { TuiEnvironment } from "./environment.js";
 
 export type InstallScope = "project" | "user-global";
@@ -45,9 +46,11 @@ export interface InstalledSkills {
   readonly global: readonly ProjectSkillSelection[];
   readonly project: readonly ProjectSkillSelection[];
   readonly sources: readonly Source[];
+  /** Names of Skills that exist unmanaged on disk (directories or symlinks under the global roots). */
+  readonly unmanagedNames: ReadonlySet<string>;
 }
 
-export const NO_INSTALLED: InstalledSkills = { global: [], project: [], sources: [] };
+export const NO_INSTALLED: InstalledSkills = { global: [], project: [], sources: [], unmanagedNames: new Set() };
 
 function homeOf(environment: TuiEnvironment): string {
   return path.resolve(environment.homeDirectory ?? homedir());
@@ -68,7 +71,16 @@ export async function loadInstalledSkills(
     manifestStoreOf(environment).load().then((manifest) => manifest.skills, () => []),
     operations.listSources().catch(() => []),
   ]);
-  return { global, project, sources };
+  const unmanagedNames = await scanUserGlobalSkillInventory({ homeDirectory: homeOf(environment), managedInstallations: global }).then(
+    (inventory) => new Set([...inventory.unmanaged, ...inventory.symlinks].map((entry) => entry.name)),
+    () => new Set<string>(),
+  );
+  return { global, project, sources, unmanagedNames };
+}
+
+/** Whether an unmanaged copy with the Skill's directory name exists on disk (the name an install would use). */
+export function hasUnmanagedCopy(skill: SkillCandidate, installed: InstalledSkills): boolean {
+  return installed.unmanagedNames.has(path.posix.basename(skill.path));
 }
 
 function matchesSource(source: ProjectSource, sourceId: string, sources: readonly Source[]): boolean {
@@ -171,7 +183,9 @@ export async function runInstall(
     : prepared.plan;
   const persist = manifestStore
     ? async (record: ProjectSkillSelection) => {
-        await manifestStore.save(parseProjectManifest({ version: 1, skills: [...plan.context.existing, record] }));
+        // Read at persist time: a batch installs several Skills, and each record must keep the ones saved before it.
+        const current = (await manifestStore.load()).skills;
+        await manifestStore.save(parseProjectManifest({ version: 1, skills: [...current, record] }));
       }
     : (record: ProjectSkillSelection) => operations.addUserGlobalInstallation!(record);
   await executeSingleInstall(plan, persist, (line) => lines.push(line));

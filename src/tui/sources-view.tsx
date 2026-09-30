@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { GitSource } from "../git-source.js";
@@ -6,6 +6,7 @@ import type { Source, SourceOperations } from "../sources.js";
 import { initialMode, modeReducer, type Mode, type ModeEvent } from "./sources-mode.js";
 import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
+import { useKeys } from "./keys.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
@@ -21,6 +22,14 @@ type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly sources: readonly Source[] };
+
+type Selection = { readonly id?: string; readonly index: number };
+
+/** The highlighted index: by stable id while that source exists, otherwise the bounded fallback index. */
+function resolveIndex(sources: readonly GitSource[], selection: Selection): number {
+  const found = sources.findIndex((source) => source.id === selection.id);
+  return found >= 0 ? found : Math.min(selection.index, Math.max(sources.length - 1, 0));
+}
 
 interface Message {
   readonly kind: "ok" | "error";
@@ -50,14 +59,25 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   const height = useListHeight(listHeight, 7);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
-  const [selection, setSelection] = useState<{ readonly id?: string; readonly index: number }>({ index: 0 });
+  // Selection and marks are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
+  const [selection, setSelectionState] = useState<Selection>({ index: 0 });
+  const selectionRef = useRef<Selection>({ index: 0 });
+  const setSelection = (next: Selection) => {
+    selectionRef.current = next;
+    setSelectionState(next);
+  };
   const [mode, dispatchMode] = useReducer(modeReducer, initialMode);
   // Mirrors the mode synchronously so the shell and later keystrokes never see a stale capturing state.
   const modeRef = useRef<Mode>(initialMode);
   const mounted = useRef(true);
   const [message, setMessage] = useState<Message | undefined>();
   // Git sources marked for a combined refresh; the built-in source can never be marked.
-  const [marked, setMarked] = useState<ReadonlySet<string>>(new Set());
+  const [marked, setMarkedState] = useState<ReadonlySet<string>>(new Set());
+  const markedRef = useRef<ReadonlySet<string>>(new Set());
+  const setMarked = (next: ReadonlySet<string>) => {
+    markedRef.current = next;
+    setMarkedState(next);
+  };
   // Mirrors the typed URL synchronously so keystrokes delivered in one burst are not lost to stale closures.
   const typed = useRef("");
 
@@ -102,12 +122,13 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   const builtin = allSources.find((source) => source.kind === "builtin");
   // The built-in source is a fixed row; only Git sources are selectable and navigable.
   const sources = allSources.filter((source): source is GitSource => source.kind === "git");
-  const found = sources.findIndex((source) => source.id === selection.id);
-  const selected = found >= 0 ? found : Math.min(selection.index, Math.max(sources.length - 1, 0));
-  const current = sources[selected];
+  const sourcesRef = useRef<readonly GitSource[]>(sources);
+  sourcesRef.current = sources;
+  const selected = resolveIndex(sources, selection);
   const select = (index: number) => {
-    const bounded = Math.min(Math.max(index, 0), Math.max(sources.length - 1, 0));
-    setSelection({ id: sources[bounded]?.id, index: bounded });
+    const listed = sourcesRef.current;
+    const bounded = Math.min(Math.max(index, 0), Math.max(listed.length - 1, 0));
+    setSelection({ id: listed[bounded]?.id, index: bounded });
   };
 
   /** Runs a mutating action in the busy mode, reports its outcome and reloads the list. */
@@ -128,13 +149,12 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   };
 
   /** Marks the given ids, or unmarks them all when every one is already marked. */
-  const toggle = (ids: readonly string[]) =>
-    setMarked((previous) => {
-      const next = new Set(previous);
-      if (ids.every((id) => next.has(id))) ids.forEach((id) => next.delete(id));
-      else ids.forEach((id) => next.add(id));
-      return next;
-    });
+  const toggle = (ids: readonly string[]) => {
+    const next = new Set(markedRef.current);
+    if (ids.every((id) => next.has(id))) ids.forEach((id) => next.delete(id));
+    else ids.forEach((id) => next.add(id));
+    setMarked(next);
+  };
 
   const stop = (text: string) => setMessage({ kind: "error", text });
 
@@ -164,7 +184,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
     }
   };
 
-  useInput((input, key) => {
+  useKeys((input, key) => {
     const mode = modeRef.current;
     if (mode.kind === "busy") return;
     if (mode.kind === "input") {
@@ -202,39 +222,42 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       return;
     }
 
+    const listed = sourcesRef.current;
+    const at = resolveIndex(listed, selectionRef.current);
+    const highlighted = listed[at];
     if (key.downArrow || input === "j") {
-      select(selected + 1);
+      select(at + 1);
     } else if (key.upArrow || input === "k") {
-      select(selected - 1);
+      select(at - 1);
     } else if (key.pageDown) {
-      select(selected + pageStep(height));
+      select(at + pageStep(height));
     } else if (key.pageUp) {
-      select(selected - pageStep(height));
-    } else if (key.return && current) {
-      onOpenCatalog?.(current);
+      select(at - pageStep(height));
+    } else if (key.return && highlighted) {
+      onOpenCatalog?.(highlighted);
     } else if (input === "n") {
       setMessage(undefined);
       typed.current = "";
       dispatch({ type: "input" });
-    } else if (input === " " && current) {
+    } else if (input === " " && highlighted) {
       setMessage(undefined);
-      toggle([current.id]);
+      toggle([highlighted.id]);
     } else if (input === "a") {
-      if (sources.length === 0) stop("There are no Git sources to select");
+      if (listed.length === 0) stop("There are no Git sources to select");
       else {
         setMessage(undefined);
-        toggle(sources.map((source) => source.id));
+        toggle(listed.map((source) => source.id));
       }
     } else if (input === "r") {
-      const targets = marked.size > 0
-        ? sources.filter((source) => marked.has(source.id))
-        : current ? [current] : [];
+      const targets = markedRef.current.size > 0
+        ? listed.filter((source) => markedRef.current.has(source.id))
+        : highlighted ? [highlighted] : [];
       if (targets.length > 0) {
         setMessage(undefined);
         dispatch({ type: "confirm", action: "refresh", sources: targets });
       }
-    } else if (input === "d" && current) {
-      void startRemoval(current);
+    } else if (input === "d" && highlighted) {
+      void startRemoval(highlighted);
     }
   });
 

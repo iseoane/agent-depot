@@ -168,7 +168,41 @@ test("App footer for the Catalog offers install only", async () => {
   stdin.write("2");
   const frame = await waitForFrame(lastFrame, /\[2 Catalog\]/);
   assert.match(frame, /i install/);
-  assert.match(frame, /Enter\/right expand/);
+  assert.match(frame, /Enter expand/);
   assert.doesNotMatch(frame, /uninstall|add hosts/);
+  unmount();
+});
+
+/** The last non-empty line of the frame, where the shell prints the key hints. */
+function footerOf(frame: string): string {
+  return frame.split("\n").filter((line) => line.trim() !== "").at(-1) ?? "";
+}
+
+test("no footer repeats the view-switch hints the tab bar already shows, and each names its own keys", async () => {
+  const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
+  const expected: [string | undefined, RegExp, RegExp][] = [
+    [undefined, /\[1 Sources\]/, /space mark.*a all.*Enter catalog.*n add.*r refresh.*d remove/],
+    ["2", /\[2 Catalog\]/, /space mark.*a all.*i install.*\/ filter/],
+    ["3", /\[3 Installations\]/, /u uninstall.*h add hosts.*A adopt/],
+    ["4", /\[4 Updates\]/, /space mark.*a all.*Enter preview.*r check again/],
+  ];
+  for (const [key, tab, keys] of expected) {
+    if (key !== undefined) stdin.write(key);
+    const frame = await waitForFrame(lastFrame, tab);
+    const footer = footerOf(await waitForFrame(lastFrame, (candidate) => keys.test(footerOf(candidate))));
+    assert.match(footer, /j\/k move/);
+    assert.match(footer, /q quit/);
+    assert.doesNotMatch(footer, /\b[1-4] (sources|catalog|installations|updates)\b/i, `view-switch hint in: ${footer}\n${frame}`);
+  }
+  unmount();
+});
+
+test("the number keys still switch views", async () => {
+  const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
+  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  for (const [key, tab] of [["2", /\[2 Catalog\]/], ["3", /\[3 Installations\]/], ["1", /\[1 Sources\]/], ["4", /\[4 Updates\]/]] as const) {
+    stdin.write(key);
+    await waitForFrame(lastFrame, tab);
+  }
   unmount();
 });

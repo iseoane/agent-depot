@@ -577,7 +577,8 @@ test("the footer names the scope keys and the check", async (t) => {
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /4 Updates/);
   press(stdin, "4");
-  const frame = await waitForFrame(lastFrame, /\[4 Updates\]/);
+  // While the sources refresh the view captures keys, so the footer shows the check key once it is done.
+  const frame = await waitForFrame(lastFrame, /r check again/);
   assert.match(frame, /t all/);
   assert.match(frame, /p project/);
   assert.match(frame, /g user-global/);
@@ -730,5 +731,85 @@ test("after a failed refresh the apply works on the current data and the view sa
   press(stdin, "y");
   await waitForFrame(lastFrame, /1 updated, 0 failed/);
   assert.equal(await f.read(f.project, ".agents/skills/ext"), newText("ext"));
+  unmount();
+});
+
+test("keys sent in one burst move and select against the latest state", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "three", state: "outdated" },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /portable\/three/);
+  for (const data of ["j", "j", " "]) press(stdin, data);
+  const frame = await waitForFrame(lastFrame, /1 selected/);
+  const line = (name: string) => frame.split("\n").find((candidate) => candidate.includes(`portable/${name}`)) ?? "";
+  assert.match(line("three"), /\[x\]/);
+  assert.match(line("one"), /\[ \]/);
+  assert.match(line("three"), /^> /);
+  unmount();
+});
+
+test("j, j, space, Enter in one burst previews the item the highlight reached", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "three", state: "outdated" },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /portable\/three/);
+  for (const data of ["j", "j", " ", ENTER]) press(stdin, data);
+  const frame = await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
+  assert.match(frame, /three/);
+  unmount();
+});
+
+test("a scope key followed by navigation in one burst acts on the filtered list", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+  ]);
+  await seedGlobal(f, { name: "glob", state: "outdated" });
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /portable\/glob/);
+  for (const data of ["p", "j", " "]) press(stdin, data);
+  const frame = await waitForFrame(lastFrame, /1 selected/);
+  const line = (name: string) => frame.split("\n").find((candidate) => candidate.includes(`portable/${name}`)) ?? "";
+  assert.match(line("two"), /\[x\]/);
+  assert.match(line("one"), /\[ \]/);
+  assert.ok(!frame.includes("portable/glob"));
+  unmount();
+});
+
+test("the right arrow and j in one burst move within the expanded cannot-be-checked lines", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "mystery", state: "unknown" },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /1 cannot be checked/);
+  for (const data of ["j", "\u001B[C", "j"]) press(stdin, data);
+  const frame = await waitForFrame(lastFrame, (candidate) => /^> .*portable\/mystery/m.test(candidate));
+  assert.match(frame, /1 cannot be checked ▾/);
+  unmount();
+});
+
+test("several keys delivered in a single write are handled one by one", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "three", state: "outdated" },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /portable\/three/);
+  press(stdin, "jj ");
+  const frame = await waitForFrame(lastFrame, /1 selected/);
+  assert.match(frame.split("\n").find((line) => line.includes("portable/three")) ?? "", /\[x\]/);
   unmount();
 });
