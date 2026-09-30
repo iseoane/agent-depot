@@ -138,7 +138,9 @@ test("shows an error when the installation state cannot be read", async (t) => {
 
 test("missing user-global operations are reported as not supported", async (t) => {
   const f = await fixture(t);
-  const { addUserGlobalInstallation: _add, listUserGlobalInstallations: _list, ...rest } = f.operations;
+  const rest: SourceOperations = { ...f.operations };
+  delete rest.addUserGlobalInstallation;
+  delete rest.listUserGlobalInstallations;
   const { lastFrame, unmount } = mount({ ...f, operations: rest });
   await waitForFrame(lastFrame, /not supported/i);
   unmount();
