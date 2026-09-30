@@ -998,73 +998,93 @@ async function runInstall(
   const projectRoot = path.resolve(dependencies.projectRoot ?? process.cwd());
   const manifestStore = dependencies.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot));
 
+  const context: ProjectInstallContext = { options, operations, dependencies, sourceAccess, output, projectRoot, manifestStore };
   if (options.fromManifest) {
-    const manifest = await manifestStore.load();
-    if (manifest.skills.length === 0) {
-      throw new CliUsageError("The project manifest contains no selected Skills");
-    }
-    if (!options.portableV1) {
-      throw new CliUsageError("Compatibility is not known for a manifest install; rerun with --portable-v1 after reviewing the Skill");
-    }
-    const resolved = await resolveManifestSelections(manifest, operations, sourceAccess, options.confirmed);
-    if (resolved.some((item) => item.method !== undefined) && resolved.length > 1) {
-      throw new SourceMetadataError("A batch install containing an external method is refused because command side effects cannot be rolled back safely; install that Skill separately");
-    }
-    // Inspect every physical destination before printing a confirmation preview.
-    // Two different manifest selections can have different Source/path
-    // identities while still resolving to the same basename directory.
-    const inspections = await inspectManifestInstallations(resolved, projectRoot, sourceAccess, dependencies);
-    for (let index = 0; index < resolved.length; index += 1) {
-      const item = resolved[index]!;
-      outputInstallPreview(item.selection, item.source, projectRoot, output, item.files, item.method, "project", inspections[index], false, options.confirmed);
-    }
-    requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
-    for (const inspection of inspections) {
-      rejectInstallationCollision(inspection, false);
-    }
-
-    const transactions: ProjectSkillInstallationTransaction[] = [];
-    const installed: Array<{ readonly item: ResolvedManifestSelection; readonly result: ProjectSkillInstallationResult }> = [];
-    let methodFailed = false;
-    try {
-      for (let index = 0; index < resolved.length; index += 1) {
-        const item = resolved[index]!;
-        const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, item.resolvedVersion, options.confirmAdditionalHostExposure, false, inspections[index]);
-        if (transaction) {
-          transactions.push(transaction);
-          installed.push({ item, result: transaction.result });
-        }
-      }
-      const nextManifest = parseProjectManifest({
-        version: 1,
-        skills: manifest.skills.map((selection) => {
-          const installedSelection = installed.find(({ item }) =>
-            JSON.stringify([item.selection.source, item.selection.path]) === JSON.stringify([selection.source, selection.path]),
-          );
-          return installedSelection === undefined
-            ? selection
-            : selectionWithInstallation(installedSelection.item.selection, installedSelection.result, projectRoot);
-        }),
-      });
-      await manifestStore.save(nextManifest);
-      for (const { item, result } of installed) {
-        outputInstallationResult(result, projectRoot, output);
-        try {
-          await executeOrRejectMethod(item, operations, projectRoot);
-        } catch (error) {
-          methodFailed = true;
-          throw externalMethodFailure(error);
-        }
-      }
-    } catch (error) {
-      if (methodFailed) {
-        throw error;
-      }
-      await rollbackTransactions(transactions, error);
-    }
+    await runManifestInstall(context);
     return;
   }
+  await runSingleProjectInstall(context);
+}
 
+interface ProjectInstallContext {
+  readonly options: InstallOptions;
+  readonly operations: SourceOperations;
+  readonly dependencies: CliDependencies;
+  readonly sourceAccess: ProjectSkillTreeAccess;
+  readonly output: (line: string) => void;
+  readonly projectRoot: string;
+  readonly manifestStore: ProjectManifestStore;
+}
+
+async function runManifestInstall(context: ProjectInstallContext): Promise<void> {
+  const { options, operations, dependencies, sourceAccess, output, projectRoot, manifestStore } = context;
+  const manifest = await manifestStore.load();
+  if (manifest.skills.length === 0) {
+    throw new CliUsageError("The project manifest contains no selected Skills");
+  }
+  if (!options.portableV1) {
+    throw new CliUsageError("Compatibility is not known for a manifest install; rerun with --portable-v1 after reviewing the Skill");
+  }
+  const resolved = await resolveManifestSelections(manifest, operations, sourceAccess, options.confirmed);
+  if (resolved.some((item) => item.method !== undefined) && resolved.length > 1) {
+    throw new SourceMetadataError("A batch install containing an external method is refused because command side effects cannot be rolled back safely; install that Skill separately");
+  }
+  // Inspect every physical destination before printing a confirmation preview.
+  // Two different manifest selections can have different Source/path
+  // identities while still resolving to the same basename directory.
+  const inspections = await inspectManifestInstallations(resolved, projectRoot, sourceAccess, dependencies);
+  for (let index = 0; index < resolved.length; index += 1) {
+    const item = resolved[index]!;
+    outputInstallPreview(item.selection, item.source, projectRoot, output, item.files, item.method, "project", inspections[index], false, options.confirmed);
+  }
+  requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
+  for (const inspection of inspections) {
+    rejectInstallationCollision(inspection, false);
+  }
+
+  const transactions: ProjectSkillInstallationTransaction[] = [];
+  const installed: Array<{ readonly item: ResolvedManifestSelection; readonly result: ProjectSkillInstallationResult }> = [];
+  let methodFailed = false;
+  try {
+    for (let index = 0; index < resolved.length; index += 1) {
+      const item = resolved[index]!;
+      const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, item.resolvedVersion, options.confirmAdditionalHostExposure, false, inspections[index]);
+      if (transaction) {
+        transactions.push(transaction);
+        installed.push({ item, result: transaction.result });
+      }
+    }
+    const nextManifest = parseProjectManifest({
+      version: 1,
+      skills: manifest.skills.map((selection) => {
+        const installedSelection = installed.find(({ item }) =>
+          JSON.stringify([item.selection.source, item.selection.path]) === JSON.stringify([selection.source, selection.path]),
+        );
+        return installedSelection === undefined
+          ? selection
+          : selectionWithInstallation(installedSelection.item.selection, installedSelection.result, projectRoot);
+      }),
+    });
+    await manifestStore.save(nextManifest);
+    for (const { item, result } of installed) {
+      outputInstallationResult(result, projectRoot, output);
+      try {
+        await executeOrRejectMethod(item, operations, projectRoot);
+      } catch (error) {
+        methodFailed = true;
+        throw externalMethodFailure(error);
+      }
+    }
+  } catch (error) {
+    if (methodFailed) {
+      throw error;
+    }
+    await rollbackTransactions(transactions, error);
+  }
+}
+
+async function runSingleProjectInstall(context: ProjectInstallContext): Promise<void> {
+  const { options, operations, dependencies, sourceAccess, output, projectRoot, manifestStore } = context;
   if (!options.sourceId || !options.skillPath || !options.version || options.hosts.length === 0) {
     throw new CliUsageError(INSTALL_USAGE);
   }
