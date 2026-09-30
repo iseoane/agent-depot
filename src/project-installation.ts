@@ -276,11 +276,16 @@ export async function inspectProjectSkillRemoval(
   });
 }
 
-/** Removes a previously inspected user-global Skill after rechecking ownership. */
+/**
+ * Removes a previously inspected user-global Skill after rechecking ownership.
+ * `deletePaths` narrows the deletion to a subset of the inspected paths (used
+ * when only some Hosts are removed); the whole inspection is still rechecked.
+ */
 export async function removeProjectSkill(
   selection: ProjectSkillSelection,
   inspection: ProjectSkillRemovalInspection,
   options: ProjectInstallationOptions,
+  deletePaths?: readonly string[],
 ): Promise<void> {
   assertNoOverlappingProjectSkillRemovalTargets([inspection]);
   const current = await inspectProjectSkillRemoval(selection, options);
@@ -295,9 +300,101 @@ export async function removeProjectSkill(
   }
   assertNonCanonicalConfirmed(current.nonCanonicalPath, options);
   const fileSystem = options.fileSystem ?? nodeFileSystem;
-  for (const candidate of [...current.paths].reverse()) {
+  const selected = deletePaths ?? current.paths;
+  if (selected.some((candidate) => !current.paths.includes(candidate))) {
+    throw new ProjectInstallationError("removal-changed", "A path selected for removal is not part of the inspected Skill installation; no path was removed");
+  }
+  for (const candidate of [...current.paths].reverse().filter((candidate) => selected.includes(candidate))) {
     await fileSystem.rm(candidate);
   }
+}
+
+/** Read-only receipt for exposing an installed user-global Skill to more Hosts. */
+export interface ProjectSkillHostAdditionInspection {
+  readonly skillName: string;
+  readonly canonicalPath: string;
+  readonly claudePath: string;
+  /** Content digest of the installed Skill; must match before anything is created. */
+  readonly digest: string;
+  /** Host locations the addition creates; empty when every requested Host already resolves to an existing location. */
+  readonly createPaths: readonly string[];
+}
+
+/**
+ * Inspects what exposing the installed Skill to `hosts` would change without
+ * writing. Non-Claude Hosts share the canonical `.agents/skills` location, and
+ * Claude is a symlink to it; anything else at a target location is a conflict.
+ */
+export async function inspectProjectSkillHostAddition(
+  selection: ProjectSkillSelection,
+  hosts: readonly ProjectHost[],
+  options: ProjectInstallationOptions,
+): Promise<ProjectSkillHostAdditionInspection> {
+  const removal = await inspectProjectSkillRemoval(selection, options);
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  const projectRoot = path.resolve(options.projectRoot);
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", removal.skillName);
+  const claudePath = path.join(projectRoot, ".claude", "skills", removal.skillName);
+  const installedAt = resolveInstallationPath(projectRoot, selection.installation!.path);
+  if (installedAt !== canonicalPath) {
+    throw new ProjectInstallationError(
+      "host-exposure-unavailable",
+      `Cannot expose ${JSON.stringify(removal.skillName)} to more Hosts because it is installed at ${JSON.stringify(installedAt)}, not the canonical ${JSON.stringify(canonicalPath)}; exposing it would require copying or moving it. No path was changed.`,
+    );
+  }
+  const createPaths: string[] = [];
+  if (hosts.includes("claude")) {
+    await assertNoSymlinkAncestors(projectRoot, [".claude", "skills"], fileSystem);
+    const existing = await fileSystem.lstat(claudePath).catch((error: unknown) => {
+      if (isMissing(error)) return undefined;
+      throw error;
+    });
+    if (existing === undefined) {
+      createPaths.push(claudePath);
+    } else {
+      const target = existing.isSymbolicLink() ? await fileSystem.readlink(claudePath) : undefined;
+      if (target === undefined || path.resolve(path.dirname(claudePath), target) !== canonicalPath) {
+        throw new ProjectInstallationError(
+          "target-conflict",
+          `Cannot expose ${JSON.stringify(removal.skillName)} to Claude because ${JSON.stringify(claudePath)} already exists and is not the managed symlink to the installed Skill; no path was changed.`,
+        );
+      }
+    }
+  }
+  return Object.freeze({ skillName: removal.skillName, canonicalPath, claudePath, digest: removal.digest, createPaths: Object.freeze(createPaths) });
+}
+
+/**
+ * Creates the Host locations of an inspected addition after rechecking that
+ * nothing changed. The returned rollback removes only what this call created.
+ */
+export async function addProjectSkillHosts(
+  selection: ProjectSkillSelection,
+  hosts: readonly ProjectHost[],
+  inspection: ProjectSkillHostAdditionInspection,
+  options: ProjectInstallationOptions,
+): Promise<{ rollback(): Promise<void> }> {
+  const current = await inspectProjectSkillHostAddition(selection, hosts, options);
+  if (current.digest !== inspection.digest || current.createPaths.length !== inspection.createPaths.length ||
+    current.createPaths.some((candidate, index) => candidate !== inspection.createPaths[index])) {
+    throw new ProjectInstallationError("host-addition-changed", "The inspected Skill installation or Host locations changed; no path was created");
+  }
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  const createdPaths: CreatedPath[] = [];
+  const uncertainCreates = new Set<string>();
+  try {
+    if (current.createPaths.includes(current.claudePath)) {
+      await createAdditionalClaudeExposure(path.resolve(options.projectRoot), current.canonicalPath, current.claudePath, fileSystem, createdPaths, uncertainCreates);
+    }
+  } catch (error) {
+    const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
+    if (cleanupErrors.length > 0) {
+      const original = error instanceof Error ? error.message : String(error);
+      throw new ProjectInstallationError("rollback-failed", `${original} Rollback was incomplete: ${cleanupErrors.join("; ")}`);
+    }
+    throw error;
+  }
+  return { rollback: createCreatedPathsRollback(createdPaths, uncertainCreates, fileSystem) };
 }
 
 export async function inspectProjectSkillUpdate(
