@@ -193,17 +193,24 @@ export function applyConfirmedUpdates(
   selected: readonly UpdateBatchAssessmentItem[],
   context: SkillUpdateApplicationOptions,
   confirmedPaths: readonly string[],
+  /** Ids of the items whose preview showed the overwrite of local modifications; when given, any other item that turns out modified fails instead of being overwritten. */
+  previewedOverwrites?: ReadonlySet<string>,
 ): Promise<UpdateBatchResult> {
   return applyUpdateBatch(selected, {
     ...context,
     // The callback is invoked independently for every candidate. In particular,
     // a modified installation is never overwritten unless the caller confirmed.
-    confirm: async (plan) => ({
+    confirm: async (plan) => {
+      if (previewedOverwrites !== undefined && plan.overwriteRequired && !previewedOverwrites.has(plan.item.id)) {
+        throw new Error(`Skill ${JSON.stringify(plan.item.id)} was modified after the preview, so the overwrite was never shown or confirmed; nothing was changed`);
+      }
+      return {
       overwriteModifiedInstallation: true,
       externalMethod: true,
       ...(plan.nonCanonicalPath !== undefined && confirmedPaths.includes(relativeProjectPath(context.projectRoot, plan.nonCanonicalPath))
         ? { nonCanonicalPath: plan.nonCanonicalPath }
         : {}),
-    }),
+      };
+    },
   });
 }

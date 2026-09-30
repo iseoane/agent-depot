@@ -12,6 +12,7 @@ import {
   prepareUpdates,
   runUpdates,
   type PreparedUpdates,
+  type ScopedPath,
   type UpdateRow,
   type UpdateScopeFilter,
   type UpdatesData,
@@ -56,8 +57,11 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
 const matchesScope = (row: UpdateRow, filter: UpdateScopeFilter): boolean => filter === "all" || row.scope === filter;
 
 function describeRefresh(data: UpdatesData): string {
-  const { attempted, refreshed, failed } = data.refresh;
+  const { attempted, refreshed, failed, unreadable } = data.refresh;
   if (!attempted) return "sources not fetched again";
+  if (unreadable.length > 0) {
+    return `could not refresh: ${unreadable.map(({ scope, reason }) => `${reason} (${scope})`).join("; ")}; cached data was used`;
+  }
   if (failed.length > 0) {
     return `${failed.length} of ${failed.length + refreshed.length} sources could not be refreshed; their current data was used`;
   }
@@ -178,7 +182,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
     }
   };
 
-  const apply = async (prepared: PreparedUpdates, confirmedPaths: readonly string[]) => {
+  const apply = async (prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[]) => {
     setMode({ kind: "busy", label: "Applying updates..." });
     let result: Message;
     try {
@@ -300,7 +304,7 @@ function emptyData(reason: string, checkedAt: number): UpdatesData {
   return {
     results: [{ scope: "project", error: reason }],
     rows: [],
-    refresh: { attempted: false, refreshed: [], failed: [] },
+    refresh: { attempted: false, refreshed: [], failed: [], unreadable: [] },
     checkedAt,
   };
 }
@@ -327,7 +331,7 @@ function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
       return (
         <Box flexDirection="column">
           <Text color={theme.warning}>Confirm replacing non-canonical locations (outside .agents/skills and .claude/skills):</Text>
-          {mode.prepared.nonCanonicalPaths.map((location, position) => <Text key={position} color={theme.warning}>  {JSON.stringify(location)}</Text>)}
+          {mode.prepared.nonCanonicalPaths.map((location, position) => <Text key={position} color={theme.warning}>  [{location.scope}] {JSON.stringify(location.path)}</Text>)}
           <Text>Replace exactly these paths? y/n</Text>
         </Box>
       );

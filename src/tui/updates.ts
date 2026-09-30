@@ -56,6 +56,14 @@ export interface RefreshReport {
   readonly attempted: boolean;
   readonly refreshed: readonly string[];
   readonly failed: readonly SourceRefreshFailure[];
+  /** Scopes whose installations could not be read to find the sources to refresh; the check used the cached data. */
+  readonly unreadable: readonly { readonly scope: UpdateScope; readonly reason: string }[];
+}
+
+/** A non-canonical location together with the scope it belongs to: the same relative path can exist in both. */
+export interface ScopedPath {
+  readonly scope: UpdateScope;
+  readonly path: string;
 }
 
 export interface UpdatesData {
@@ -127,7 +135,7 @@ async function refreshSources(operations: SourceOperations, selections: readonly
       failed.push({ source: label, reason: errorText(error) });
     }
   }
-  return { attempted: true, refreshed, failed };
+  return { attempted: true, refreshed, failed, unreadable: [] };
 }
 
 /**
@@ -141,13 +149,17 @@ export async function loadUpdateRows(
   environment: TuiEnvironment,
   options: LoadUpdatesOptions,
 ): Promise<UpdatesData> {
-  let refresh: RefreshReport = { attempted: false, refreshed: [], failed: [] };
+  let refresh: RefreshReport = { attempted: false, refreshed: [], failed: [], unreadable: [] };
   if (options.refresh) {
     options.onPhase?.("refreshing");
+    const unreadable: { scope: UpdateScope; reason: string }[] = [];
     const installations = await Promise.all(
-      UPDATE_SCOPES.map((scope) => readScopeInstallations(scopeInput(operations, environment, scope)).catch(() => [])),
+      UPDATE_SCOPES.map((scope) => readScopeInstallations(scopeInput(operations, environment, scope)).catch((error: unknown) => {
+        unreadable.push({ scope, reason: errorText(error) });
+        return [];
+      })),
     );
-    refresh = await refreshSources(operations, installations.flat());
+    refresh = { ...(await refreshSources(operations, installations.flat())), unreadable };
   }
   options.onPhase?.("checking");
   const results = await Promise.all(UPDATE_SCOPES.map(async (scope): Promise<ScopeResult> => {
@@ -190,6 +202,8 @@ export interface PreparedUpdateGroup {
   readonly applicable: readonly UpdateBatchAssessmentItem[];
   /** Relative non-canonical locations of this scope that need their own explicit confirmation. */
   readonly nonCanonicalPaths: readonly string[];
+  /** Ids of the items whose preview showed the overwrite of local modifications. */
+  readonly overwriteShown: ReadonlySet<string>;
 }
 
 export interface PreparedUpdates {
@@ -199,8 +213,8 @@ export interface PreparedUpdates {
   /** Items whose preview succeeded, across scopes; only these are applied. */
   readonly applicable: readonly UpdateBatchAssessmentItem[];
   readonly failures: readonly UpdatePreviewFailure[];
-  /** Relative non-canonical locations that need their own explicit confirmation. */
-  readonly nonCanonicalPaths: readonly string[];
+  /** Non-canonical locations, per scope, that need their own explicit confirmation. */
+  readonly nonCanonicalPaths: readonly ScopedPath[];
 }
 
 /** Plan step: previews the selection from the assessed snapshots, scope by scope. Changes nothing. */
@@ -223,6 +237,7 @@ export async function prepareUpdates(
       loaded,
       applicable: outcome.plans.map((plan) => plan.item),
       nonCanonicalPaths: outcome.nonCanonicalPaths,
+      overwriteShown: new Set(outcome.plans.filter((plan) => plan.overwriteRequired).map((plan) => plan.item.id)),
     });
   }
   return {
@@ -230,7 +245,7 @@ export async function prepareUpdates(
     lines,
     applicable: groups.flatMap((group) => group.applicable),
     failures,
-    nonCanonicalPaths: groups.flatMap((group) => group.nonCanonicalPaths),
+    nonCanonicalPaths: groups.flatMap((group) => group.nonCanonicalPaths.map((location) => ({ scope: group.scope, path: location }))),
   };
 }
 
@@ -242,16 +257,20 @@ export interface UpdateOutcome {
 /**
  * Applies exactly the previewed items, scope by scope. Confirming the preview
  * confirms overwriting and external commands; a non-canonical path is applied
- * only when the caller passes it after the separate confirmation.
+ * only when the caller passes it (with its scope) after the separate confirmation.
+ * A Skill that became locally modified after the preview fails instead of being overwritten.
  */
-export async function runUpdates(prepared: PreparedUpdates, confirmedPaths: readonly string[]): Promise<UpdateOutcome> {
+export async function runUpdates(prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[]): Promise<UpdateOutcome> {
   const updated: string[] = [];
   const failedLines: string[] = [];
   for (const group of prepared.groups) {
     const result = await applyConfirmedUpdates(
       group.applicable,
       group.loaded.context,
-      confirmedPaths.filter((confirmed) => group.nonCanonicalPaths.includes(confirmed)),
+      confirmedPaths
+        .filter((confirmed) => confirmed.scope === group.scope && group.nonCanonicalPaths.includes(confirmed.path))
+        .map((confirmed) => confirmed.path),
+      group.overwriteShown,
     );
     updated.push(...result.updated.map((item) => `Updated ${item.selection.path}`));
     failedLines.push(...result.failed.map((item) => `Failed ${item.selection.path}: ${item.error ?? "unknown error"}`));

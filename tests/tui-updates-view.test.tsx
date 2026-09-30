@@ -15,7 +15,7 @@ import {
 } from "../src/project-manifest.js";
 import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
-import { formatAgo } from "../src/tui/updates.js";
+import { formatAgo, loadUpdateRows, prepareUpdates, runUpdates } from "../src/tui/updates.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
@@ -598,5 +598,137 @@ test("windows a long list of updates around the highlight and pages with PgDn", 
   const paged = await waitForFrame(lastFrame, (frame) => /> .*skill04/.test(frame));
   assert.match(paged, /\d+–\d+ of 12/);
   assert.ok(!paged.includes("skill00"));
+  unmount();
+});
+
+test("a refresh phase that cannot read the installations says so instead of claiming there was nothing to refresh", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated", url: GIT_URL }]);
+  let loads = 0;
+  const flaky = {
+    load: async () => {
+      loads += 1;
+      // The first read is the refresh phase's; the assessment that follows succeeds.
+      if (loads === 1) throw new Error("manifest busy");
+      return f.manifestStore.load();
+    },
+  } as unknown as ProjectManifestStore;
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, projectManifestStore: flaky }} />);
+  const frame = await waitForFrame(view.lastFrame, /portable\/one/);
+  assert.match(frame, /could not refresh: manifest busy/);
+  assert.ok(!frame.includes("no Git sources to refresh"), "a failed read is not an empty refresh");
+  assert.deepEqual(f.events.filter((event) => event.startsWith("refresh:")), [], "nothing was fetched");
+  view.unmount();
+});
+
+test("a non-canonical path is confirmed per scope and path: the other scope's confirmation of the same string does not count", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated", installPath: "tools/skills/one" }]);
+  const data = await loadUpdateRows(f.operations, f.environment, { refresh: false });
+  const prepared = await prepareUpdates(data, data.rows);
+  assert.deepEqual(prepared.nonCanonicalPaths, [{ scope: "project", path: "tools/skills/one" }]);
+
+  const wrongScope = await runUpdates(prepared, [{ scope: "user-global", path: "tools/skills/one" }]);
+  assert.equal(wrongScope.failed, 1, "the same path string in another scope is not a confirmation");
+  assert.equal(await f.read(f.project, "tools/skills/one"), oldText("one"));
+
+  const confirmed = await runUpdates(prepared, [{ scope: "project", path: "tools/skills/one" }]);
+  assert.equal(confirmed.failed, 0);
+  assert.equal(await f.read(f.project, "tools/skills/one"), newText("one"));
+});
+
+test("the confirm-paths panel labels each path with its scope", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated", installPath: "tools/skills/one" }]);
+  await seedGlobal(f, { name: "two", state: "outdated" });
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, (frame) => frame.includes("portable/one") && frame.includes("portable/two"));
+  press(stdin, "a");
+  press(stdin, ENTER);
+  await waitForFrame(lastFrame, /y\/n/);
+  press(stdin, "y");
+  const panel = await waitForFrame(lastFrame, /Confirm replacing non-canonical/);
+  assert.match(panel, /\[project\] "tools\/skills\/one"/);
+  press(stdin, "y");
+  await waitForFrame(lastFrame, /2 updated, 0 failed/);
+  assert.equal(await f.read(f.project, "tools/skills/one"), newText("one"));
+  assert.equal(await f.read(f.home, ".agents/skills/two"), newText("two"));
+  unmount();
+});
+
+test("a Skill that became locally modified after the preview is not overwritten", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }, { name: "two", state: "outdated" }]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /portable\/one/);
+  press(stdin, "a");
+  press(stdin, ENTER);
+  const preview = await waitForFrame(lastFrame, /Apply 2 updates\? y\/n/);
+  assert.ok(!preview.includes("local modifications"), "the preview showed no overwrite");
+  await writeFile(path.join(f.project, ".agents/skills/one/SKILL.md"), "edited after the preview", "utf8");
+  press(stdin, "y");
+  const done = await waitForFrame(lastFrame, /1 updated, 1 failed/);
+  assert.match(done, /Failed portable\/one:[\s\S]*modified after the\s+preview/);
+  assert.equal(await f.read(f.project, ".agents/skills/one"), "edited after the preview", "the new local edit survives");
+  assert.equal(await f.read(f.project, ".agents/skills/two"), newText("two"));
+  unmount();
+});
+
+test("an item whose preview failed is excluded from the apply and its files stay untouched", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "good", state: "outdated" }, { name: "bad", state: "outdated" }]);
+  const operations: SourceOperations = {
+    ...f.operations,
+    async readInstallationMethod(_source, skillPath) {
+      if (skillPath === "portable/bad") throw new Error("cannot read install metadata");
+      return undefined;
+    },
+  };
+  const { lastFrame, stdin, unmount } = render(<UpdatesView operations={operations} environment={f.environment} />);
+  await waitForFrame(lastFrame, /portable\/bad/);
+  press(stdin, "a");
+  press(stdin, ENTER);
+  const preview = await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
+  assert.match(preview, /Preview failed for[\s\S]*bad[\s\S]*cannot read install metadata/);
+  press(stdin, "y");
+  const done = await waitForFrame(lastFrame, /1 updated, 1 failed/);
+  assert.match(done, /Failed portable\/bad: preview failed: cannot read install metadata/);
+  assert.equal(await f.read(f.project, ".agents/skills/good"), newText("good"));
+  assert.equal(await f.read(f.project, ".agents/skills/bad"), oldText("bad"));
+  unmount();
+});
+
+test("with a scope filter active, y applies only the visible items and leaves the hidden ones' files untouched", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "proj", state: "outdated" }]);
+  await seedGlobal(f, { name: "glob", state: "outdated" });
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, (frame) => frame.includes("portable/proj") && frame.includes("portable/glob"));
+  press(stdin, "g");
+  await waitForFrame(lastFrame, (frame) => /scope: user-global/.test(frame) && !frame.includes("portable/proj"));
+  press(stdin, "a");
+  press(stdin, ENTER);
+  await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
+  press(stdin, "y");
+  await waitForFrame(lastFrame, /1 updated, 0 failed/);
+  assert.equal(await f.read(f.home, ".agents/skills/glob"), newText("glob"));
+  assert.equal(await f.read(f.project, ".agents/skills/proj"), oldText("proj"), "the hidden project item was not applied");
+  unmount();
+});
+
+test("after a failed refresh the apply works on the current data and the view said the data was not fresh", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "ext", state: "outdated", url: GIT_URL }]);
+  f.failRefresh.add(GIT_URL);
+  const { lastFrame, stdin, unmount } = mount(f);
+  const listed = await waitForFrame(lastFrame, /portable\/ext/);
+  assert.match(listed, /1 of 1 sources could not be refreshed; their current data was used/);
+  assert.match(listed, /network unreachable/);
+  press(stdin, "a");
+  press(stdin, ENTER);
+  await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
+  press(stdin, "y");
+  await waitForFrame(lastFrame, /1 updated, 0 failed/);
+  assert.equal(await f.read(f.project, ".agents/skills/ext"), newText("ext"));
   unmount();
 });
