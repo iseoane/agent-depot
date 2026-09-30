@@ -110,6 +110,14 @@ node dist/src/cli.js update apply --scope project --all --yes
 node dist/src/cli.js update apply --scope user-global --skill 0 --yes
 ```
 
+A Skill tracked at a non-canonical project path (outside `.agents/skills/<name>` and
+`.claude/skills/<name>`) is repository-controlled, so `--yes` alone does not update it. The
+preview prints the relative path; repeat it with `--confirm-path` (once per such path):
+
+```sh
+node dist/src/cli.js update apply --scope project --all --yes --confirm-path vendor/alpha
+```
+
 Applying always previews each selected candidate first. `--yes` is required and
 confirms each candidate independently; without it, no files or state are
 changed. Modified installations are called out and are never overwritten
