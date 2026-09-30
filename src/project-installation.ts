@@ -1316,6 +1316,29 @@ async function createAdditionalClaudeExposure(
   uncertainCreates.delete(claudePath);
 }
 
+function assertAdditionalExposureAllowed(
+  existingPaths: readonly string[],
+  canonicalPath: string,
+  missingClaude: boolean,
+  confirmed: boolean,
+): void {
+  if (!confirmed) {
+    const missing = missingClaude ? "Claude exposure" : "another Host location";
+    throw new ProjectInstallationError(
+      "adoption-confirmation-required",
+      `An identical Skill was found at ${JSON.stringify(existingPaths[0])}, but adding the missing ${missing} requires explicit confirmation; ` +
+      "adoption will not create, move, or overwrite any path. Re-run with --confirm-additional-host and --yes.",
+    );
+  }
+  if (!existingPaths.includes(canonicalPath)) {
+    throw new ProjectInstallationError(
+      "adoption-confirmation-required",
+      `An identical Skill was found at ${JSON.stringify(existingPaths[0])}, but safely exposing it at another Host location would require moving or copying it; ` +
+      "this operation does not move or duplicate adopted Skills, so no path was changed.",
+    );
+  }
+}
+
 async function adoptExistingProjectSkill(
   projectRoot: string,
   skillName: string,
@@ -1365,21 +1388,7 @@ async function adoptExistingProjectSkill(
   const missingClaude = hosts.includes("claude") && !existingPaths.includes(claudePath);
   const missingCanonical = hosts.some((host) => host !== "claude") && !existingPaths.includes(canonicalPath);
   if (missingCanonical || missingClaude) {
-    if (!confirmAdditionalHostExposure) {
-      const missing = missingClaude ? "Claude exposure" : "another Host location";
-      throw new ProjectInstallationError(
-        "adoption-confirmation-required",
-        `An identical Skill was found at ${JSON.stringify(existingPaths[0])}, but adding the missing ${missing} requires explicit confirmation; ` +
-        "adoption will not create, move, or overwrite any path. Re-run with --confirm-additional-host and --yes.",
-      );
-    }
-    if (!existingPaths.includes(canonicalPath)) {
-      throw new ProjectInstallationError(
-        "adoption-confirmation-required",
-        `An identical Skill was found at ${JSON.stringify(existingPaths[0])}, but safely exposing it at another Host location would require moving or copying it; ` +
-        "this operation does not move or duplicate adopted Skills, so no path was changed.",
-      );
-    }
+    assertAdditionalExposureAllowed(existingPaths, canonicalPath, missingClaude, confirmAdditionalHostExposure);
     await createAdditionalClaudeExposure(projectRoot, canonicalPath, claudePath, fileSystem, createdPaths, uncertainCreates);
     existingPaths.push(claudePath);
   }
