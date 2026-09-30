@@ -387,16 +387,9 @@ async function planUserGlobalSkillMigration(
   const snapshot = operations.readSkillTreeSnapshot
     ? await operations.readSkillTreeSnapshot(newSource, selection.path)
     : undefined;
-  const newBaseline = snapshot === undefined ? undefined : skillTreeBaseline(snapshot.files);
-  if (snapshot !== undefined && !snapshot.files.some((file) => file.path === `${selection.path}/SKILL.md`)) {
-    throw new Error(`Replacement Source does not contain selected Skill ${JSON.stringify(selection.path)}`);
-  }
-  if (selection.version.policy === "fixed" &&
-    (snapshot?.resolvedVersion?.kind !== "git-commit" || snapshot.resolvedVersion.commit !== selection.version.version)) {
-    throw new Error(`Cannot migrate fixed Skill ${JSON.stringify(selection.path)} without matching version evidence from the replacement Source`);
-  }
-  const contentMatches = selection.installation?.baseline !== undefined &&
-    newBaseline !== undefined && selection.installation.baseline.digest === newBaseline.digest;
+  assertReplacementSnapshot(selection, snapshot);
+  const contentMatches = selection.installation?.baseline !== undefined && snapshot !== undefined &&
+    selection.installation.baseline.digest === skillTreeBaseline(snapshot.files).digest;
   const source = selection.version.policy === "fixed"
     ? { kind: "external" as const, url: newSource.url, ref: selection.version.version }
     : { kind: "external" as const, url: newSource.url };
@@ -406,8 +399,7 @@ async function planUserGlobalSkillMigration(
       path: selection.installation.path,
       adopted: selection.installation.adopted,
       ...(selection.installation.baseline === undefined ? {} : { baseline: selection.installation.baseline }),
-      ...(contentMatches && snapshot?.resolvedVersion === undefined ? {} :
-        contentMatches && snapshot?.resolvedVersion !== undefined ? { resolvedVersion: snapshot.resolvedVersion } : {}),
+      ...(contentMatches && snapshot?.resolvedVersion !== undefined ? { resolvedVersion: snapshot.resolvedVersion } : {}),
     };
   return {
     from: selection,
@@ -417,6 +409,19 @@ async function planUserGlobalSkillMigration(
       ...(installation === undefined ? {} : { installation }),
     },
   };
+}
+
+function assertReplacementSnapshot(
+  selection: ProjectSkillSelection,
+  snapshot: Awaited<ReturnType<NonNullable<SourceOperations["readSkillTreeSnapshot"]>>> | undefined,
+): void {
+  if (snapshot !== undefined && !snapshot.files.some((file) => file.path === `${selection.path}/SKILL.md`)) {
+    throw new Error(`Replacement Source does not contain selected Skill ${JSON.stringify(selection.path)}`);
+  }
+  if (selection.version.policy === "fixed" &&
+    (snapshot?.resolvedVersion?.kind !== "git-commit" || snapshot.resolvedVersion.commit !== selection.version.version)) {
+    throw new Error(`Cannot migrate fixed Skill ${JSON.stringify(selection.path)} without matching version evidence from the replacement Source`);
+  }
 }
 
 function resolveMigrationSelections(
