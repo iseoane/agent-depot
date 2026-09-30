@@ -1006,48 +1006,13 @@ async function runInstall(
   if (!options.sourceId || !options.skillPath || !options.version || options.hosts.length === 0) {
     throw new CliUsageError(INSTALL_USAGE);
   }
-  const source = await findSource(operations, options.sourceId);
-  const projectSource = projectSourceFromSource(source, options.ref, options.version);
-  const selection = parseProjectManifest({
-    version: 1,
-    skills: [{
-      source: projectSource,
-      path: options.skillPath,
-      version: options.version,
-      hosts: options.hosts,
-      ...(options.method === undefined ? {} : { methods: { install: options.method } }),
-    }],
-  }).skills[0];
-  if (!selection) {
-    throw new CliUsageError(INSTALL_USAGE);
-  }
-  if (!options.portableV1) {
-    throw new CliUsageError("Compatibility is not known; rerun with --portable-v1 after reviewing the Skill");
-  }
+  const { source, projectSource, selection } = await selectInstallSource({ ...options, sourceId: options.sourceId, skillPath: options.skillPath, version: options.version }, operations);
 
   const existing = await manifestStore.load();
   if (existing.skills.some((candidate) => JSON.stringify(candidate.source) === JSON.stringify(selection.source) && candidate.path === selection.path)) {
     throw new CliUsageError(`Skill selection ${JSON.stringify(selection.path)} is already recorded in ${manifestStore.path}; already managed Skills must be changed with update apply`);
   }
-  const initialResolvedSource = projectSource.kind === "builtin"
-    ? source
-    : operations.resolveProjectSource
-      ? await operations.resolveProjectSource(projectSource)
-      : resolveProjectSource(projectSource);
-  const resolvedSource = await refreshResolvedSource(operations, projectSource, initialResolvedSource, options.confirmed);
-  const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
-  const installationInspection = await inspectProjectSkillInstallation({
-    selection,
-    source: resolvedSource,
-    previewTree: resolved.files,
-    portableV1: options.portableV1,
-    confirmAdditionalHostExposure: options.confirmAdditionalHostExposure,
-    resolvedVersion: resolved.resolvedVersion,
-  }, {
-    projectRoot,
-    sourceAccess,
-    ...dependencies.installationOptions,
-  });
+  const { resolvedSource, resolved, installationInspection } = await resolveInstallInspection(selection, source, projectSource, projectRoot, options, operations, dependencies, sourceAccess);
   outputInstallPreview(selection, source, projectRoot, output, resolved.files, resolved.method, "project", installationInspection, options.overwrite, options.confirmed);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
   const protectedPaths = assertNoManagedInstallationOverlap(existing.skills, selection, installationInspection, projectRoot, options.overwrite);
@@ -1090,48 +1055,13 @@ async function runUserGlobalInstall(
   }
 
   const homeDirectory = path.resolve(dependencies.homeDirectory ?? homedir());
-  const source = await findSource(operations, options.sourceId);
-  const projectSource = projectSourceFromSource(source, options.ref, options.version);
-  const selection = parseProjectManifest({
-    version: 1,
-    skills: [{
-      source: projectSource,
-      path: options.skillPath,
-      version: options.version,
-      hosts: options.hosts,
-      ...(options.method === undefined ? {} : { methods: { install: options.method } }),
-    }],
-  }).skills[0];
-  if (!selection) {
-    throw new CliUsageError(INSTALL_USAGE);
-  }
-  if (!options.portableV1) {
-    throw new CliUsageError("Compatibility is not known; rerun with --portable-v1 after reviewing the Skill");
-  }
+  const { source, projectSource, selection } = await selectInstallSource({ ...options, sourceId: options.sourceId, skillPath: options.skillPath, version: options.version }, operations);
 
   const existing = await operations.listUserGlobalInstallations();
   if (existing.some((candidate) => JSON.stringify([candidate.source, candidate.path]) === JSON.stringify([selection.source, selection.path]))) {
     throw new CliUsageError(`Skill selection ${JSON.stringify(selection.path)} is already recorded in user-global state; already managed Skills must be changed with update apply`);
   }
-  const initialResolvedSource = projectSource.kind === "builtin"
-    ? source
-    : operations.resolveProjectSource
-      ? await operations.resolveProjectSource(projectSource)
-      : resolveProjectSource(projectSource);
-  const resolvedSource = await refreshResolvedSource(operations, projectSource, initialResolvedSource, options.confirmed);
-  const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
-  const installationInspection = await inspectProjectSkillInstallation({
-    selection,
-    source: resolvedSource,
-    previewTree: resolved.files,
-    portableV1: options.portableV1,
-    confirmAdditionalHostExposure: options.confirmAdditionalHostExposure,
-    resolvedVersion: resolved.resolvedVersion,
-  }, {
-    projectRoot: homeDirectory,
-    sourceAccess,
-    ...dependencies.installationOptions,
-  });
+  const { resolvedSource, resolved, installationInspection } = await resolveInstallInspection(selection, source, projectSource, homeDirectory, options, operations, dependencies, sourceAccess);
   outputInstallPreview(selection, source, homeDirectory, output, resolved.files, resolved.method, "user-global", installationInspection, options.overwrite, options.confirmed);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
   const protectedPaths = assertNoManagedInstallationOverlap(existing, selection, installationInspection, homeDirectory, options.overwrite);
@@ -1180,6 +1110,69 @@ interface InstallOptions {
   readonly confirmed: boolean;
   readonly overwrite: boolean;
   readonly confirmAdditionalHostExposure: boolean;
+}
+
+type InstallSelectionOptions = InstallOptions & {
+  readonly sourceId: string;
+  readonly skillPath: string;
+  readonly version: VersionPolicy;
+};
+
+async function selectInstallSource(
+  options: InstallSelectionOptions,
+  operations: SourceOperations,
+): Promise<{ source: Source; projectSource: ProjectSource; selection: ProjectSkillSelection }> {
+  const source = await findSource(operations, options.sourceId);
+  const projectSource = projectSourceFromSource(source, options.ref, options.version);
+  const selection = parseProjectManifest({
+    version: 1,
+    skills: [{
+      source: projectSource,
+      path: options.skillPath,
+      version: options.version,
+      hosts: options.hosts,
+      ...(options.method === undefined ? {} : { methods: { install: options.method } }),
+    }],
+  }).skills[0];
+  if (!selection) {
+    throw new CliUsageError(INSTALL_USAGE);
+  }
+  if (!options.portableV1) {
+    throw new CliUsageError("Compatibility is not known; rerun with --portable-v1 after reviewing the Skill");
+  }
+  return { source, projectSource, selection };
+}
+
+async function resolveInstallInspection(
+  selection: ProjectSkillSelection,
+  source: Source,
+  projectSource: ProjectSource,
+  installationRoot: string,
+  options: InstallOptions,
+  operations: SourceOperations,
+  dependencies: CliDependencies,
+  sourceAccess: ProjectSkillTreeAccess,
+) {
+  const initialResolvedSource = projectSource.kind === "builtin"
+    ? source
+    : operations.resolveProjectSource
+      ? await operations.resolveProjectSource(projectSource)
+      : resolveProjectSource(projectSource);
+  const resolvedSource = await refreshResolvedSource(operations, projectSource, initialResolvedSource, options.confirmed);
+  const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
+  const installationInspection = await inspectProjectSkillInstallation({
+    selection,
+    source: resolvedSource,
+    previewTree: resolved.files,
+    portableV1: options.portableV1,
+    confirmAdditionalHostExposure: options.confirmAdditionalHostExposure,
+    resolvedVersion: resolved.resolvedVersion,
+  }, {
+    projectRoot: installationRoot,
+    sourceAccess,
+    ...dependencies.installationOptions,
+  });
+  return { resolvedSource, resolved, installationInspection };
 }
 
 function parseInstallOptions(argv: readonly string[]): InstallOptions {
