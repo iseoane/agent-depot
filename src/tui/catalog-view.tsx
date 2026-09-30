@@ -103,8 +103,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
 
   useEffect(() => {
     let cancelled = false;
-    const discover = operations.discoverSkills;
-    if (!discover) {
+    if (!operations.discoverSkills) {
       setState({ status: "error", message: "Discovery is not supported by the configured operations" });
       return;
     }
@@ -115,7 +114,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
         const ids = all || sourceId === undefined
           ? (await operations.listSources()).map((source) => source.id)
           : [sourceId];
-        const skills = await discover(ids);
+        const skills = await operations.discoverSkills!(ids);
         if (!cancelled) setState({ status: "ready", skills });
       } catch (error) {
         if (!cancelled) setState({ status: "error", message: error instanceof Error ? error.message : String(error) });

@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import { render } from "ink-testing-library";
 
-import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
+import { ProjectManifestStore } from "../src/project-manifest.js";
+import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
+import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const external = {
@@ -116,4 +121,32 @@ test("App ignores q and view keys sent in the same burst as the catalog filter k
   assert.equal(exits, 0);
   assert.match(frame, /\[2 Catalog\]/);
   unmount();
+});
+
+test("App views render with the real source operations on a temporary home", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-smoke-"));
+  try {
+    const environment: TuiEnvironment = {
+      homeDirectory: home,
+      projectManifestStore: new ProjectManifestStore(path.join(home, "project", "agent-depot.json")),
+    };
+    const real = createSourceOperations({ homeDirectory: home });
+    const { lastFrame, stdin, unmount } = render(<App operations={real} environment={environment} />);
+    await waitForFrame(lastFrame, /builtin:agent-depot/);
+    const views: [string, RegExp][] = [
+      ["2", /\[2 Catalog\]/],
+      ["3", /\[3 Installations\]/],
+      ["4", /\[4 Updates\]/],
+      ["1", /\[1 Sources\]/],
+    ];
+    for (const [key, header] of views) {
+      stdin.write(key);
+      // Wait until the view finished loading (or failed), then require that it did not fail.
+      const frame = await waitForFrame(lastFrame, (candidate) => header.test(candidate) && !/Loading|Checking/.test(candidate));
+      assert.doesNotMatch(frame, /Cannot read properties|TypeError|Error:/);
+    }
+    unmount();
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
