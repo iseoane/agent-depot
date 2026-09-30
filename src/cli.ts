@@ -523,13 +523,7 @@ function parseUninstallOptions(argv: readonly string[]): UninstallOptions {
   return { skills, unmanagedSkills: Object.freeze(unmanagedSkills), data, cli, confirmed };
 }
 
-async function runUninstall(
-  argv: readonly string[],
-  operations: SourceOperations,
-  dependencies: CliDependencies,
-  output: (line: string) => void,
-): Promise<void> {
-  const options = parseUninstallOptions(argv);
+function assertUninstallCapabilities(options: UninstallOptions, operations: SourceOperations): void {
   if (options.skills && !operations.listUserGlobalInstallations) {
     throw new Error("Configured Source operations cannot inspect user-global Skill installations");
   }
@@ -542,59 +536,59 @@ async function runUninstall(
   if (options.data && !operations.removeCatalogData) {
     throw new Error("Configured Source operations cannot remove user-global catalog data");
   }
+}
 
-  const homeDirectory = path.resolve(dependencies.homeDirectory ?? homedir());
-  let installations = options.skills || options.unmanagedSkills.length > 0
-    ? await operations.listUserGlobalInstallations!()
-    : [];
-  // Keep the initial selection snapshot separate from the reconciled records.
-  // Removing one entry shrinks the persisted list, but must not skip the next
-  // selected entry or change its inspection/removal order.
-  const selectedInstallations = installations;
-  let expectedManagedInstallations = installations;
-  const initialInstallationCount = installations.length;
+async function previewManagedUninstall(
+  options: UninstallOptions,
+  installations: readonly ProjectSkillSelection[],
+  removalOptions: ProjectInstallationOptions,
+  output: (line: string) => void,
+): Promise<ProjectSkillRemovalInspection[]> {
   const inspections: ProjectSkillRemovalInspection[] = [];
-  const unmanagedInspections: UserGlobalSkillRemovalInspection[] = [];
-  const removalOptions: ProjectInstallationOptions = {
-    projectRoot: homeDirectory,
-    sourceAccess: { readSkillTree: async () => [] },
-    ...dependencies.installationOptions,
-  };
-
-  output("Uninstall preview (scope: user-global only)");
-  if (options.skills) {
-    output(`Managed Skills (${installations.length}):`);
-    for (const selection of installations) {
-      const inspection = await inspectProjectSkillRemoval(selection, removalOptions);
-      inspections.push(inspection);
-      output(`  remove ${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`);
-      if (inspection.adopted) {
-        output("    WARNING: this Skill was adopted; removal deletes content that Agent Depot did not create");
-      }
-      if (inspection.modified) {
-        output("    WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes");
-      }
-    }
-    output("  Installation records are reconciled after each successful Skill removal");
-  } else {
+  if (!options.skills) {
     output("Managed Skills: preserve (not selected)");
+    return inspections;
   }
-
-  if (options.unmanagedSkills.length > 0) {
-    output(`Unmanaged Skills (${options.unmanagedSkills.length}):`);
-    for (const selectedPath of options.unmanagedSkills) {
-      const inspection = await inspectUserGlobalSkillRemoval(selectedPath, {
-        homeDirectory,
-        managedInstallations: installations,
-      });
-      unmanagedInspections.push(inspection);
-      output(`  remove exact path ${JSON.stringify(inspection.path)}`);
-      output("    WARNING: this is a permanent deletion; Agent Depot will not retain a backup");
-      output("    WARNING: recovery through Agent Depot requires a resolvable Source and is not guaranteed");
+  output(`Managed Skills (${installations.length}):`);
+  for (const selection of installations) {
+    const inspection = await inspectProjectSkillRemoval(selection, removalOptions);
+    inspections.push(inspection);
+    output(`  remove ${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`);
+    if (inspection.adopted) {
+      output("    WARNING: this Skill was adopted; removal deletes content that Agent Depot did not create");
     }
-    output("  Unmanaged Skills are never inferred from a Source and no project scope is used");
+    if (inspection.modified) {
+      output("    WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes");
+    }
   }
+  output("  Installation records are reconciled after each successful Skill removal");
+  return inspections;
+}
 
+async function previewUnmanagedUninstall(
+  options: UninstallOptions,
+  homeDirectory: string,
+  installations: readonly ProjectSkillSelection[],
+  output: (line: string) => void,
+): Promise<UserGlobalSkillRemovalInspection[]> {
+  const inspections: UserGlobalSkillRemovalInspection[] = [];
+  if (options.unmanagedSkills.length === 0) return inspections;
+  output(`Unmanaged Skills (${options.unmanagedSkills.length}):`);
+  for (const selectedPath of options.unmanagedSkills) {
+    const inspection = await inspectUserGlobalSkillRemoval(selectedPath, {
+      homeDirectory,
+      managedInstallations: installations,
+    });
+    inspections.push(inspection);
+    output(`  remove exact path ${JSON.stringify(inspection.path)}`);
+    output("    WARNING: this is a permanent deletion; Agent Depot will not retain a backup");
+    output("    WARNING: recovery through Agent Depot requires a resolvable Source and is not guaranteed");
+  }
+  output("  Unmanaged Skills are never inferred from a Source and no project scope is used");
+  return inspections;
+}
+
+function outputDataAndCliUninstallPreview(options: UninstallOptions, output: (line: string) => void): void {
   if (options.data) {
     output("Catalog/configuration data: remove the user-global Source state file");
     output("  Git Source caches are retained");
@@ -610,61 +604,65 @@ async function runUninstall(
   } else {
     output("Persistent CLI: preserve (not selected)");
   }
+}
 
-  assertNoOverlappingProjectSkillRemovalTargets(inspections);
-  assertNoOverlappingUserGlobalSkillRemovals(unmanagedInspections);
-  for (const managed of inspections) {
-    for (const unmanaged of unmanagedInspections) {
-      if (managed.paths.some((managedPath) => pathsOverlap(managedPath, unmanaged.path))) {
-        throw new Error(`Cannot remove unmanaged Skill ${JSON.stringify(unmanaged.path)} because it overlaps a selected managed Skill target; no path was changed`);
+function assertNoManagedUnmanagedOverlap(
+  managed: readonly ProjectSkillRemovalInspection[],
+  unmanaged: readonly UserGlobalSkillRemovalInspection[],
+  message: (unmanagedPath: string) => string,
+): void {
+  for (const managedInspection of managed) {
+    for (const unmanagedInspection of unmanaged) {
+      if (managedInspection.paths.some((managedPath) => pathsOverlap(managedPath, unmanagedInspection.path))) {
+        throw new Error(message(unmanagedInspection.path));
       }
     }
   }
-  if (options.skills || options.unmanagedSkills.length > 0 || options.data) {
-    requireConfirmation(options.confirmed, "Uninstall not confirmed; rerun with --yes after reviewing every user-global deletion preview");
-  }
+}
 
-  const rechecked: ProjectSkillRemovalInspection[] = [];
-  const unmanagedRechecked: UserGlobalSkillRemovalInspection[] = [];
-  if (options.skills) {
-    for (const selection of selectedInstallations) {
-      rechecked.push(await inspectProjectSkillRemoval(selection, removalOptions));
-    }
+function assertRemovalInspectionUnchanged(before: ProjectSkillRemovalInspection, after: ProjectSkillRemovalInspection): void {
+  const unchanged = before.digest === after.digest && before.adopted === after.adopted && before.modified === after.modified &&
+    before.skillName === after.skillName && before.paths.length === after.paths.length &&
+    before.paths.every((candidate, pathIndex) => candidate === after.paths[pathIndex]);
+  if (!unchanged) {
+    throw new Error("The inspected Skill removal target changed before deletion; no path was removed");
   }
-  assertNoOverlappingProjectSkillRemovalTargets(rechecked);
-  for (const inspection of unmanagedInspections) {
-    unmanagedRechecked.push(await inspectUserGlobalSkillRemoval(inspection.path, {
-      homeDirectory,
-      managedInstallations: installations,
-    }));
+}
+
+interface UninstallRemovalContext {
+  readonly operations: SourceOperations;
+  readonly homeDirectory: string;
+  readonly removalOptions: ProjectInstallationOptions;
+}
+
+async function removeManagedUninstallSkills(
+  context: UninstallRemovalContext,
+  selected: readonly ProjectSkillSelection[],
+  inspections: readonly ProjectSkillRemovalInspection[],
+  rechecked: readonly ProjectSkillRemovalInspection[],
+  initialManaged: readonly ProjectSkillSelection[],
+): Promise<readonly ProjectSkillSelection[]> {
+  const { operations, removalOptions } = context;
+  let expectedManagedInstallations = initialManaged;
+  for (let index = 0; index < selected.length; index += 1) {
+    assertRemovalInspectionUnchanged(inspections[index]!, rechecked[index]!);
+    const latestManagedInstallations = await operations.listUserGlobalInstallations!();
+    assertManagedInstallationRecordsUnchanged(expectedManagedInstallations, latestManagedInstallations);
+    const selection = selected[index]!;
+    await removeProjectSkill(selection, rechecked[index]!, removalOptions);
+    await operations.removeUserGlobalInstallations!([selection]);
+    expectedManagedInstallations = await operations.listUserGlobalInstallations!();
   }
-  assertNoOverlappingUserGlobalSkillRemovals(unmanagedRechecked);
-  for (const managed of rechecked) {
-    for (const unmanaged of unmanagedRechecked) {
-      if (managed.paths.some((managedPath) => pathsOverlap(managedPath, unmanaged.path))) {
-        throw new Error("An unmanaged Skill target changed into an overlap with a selected managed Skill; no path was changed");
-      }
-    }
-  }
-  if (options.skills) {
-    for (let index = 0; index < selectedInstallations.length; index += 1) {
-      const before = inspections[index]!;
-      const after = rechecked[index]!;
-      if (before.digest !== after.digest || before.adopted !== after.adopted || before.modified !== after.modified ||
-        before.skillName !== after.skillName || before.paths.length !== after.paths.length ||
-        before.paths.some((candidate, pathIndex) => candidate !== after.paths[pathIndex])) {
-        throw new Error("The inspected Skill removal target changed before deletion; no path was removed");
-      }
-      const latestManagedInstallations = await operations.listUserGlobalInstallations!();
-      assertManagedInstallationRecordsUnchanged(expectedManagedInstallations, latestManagedInstallations);
-      const selection = selectedInstallations[index]!;
-      await removeProjectSkill(selection, after, removalOptions);
-      await operations.removeUserGlobalInstallations!([selection]);
-      installations = await operations.listUserGlobalInstallations!();
-      expectedManagedInstallations = installations;
-    }
-  }
-  for (const inspection of unmanagedInspections) {
+  return expectedManagedInstallations;
+}
+
+async function removeUnmanagedUninstallSkills(
+  context: UninstallRemovalContext,
+  inspections: readonly UserGlobalSkillRemovalInspection[],
+  expectedManagedInstallations: readonly ProjectSkillSelection[],
+): Promise<void> {
+  const { operations, homeDirectory } = context;
+  for (const inspection of inspections) {
     const latestManagedInstallations = await operations.listUserGlobalInstallations!();
     assertManagedInstallationRecordsUnchanged(expectedManagedInstallations, latestManagedInstallations);
     const latestInspection = await inspectUserGlobalSkillRemoval(inspection.path, {
@@ -679,12 +677,11 @@ async function runUninstall(
       expectedManagedInstallations,
     });
   }
+}
 
-  if (options.data) {
-    await operations.removeCatalogData!();
-  }
+function outputUninstallSummary(options: UninstallOptions, removedManagedCount: number, output: (line: string) => void): void {
   if (options.skills) {
-    output(`Removed ${initialInstallationCount} managed user-global Skill${initialInstallationCount === 1 ? "" : "s"}`);
+    output(`Removed ${removedManagedCount} managed user-global Skill${removedManagedCount === 1 ? "" : "s"}`);
   }
   if (options.unmanagedSkills.length > 0) {
     output(`Permanently deleted ${options.unmanagedSkills.length} unmanaged user-global Skill${options.unmanagedSkills.length === 1 ? "" : "s"}`);
@@ -695,6 +692,71 @@ async function runUninstall(
   if (options.cli) {
     output("Handoff: remove the persistent Agent Depot CLI with the package manager that installed it; no package manager was invoked or inferred");
   }
+}
+
+async function runUninstall(
+  argv: readonly string[],
+  operations: SourceOperations,
+  dependencies: CliDependencies,
+  output: (line: string) => void,
+): Promise<void> {
+  const options = parseUninstallOptions(argv);
+  assertUninstallCapabilities(options, operations);
+
+  const homeDirectory = path.resolve(dependencies.homeDirectory ?? homedir());
+  // Keep the initial selection snapshot separate from the reconciled records.
+  // Removing one entry shrinks the persisted list, but must not skip the next
+  // selected entry or change its inspection/removal order.
+  const selectedInstallations = options.skills || options.unmanagedSkills.length > 0
+    ? await operations.listUserGlobalInstallations!()
+    : [];
+  const removalOptions: ProjectInstallationOptions = {
+    projectRoot: homeDirectory,
+    sourceAccess: { readSkillTree: async () => [] },
+    ...dependencies.installationOptions,
+  };
+  const context: UninstallRemovalContext = { operations, homeDirectory, removalOptions };
+
+  output("Uninstall preview (scope: user-global only)");
+  const inspections = await previewManagedUninstall(options, selectedInstallations, removalOptions, output);
+  const unmanagedInspections = await previewUnmanagedUninstall(options, homeDirectory, selectedInstallations, output);
+  outputDataAndCliUninstallPreview(options, output);
+
+  assertNoOverlappingProjectSkillRemovalTargets(inspections);
+  assertNoOverlappingUserGlobalSkillRemovals(unmanagedInspections);
+  assertNoManagedUnmanagedOverlap(inspections, unmanagedInspections, (unmanagedPath) =>
+    `Cannot remove unmanaged Skill ${JSON.stringify(unmanagedPath)} because it overlaps a selected managed Skill target; no path was changed`);
+  if (options.skills || options.unmanagedSkills.length > 0 || options.data) {
+    requireConfirmation(options.confirmed, "Uninstall not confirmed; rerun with --yes after reviewing every user-global deletion preview");
+  }
+
+  const rechecked: ProjectSkillRemovalInspection[] = [];
+  if (options.skills) {
+    for (const selection of selectedInstallations) {
+      rechecked.push(await inspectProjectSkillRemoval(selection, removalOptions));
+    }
+  }
+  assertNoOverlappingProjectSkillRemovalTargets(rechecked);
+  const unmanagedRechecked: UserGlobalSkillRemovalInspection[] = [];
+  for (const inspection of unmanagedInspections) {
+    unmanagedRechecked.push(await inspectUserGlobalSkillRemoval(inspection.path, {
+      homeDirectory,
+      managedInstallations: selectedInstallations,
+    }));
+  }
+  assertNoOverlappingUserGlobalSkillRemovals(unmanagedRechecked);
+  assertNoManagedUnmanagedOverlap(rechecked, unmanagedRechecked, () =>
+    "An unmanaged Skill target changed into an overlap with a selected managed Skill; no path was changed");
+
+  const expectedManagedInstallations = options.skills
+    ? await removeManagedUninstallSkills(context, selectedInstallations, inspections, rechecked, selectedInstallations)
+    : selectedInstallations;
+  await removeUnmanagedUninstallSkills(context, unmanagedInspections, expectedManagedInstallations);
+
+  if (options.data) {
+    await operations.removeCatalogData!();
+  }
+  outputUninstallSummary(options, selectedInstallations.length, output);
 }
 
 interface UpdateOptions {
