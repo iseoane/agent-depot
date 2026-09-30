@@ -118,3 +118,27 @@ test("App ignores q and view keys sent in the same burst as the catalog filter k
   assert.match(lastFrame() ?? "", /Filter: q1/);
   unmount();
 });
+
+test("App keeps q, 1 and 2 inert while the Catalog install flow captures keys", async () => {
+  let exits = 0;
+  const { stdin, lastFrame, unmount } = render(<App operations={catalogOperations} onExit={() => { exits += 1; }} />);
+  await settle();
+  stdin.write("2");
+  await settle();
+  stdin.write("i");
+  await settle();
+  assert.match(lastFrame() ?? "", /Host/);
+  for (const input of ["q", "1", "2"]) {
+    stdin.write(input);
+    await settle();
+  }
+  assert.equal(exits, 0);
+  assert.match(lastFrame() ?? "", /2 Catalog\]/);
+  assert.match(lastFrame() ?? "", /space toggle/);
+  stdin.write("\u001B");
+  await settle();
+  stdin.write("q");
+  await settle();
+  assert.equal(exits, 1);
+  unmount();
+});

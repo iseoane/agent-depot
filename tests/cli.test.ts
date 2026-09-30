@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -139,7 +140,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]\n  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]\n  agent-depot tui",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]\n  agent-depot skill remove <id|path>... [--yes]\n  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]\n  agent-depot tui",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -2821,4 +2822,122 @@ test("tui command fails with a clear error when the terminal is not interactive"
   assert.equal(code, 1);
   assert.deepEqual(errors, ["Error: agent-depot tui requires an interactive terminal"]);
   assert.equal(rendered, false);
+});
+
+async function withUserGlobalSkills<T>(
+  names: readonly string[],
+  run: (context: { operations: SourceOperations; homeDirectory: string; lines: string[]; errors: string[]; cli: (argv: string[]) => Promise<number> }) => Promise<T>,
+): Promise<T> {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-skill-remove-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-skill-remove-state-"));
+  try {
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    for (const name of names) {
+      await operations.addUserGlobalInstallation!({
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: name,
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        installation: { path: `.agents/skills/${name.split("/").at(-1)}`, adopted: false },
+      });
+      const directory = path.join(homeDirectory, ".agents", "skills", name.split("/").at(-1)!);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "SKILL.md"), name, "utf8");
+    }
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const cli = (argv: string[]) => runCli(argv, { operations, homeDirectory, stdout: (line) => lines.push(line), stderr: (line) => errors.push(line) });
+    return await run({ operations, homeDirectory, lines, errors, cli });
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+}
+
+const skillDirectory = (homeDirectory: string, name: string) => path.join(homeDirectory, ".agents", "skills", name);
+
+test("skill remove previews and requires --yes before deleting", async () => {
+  await withUserGlobalSkills(["portable/one", "portable/two"], async ({ operations, homeDirectory, lines, errors, cli }) => {
+    assert.equal(await cli(["skill", "remove", "portable/one"]), 1);
+    assert.match(lines.join("\n"), /remove "portable\/one" at .*\.agents\/skills\/one/u);
+    assert.match(errors.join("\n"), /Removal not confirmed; rerun with --yes/u);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 2);
+  });
+});
+
+test("skill remove deletes only the selected user-global Skill and its record", async () => {
+  await withUserGlobalSkills(["portable/one", "portable/two"], async ({ operations, homeDirectory, lines, cli }) => {
+    assert.equal(await cli(["skill", "remove", "portable/one", "--yes"]), 0);
+    await assert.rejects(lstat(skillDirectory(homeDirectory, "one")), { code: "ENOENT" });
+    assert.ok(await lstat(skillDirectory(homeDirectory, "two")));
+    assert.deepEqual((await operations.listUserGlobalInstallations!()).map((selection) => selection.path), ["portable/two"]);
+    assert.match(lines.join("\n"), /Removed 1 user-global Skill\b/u);
+  });
+});
+
+test("skill remove accepts a unique skill name and rejects unknown or ambiguous selections", async () => {
+  await withUserGlobalSkills(["a/same", "b/same", "portable/solo"], async ({ operations, homeDirectory, errors, cli }) => {
+    assert.equal(await cli(["skill", "remove", "solo", "--yes"]), 0);
+    await assert.rejects(lstat(skillDirectory(homeDirectory, "solo")), { code: "ENOENT" });
+    assert.equal(await cli(["skill", "remove", "missing", "--yes"]), 1);
+    assert.match(errors.join("\n"), /Unknown user-global Skill "missing"/u);
+    assert.equal(await cli(["skill", "remove", "same", "--yes"]), 1);
+    assert.match(errors.join("\n"), /Ambiguous user-global Skill "same"/u);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 2);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "same")));
+  });
+});
+
+test("skill remove requires a selection and warns about modified content", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ homeDirectory, lines, errors, cli }) => {
+    assert.equal(await cli(["skill", "remove"]), 1);
+    assert.match(errors.join("\n"), /Usage: agent-depot skill remove/u);
+    assert.equal(await cli(["skill", "remove", "portable/one"]), 1);
+    assert.match(lines.join("\n"), /WARNING: this Skill is locally modified or has no trusted baseline/u);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
+  });
+});
+
+test("skill remove does not delete a Skill whose directory changed after the preview", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors }) => {
+    const code = await runCli(["skill", "remove", "portable/one", "--yes"], {
+      operations,
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+      stdout: (line) => {
+        if (line.includes("Installation records are reconciled")) {
+          writeFileSync(path.join(skillDirectory(homeDirectory, "one"), "SKILL.md"), "changed after preview", "utf8");
+        }
+      },
+    });
+
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /changed before deletion; no path was removed/u);
+    assert.equal(await readFile(path.join(skillDirectory(homeDirectory, "one"), "SKILL.md"), "utf8"), "changed after preview");
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+  });
+});
+
+test("skill remove aborts without deleting when installation records changed after the preview", async () => {
+  await withUserGlobalSkills(["portable/one", "portable/two"], async ({ operations, homeDirectory, errors }) => {
+    let listCalls = 0;
+    const code = await runCli(["skill", "remove", "portable/one", "--yes"], {
+      operations: {
+        ...operations,
+        listUserGlobalInstallations: async () => {
+          const records = await operations.listUserGlobalInstallations!();
+          listCalls += 1;
+          return listCalls === 1 ? records : records.filter((selection) => selection.path !== "portable/two");
+        },
+      },
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+    });
+
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /Managed Skill installation records changed before deletion; no path was removed/u);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 2);
+  });
 });

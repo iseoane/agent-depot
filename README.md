@@ -24,6 +24,7 @@ node dist/src/cli.js install --scope project --manifest --portable-v1 --yes
 node dist/src/cli.js update check --scope project
 node dist/src/cli.js update apply --scope project --all --yes
 node dist/src/cli.js update apply --scope user-global --skill 0 --yes
+node dist/src/cli.js skill remove <id|path>... --yes
 node dist/src/cli.js uninstall --cli
 node dist/src/cli.js uninstall --skills --yes
 node dist/src/cli.js uninstall --data --yes
@@ -45,6 +46,14 @@ Preflight rejects unsafe paths, unexpected links, missing installations, overlap
 selected targets, and other inspection failures before changing the Source state or
 deleting any Skill. A second preflight compares each target's content digest,
 adoption flag, and modified status before the first deletion.
+
+`skill remove <id|path>...` removes selected user-global managed Skills without
+touching their Source. Each `<id|path>` is the exact Skill path or its final path
+segment when that is unique; unknown or ambiguous selections fail before anything
+changes. It previews every deletion (with adopted/modified warnings), requires
+`--yes`, rechecks the targets, then deletes the files and their installation
+records. It is user-global only: project installations and manifests are never
+read or changed, and the Git cache is retained.
 
 To replace a Source URL, register the new Git Source first, then explicitly migrate
 user-global identities with `source migrate <old-id> <new-id> (--skill <path>... |

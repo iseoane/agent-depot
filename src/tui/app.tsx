@@ -3,11 +3,14 @@ import { useCallback, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
 import { CatalogView } from "./catalog-view.js";
+import type { TuiEnvironment } from "./environment.js";
 import { SourcesView } from "./sources-view.js";
 
 export interface AppProps {
   /** Source operations the views call directly; injectable for tests. */
   readonly operations: SourceOperations;
+  /** Home, project and source-access overrides for installs; defaults mirror the CLI. */
+  readonly environment?: TuiEnvironment;
   /** Invoked once when the user asks to quit. */
   readonly onExit?: () => void;
 }
@@ -16,10 +19,10 @@ type ViewName = "sources" | "catalog";
 
 const HINTS: Record<ViewName, string> = {
   sources: "j/k move  Enter catalog  a add  r refresh  d remove  2 catalog  q quit",
-  catalog: "j/k move  / filter  s all sources  1 sources  q quit",
+  catalog: "j/k move  / filter  i install  u uninstall  s all sources  1 sources  q quit",
 };
 
-export function App({ operations, onExit }: AppProps) {
+export function App({ operations, environment, onExit }: AppProps) {
   const { exit } = useApp();
   const [capturing, setCapturing] = useState(false);
   // Updated synchronously by the views so keys in the same burst never see a stale capturing state.
@@ -56,9 +59,14 @@ export function App({ operations, onExit }: AppProps) {
           }}
         />
       ) : (
-        <CatalogView operations={operations} sourceId={catalogSourceId} onCapturingChange={onCapturingChange} />
+        <CatalogView
+          operations={operations}
+          sourceId={catalogSourceId}
+          environment={environment}
+          onCapturingChange={onCapturingChange}
+        />
       )}
-      <Text dimColor>{capturing ? "Enter submit  Esc cancel  y/n confirm" : HINTS[view]}</Text>
+      <Text dimColor>{capturing ? "Enter submit  Esc cancel  y/n confirm  space toggle" : HINTS[view]}</Text>
     </Box>
   );
 }
