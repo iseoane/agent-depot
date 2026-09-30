@@ -36,19 +36,32 @@ class TuiSession {
   private readonly terminal: pty.IPty;
   private output = "";
   private readonly exited: Promise<number>;
+  private exit: { exitCode: number; signal?: number } | undefined;
+  private rawLength = 0;
 
   constructor() {
+    // Ink renders only the final frame when it detects CI (`CI` / `CONTINUOUS_INTEGRATION`), which leaves an
+    // interactive PTY blank. The session is a real terminal, so hide the CI markers from the child.
+    const inherited = { ...process.env };
+    delete inherited.CI;
+    delete inherited.CONTINUOUS_INTEGRATION;
     this.terminal = pty.spawn(process.execPath, [CLI, "tui"], {
       name: "xterm-256color",
       cols: 110,
       rows: 40,
       cwd: projectRoot,
-      env: { ...process.env, HOME: homeDirectory, USERPROFILE: homeDirectory, NO_COLOR: "1", FORCE_COLOR: "0" },
+      env: { ...inherited, TERM: "xterm-256color", HOME: homeDirectory, USERPROFILE: homeDirectory, NO_COLOR: "1", FORCE_COLOR: "0" },
     });
     this.terminal.onData((data) => {
       this.output += data;
+      this.rawLength += data.length;
     });
-    this.exited = new Promise((resolve) => this.terminal.onExit(({ exitCode }) => resolve(exitCode)));
+    this.exited = new Promise((resolve) =>
+      this.terminal.onExit(({ exitCode, signal }) => {
+        this.exit = { exitCode, signal };
+        resolve(exitCode);
+      }),
+    );
   }
 
   /** Text rendered since the last `send` (or since spawn), ANSI stripped. */
@@ -68,13 +81,24 @@ class TuiSession {
     this.terminal.write(keys);
   }
 
+  /** Child state for failure messages: exit code/signal and total raw chars received since spawn. */
+  private get diagnostics(): string {
+    const state = this.exit ? `exited code=${this.exit.exitCode} signal=${this.exit.signal ?? 0}` : "still running";
+    return `child ${state}; ${this.rawLength} raw chars received`;
+  }
+
   async waitFor(expected: RegExp): Promise<string> {
     const deadline = Date.now() + TIMEOUT_MS;
     for (;;) {
       const screen = this.screen;
       assert.doesNotMatch(screen, /Error:|TypeError/u, `TUI reported an error:\n${screen}`);
       if (expected.test(screen)) return screen;
-      if (Date.now() >= deadline) assert.fail(`Timed out waiting for ${String(expected)}; screen:\n${screen}`);
+      if (this.exit) {
+        assert.fail(`TUI exited early while waiting for ${String(expected)}; ${this.diagnostics}; screen:\n${screen}`);
+      }
+      if (Date.now() >= deadline) {
+        assert.fail(`Timed out waiting for ${String(expected)}; ${this.diagnostics}; screen:\n${screen}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
@@ -82,7 +106,7 @@ class TuiSession {
   async exitCode(): Promise<number> {
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`TUI did not exit; screen:\n${this.screen}`)), TIMEOUT_MS);
+      timer = setTimeout(() => reject(new Error(`TUI did not exit; ${this.diagnostics}; screen:\n${this.screen}`)), TIMEOUT_MS);
     });
     try {
       return await Promise.race([this.exited, timeout]);
