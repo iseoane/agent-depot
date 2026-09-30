@@ -53,6 +53,17 @@ type Entry =
   | { readonly kind: "summary" }
   | { readonly kind: "unknown"; readonly row: UpdateRow };
 
+/** Names the reasons worth knowing before expanding the collapsed "cannot be checked" row. */
+function describeUnknownReasons(rows: readonly UpdateRow[]): string {
+  const newer = rows.filter((row) => /^installed by a newer agent depot/i.test(row.reason)).length;
+  const pinned = rows.filter((row) => /^pinned to agent depot/i.test(row.reason)).length;
+  const parts = [
+    ...(newer > 0 ? [`${newer} installed by a newer Agent Depot`] : []),
+    ...(pinned > 0 ? [`${pinned} pinned to another Agent Depot`] : []),
+  ];
+  return parts.length === 0 ? "" : ` (${parts.join(", ")})`;
+}
+
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const matchesScope = (row: UpdateRow, filter: UpdateScopeFilter): boolean => filter === "all" || row.scope === filter;
@@ -300,7 +311,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
         if (entry.kind === "summary") {
           return (
             <Text key="summary" {...rowStyle(selected)} color={theme.inactive}>
-              {selected ? "> " : "  "}{unknown.length} cannot be checked {showUnknown ? "▾" : "▸"}
+              {selected ? "> " : "  "}{unknown.length} cannot be checked {showUnknown ? "▾" : "▸"}{describeUnknownReasons(unknown)}
             </Text>
           );
         }

@@ -229,7 +229,7 @@ test("never offers a built-in Skill installed by a newer Agent Depot and says wh
   const { lastFrame, stdin, unmount } = mount(f);
   const frame = await waitForFrame(lastFrame, /portable\/outdated/);
   assert.ok(!frame.includes("portable/ahead"), "the newer-installed Skill is not offered");
-  assert.match(frame, /1 cannot be checked ▸/);
+  assert.match(frame, /1 cannot be checked ▸ \(1 installed by a newer Agent Depot\)/);
   press(stdin, "j");
   await waitForFrame(lastFrame, (current) => /> .*cannot be checked/.test(current));
   press(stdin, ENTER);

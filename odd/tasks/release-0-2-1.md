@@ -17,7 +17,8 @@ Ship every finding of the 0.2.1 review (2026-09-30) as a patch release of @iseoa
   - Evidence: RED (3 tests failed: manifest parse, update-batch reason, `install --manifest` skip) -> GREEN (`pnpm test` 499 pass). Parser accepts the mismatch; `builtinPinMismatch()` drives update check (unknown, "Pinned to Agent Depot X; running Y") and manifest install (skipped with reason, others install). `install --version fixed:<other>` for a new install is still rejected in `selectInstallSource`. Route: inline.
 - [x] A3 `--help` / `-h` / `help` print usage to stdout and exit 0.
   - Evidence: RED (3 help tests failed) -> GREEN. Only the bare explicit forms print help; no args and `--help extra` stay exit 1 usage errors; USAGE text unchanged. README updated. Route: inline.
-- [ ] A4 Updates: collapsed "cannot be checked" row names the "newer Agent Depot" reason.
+- [x] A4 Updates: collapsed "cannot be checked" row names the "newer Agent Depot" reason.
+  - Evidence: RED (tui-updates-view test) -> GREEN. Row reads `N cannot be checked ▸ (1 installed by a newer Agent Depot)`; also counts A2's `pinned to another Agent Depot`. Route: inline.
 - [ ] A5 unmanaged symlink identity includes birthtime (`src/user-global-skill-inventory.ts:681`).
 - [ ] A6 README relative links (CONTEXT.md, docs/adr) → absolute GitHub URLs.
 ### B — Hardening and packaging
