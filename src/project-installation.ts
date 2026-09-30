@@ -925,6 +925,21 @@ function createCreatedPathsRollback(
   };
 }
 
+/** Writes one validated file and confirms the result is a regular file, not a link or other entry. */
+async function writeRegularFile(
+  destination: string,
+  file: ValidatedTreeFile,
+  description: "Installed" | "Updated",
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<Stats> {
+  await fileSystem.writeFile(destination, file.source.content);
+  const information = await fileSystem.lstat(destination);
+  if (information.isSymbolicLink() || !information.isFile()) {
+    throw new ProjectInstallationError("unsafe-target", `${description} file is not a regular file: ${destination}`);
+  }
+  return information;
+}
+
 async function writeInstalledFile(
   canonicalPath: string,
   file: ValidatedTreeFile,
@@ -935,11 +950,7 @@ async function writeInstalledFile(
   const destination = path.join(canonicalPath, ...file.relativePath.split("/"));
   await ensureDirectoryTree(canonicalPath, file.relativePath.split("/").slice(0, -1), createdPaths, uncertainCreates, fileSystem);
   uncertainCreates.add(destination);
-  await fileSystem.writeFile(destination, file.source.content);
-  const information = await fileSystem.lstat(destination);
-  if (information.isSymbolicLink() || !information.isFile()) {
-    throw new ProjectInstallationError("unsafe-target", `Installed file is not a regular file: ${destination}`);
-  }
+  const information = await writeRegularFile(destination, file, "Installed", fileSystem);
   createdPaths.push({ path: destination, kind: "file", identity: pathIdentity(information) });
   uncertainCreates.delete(destination);
   await fileSystem.chmod(destination, file.source.executable ? 0o755 : 0o644);
@@ -1910,11 +1921,7 @@ async function writeStagedTree(
     const segments = file.relativePath.split("/");
     const destination = path.join(stagePath, ...segments);
     await ensureDirectoryTree(stagePath, segments.slice(0, -1), [], new Set(), fileSystem);
-    await fileSystem.writeFile(destination, file.source.content);
-    const information = await fileSystem.lstat(destination);
-    if (information.isSymbolicLink() || !information.isFile()) {
-      throw new ProjectInstallationError("unsafe-target", `Updated file is not a regular file: ${destination}`);
-    }
+    await writeRegularFile(destination, file, "Updated", fileSystem);
     await fileSystem.chmod(destination, file.source.executable ? 0o755 : 0o644);
   }
 }
