@@ -541,75 +541,20 @@ export async function inspectProjectSkillInstallation(
   await assertNoSymlinkAncestors(projectRoot, [".agents", "skills"], fileSystem);
   await assertNoSymlinkAncestors(projectRoot, [".claude", "skills"], fileSystem);
 
-  const existingPaths: string[] = [];
   const locations: ProjectSkillInstallationLocationInspection[] = [];
   const expectedTree = files.map((file) => file.source);
+  const treeAccess = { lstat: fileSystem.lstat, readdir: fileSystem.readdir, readFile: fileSystem.readFile };
   for (const candidate of [canonicalPath, claudePath]) {
-    let information: Stats;
-    try {
-      information = await fileSystem.lstat(candidate);
-    } catch (error) {
-      if (isMissing(error)) {
-        locations.push(Object.freeze({ path: candidate, status: "missing" }));
-        continue;
-      }
-      throw error;
-    }
-
-    if (information.isSymbolicLink()) {
-      if (candidate !== claudePath || !existingPaths.includes(canonicalPath)) {
-        const collision = Object.freeze({ path: candidate, reason: "symbolic-link" as const });
-        locations.push(Object.freeze({ path: candidate, status: "collision", collision }));
-        continue;
-      }
-      let target: string;
-      try {
-        target = await fileSystem.readlink(candidate);
-      } catch {
-        const collision = Object.freeze({ path: candidate, reason: "symbolic-link" as const });
-        locations.push(Object.freeze({ path: candidate, status: "collision", collision }));
-        continue;
-      }
-      if (path.resolve(path.dirname(candidate), target) !== canonicalPath) {
-        const collision = Object.freeze({ path: candidate, reason: "symbolic-link" as const });
-        locations.push(Object.freeze({ path: candidate, status: "collision", collision }));
-        continue;
-      }
-      existingPaths.push(candidate);
-      locations.push(Object.freeze({ path: candidate, status: "identical" }));
-      continue;
-    }
-    if (!information.isDirectory()) {
-      const collision = Object.freeze({ path: candidate, reason: "not-directory" as const });
-      locations.push(Object.freeze({ path: candidate, status: "collision", collision, identity: pathIdentityKey(pathIdentity(information)) }));
-      continue;
-    }
-
-    let actualTree: readonly SkillTreeFile[];
-    try {
-      actualTree = await readExistingSkillTree(candidate, request.selection.path, {
-        lstat: fileSystem.lstat,
-        readdir: fileSystem.readdir,
-        readFile: fileSystem.readFile,
-      });
-    } catch {
-      const collision = Object.freeze({ path: candidate, reason: "unsafe-file" as const });
-      locations.push(Object.freeze({ path: candidate, status: "collision", collision }));
-      continue;
-    }
-    const comparison = compareSkillTrees(expectedTree, actualTree);
-    const digest = skillTreeBaseline(actualTree).digest;
-    const identity = pathIdentityKey(pathIdentity(information));
-    if (!comparison.identical) {
-      const collision = Object.freeze({
-        path: candidate,
-        reason: comparison.reason ?? "content-mismatch",
-      });
-      locations.push(Object.freeze({ path: candidate, status: "collision", collision, identity, digest }));
-      continue;
-    }
-    existingPaths.push(candidate);
-    locations.push(Object.freeze({ path: candidate, status: "identical", identity, digest }));
+    const canonicalIdentical = locations.some((location) => location.path === canonicalPath && location.status === "identical");
+    locations.push(await inspectSkillLocation(candidate, {
+      canonicalPath,
+      claudePath,
+      canonicalIdentical,
+      selectionPath: request.selection.path,
+      expectedTree,
+      fileSystem,
+      treeAccess,
+    }));
   }
 
   const firstExisting = locations.find((location) => location.status !== "missing");
@@ -622,6 +567,73 @@ export async function inspectProjectSkillInstallation(
     locations: Object.freeze(locations),
     ...(collision === undefined ? {} : { collision }),
   });
+}
+
+interface SkillLocationContext {
+  readonly canonicalPath: string;
+  readonly claudePath: string;
+  readonly canonicalIdentical: boolean;
+  readonly selectionPath: string;
+  readonly expectedTree: readonly SkillTreeFile[];
+  readonly fileSystem: ProjectInstallationFileSystem;
+  readonly treeAccess: SkillTreeFileSystem;
+}
+
+function collisionLocation(
+  candidate: string,
+  reason: ProjectSkillInstallationCollisionReason,
+  evidence: { readonly identity?: string; readonly digest?: string } = {},
+): ProjectSkillInstallationLocationInspection {
+  const collision = Object.freeze({ path: candidate, reason });
+  return Object.freeze({ path: candidate, status: "collision", collision, ...evidence });
+}
+
+async function inspectSkillLocation(
+  candidate: string,
+  context: SkillLocationContext,
+): Promise<ProjectSkillInstallationLocationInspection> {
+  const { fileSystem } = context;
+  let information: Stats;
+  try {
+    information = await fileSystem.lstat(candidate);
+  } catch (error) {
+    if (isMissing(error)) return Object.freeze({ path: candidate, status: "missing" });
+    throw error;
+  }
+  if (information.isSymbolicLink()) {
+    return await isClaudeExposureOfCanonical(candidate, context)
+      ? Object.freeze({ path: candidate, status: "identical" })
+      : collisionLocation(candidate, "symbolic-link");
+  }
+  if (!information.isDirectory()) {
+    return collisionLocation(candidate, "not-directory", { identity: pathIdentityKey(pathIdentity(information)) });
+  }
+
+  let actualTree: readonly SkillTreeFile[];
+  try {
+    actualTree = await readExistingSkillTree(candidate, context.selectionPath, context.treeAccess);
+  } catch {
+    return collisionLocation(candidate, "unsafe-file");
+  }
+  const comparison = compareSkillTrees(context.expectedTree, actualTree);
+  const evidence = {
+    identity: pathIdentityKey(pathIdentity(information)),
+    digest: skillTreeBaseline(actualTree).digest,
+  };
+  return comparison.identical
+    ? Object.freeze({ path: candidate, status: "identical", ...evidence })
+    : collisionLocation(candidate, comparison.reason ?? "content-mismatch", evidence);
+}
+
+/** A Claude symlink is an exposure only when it points to the canonical Skill that was itself found identical. */
+async function isClaudeExposureOfCanonical(candidate: string, context: SkillLocationContext): Promise<boolean> {
+  if (candidate !== context.claudePath || !context.canonicalIdentical) return false;
+  try {
+    const target = await context.fileSystem.readlink(candidate);
+    return path.resolve(path.dirname(candidate), target) === context.canonicalPath;
+  } catch {
+    return false;
+  }
 }
 
 /** Validates the immutable preview tree and its requested Host compatibility without writing. */
