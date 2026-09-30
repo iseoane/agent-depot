@@ -549,3 +549,26 @@ export async function executeSingleInstall(
     throw externalMethodFailure(error);
   }
 }
+
+/** A fixed version must be non-empty with no whitespace or control characters. */
+export function isValidFixedVersion(version: string): boolean {
+  return version.length > 0 && !/\s/u.test(version) && !Array.from(version).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
+/**
+ * True when the install would adopt an identical existing Skill but a selected
+ * Host location is missing, which the CLI only allows with --confirm-additional-host.
+ */
+export function needsAdditionalHostExposure(
+  inspection: ProjectSkillInstallationInspection,
+  hosts: readonly ProjectHost[],
+): boolean {
+  const identical = inspection.locations.filter((location) => location.status === "identical").map((location) => location.path);
+  if (identical.length === 0) return false;
+  const missingClaude = hosts.includes("claude") && !identical.includes(inspection.claudePath);
+  const missingCanonical = hosts.some((host) => host !== "claude") && !identical.includes(inspection.canonicalPath);
+  return missingClaude || missingCanonical;
+}

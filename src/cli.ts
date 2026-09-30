@@ -64,6 +64,7 @@ import {
   executeOrRejectMethod,
   executeSingleInstall,
   externalMethodFailure,
+  isValidFixedVersion,
   findSource,
   installOne,
   outputInstallationResult,
@@ -76,6 +77,7 @@ import {
   rollbackTransactions,
   type ResolvedManifestSelection,
 } from "./skill-install.js";
+import type { TuiEnvironment } from "./tui/environment.js";
 import { CliUsageError } from "./usage-error.js";
 import { applyUpdateBatch, previewSkillUpdate, relativeProjectPath, selectionWithInstallation } from "./skill-update.js";
 import {
@@ -99,7 +101,7 @@ export interface CliDependencies {
   /** Home directory used by user-global installation; injectable for tests. */
   readonly homeDirectory?: string;
   /** Test/embedding seam for the interactive TUI; defaults to the Ink renderer. */
-  readonly renderTui?: (operations: SourceOperations) => Promise<void>;
+  readonly renderTui?: (operations: SourceOperations, environment?: TuiEnvironment) => Promise<void>;
   /** Test seam: whether stdin supports raw-mode keyboard input; defaults to the real stdin. */
   readonly isInteractive?: () => boolean;
 }
@@ -192,7 +194,13 @@ const COMMANDS = new Map<string, CommandHandler>([
     }
     // Loaded lazily so non-interactive commands never import Ink/React.
     const renderTui = dependencies.renderTui ?? (await import("./tui/render.js")).renderTui;
-    await renderTui(operations);
+    await renderTui(operations, {
+      homeDirectory: dependencies.homeDirectory,
+      projectRoot: dependencies.projectRoot,
+      sourceAccess: dependencies.sourceAccess,
+      installationOptions: dependencies.installationOptions,
+      projectManifestStore: dependencies.projectManifestStore,
+    });
     return 0;
   }],
   ["source", async (values, context) => {
@@ -1331,10 +1339,7 @@ function parseVersionOption(value: string): VersionPolicy {
     return { policy: "latest" };
   }
   const version = value.startsWith("fixed:") ? value.slice("fixed:".length) : value;
-  if (!version || /\s/u.test(version) || Array.from(version).some((character) => {
-    const code = character.codePointAt(0) ?? 0;
-    return code <= 0x1f || code === 0x7f;
-  })) {
+  if (!isValidFixedVersion(version)) {
     throw new CliUsageError("--version fixed:<value> must provide a non-empty version without whitespace or control characters");
   }
   return { policy: "fixed", version };
