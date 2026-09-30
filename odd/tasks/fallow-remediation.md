@@ -7,7 +7,7 @@ Delivery: branch refactor/reduce-complexity; work-unit commits; no push, no merg
 
 - [x] Task D: Reduce complexity of `cli.ts runUninstall` (49/65), `cli.ts runInstall` (31/44), `project-installation.ts installProjectSkillTransaction` (31/44), plus `skill-discovery.ts consumeNestedMapping`, `parseSkillFrontmatter`, `source-state.ts parseState`. Pure refactor: existing tests are the characterization net; extracted logic units get focused tests when new.
 - [x] Task E: Fallow config/integration (branch chore/fallow-integration; commits e911b12, cbd2abd).
-- [ ] Task F: Path-traversal finding triage.
+- [x] Task F: Path-traversal finding triage (branch fix/path-traversal-triage).
 
 ## Task D progress / evidence
 - Route: inline (mechanical pure refactors, one file per commit; existing 199 tests are the characterization net, no new logic units).
@@ -25,3 +25,24 @@ Delivery: branch refactor/reduce-complexity; work-unit commits; no push, no merg
 - Scripts: `audit:dead-code`, `audit:dupes`, `audit:health`, `audit:all` (`audit` collides with the pnpm builtin). Cache dirs `coverage/` and `.fallow/` gitignored.
 - Checks: typecheck, lint, 199/199 tests; audit:dead-code, audit:dupes, audit:health all exit 0.
 - Remaining 29 flagged functions (parseInstallOptions 42/24 CRAP 47, runUpdate, scanRoot, adoptExistingProjectSkill, ...) are candidates for a follow-up refactor pass.
+
+## Task F progress / evidence
+- Route: inline (single shared helper + one adversarial test file). Branch fix/path-traversal-triage, not pushed. Scan: `npx --yes fallow@3.30.0 security --no-cache -f json`.
+- Baseline: 92 candidates (91 path-traversal: 48 path.join + 43 path.resolve; 1 command-injection `spawn`; the earlier "3 command-injection" figure was not reproducible). After: 92 (sink shapes are unchanged; the fix adds a check, not fewer calls). Exit code 0 (no gate).
+- Threat model: hostile Source (git repo / skill tree) or repository-committed manifest supplying `../`, absolute or odd names, symlinks escaping the target, symlinked target dirs. Priority on install/update/uninstall/overwrite/unmanaged removal/backup.
+- Classification (92): safe-by-prior-validation 34, safe-by-context 56, safe-by-design 1, real 1.
+
+| Family (sink) | N | Class | Evidence |
+|---|---|---|---|
+| F1 `spawn` in process-runner.ts:26 | 1 | design | argv vector, `shell:false`; method shape validated by `parsePortableInstallationMethod`; cwd realpath-contained (sources.ts:498-507); execution needs explicit confirmation |
+| F2 trusted root / constant joins (project/home root from CLI or `homedir()`, fixed filenames) | 21 | context | cli.ts:232,706,779,780,998,1139; project-installation:195,295,338,508,651,1025; user-global:90,114,336,371,382; manifest:540; discovery:79; sources:498; skill-update:273 |
+| F3 comparison / containment / preview only (no fs op on the result) | 31 | context | overlap checks (project-installation:168,169,878; cli:1658,1659), readlink-vs-canonical compares (241,548,1317; user-global:249), containment checks (cli:1704,1705; skill-update:334; sources:501), previews (cli:1602,1608; user-method:28; skill-update:119), protection sets (user-global:548-607; cli:1622,1433) |
+| F4 joins of validated names / relative paths | 18 | validated | skill name `isSafeSegment` via `skillNameFromSelection` (project-installation:1380); tree paths `isSafeRelativePath` in `readAndValidateTree` (1344); Source paths `validateSkillDirectoryPath` (git-source:459, used by discovery:110,362); git cache id is `git:<sha256[:24]>` checked at git-source:372-377 |
+| F5 component walks / readdir entries | 16 | validated | each step lstat-checked for symlinks (`assertNoSymlinkComponents/Ancestors`, `assertNoSymlinkPath`, `realDirectory`); readdir names cannot contain separators, adoption filters via `isSafeEntry` (skill-adoption:103) |
+| F6 `randomUUID` stage/backup names | 4 | context | project-installation:375,376,1028,1029 |
+| F7 `resolveInstallationPath` (project-installation:1677) | 1 | REAL | manifest `installation.path` only had to stay inside the project, so `src/demo`, `docs` or `.git/hooks/x` could be replaced or deleted by update/uninstall (guarded only by a baseline digest the hostile manifest also supplies) |
+
+- Real issue fix: `resolveInstallationPath` now also requires exactly `.agents/skills/<name>` or `.claude/skills/<name>` (name passes `isSafeSegment`). One shared helper covers inspect-removal, remove, inspect-update, update transaction (also user-global managed removals, which reuse them).
+- Behavior change (hardening only): a manifest/state record whose `installation.path` is not an immediate child of `.agents/skills` or `.claude/skills` is now rejected with `unsafe-target` at update/removal (before, any in-project directory was accepted). CLI overlap test message updated: nested `.agents/skills/shared/nested` is now rejected earlier ("not an immediate child") instead of "overlap"; still exit 1 and nothing deleted. Legitimate installs (always at those two layouts) are unaffected.
+- TDD: tests/path-containment.test.ts (5 tests). RED observed: "hostile manifest installation path" (removal of `src/demo` accepted). Already GREEN and kept as regression tests: hostile skill names/tree paths on install (`..`, absolute, `a/../../x`, backslash, `./`, trailing slash, foreign prefix; project unchanged), symlinked tracked skill dir and symlinked skills root (update/remove refuse, outside untouched), unmanaged user-global removal with hostile explicit paths and symlinked skill dir.
+- Suppressions: none added. Fallow only offers file-level (`// fallow-ignore-file security-sink`) or per-line comments; 91 sites (>20) would be noisy and a file-level ignore would hide future real sinks in the files that matter most. Classification lives here instead. Use `fallow security --gate new` (diff-based) in CI if a regression gate is wanted.
