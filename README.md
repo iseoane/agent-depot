@@ -59,13 +59,24 @@ user-provided methods are retained for review rather than rewritten.
 
 Uninstall is user-global only and never reads or changes project manifests. The
 choices are independent: `--skills` removes all managed user-global Skills,
-`--data` removes the catalog/configuration state file, and `--cli` prints a
-package-manager handoff for removing the persistent CLI. Skills and catalog data
-are preserved when their flags are omitted. Removing Skills reconciles their
-installation records; removing data while retaining Skills leaves those Skills
-untracked. Every filesystem deletion requires `--yes` after the complete
-preview. Agent Depot never invokes or infers a package manager, and Git Source
-caches are retained.
+`--unmanaged-skill <exact-global-path>` removes only explicitly selected unmanaged
+real directories below `~/.agents/skills` or `~/.claude/skills`, `--data` removes
+the catalog/configuration state file, and `--cli` prints a package-manager handoff
+for removing the persistent CLI. Unmanaged removal never searches or infers a
+Source, refuses symlinks, transient/backup paths, invalid trees, managed paths,
+and overlaps, and permanently deletes only after moving the unchanged tree to
+same-parent staging. Skills and catalog data are preserved when their flags are
+omitted. Removing Skills reconciles their installation records; removing data
+while retaining Skills leaves those Skills untracked. Every filesystem deletion
+requires `--yes` after the complete preview, and the unmanaged preview warns that
+Agent Depot cannot guarantee recovery without a resolvable Source. Immediately
+before each destructive removal, Agent Depot rereads managed installation records
+and fails closed if they changed or now claim the selected path. The source-state
+store serializes cooperating updates, but a non-cooperating process can still race
+between the final check and filesystem rename/delete; staging failures restore the
+original path when the result is known and otherwise retain the staged path with an
+uncertain-status error. Agent Depot never invokes or infers a package manager, and
+Git Source caches are retained.
 
 ## Batch updates
 
@@ -76,8 +87,22 @@ node dist/src/cli.js update check --scope project
 node dist/src/cli.js update check --scope user-global
 ```
 
-The check reports `Updateable`, `Current`, and `Unknown` Skills separately. Apply
-all updateable Skills or select one or more by their printed update ID, numeric
+The check reports `Updateable`, `Current`, and `Unknown` managed Skills separately. `Unknown`
+means a recorded managed selection could not be assessed safely (for example, its
+Source or version evidence is unavailable); it remains managed but is not
+updateable. For `--scope user-global` only, the check also reports `Unmanaged`
+real Skill directories found at exact absolute locations below the supported
+user-global roots. These are not update candidates, are not included in the
+managed status counts, and are never looked up through a Source. Project checks
+do not inventory or report unmanaged directories.
+
+Skipped or unsafe global entries are shown separately with guidance and are not
+Unmanaged entries or removal candidates. They may be symlinks, unsafe roots or
+Skill files, or transient Agent Depot paths; inspect them manually. The later
+unmanaged-removal workflow requires its own exact-path preview and explicit
+confirmation.
+
+Apply all updateable Skills or select one or more by their printed update ID, numeric
 index, or an unambiguous Skill path:
 
 ```sh

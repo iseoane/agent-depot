@@ -73,6 +73,7 @@ Keep the V1 architecture as small as possible while satisfying the agreed requir
 19. When removing a source, Agent Depot lists dependent skills that remain installed and lets the user keep all, uninstall selected skills, or uninstall all. Installed skills kept after source removal remain tracked in the catalog; updates can resume if the source is registered again or another method is configured.
 20. Skill uninstallation requires explicit confirmation.
 21. When uninstalling Agent Depot, the user can independently choose whether to remove the persistent CLI, managed skills, and catalog/configuration data. The default is to preserve managed skills and catalog/configuration data.
+22. An explicit `uninstall --unmanaged-skill <exact-global-path> --yes` may permanently remove selected unmanaged real Skill directories only below supported user-global roots. The preview shows exact paths and warns that recovery is not guaranteed; selection rejects transient/backup paths, symlinks or unsafe trees, invalid top-level Skill metadata, every managed record and canonical/Claude alias overlap, and content or identity drift. No Source lookup or project scope is used. Managed installation records are reread immediately before each destructive removal and any observed change fails closed; cooperating source-state operations are serialized, but non-cooperating filesystem/process races remain unavoidable and uncertain staging outcomes preserve the staged path.
 
 ## Acceptance checks
 
@@ -88,7 +89,7 @@ Keep the V1 architecture as small as possible while satisfying the agreed requir
 - Removing a source preserves installed dependents unless the user selects them for uninstall.
 - If one selected skill fails to update, independent selected updates still proceed and the final summary identifies the failures.
 - Invocations via `pnpm dlx`, `npx`, and the global CLI observe the same user catalog/configuration.
-- Uninstalling Agent Depot preserves skills and user data by default and asks separately about each removal category.
+- Uninstalling Agent Depot preserves skills and user data by default and asks separately about each removal category; explicitly selected unmanaged global Skills use exact-path preview, fail-closed race checks, same-parent staging, and permanent deletion only after `--yes`.
 - The CLI works on Linux and Windows for the supported V1 skill/host combinations.
 
 ## Explicitly later or out of scope for V1

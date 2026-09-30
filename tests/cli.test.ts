@@ -139,7 +139,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]\n  agent-depot uninstall [--skills] [--data] [--cli] [--yes]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]\n  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -247,6 +247,195 @@ test("uninstalls independent user-global choices with conservative defaults", as
     await rm(homeDirectory, { recursive: true, force: true });
     await rm(stateDirectory, { recursive: true, force: true });
     await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("previews and permanently deletes explicitly selected unmanaged user-global Skills", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-unmanaged-remove-home-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    const first = path.join(homeDirectory, ".agents", "skills", "first");
+    const second = path.join(homeDirectory, ".claude", "skills", "second");
+    await mkdir(first, { recursive: true });
+    await mkdir(second, { recursive: true });
+    await writeFile(path.join(first, "SKILL.md"), "---\nname: first\ndescription: First\n---\n\nFirst\n");
+    await writeFile(path.join(second, "SKILL.md"), "---\nname: second\ndescription: Second\n---\n\nSecond\n");
+    const operations = fakeOperations({ async listUserGlobalInstallations() { return []; } });
+    const dependencies = { operations, homeDirectory, stdout: (line: string) => output.push(line), stderr: (line: string) => errors.push(line) };
+
+    assert.equal(await runCli(["uninstall", "--unmanaged-skill", first, "--unmanaged-skill", second], dependencies), 1);
+    assert.match(errors.join("\\n"), /not confirmed/);
+    assert.match(output.join("\\n"), /permanent deletion/i);
+    assert.ok(output.join("\\n").includes(first));
+    assert.equal((await lstat(first)).isDirectory(), true);
+    assert.equal((await lstat(second)).isDirectory(), true);
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli(["uninstall", "--unmanaged-skill", first, "--unmanaged-skill", second, "--yes"], dependencies), 0);
+    await assert.rejects(lstat(first), { code: "ENOENT" });
+    await assert.rejects(lstat(second), { code: "ENOENT" });
+    assert.match(output.join("\\n"), /recovery.*not guaranteed/i);
+    assert.match(output.join("\\n"), /Permanently deleted 2 unmanaged/);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+  }
+});
+
+test("rejects duplicate, traversing, symlink, and managed unmanaged-skill selections", async (t) => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-unmanaged-reject-home-"));
+  const outside = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-unmanaged-reject-outside-"));
+  const errors: string[] = [];
+  try {
+    const candidate = path.join(homeDirectory, ".agents", "skills", "candidate");
+    const managed = path.join(homeDirectory, ".agents", "skills", "managed");
+    await mkdir(candidate, { recursive: true });
+    await mkdir(managed, { recursive: true });
+    await writeFile(path.join(candidate, "SKILL.md"), "---\nname: candidate\ndescription: Candidate\n---\n\nCandidate\n");
+    await writeFile(path.join(managed, "SKILL.md"), "---\nname: managed\ndescription: Managed\n---\n\nManaged\n");
+    const managedSelection: ProjectSkillSelection = {
+      source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+      path: "portable/managed",
+      version: { policy: "latest" },
+      hosts: ["pi", "claude"],
+      installation: { path: ".agents/skills/managed", adopted: false },
+    };
+    const operations = fakeOperations({ async listUserGlobalInstallations() { return [managedSelection]; } });
+    const run = (args: readonly string[]) => runCli(args, {
+      operations,
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+    });
+
+    assert.equal(await run(["uninstall", "--unmanaged-skill", candidate, "--unmanaged-skill", candidate, "--yes"]), 1);
+    assert.match(errors.at(-1) ?? "", /Duplicate --unmanaged-skill/);
+    assert.equal(await run(["uninstall", "--unmanaged-skill", `${candidate}/../candidate`, "--yes"]), 1);
+    assert.match(errors.at(-1) ?? "", /exact normalized absolute/);
+    assert.equal(await run(["uninstall", "--unmanaged-skill", managed, "--yes"]), 1);
+    assert.match(errors.at(-1) ?? "", /managed/);
+
+    await writeFile(path.join(outside, "SKILL.md"), "outside");
+    const linked = path.join(homeDirectory, ".claude", "skills", "linked");
+    await mkdir(path.dirname(linked), { recursive: true });
+    try {
+      await symlink(outside, linked, "dir");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+    assert.equal(await run(["uninstall", "--unmanaged-skill", linked, "--yes"]), 1);
+    assert.match(errors.at(-1) ?? "", /real directory/);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("fails closed when managed records change before unmanaged deletion", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-unmanaged-race-home-"));
+  const candidate = path.join(homeDirectory, ".agents", "skills", "candidate");
+  const errors: string[] = [];
+  try {
+    await mkdir(candidate, { recursive: true });
+    await writeFile(path.join(candidate, "SKILL.md"), "---\nname: candidate\ndescription: Candidate\n---\n\nCandidate\n");
+    const changedSelection: ProjectSkillSelection = {
+      source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+      path: "portable/other",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/other", adopted: false },
+    };
+    let reads = 0;
+    const operations = fakeOperations({
+      async listUserGlobalInstallations() {
+        reads += 1;
+        return reads === 1 ? [] : [changedSelection];
+      },
+    });
+    assert.equal(await runCli(["uninstall", "--unmanaged-skill", candidate, "--yes"], {
+      operations,
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+    }), 1);
+    assert.match(errors.at(-1) ?? "", /Managed Skill installation records changed/);
+    assert.equal((await lstat(candidate)).isDirectory(), true);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+  }
+});
+
+test("preserves the existing all-managed uninstall flow", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-managed-uninstall-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-managed-uninstall-state-"));
+  try {
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const source = await operations.addGitSource(external.url);
+    const selection: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url },
+      path: "portable/managed",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/managed", adopted: false },
+    };
+    await operations.addUserGlobalInstallation!(selection);
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "managed"), { recursive: true });
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "managed", "SKILL.md"), "managed");
+    assert.equal(await runCli(["uninstall", "--skills", "--yes"], { operations, homeDirectory }), 0);
+    await assert.rejects(lstat(path.join(homeDirectory, ".agents", "skills", "managed")), { code: "ENOENT" });
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("removes every managed user-global Skill and reconciles records in selection order", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-managed-uninstall-multiple-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-managed-uninstall-multiple-state-"));
+  try {
+    const baseOperations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const first: ProjectSkillSelection = {
+      source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+      path: "portable/first",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/first", adopted: false },
+    };
+    const second: ProjectSkillSelection = {
+      source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+      path: "portable/second",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/second", adopted: false },
+    };
+    await baseOperations.addUserGlobalInstallation!(first);
+    await baseOperations.addUserGlobalInstallation!(second);
+    for (const name of ["first", "second"]) {
+      const directory = path.join(homeDirectory, ".agents", "skills", name);
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "SKILL.md"), name, "utf8");
+    }
+    const removed: string[] = [];
+    const operations: SourceOperations = {
+      ...baseOperations,
+      async removeUserGlobalInstallations(selections) {
+        removed.push(...selections.map((selection) => selection.path));
+        await baseOperations.removeUserGlobalInstallations!(selections);
+      },
+    };
+
+    assert.equal(await runCli(["uninstall", "--skills", "--yes"], { operations, homeDirectory }), 0);
+    assert.deepEqual(removed, ["portable/first", "portable/second"]);
+    await assert.rejects(lstat(path.join(homeDirectory, ".agents", "skills", "first")), { code: "ENOENT" });
+    await assert.rejects(lstat(path.join(homeDirectory, ".agents", "skills", "second")), { code: "ENOENT" });
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
   }
 });
 
@@ -2130,6 +2319,68 @@ test("refuses unsafe or unsupported upstream methods without executing commands"
     await assert.rejects(readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("reports user-global unmanaged Skill locations separately without resolving them as Sources", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-global-unmanaged-home-"));
+  const output: string[] = [];
+  const sourceReads: string[] = [];
+  const managedTree: readonly SkillTreeFile[] = [
+    { path: "portable/managed/SKILL.md", content: Buffer.from("managed"), executable: false },
+  ];
+  const managed: ProjectSkillSelection = {
+    source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+    path: "portable/managed",
+    version: { policy: "latest" },
+    hosts: ["pi"],
+    installation: {
+      path: ".agents/skills/managed",
+      adopted: false,
+      resolvedVersion: { kind: "builtin-package", version: "0.1.0" },
+      baseline: skillTreeBaseline(managedTree),
+    },
+  };
+  try {
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "managed"), { recursive: true });
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "managed", "SKILL.md"), "---\nname: managed\ndescription: Managed\n---\n\nManaged\n");
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "unmanaged"), { recursive: true });
+    await writeFile(path.join(homeDirectory, ".agents", "skills", "unmanaged", "SKILL.md"), "---\nname: unmanaged\ndescription: Unmanaged\n---\n\nUnmanaged\n");
+    await mkdir(path.join(homeDirectory, ".claude", "skills", "claude-unmanaged"), { recursive: true });
+    await writeFile(path.join(homeDirectory, ".claude", "skills", "claude-unmanaged", "SKILL.md"), "---\nname: claude-unmanaged\ndescription: Claude unmanaged\n---\n\nUnmanaged\n");
+    await mkdir(path.join(homeDirectory, ".agents", "skills", "unsafe", "SKILL.md"), { recursive: true });
+
+    const exitCode = await runCli(["update", "check", "--scope", "user-global"], {
+      operations: fakeOperations({
+        async listUserGlobalInstallations() {
+          return [managed];
+        },
+      }),
+      homeDirectory,
+      sourceAccess: {
+        async readSkillTree() {
+          throw new Error("the update check must use the snapshot reader");
+        },
+        async readSkillTreeSnapshot(_source, skillPath) {
+          sourceReads.push(skillPath);
+          assert.equal(skillPath, managed.path);
+          return { files: managedTree, resolvedVersion: managed.installation?.resolvedVersion };
+        },
+      },
+      stdout: (line) => output.push(line),
+    });
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(sourceReads, ["portable/managed"]);
+    assert.match(output.join("\\n"), /Current \(1\)/);
+    assert.match(output.join("\\n"), /Unmanaged \(2\):/);
+    assert.ok(output.includes(`  ${path.join(homeDirectory, ".agents", "skills", "unmanaged")}`));
+    assert.ok(output.includes(`  ${path.join(homeDirectory, ".claude", "skills", "claude-unmanaged")}`));
+    assert.match(output.join("\\n"), /Skipped\/unsafe entries \(1\):/);
+    assert.ok(output.includes(`  ${path.join(homeDirectory, ".agents", "skills", "unsafe")}: SKILL.md is not a real file`));
+    assert.match(output.join("\\n"), /not Unmanaged entries or removal candidates/);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
   }
 });
 
