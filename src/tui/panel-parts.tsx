@@ -1,0 +1,45 @@
+import { Box, Text } from "ink";
+
+import { theme } from "./theme.js";
+
+/** The `> [x] 1 name` rows of a checklist; the caller renders the header. */
+export function ChecklistLines<T>({ choices, cursor, isSelected, keyOf, label }: {
+  readonly choices: readonly T[];
+  readonly cursor: number;
+  readonly isSelected: (choice: T) => boolean;
+  readonly keyOf: (choice: T) => string;
+  readonly label: (choice: T) => string;
+}) {
+  return (
+    <>
+      {choices.map((choice, position) => (
+        <Text key={keyOf(choice)}>
+          {position === cursor ? "> " : "  "}[{isSelected(choice) ? "x" : " "}] {position + 1} {label(choice)}
+        </Text>
+      ))}
+    </>
+  );
+}
+
+/** Preview lines; `warnFirst` colors the first one as a warning. */
+export function PreviewLines({ lines, warnFirst = false }: { readonly lines: readonly string[]; readonly warnFirst?: boolean }) {
+  return (
+    <>
+      {lines.map((line, position) => <Text key={position} color={warnFirst && position === 0 ? theme.warning : undefined}>{line}</Text>)}
+    </>
+  );
+}
+
+/** A preview followed by a y/n question. */
+export function PreviewConfirm({ lines, question, warnFirst }: {
+  readonly lines: readonly string[];
+  readonly question: string;
+  readonly warnFirst?: boolean;
+}) {
+  return (
+    <Box flexDirection="column">
+      <PreviewLines lines={lines} warnFirst={warnFirst} />
+      <Text>{question}</Text>
+    </Box>
+  );
+}

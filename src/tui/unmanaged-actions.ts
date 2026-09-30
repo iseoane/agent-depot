@@ -18,6 +18,7 @@ import {
   type UserGlobalSymlinkRemovalInspection,
 } from "../user-global-skill-inventory.js";
 import type { TuiEnvironment } from "./environment.js";
+import { answerYesNo, moveCursor } from "./mode-keys.js";
 import { homeOf, type UnmanagedGroup, type UnmanagedLocation } from "./installations.js";
 
 /** One location ready to be removed: a real directory or only a symbolic link. */
@@ -207,9 +208,9 @@ export function handleUnmanagedKey(context: UnmanagedContext, mode: { readonly k
           : [...current.selected, location.path];
         context.setMode({ ...current, selected });
       };
+      const cursor = moveCursor(current.cursor, locations.length, input, key);
       if (key.escape) cancel(context);
-      else if (key.downArrow || input === "j") context.setMode({ ...current, cursor: Math.min(current.cursor + 1, locations.length - 1) });
-      else if (key.upArrow || input === "k") context.setMode({ ...current, cursor: Math.max(current.cursor - 1, 0) });
+      else if (cursor !== undefined) context.setMode({ ...current, cursor });
       else if (input === " ") toggle(current.cursor);
       else if (Number(input) >= 1 && Number(input) <= locations.length) toggle(Number(input) - 1);
       else if (key.return) {
@@ -220,8 +221,7 @@ export function handleUnmanagedKey(context: UnmanagedContext, mode: { readonly k
       return true;
     }
     case "confirm-unmanaged":
-      if (input === "y") void execute(context, current.group, current.prepared);
-      else if (input === "n" || key.escape) cancel(context);
+      answerYesNo(input, key, () => void execute(context, current.group, current.prepared), () => cancel(context));
       return true;
     default:
       return false;
