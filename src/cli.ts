@@ -785,10 +785,9 @@ async function runUpdate(
   const manifestStore = options.scope === "project"
     ? dependencies.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot))
     : undefined;
-  const installed = options.scope === "project"
-    ? (await manifestStore!.load()).skills
+  const installed = manifestStore
+    ? (await manifestStore.load()).skills
     : await requireUserGlobalInstallations(operations);
-  const trackedInstallationPaths = installed.flatMap((selection) => selection.installation === undefined ? [] : [selection.installation.path]);
   const resolveSource = operations.resolveProjectSource
     ? (source: ProjectSource) => operations.resolveProjectSource!(source)
     : resolveProjectSource;
@@ -802,46 +801,22 @@ async function runUpdate(
     return 0;
   }
 
-  const requested = options.all
-    ? "all" as const
-    : resolveUpdateSelectionIds(assessment, options.requested);
-  let selected: readonly UpdateBatchAssessmentItem[];
-  try {
-    selected = selectUpdateBatch(assessment, requested);
-  } catch (error) {
-    if (error instanceof UpdateBatchSelectionError) throw new CliUsageError(error.message);
-    throw error;
-  }
-
-  const previewFailures: Array<{ readonly item: UpdateBatchAssessmentItem; readonly error: string }> = [];
   const installationFileSystem = dependencies.installationOptions?.fileSystem;
-  for (const item of selected) {
-    try {
-      outputUpdatePreview(await previewSkillUpdate(item, {
-        projectRoot,
-        scope: options.scope,
-        sourceAccess,
-        sourceOperations: operations,
-        trackedInstallationPaths,
-        ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
-        ...(installationFileSystem === undefined ? {} : { installationFileSystem }),
-      }), options.scope, output);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      previewFailures.push({ item, error: message });
-      output(`Preview failed for ${JSON.stringify(item.id)}: ${message}`);
-    }
-  }
-
-  requireConfirmation(options.confirmed, "Update not confirmed; rerun with --yes after reviewing every candidate preview");
-  const result = await applyUpdateBatch(selected, {
+  const context = {
     projectRoot,
     scope: options.scope,
     sourceAccess,
     sourceOperations: operations,
-    trackedInstallationPaths,
+    trackedInstallationPaths: installed.flatMap((selection) => selection.installation === undefined ? [] : [selection.installation.path]),
     ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
     ...(installationFileSystem === undefined ? {} : { installationFileSystem }),
+  };
+  const selected = selectUpdateCandidates(assessment, options);
+  const previewFailures = await previewUpdateCandidates(selected, context, options.scope, output);
+
+  requireConfirmation(options.confirmed, "Update not confirmed; rerun with --yes after reviewing every candidate preview");
+  const result = await applyUpdateBatch(selected, {
+    ...context,
     // The callback is invoked independently for every candidate. In particular,
     // a modified installation is never overwritten unless this invocation was
     // explicitly confirmed with --yes.
@@ -853,8 +828,8 @@ async function runUpdate(
   });
 
   for (const failure of previewFailures) {
-    if (!result.failed.some((item) => item.id === failure.item.id)) {
-      output(`Preview failure was not selected for application: ${JSON.stringify(failure.item.id)}`);
+    if (!result.failed.some((item) => item.id === failure.id)) {
+      output(`Preview failure was not selected for application: ${JSON.stringify(failure.id)}`);
     }
   }
   for (const item of result.updated) {
@@ -865,6 +840,39 @@ async function runUpdate(
   }
   output(`Update summary: ${result.updated.length} updated, ${result.failed.length} failed`);
   return result.failed.length === 0 ? 0 : 1;
+}
+
+function selectUpdateCandidates(
+  assessment: Parameters<typeof selectUpdateBatch>[0],
+  options: UpdateOptions,
+): readonly UpdateBatchAssessmentItem[] {
+  const requested = options.all
+    ? "all" as const
+    : resolveUpdateSelectionIds(assessment, options.requested);
+  try {
+    return selectUpdateBatch(assessment, requested);
+  } catch (error) {
+    if (error instanceof UpdateBatchSelectionError) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
+
+async function previewUpdateCandidates(
+  selected: readonly UpdateBatchAssessmentItem[],
+  context: Parameters<typeof previewSkillUpdate>[1],
+  scope: UpdateOptions["scope"],
+  output: (line: string) => void,
+): Promise<readonly UpdateBatchAssessmentItem[]> {
+  const failures: UpdateBatchAssessmentItem[] = [];
+  for (const item of selected) {
+    try {
+      outputUpdatePreview(await previewSkillUpdate(item, context), scope, output);
+    } catch (error) {
+      failures.push(item);
+      output(`Preview failed for ${JSON.stringify(item.id)}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return failures;
 }
 
 function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
