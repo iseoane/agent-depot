@@ -14,16 +14,18 @@
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\"",
-    "test": "pnpm build && node --test \"dist/**/*.test.js\"",
+    "test": "pnpm build && node --test \"dist/tests/*.test.js\"",
     "test:single": "pnpm build && node -e \"const { spawnSync } = require('node:child_process'); const input = process.argv[1] || 'tests/version.test.ts'; const file = input.replace(/^tests[\\\\/]/, 'dist/tests/').replace(/\\\\.ts$/i, '.js'); process.exit(spawnSync(process.execPath, ['--test', file], { stdio: 'inherit' }).status ?? 1);\"",
-    "test:coverage": "node -e \"require('node:fs').rmSync('coverage',{recursive:true,force:true})\" && tsc -p tsconfig.coverage.json && node -e \"const { spawnSync } = require('node:child_process'); process.exit(spawnSync(process.execPath, ['--enable-source-maps','--test','--test-reporter=dot','dist/**/*.test.js'], { stdio: 'inherit', env: { ...process.env, NODE_V8_COVERAGE: 'coverage/v8' } }).status ?? 1);\"",
+    "test:coverage": "node -e \"require('node:fs').rmSync('coverage',{recursive:true,force:true})\" && tsc -p tsconfig.coverage.json && node -e \"const { spawnSync } = require('node:child_process'); process.exit(spawnSync(process.execPath, ['--enable-source-maps','--test','--test-reporter=dot','dist/tests/*.test.js'], { stdio: 'inherit', env: { ...process.env, NODE_V8_COVERAGE: 'coverage/v8' } }).status ?? 1);\"",
     "audit:dead-code": "npx --yes fallow@3.30.0 dead-code --fail-on-issues",
     "audit:dupes": "npx --yes fallow@3.30.0 dupes",
     "audit:health": "pnpm test:coverage && npx --yes fallow@3.30.0 health --coverage coverage/v8 --min-score 85",
-    "audit:all": "pnpm audit:dead-code && pnpm audit:dupes && pnpm audit:health"
+    "audit:all": "pnpm audit:dead-code && pnpm audit:dupes && pnpm audit:health",
+    "test:e2e": "pnpm build && node --test --test-timeout=120000 \"dist/tests/e2e/*.e2e.test.js\""
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.14.1",
     "@types/node": "^24.19.0",
     "@types/react": "^19.3.0",
     "eslint": "^9.39.2",
