@@ -150,103 +150,121 @@ interface ScanState {
   readonly exposures: UserGlobalSkillExposure[];
 }
 
+type GlobalSkillRoot = (typeof GLOBAL_SKILL_ROOTS)[number];
+
 async function scanRoot(
-  root: (typeof GLOBAL_SKILL_ROOTS)[number],
+  root: GlobalSkillRoot,
   rootPath: string,
   homeDirectory: string,
   state: ScanState,
 ): Promise<void> {
-  const { managedPaths, entries, skipped } = state;
+  const names = await listScannableRoot(root, rootPath, homeDirectory, state.skipped);
+  for (const name of names ?? []) {
+    await scanRootEntry(root, name, path.join(rootPath, name), homeDirectory, state);
+  }
+}
+
+/** Returns the sorted entry names of a safe root, or undefined when it is missing or reported as skipped. */
+async function listScannableRoot(
+  root: GlobalSkillRoot,
+  rootPath: string,
+  homeDirectory: string,
+  skipped: UserGlobalSkillInventorySkippedEntry[],
+): Promise<string[] | undefined> {
   const ancestorSafety = await inspectGlobalRootAncestors(homeDirectory, rootPath);
-  if (ancestorSafety === "missing") return;
+  if (ancestorSafety === "missing") return undefined;
   if (ancestorSafety !== undefined) {
     skipped.push(skip(rootPath, root.kind, "unsafe-root", ancestorSafety));
-    return;
+    return undefined;
   }
   let rootInformation: Stats;
   try {
     rootInformation = await lstat(rootPath);
   } catch (error) {
-    if (isMissing(error)) return;
-    skipped.push(skip(rootPath, root.kind, "unsafe-root", errorMessage(error)));
-    return;
+    if (!isMissing(error)) skipped.push(skip(rootPath, root.kind, "unsafe-root", errorMessage(error)));
+    return undefined;
   }
   if (rootInformation.isSymbolicLink() || !rootInformation.isDirectory()) {
     skipped.push(skip(rootPath, root.kind, "unsafe-root", "global Skill root is not a real directory"));
-    return;
+    return undefined;
   }
-
-  let names: string[];
   try {
-    names = await readdir(rootPath);
+    return (await readdir(rootPath)).sort();
   } catch (error) {
     skipped.push(skip(rootPath, root.kind, "unsafe-root", errorMessage(error)));
+    return undefined;
+  }
+}
+
+async function scanRootEntry(
+  root: GlobalSkillRoot,
+  name: string,
+  candidatePath: string,
+  homeDirectory: string,
+  state: ScanState,
+): Promise<void> {
+  const { managedPaths, entries, skipped } = state;
+  if (isTransientName(name)) {
+    skipped.push({ name, path: candidatePath, root: root.kind, reason: "excluded-transient" });
     return;
   }
 
-  for (const name of names.sort()) {
-    const candidatePath = path.join(rootPath, name);
-    if (isTransientName(name)) {
-      skipped.push({ name, path: candidatePath, root: root.kind, reason: "excluded-transient" });
-      continue;
-    }
-
-    let information: Stats;
-    try {
-      // lstat is deliberate: neither an entry nor any ancestor below the root
-      // is followed while deciding whether it is eligible for removal.
-      information = await lstat(candidatePath);
-    } catch (error) {
-      if (isMissing(error)) continue;
-      skipped.push(skip(candidatePath, root.kind, "unsafe-entry", errorMessage(error), name));
-      continue;
-    }
-
-    if (information.isSymbolicLink()) {
-      await classifySymlink(candidatePath, name, root.kind, homeDirectory, state);
-      continue;
-    }
-    if (!information.isDirectory()) continue;
-
-    const skillFile = path.join(candidatePath, "SKILL.md");
-    let skillFileInformation: Stats;
-    try {
-      skillFileInformation = await lstat(skillFile);
-    } catch (error) {
-      if (isMissing(error)) continue;
-      skipped.push(skip(candidatePath, root.kind, "unsafe-skill-file", errorMessage(error), name));
-      continue;
-    }
-    if (skillFileInformation.isSymbolicLink() || !skillFileInformation.isFile()) {
-      skipped.push(skip(candidatePath, root.kind, "unsafe-skill-file", "SKILL.md is not a real file", name));
-      continue;
-    }
-    let skillContent: Uint8Array;
-    try {
-      skillContent = await readFile(skillFile);
-    } catch (error) {
-      skipped.push(skip(candidatePath, root.kind, "unsafe-skill-file", `SKILL.md cannot be read: ${errorMessage(error)}`, name));
-      continue;
-    }
-    if (parseSkillFrontmatter(Buffer.from(skillContent).toString("utf8")) === undefined) {
-      skipped.push(skip(candidatePath, root.kind, "unsafe-skill-file", "SKILL.md does not contain valid top-level name and description frontmatter", name));
-      continue;
-    }
-    const unsafeTreeEntry = await findUnsafeTreeEntry(candidatePath);
-    if (unsafeTreeEntry !== undefined) {
-      skipped.push(skip(candidatePath, root.kind, "unsafe-entry", unsafeTreeEntry, name));
-      continue;
-    }
-
-    const entry: UserGlobalSkillInventoryEntry = {
-      name,
-      path: candidatePath,
-      root: root.kind,
-      host: root.kind === "claude" ? "claude" : "shared",
-      status: managedPaths.has(pathKey(candidatePath)) ? "managed" : "unmanaged",
-    };
-    entries.push(Object.freeze(entry));
+  let information: Stats;
+  try {
+    // lstat is deliberate: neither an entry nor any ancestor below the root
+    // is followed while deciding whether it is eligible for removal.
+    information = await lstat(candidatePath);
+  } catch (error) {
+    if (!isMissing(error)) skipped.push(skip(candidatePath, root.kind, "unsafe-entry", errorMessage(error), name));
+    return;
   }
+
+  if (information.isSymbolicLink()) {
+    await classifySymlink(candidatePath, name, root.kind, homeDirectory, state);
+    return;
+  }
+  if (!information.isDirectory()) return;
+
+  const problem = await findSkillDirectoryProblem(candidatePath);
+  if (problem === "not-a-skill") return;
+  if (problem !== undefined) {
+    skipped.push(skip(candidatePath, root.kind, problem.reason, problem.detail, name));
+    return;
+  }
+  entries.push(Object.freeze<UserGlobalSkillInventoryEntry>({
+    name,
+    path: candidatePath,
+    root: root.kind,
+    host: root.kind === "claude" ? "claude" : "shared",
+    status: managedPaths.has(pathKey(candidatePath)) ? "managed" : "unmanaged",
+  }));
+}
+
+/** Why a real directory is not an eligible Skill: silently "not-a-skill" (no SKILL.md) or a reported problem. */
+async function findSkillDirectoryProblem(
+  candidatePath: string,
+): Promise<{ readonly reason: "unsafe-skill-file" | "unsafe-entry"; readonly detail: string } | "not-a-skill" | undefined> {
+  const skillFile = path.join(candidatePath, "SKILL.md");
+  let skillFileInformation: Stats;
+  try {
+    skillFileInformation = await lstat(skillFile);
+  } catch (error) {
+    return isMissing(error) ? "not-a-skill" : { reason: "unsafe-skill-file", detail: errorMessage(error) };
+  }
+  if (skillFileInformation.isSymbolicLink() || !skillFileInformation.isFile()) {
+    return { reason: "unsafe-skill-file", detail: "SKILL.md is not a real file" };
+  }
+  let skillContent: Uint8Array;
+  try {
+    skillContent = await readFile(skillFile);
+  } catch (error) {
+    return { reason: "unsafe-skill-file", detail: `SKILL.md cannot be read: ${errorMessage(error)}` };
+  }
+  if (parseSkillFrontmatter(Buffer.from(skillContent).toString("utf8")) === undefined) {
+    return { reason: "unsafe-skill-file", detail: "SKILL.md does not contain valid top-level name and description frontmatter" };
+  }
+  const unsafeTreeEntry = await findUnsafeTreeEntry(candidatePath);
+  return unsafeTreeEntry === undefined ? undefined : { reason: "unsafe-entry", detail: unsafeTreeEntry };
 }
 
 async function classifySymlink(
