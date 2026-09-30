@@ -224,6 +224,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       global: (data?.global ?? []).map((row) => row.selection),
       project: (data?.project ?? []).map((row) => row.selection),
       sources: data?.sources ?? [],
+      unmanagedNames: new Set<string>(),
     }),
     [data],
   );
