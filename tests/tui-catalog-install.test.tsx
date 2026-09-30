@@ -262,6 +262,65 @@ test("adopting an identical Skill with a missing Host location needs a separate 
   unmount();
 });
 
+/** A fixture whose only Source is an external Git Source, with a recording refresh seam. */
+async function gitFixture(f: Fixture, refresh: (installedBefore: boolean) => Promise<void>): Promise<{ readonly fixture: Fixture; readonly events: string[] }> {
+  const git = await f.operations.addGitSource("https://example.com/ext.git");
+  const events: string[] = [];
+  const operations: SourceOperations = {
+    ...f.operations,
+    listSources: async () => [git],
+    discoverSkills: async () => [{ ...demo, sourceId: git.id }],
+    resolveProjectSource: async () => git,
+    resolveSourceVersion: async () => undefined,
+    refreshProjectSource: async () => {
+      events.push("refresh");
+      const installed = await readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md")).then(() => true, () => false);
+      await refresh(installed);
+      return git;
+    },
+  };
+  const gitAccess = {
+    readSkillTree: sourceAccess.readSkillTree,
+    readSkillTreeSnapshot: async () => ({ files: tree }),
+  };
+  return { fixture: { ...f, operations, environment: { ...f.environment, sourceAccess: gitAccess } }, events };
+}
+
+test("confirming an install refreshes a Git Source first, before anything is written", async (t) => {
+  const f = await fixture(t);
+  let installedAtRefresh: boolean | undefined;
+  const { fixture: g, events } = await gitFixture(f, async (installed) => {
+    installedAtRefresh = installed;
+  });
+  const { lastFrame, stdin, unmount } = mount({ ...g });
+  await waitFor(lastFrame, /demo/);
+  await chooseInstall(stdin, ["2"], "2", "1");
+  await waitFor(lastFrame, /y\/n/);
+  assert.deepEqual(events, [], "previewing must not refresh, like the CLI without --yes");
+  await key(stdin, "y");
+  await waitFor(lastFrame, /Installed Skill "demo"/);
+  assert.deepEqual(events, ["refresh"]);
+  assert.equal(installedAtRefresh, false);
+  assert.equal(await readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
+  unmount();
+});
+
+test("a failed refresh aborts the install with an error and writes nothing", async (t) => {
+  const f = await fixture(t);
+  const { fixture: g } = await gitFixture(f, async () => {
+    throw new Error("network unreachable");
+  });
+  const { lastFrame, stdin, unmount } = mount({ ...g });
+  await waitFor(lastFrame, /demo/);
+  await chooseInstall(stdin, ["2"], "2", "1");
+  await waitFor(lastFrame, /y\/n/);
+  await key(stdin, "y");
+  await waitFor(lastFrame, /network unreachable/);
+  await assert.rejects(readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  unmount();
+});
+
 test("install shows an error when the Skill is already installed there", async (t) => {
   const f = await fixture(t);
   await f.operations.addUserGlobalInstallation!(selection(["claude"]));

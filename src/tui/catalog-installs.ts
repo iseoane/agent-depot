@@ -12,6 +12,7 @@ import {
 } from "../project-manifest.js";
 import {
   defaultProjectSkillTreeAccess,
+  confirmSingleInstallPlan,
   executeSingleInstall,
   needsAdditionalHostExposure,
   outputSingleInstallPreview,
@@ -159,9 +160,11 @@ export async function runInstall(
 ): Promise<readonly string[]> {
   const lines: string[] = [];
   const { manifestStore } = prepared;
+  // Like `install --yes`: refresh the Source, then resolve and inspect again before writing.
+  const confirmed = await confirmSingleInstallPlan(prepared.plan);
   const plan = confirmAdditionalHostExposure
-    ? { ...prepared.plan, request: { ...prepared.plan.request, confirmAdditionalHostExposure: true } }
-    : prepared.plan;
+    ? { ...confirmed, request: { ...confirmed.request, confirmAdditionalHostExposure: true } }
+    : confirmed;
   const persist = manifestStore
     ? async (record: ProjectSkillSelection) => {
         await manifestStore.save(parseProjectManifest({ version: 1, skills: [...plan.context.existing, record] }));
