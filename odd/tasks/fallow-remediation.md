@@ -9,6 +9,7 @@ Delivery: branch refactor/reduce-complexity; work-unit commits; no push, no merg
 - [x] Task E: Fallow config/integration (branch chore/fallow-integration; commits e911b12, cbd2abd).
 - [x] Task F: Path-traversal finding triage (branch fix/path-traversal-triage).
 - [x] Task D2 — complexity pass 2 (branch refactor/complexity-pass-2): adoptExistingProjectSkill, parseInstallOptions, runUpdate, runCli, scanRoot, readSkillTreeSnapshot, inspectProjectSkillInstallation, restore, consumeNestedBlockScalar.
+- [x] Task D3 — follow-ups (same branch): duplication margin, Preview-failed test, moderate complexity.
 
 ## Task D progress / evidence
 - Route: inline (mechanical pure refactors, one file per commit; existing 199 tests are the characterization net, no new logic units).
@@ -56,3 +57,11 @@ Delivery: branch refactor/reduce-complexity; work-unit commits; no push, no merg
 - Totals: above threshold 30 -> 22; critical 1 -> 0; high 8 -> 0; moderate 21 -> 22; health score 88 -> 90; dupes 5.4% -> 5.9% (threshold 6%, growth from test scaffolding); tests 222 -> 232. `pnpm audit:all` exit 0.
 - Not covered by a characterization test: the "Preview failed" branch in runUpdate (no cheap seam to make a preview throw); behavior preserved by mechanical extraction.
 - Remaining: 22 moderate functions (parsePortableInstallationMethod, parseSelection, runSourceRemoval, planUserGlobalSkillMigration, runUpdate 21/20, ...), left as low ROI.
+
+## Task D3 progress / evidence
+- Route: delegated direct (one bounded writer). TDD strict; new module `src/path-safety.ts` (infrastructure zone in `.fallowrc.json`) has tests/path-safety.test.ts; refactors used the existing suite plus characterization tests that were GREEN on the old code first.
+- Duplication: 5.9% -> 2.3% (188 duplicated lines). Removed real clones: `assertNoSymlinkPath` (git-source, skill-discovery) and `pathsOverlap` (cli, project-installation, user-global-skill-inventory) now shared from `src/path-safety.ts`; `selectionWithInstallation`/`relativeProjectPath` (cli vs skill-update) exported once; git mirror precondition (`requireMirror`), replacement rollback (`removeVerifiedReplacement`), user-global installation-location guard (sources.ts). Threshold unchanged (6%), no suppressions.
+- Preview failed: tests/cli.test.ts "reports a failed update preview per Skill...". Trigger: the update tree returned by the Source contains an unsafe path (`portable/demo/../escape.txt`); the assessment only compares snapshots, the preview validates every tree path. Asserts exit 1, the exact `Preview failed for <id>: Skill "demo" returned an unsafe or duplicate file path: ...` line, the `Failed Skill` summary, and the installed Skill left unchanged.
+- Complexity (moderate, over threshold): 22 -> 18. Cleared: parsePortableInstallationMethod (ordered rule table + cwd predicate), planUserGlobalSkillMigration, applySkillUpdate (confirmation + rollback helpers), parseRuntimeSelection (source normalization). parseSelection 27/17 -> 21/12 (cyclomatic only); runSourceRemoval 23/22 -> 18/21. Characterization tests added for method rule precedence and fixed/resolved version mismatch messages.
+- Remaining 18: runUpdate 21/20, parseSelection, runSourceMigration, outputInstallPreview, classifyTrackedInstallation, runSourceRemoval, removeUserGlobalSkill, installProjectSkillTransaction, selectUpdateBatch, parseUninstallOptions, inspectProjectSkillRemoval, updateProjectSkillTransaction, adoptExistingProjectSkill, parseSource, consumeNestedMapping, validateCompatibility, rollbackCreatedPaths, discoverSkillsFromSources. All sequential validate-or-throw / preview-printing orchestrators just above the cognitive threshold (15-24); further splits would only relocate branches.
+- Totals: health score 91 A (was 90), tests 232 -> 237, `pnpm audit:all` exit 0.
