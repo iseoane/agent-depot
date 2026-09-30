@@ -75,6 +75,8 @@ export interface CliDependencies {
   readonly projectManifestStore?: ProjectManifestStore;
   /** Home directory used by user-global installation; injectable for tests. */
   readonly homeDirectory?: string;
+  /** Test/embedding seam for the interactive TUI; defaults to the Ink renderer. */
+  readonly renderTui?: (operations: SourceOperations) => Promise<void>;
 }
 
 const USAGE = [
@@ -90,6 +92,7 @@ const USAGE = [
   "  agent-depot update check --scope <project|user-global>",
   "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]",
   "  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]",
+  "  agent-depot tui",
 ].join("\n");
 const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
@@ -148,6 +151,12 @@ const COMMANDS = new Map<string, CommandHandler>([
     for (const candidate of candidates) {
       output(formatCandidate(candidate));
     }
+    return 0;
+  }],
+  ["tui", async (_values, { operations, dependencies }) => {
+    // Loaded lazily so non-interactive commands never import Ink/React.
+    const renderTui = dependencies.renderTui ?? (await import("./tui/render.js")).renderTui;
+    await renderTui(operations);
     return 0;
   }],
   ["source", async (values, context) => {

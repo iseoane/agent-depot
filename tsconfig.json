@@ -6,9 +6,10 @@
     "rootDir": ".",
     "outDir": "dist",
     "strict": true,
+    "jsx": "react-jsx",
     "isolatedModules": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx"]
 }
