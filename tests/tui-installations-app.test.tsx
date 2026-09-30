@@ -108,7 +108,7 @@ test("key 3 opens the Installations view, listed in the header and footer hints"
   unmount();
 });
 
-test("u on a user-global installation opens the Catalog uninstall flow for that Skill", async (t) => {
+test("u on a user-global installation runs the uninstall flow inside the Installations view", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /\[1 Sources\]/);
@@ -117,21 +117,22 @@ test("u on a user-global installation opens the Catalog uninstall flow for that 
   await revealSkill(lastFrame, stdin);
   stdin.write("u");
   const frame = await waitForFrame(lastFrame, /Uninstall demo\? y\/n/);
-  assert.match(frame, /\[2 Catalog\]/);
+  assert.match(frame, /\[3 Installations\]/);
   assert.match(frame, /removes the whole user-global installation/);
   unmount();
 });
 
-test("i on an installation with missing hosts opens the Catalog host flow", async (t) => {
+test("h on an installation with missing hosts opens the host checklist without leaving the view", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("3");
   await waitForFrame(lastFrame, /builtin:agent-depot \(1\)/);
   await revealSkill(lastFrame, stdin);
-  stdin.write("i");
-  const frame = await waitForFrame(lastFrame, /1 add hosts/);
-  assert.match(frame, /\[2 Catalog\]/);
+  stdin.write("h");
+  const frame = await waitForFrame(lastFrame, /Add hosts to demo/);
+  assert.match(frame, /\[3 Installations\]/);
+  assert.match(frame, /\[ \] 1 claude/);
   unmount();
 });
 

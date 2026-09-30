@@ -142,11 +142,33 @@ test("App views render with the real source operations on a temporary home", asy
     for (const [key, header] of views) {
       stdin.write(key);
       // Wait until the view finished loading (or failed), then require that it did not fail.
-      const frame = await waitForFrame(lastFrame, (candidate) => header.test(candidate) && !/Loading|Checking/.test(candidate));
+      const frame = await waitForFrame(lastFrame, (candidate) => header.test(candidate) && !/Loading|Checking|Refreshing/.test(candidate));
       assert.doesNotMatch(frame, /Cannot read properties|TypeError|Error:/);
     }
     unmount();
   } finally {
     await rm(home, { recursive: true, force: true });
   }
+});
+
+test("App separates the header and tab bar from the page with a double line", async () => {
+  const { lastFrame, unmount } = render(<App operations={operations} onExit={() => undefined} />);
+  const frame = await waitForFrame(lastFrame, /builtin:agent-depot/);
+  const lines = frame.split("\n");
+  const tabs = lines.findIndex((line) => line.includes("1 Sources"));
+  const separator = lines.findIndex((line) => /^═{20,}$/.test(line.trim()));
+  const page = lines.findIndex((line) => line.includes("builtin:agent-depot"));
+  assert.ok(tabs >= 0 && separator > tabs && page > separator, `unexpected layout:\n${frame}`);
+  unmount();
+});
+
+test("App footer for the Catalog offers install only", async () => {
+  const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
+  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  stdin.write("2");
+  const frame = await waitForFrame(lastFrame, /\[2 Catalog\]/);
+  assert.match(frame, /i install/);
+  assert.match(frame, /Enter\/right expand/);
+  assert.doesNotMatch(frame, /uninstall|add hosts/);
+  unmount();
 });

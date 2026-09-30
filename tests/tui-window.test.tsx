@@ -69,22 +69,23 @@ function selectedLine(frame: string): string {
 
 test("SourcesView renders only the rows that fit and keeps the highlighted row visible", async () => {
   const { lastFrame, stdin, unmount } = render(<SourcesView operations={operationsFor(gitSources)} listHeight={5} />);
-  const top = await waitForFrame(lastFrame, /1–5 of 31/);
-  assert.equal(top.split("\n").filter((line) => /builtin|git:/.test(line)).length, 5);
-  assert.match(selectedLine(top), /builtin:agent-depot/);
+  const top = await waitForFrame(lastFrame, /1–5 of 30/);
+  assert.equal(top.split("\n").filter((line) => /git:/.test(line)).length, 5);
+  assert.match(top, /builtin:agent-depot · included/);
+  assert.match(selectedLine(top), /git:0+\b/);
   // One key at a time: each keystroke acts on the rendered selection.
-  for (let step = 1; step <= 15; step += 1) {
+  for (let step = 1; step <= 14; step += 1) {
     stdin.write(DOWN);
-    await waitForFrame(lastFrame, (frame) => new RegExp(`git:0*${step - 1}\\b`).test(selectedLine(frame)));
+    await waitForFrame(lastFrame, (frame) => new RegExp(`git:0*${step}\\b`).test(selectedLine(frame)));
   }
   const middle = await waitForFrame(lastFrame, (frame) => /git:0+14\b/.test(selectedLine(frame)));
-  assert.match(middle, /\d+–\d+ of 31/);
+  assert.match(middle, /\d+–\d+ of 30/);
   assert.equal(middle.split("\n").filter((line) => /git:/.test(line)).length, 5);
   for (const expected of [19, 24, 29]) {
     stdin.write(PAGE_DOWN);
     await waitForFrame(lastFrame, (frame) => new RegExp(`git:0*${expected}\\b`).test(selectedLine(frame)));
   }
-  const end = await waitForFrame(lastFrame, /27–31 of 31/);
+  const end = await waitForFrame(lastFrame, /26–30 of 30/);
   assert.match(selectedLine(end), /git:0+29\b/);
   stdin.write(PAGE_UP);
   await waitForFrame(lastFrame, (frame) => /git:0+24\b/.test(selectedLine(frame)));

@@ -47,14 +47,37 @@ test("SourcesView lists id, kind and url of each source", async () => {
   const sources: readonly Source[] = [BUILT_IN_SOURCE, external];
   const { lastFrame, unmount } = render(<SourcesView operations={operationsFor(async () => sources)} />);
   const frame = await waitForFrame(lastFrame, /git:1234567890abcdef12345678/);
-  assert.match(frame, /builtin:agent-depot\s+builtin/);
+  assert.match(frame, /builtin:agent-depot · included/);
   assert.match(frame, /git:1234567890abcdef12345678\s+git\s+https:\/\/github\.com\/example\/skills\.git/);
   unmount();
 });
 
-test("SourcesView shows an empty state", async () => {
-  const { lastFrame, unmount } = render(<SourcesView operations={operationsFor(async () => [])} />);
-  await waitForFrame(lastFrame, /No sources/);
+test("SourcesView shows an empty Git state, with or without the built-in source", async () => {
+  for (const sources of [[], [BUILT_IN_SOURCE]] as const) {
+    const { lastFrame, unmount } = render(<SourcesView operations={operationsFor(async () => sources)} />);
+    const frame = await waitForFrame(lastFrame, /No Git sources · n to add/);
+    assert.doesNotMatch(selectedLine(frame) ?? "", /./);
+    unmount();
+  }
+});
+
+test("SourcesView shows the built-in source as a fixed row above the list that is never highlighted", async () => {
+  const other = { ...external, id: "git:abcdef1234567890abcdef12", url: "https://github.com/example/other.git" };
+  const { lastFrame, stdin, unmount } = render(
+    <SourcesView operations={operationsFor(async () => [BUILT_IN_SOURCE, external, other])} />,
+  );
+  let frame = await waitForFrame(lastFrame, /git:1234567890abcdef12345678/);
+  const lines = frame.split("\n");
+  const builtin = lines.findIndex((line) => line.includes("builtin:agent-depot · included"));
+  assert.ok(builtin >= 0 && builtin < lines.findIndex((line) => line.includes(external.id)), frame);
+  assert.doesNotMatch(lines[builtin] ?? "", /^>|\[.\]/);
+  // The cursor starts on the first Git source and cannot move up onto the built-in row.
+  assert.match(selectedLine(frame) ?? "", /git:1234/);
+  stdin.write(UP);
+  stdin.write(UP);
+  stdin.write("j");
+  frame = await waitForFrame(lastFrame, (candidate) => /abcdef1234567890/.test(selectedLine(candidate) ?? ""));
+  assert.equal(frame.split("\n").filter((line) => line.startsWith("> ")).length, 1);
   unmount();
 });
 
@@ -67,23 +90,24 @@ test("SourcesView shows the error message when loading fails", async () => {
 });
 
 test("SourcesView moves the selection with arrows and j/k, clamped to the list", async () => {
+  const other = { ...external, id: "git:abcdef1234567890abcdef12", url: "https://github.com/example/other.git" };
   const { lastFrame, stdin, unmount } = render(
-    <SourcesView operations={operationsFor(async () => [BUILT_IN_SOURCE, external])} />,
+    <SourcesView operations={operationsFor(async () => [BUILT_IN_SOURCE, external, other])} />,
   );
   const selects = (name: RegExp) => waitForFrame(lastFrame, (frame) => name.test(selectedLine(frame) ?? ""));
-  await selects(/builtin:agent-depot/);
+  await selects(/git:1234/);
 
   stdin.write(DOWN);
-  await selects(/git:1234/);
+  await selects(/git:abcdef/);
 
   // j at the bottom is clamped: if it moved past the end, one Up would not return to the first source.
   stdin.write("j");
   stdin.write(UP);
-  await selects(/builtin:agent-depot/);
+  await selects(/git:1234/);
 
   // k at the top is clamped: if it moved above the start, j would not land on the second source.
   stdin.write("k");
   stdin.write("j");
-  await selects(/git:1234/);
+  await selects(/git:abcdef/);
   unmount();
 });

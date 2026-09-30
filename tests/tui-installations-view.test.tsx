@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -16,7 +16,7 @@ import {
 } from "../src/project-manifest.js";
 import { skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
-import { InstallationsView, type CatalogFocus } from "../src/tui/installations-view.js";
+import { InstallationsView } from "../src/tui/installations-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
@@ -122,7 +122,7 @@ async function open(view: View, pattern: RegExp): Promise<string> {
   return step(view, ENTER_KEY);
 }
 
-function mount(f: Fixture, extra: { onOpenCatalog?: (focus: CatalogFocus) => void; onCapturingChange?: (capturing: boolean) => void } = {}) {
+function mount(f: Fixture, extra: { onCapturingChange?: (capturing: boolean) => void } = {}) {
   return render(
     <InstallationsView operations={f.operations} environment={f.environment} {...extra} />,
   );
@@ -141,7 +141,8 @@ test("shows a tree of scope, then Source, then Skills with counts, source and ma
   assert.ok(collapsed.indexOf("Managed (user-global)") < collapsed.indexOf("Managed (project)"));
   const expanded = await open(view, /builtin:agent-depot/);
   const globalLine = expanded.split("\n").find((line) => line.includes("portable/demo")) ?? "";
-  assert.match(globalLine, /managed by builtin:agent-depot/);
+  assert.ok(!globalLine.includes("managed by"), "the parent Source node already says it");
+  assert.ok(!globalLine.includes("builtin:agent-depot"));
   assert.match(globalLine, /latest/);
   assert.match(globalLine, new RegExp(AGENT_DEPOT_PACKAGE_VERSION!.replace(/\./gu, "\\.")));
   assert.match(globalLine, /claude, codex/);
@@ -151,6 +152,8 @@ test("shows a tree of scope, then Source, then Skills with counts, source and ma
   const projectLine = projectFrame.split("\n").find((line) => line.includes("portable/other")) ?? "";
   assert.match(projectLine, /pi/);
   assert.ok(!projectLine.includes("adopted"));
+  assert.ok(!projectLine.includes("modified"));
+  assert.match(projectFrame, /adopted = tracked in place, not copied by agent-depot · modified = changed on disk/);
   view.unmount();
 });
 
@@ -268,33 +271,6 @@ test("lists unmanaged user-global Skills in their own section", async (t) => {
   unmount();
 });
 
-test("u and i on a user-global installation hand over to the Catalog flow; project rows refuse u", async (t) => {
-  const f = await fixture(t);
-  await f.operations.addUserGlobalInstallation!(record(["pi"]));
-  await f.manifestStore.save(parseProjectManifest({ version: 1, skills: [record(["pi"], false, "portable/other")] }));
-  const focuses: CatalogFocus[] = [];
-  const view = mount(f, { onOpenCatalog: (focus) => focuses.push(focus) });
-  const { lastFrame, stdin, unmount } = view;
-  await waitForFrame(lastFrame, /builtin:agent-depot \(1\)/);
-  await open(view, /builtin:agent-depot/);
-  await goto(view, /portable\/demo/);
-  press(stdin, "u");
-  await waitForFrame(lastFrame, () => focuses.length === 1);
-  press(stdin, "i");
-  await waitForFrame(lastFrame, () => focuses.length === 2);
-  assert.deepEqual(focuses.map((focus) => [focus.sourceId, focus.path, focus.action]), [
-    [BUILT_IN_SOURCE.id, "portable/demo", "uninstall"],
-    [BUILT_IN_SOURCE.id, "portable/demo", "install"],
-  ]);
-  await open(view, /Managed \(project\)/);
-  await open(view, /builtin:agent-depot \(1\)$/);
-  await goto(view, /portable\/other/);
-  press(stdin, "u");
-  await waitForFrame(lastFrame, /Project uninstall is not supported/);
-  assert.equal(focuses.length, 2);
-  unmount();
-});
-
 async function startAdoption(f: Fixture, keys: readonly string[] = [ENTER]) {
   const view = mount(f);
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
@@ -399,4 +375,119 @@ test("n at the preview cancels without writing", async (t) => {
   await waitForFrame(lastFrame, /Adoption cancelled/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
   unmount();
+});
+
+/** The Claude host location adoption would create; it must not exist unless the adoption was applied. */
+const claudeLocation = (home: string) => path.join(home, ".claude", "skills", "demo");
+
+async function assertAbsent(location: string) {
+  await assert.rejects(lstat(location), { code: "ENOENT" });
+}
+
+/** Walks the host step (Claude added to the defaults) and the version step up to the preview. */
+async function chooseClaudeHost(view: View) {
+  await waitForFrame(view.lastFrame, /Host \(space/);
+  press(view.stdin, "2");
+  await waitForFrame(view.lastFrame, /\[x\] 2 claude/);
+  press(view.stdin, ENTER);
+  await waitForFrame(view.lastFrame, /Version: 1 latest/);
+  press(view.stdin, "1");
+}
+
+test("adopting with an extra host: two confirmations create the host location and update the record", async (t) => {
+  const f = await fixture(t);
+  const directory = await writeUnmanaged(f.home);
+  const before = await readFile(path.join(directory, "SKILL.md"), "utf8");
+  const view = await startAdoption(f, []);
+  await chooseClaudeHost(view);
+  const preview = await waitForFrame(view.lastFrame, /y\/n/);
+  assert.match(preview, /ADDITIONAL HOST EXPOSURE/);
+  await assertAbsent(claudeLocation(f.home));
+  press(view.stdin, "y");
+  await waitForFrame(view.lastFrame, /--confirm-additional-host/);
+  await assertAbsent(claudeLocation(f.home));
+  press(view.stdin, "y");
+  await waitForFrame(view.lastFrame, /Adopted Skill "demo"/);
+  assert.ok((await lstat(claudeLocation(f.home))).isSymbolicLink() || (await lstat(claudeLocation(f.home))).isDirectory(), "the host location exists");
+  const [installed] = await f.operations.listUserGlobalInstallations!();
+  assert.equal(installed?.installation?.adopted, true);
+  assert.ok(installed?.hosts.includes("claude"), `hosts: ${installed?.hosts.join(",")}`);
+  assert.equal(await readFile(path.join(directory, "SKILL.md"), "utf8"), before);
+  view.unmount();
+});
+
+test("declining the exposure confirmation creates no host location", async (t) => {
+  const f = await fixture(t);
+  await writeUnmanaged(f.home);
+  const view = await startAdoption(f, []);
+  await chooseClaudeHost(view);
+  await waitForFrame(view.lastFrame, /y\/n/);
+  press(view.stdin, "y");
+  await waitForFrame(view.lastFrame, /--confirm-additional-host/);
+  press(view.stdin, "n");
+  await waitForFrame(view.lastFrame, /Adoption cancelled/);
+  await assertAbsent(claudeLocation(f.home));
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  view.unmount();
+});
+
+test("a content mismatch with an extra host creates no host location", async (t) => {
+  const f = await fixture(t);
+  await writeUnmanaged(f.home, `${SKILL_MD}local edit\n`);
+  const view = await startAdoption(f, []);
+  await chooseClaudeHost(view);
+  await waitForFrame(view.lastFrame, /Cannot adopt/);
+  press(view.stdin, ENTER);
+  await waitForFrame(view.lastFrame, /Adoption cancelled/);
+  await assertAbsent(claudeLocation(f.home));
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  view.unmount();
+});
+
+test("several Source Skills with the same name open a picker, and the chosen one is adopted", async (t) => {
+  const other: SkillCandidate = { sourceId: BUILT_IN_SOURCE.id, path: "extras/demo", name: "demo", description: "Other demo" };
+  const base = await fixture(t, [demo, other]);
+  const at = (skillPath: string): readonly SkillTreeFile[] => [{ path: `${skillPath}/SKILL.md`, content: Buffer.from(SKILL_MD), executable: false }];
+  const f: Fixture = {
+    ...base,
+    environment: {
+      ...base.environment,
+      sourceAccess: {
+        readSkillTree: async (_source, skillPath) => at(skillPath),
+        readSkillTreeSnapshot: async (_source, skillPath) => ({ files: at(skillPath), resolvedVersion }),
+      },
+    },
+  };
+  await writeUnmanaged(f.home);
+  const view = await startAdoption(f, []);
+  const picker = await waitForFrame(view.lastFrame, /several Source Skills match/);
+  assert.match(picker, /portable\/demo/);
+  assert.match(picker, /extras\/demo/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  press(view.stdin, "j");
+  await waitForFrame(view.lastFrame, /> extras\/demo/);
+  press(view.stdin, ENTER);
+  await waitForFrame(view.lastFrame, /Adopt demo as extras\/demo/);
+  press(view.stdin, ENTER);
+  await waitForFrame(view.lastFrame, /Version: 1 latest/);
+  press(view.stdin, "1");
+  await waitForFrame(view.lastFrame, /y\/n/);
+  press(view.stdin, "y");
+  await waitForFrame(view.lastFrame, /Adopted Skill "demo"/);
+  const [installed] = await f.operations.listUserGlobalInstallations!();
+  assert.equal(installed?.path, "extras/demo");
+  assert.equal(installed?.installation?.adopted, true);
+  view.unmount();
+});
+
+test("Esc in the picker adopts nothing", async (t) => {
+  const other: SkillCandidate = { sourceId: BUILT_IN_SOURCE.id, path: "extras/demo", name: "demo", description: "Other demo" };
+  const f = await fixture(t, [demo, other]);
+  await writeUnmanaged(f.home);
+  const view = await startAdoption(f, []);
+  await waitForFrame(view.lastFrame, /several Source Skills match/);
+  press(view.stdin, ESC);
+  await waitForFrame(view.lastFrame, /Adoption cancelled/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  view.unmount();
 });

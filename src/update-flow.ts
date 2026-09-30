@@ -48,19 +48,28 @@ export interface LoadedUpdates {
   readonly context: SkillUpdateApplicationOptions;
 }
 
+/** Where the scope's installations live: its root and, for the project scope, its manifest store. */
+function scopeLocation(input: UpdateScopeInput): { readonly projectRoot: string; readonly manifestStore?: ProjectManifestStore } {
+  if (input.scope === "user-global") return { projectRoot: path.resolve(input.homeDirectory ?? homedir()) };
+  const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  return {
+    projectRoot,
+    manifestStore: input.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot)),
+  };
+}
+
+/** The scope's installations, read without assessing them. */
+export async function readScopeInstallations(input: UpdateScopeInput): Promise<readonly ProjectSkillSelection[]> {
+  const { manifestStore } = scopeLocation(input);
+  return manifestStore ? (await manifestStore.load()).skills : requireUserGlobalInstallations(input.operations);
+}
+
 /** Loads the scope's installations and assesses them like `update check`. Changes nothing. */
 export async function loadUpdates(input: UpdateScopeInput): Promise<LoadedUpdates> {
   const { scope, operations } = input;
   const sourceAccess = input.sourceAccess ?? defaultProjectSkillTreeAccess();
-  const projectRoot = scope === "project"
-    ? path.resolve(input.projectRoot ?? process.cwd())
-    : path.resolve(input.homeDirectory ?? homedir());
-  const manifestStore = scope === "project"
-    ? input.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot))
-    : undefined;
-  const installed = manifestStore
-    ? (await manifestStore.load()).skills
-    : await requireUserGlobalInstallations(operations);
+  const { projectRoot, manifestStore } = scopeLocation(input);
+  const installed = await readScopeInstallations(input);
   const resolveSource = operations.resolveProjectSource
     ? (source: ProjectSource) => operations.resolveProjectSource!(source)
     : resolveProjectSource;
@@ -184,17 +193,24 @@ export function applyConfirmedUpdates(
   selected: readonly UpdateBatchAssessmentItem[],
   context: SkillUpdateApplicationOptions,
   confirmedPaths: readonly string[],
+  /** Ids of the items whose preview showed the overwrite of local modifications; when given, any other item that turns out modified fails instead of being overwritten. */
+  previewedOverwrites?: ReadonlySet<string>,
 ): Promise<UpdateBatchResult> {
   return applyUpdateBatch(selected, {
     ...context,
     // The callback is invoked independently for every candidate. In particular,
     // a modified installation is never overwritten unless the caller confirmed.
-    confirm: async (plan) => ({
+    confirm: async (plan) => {
+      if (previewedOverwrites !== undefined && plan.overwriteRequired && !previewedOverwrites.has(plan.item.id)) {
+        throw new Error(`Skill ${JSON.stringify(plan.item.id)} was modified after the preview, so the overwrite was never shown or confirmed; nothing was changed`);
+      }
+      return {
       overwriteModifiedInstallation: true,
       externalMethod: true,
       ...(plan.nonCanonicalPath !== undefined && confirmedPaths.includes(relativeProjectPath(context.projectRoot, plan.nonCanonicalPath))
         ? { nonCanonicalPath: plan.nonCanonicalPath }
         : {}),
-    }),
+      };
+    },
   });
 }

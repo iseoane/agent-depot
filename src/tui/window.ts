@@ -2,8 +2,8 @@ import { useStdout } from "ink";
 
 /** Rows assumed when the terminal size is unknown (for example under test renderers). */
 export const FALLBACK_TERMINAL_ROWS = 24;
-/** Lines the shell itself uses: title, tab bar and footer hint. */
-export const APP_CHROME_ROWS = 3;
+/** Lines the shell itself uses: title, tab bar, separator and footer hint. */
+export const APP_CHROME_ROWS = 4;
 const MINIMUM_ROWS = 3;
 
 export interface ListWindow {

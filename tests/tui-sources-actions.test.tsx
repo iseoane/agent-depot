@@ -148,13 +148,13 @@ test("n and Esc cancel a refresh confirmation", async () => {
   unmount();
 });
 
-test("built-in source cannot be refreshed or removed", async () => {
+test("r and d act on the first Git source, never on the fixed built-in row", async () => {
   const h = harness();
   const { lastFrame, stdin, unmount } = await open(h);
-  stdin.write("r");
-  await waitForFrame(lastFrame, /built-in source cannot be refreshed/i);
+  await highlights(lastFrame, /git:1234/);
   stdin.write("d");
-  await waitForFrame(lastFrame, /built-in source cannot be removed/i);
+  const frame = await waitForFrame(lastFrame, /remove Git Source git:1234567890abcdef12345678/);
+  assert.doesNotMatch(frame, /cannot be (refreshed|removed)/i);
   assert.deepEqual(h.calls, []);
   unmount();
 });

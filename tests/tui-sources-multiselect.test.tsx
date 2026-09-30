@@ -47,19 +47,18 @@ const highlighted = (frame: string) => frame.split("\n").find((line) => line.sta
 test("the header row is outside the list and never highlighted", async () => {
   const { lastFrame, stdin, unmount } = await open(operationsFor([]));
   let frame = await waitForFrame(lastFrame, /ID\s+KIND\s+URL/);
-  assert.match(highlighted(frame), /builtin:agent-depot/);
+  assert.match(highlighted(frame), new RegExp(first.id));
   assert.doesNotMatch(lineOf(frame, "KIND"), /^>/);
   stdin.write(UP);
   stdin.write(UP);
   frame = await waitForFrame(lastFrame, /ID\s+KIND\s+URL/);
-  assert.match(highlighted(frame), /builtin:agent-depot/);
+  assert.match(highlighted(frame), new RegExp(first.id));
   assert.equal(frame.split("\n").filter((line) => line.startsWith("> ")).length, 1);
   unmount();
 });
 
 test("space toggles the highlighted source and markers show the selection", async () => {
   const { lastFrame, stdin, unmount } = await open(operationsFor([]));
-  stdin.write(DOWN);
   await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
   stdin.write(" ");
   let frame = await waitForFrame(lastFrame, (candidate) => /\[x\]/.test(lineOf(candidate, first.id)));
@@ -83,18 +82,9 @@ test("a toggles all Git sources and never marks the built-in source", async () =
   unmount();
 });
 
-test("space on the built-in source explains that it cannot be selected for refresh", async () => {
-  const { lastFrame, stdin, unmount } = await open(operationsFor([]));
-  stdin.write(" ");
-  const frame = await waitForFrame(lastFrame, /built-in source cannot be selected for refresh/i);
-  assert.doesNotMatch(lineOf(frame, "builtin:agent-depot"), /\[x\]/);
-  unmount();
-});
-
 test("r refreshes the selected sources with one combined preview and one confirmation", async () => {
   const calls: string[] = [];
   const { lastFrame, stdin, unmount } = await open(operationsFor(calls));
-  stdin.write(DOWN);
   await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
   stdin.write(" ");
   await waitForFrame(lastFrame, /1 selected/);
@@ -136,22 +126,12 @@ test("one failing refresh does not stop the others and is reported with its reas
 test("r without a selection refreshes the highlighted source", async () => {
   const calls: string[] = [];
   const { lastFrame, stdin, unmount } = await open(operationsFor(calls));
-  stdin.write(DOWN);
   await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
   stdin.write("r");
   await waitForFrame(lastFrame, /\[y\/n\]/);
   stdin.write("y");
   await waitForFrame(lastFrame, new RegExp(`Refreshed Git Source: ${first.id}`));
   assert.deepEqual(calls, [`refresh ${first.id}`]);
-  unmount();
-});
-
-test("r on the built-in source without a selection says it cannot be refreshed", async () => {
-  const calls: string[] = [];
-  const { lastFrame, stdin, unmount } = await open(operationsFor(calls));
-  stdin.write("r");
-  await waitForFrame(lastFrame, /built-in source cannot be refreshed/i);
-  assert.deepEqual(calls, []);
   unmount();
 });
 
@@ -169,7 +149,6 @@ test("d stays single-source even with a selection", async () => {
   const { lastFrame, stdin, unmount } = await open(operations);
   stdin.write("a");
   await waitForFrame(lastFrame, /3 selected/);
-  stdin.write(DOWN);
   await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
   stdin.write("d");
   const preview = await waitForFrame(lastFrame, /\[y\/n\]/);

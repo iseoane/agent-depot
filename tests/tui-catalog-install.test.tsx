@@ -101,30 +101,52 @@ function mount(f: Fixture, onCapturingChange?: (capturing: boolean) => void) {
   return view;
 }
 
-test("Catalog shows global and project installed markers", async (t) => {
-  const f = await fixture(t);
-  await f.operations.addUserGlobalInstallation!(selection(["claude", "codex"]));
-  await new ProjectManifestStore(defaultProjectManifestPath(f.project)).save(
-    parseProjectManifest({ version: 1, skills: [selection(["pi"])] }),
-  );
+test("Catalog without installation operations lists the skill and does not crash", async (t) => {
+  const f = await fixture(t, false);
   const { lastFrame, unmount } = mount(f);
-  const frame = await waitForFrame(lastFrame, /\[project: pi\]/);
-  const line = frame.split("\n").find((entry) => entry.includes("demo")) ?? "";
-  assert.match(line, /\[global: claude, codex\]/);
+  await waitForFrame(lastFrame, /Demo skill/);
   unmount();
 });
 
-test("Catalog without installation operations shows no marker and does not crash", async (t) => {
-  const f = await fixture(t, false);
-  const { lastFrame, stdin, unmount } = mount(f);
-  const frame = await waitForFrame(lastFrame, /demo/);
-  assert.ok(!frame.includes("[global"));
+test("Catalog hides a Skill installed user-global or in the project", async (t) => {
+  const f = await fixture(t);
+  await f.operations.addUserGlobalInstallation!(selection(["claude"]));
+  const global = mount(f);
+  await waitForFrame(global.lastFrame, /All skills are installed/);
+  assert.ok(!(global.lastFrame() ?? "").includes("Demo skill"));
+  global.unmount();
+
+  const g = await fixture(t);
+  await new ProjectManifestStore(defaultProjectManifestPath(g.project)).save(
+    parseProjectManifest({ version: 1, skills: [selection(["pi"])] }),
+  );
+  const project = mount(g);
+  await waitForFrame(project.lastFrame, /All skills are installed/);
+  assert.ok(!(project.lastFrame() ?? "").includes("Demo skill"));
+  project.unmount();
+});
+
+test("Catalog offers install only: u and h do nothing", async (t) => {
+  const f = await fixture(t);
+  const changes: boolean[] = [];
+  const { lastFrame, stdin, unmount } = mount(f, (value) => changes.push(value));
+  await showDemo(lastFrame, stdin);
   await key(stdin, "u");
-  await waitForFrame(lastFrame, /not supported/i);
+  await key(stdin, "h");
+  const frame = lastFrame() ?? "";
+  assert.ok(!/Uninstall|Remove|hosts/i.test(frame.replace(/Host/g, "")), `unexpected manage panel:\n${frame}`);
+  assert.notEqual(changes.at(-1), true);
   unmount();
 });
 
 type Stdin = { write(data: string): void };
+
+/** Waits for the Skill under its (open) source and moves the highlight onto it. */
+async function showDemo(lastFrame: () => string | undefined, stdin: Stdin) {
+  await waitForFrame(lastFrame, /Demo skill/);
+  await key(stdin, "j");
+  await waitForFrame(lastFrame, (frame) => /> .*demo/.test(frame));
+}
 
 /** Drives the install steps: toggles the given host keys, then picks scope and version. */
 async function chooseInstall(stdin: Stdin, hostKeys: readonly string[], scopeKey: string, versionKey: string) {
@@ -138,7 +160,7 @@ async function chooseInstall(stdin: Stdin, hostKeys: readonly string[], scopeKey
 test("i installs user-global step by step with a multi-host preview and confirmation", async (t) => {
   const f = await fixture(t);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await key(stdin, "i");
   await waitForFrame(lastFrame, /\[ \] 1 pi.*\[ \] 2 claude.*\[ \] 3 codex.*\[ \] 4 opencode/s);
   await key(stdin, " ");
@@ -161,8 +183,8 @@ test("i installs user-global step by step with a multi-host preview and confirma
   assert.ok(!preview.includes("ADDITIONAL HOST EXPOSURE"));
   await assert.rejects(readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
   await key(stdin, "y");
-  const done = await waitForFrame(lastFrame, /Installed Skill "demo"/);
-  assert.match(done, /\[global: pi, claude, codex\]/);
+  const done = await waitForFrame(lastFrame, (frame) => /Installed Skill "demo"/.test(frame) && /All skills are installed/.test(frame));
+  assert.ok(!done.includes("Demo skill"), "an installed Skill leaves the Catalog");
   assert.equal(await readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
   unmount();
 });
@@ -170,7 +192,7 @@ test("i installs user-global step by step with a multi-host preview and confirma
 test("host step requires at least one host", async (t) => {
   const f = await fixture(t);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await key(stdin, "i");
   await key(stdin, ENTER);
   const frame = await waitForFrame(lastFrame, /Select at least one host/);
@@ -182,7 +204,7 @@ test("host step requires at least one host", async (t) => {
 test("n declines the install preview without changing anything", async (t) => {
   const f = await fixture(t);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["2"], "2", "1");
   await waitForFrame(lastFrame, /y\/n/);
   await key(stdin, "n");
@@ -196,13 +218,13 @@ test("n declines the install preview without changing anything", async (t) => {
 test("i installs into the project manifest and shows the project marker", async (t) => {
   const f = await fixture(t);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["3"], "1", "1");
   const preview = await waitForFrame(lastFrame, /y\/n/);
   assert.match(preview, /scope: project; hosts: codex/);
   await key(stdin, "y");
-  const done = await waitForFrame(lastFrame, /\[project: codex\]/);
-  assert.match(done, /Installed Skill "demo"/);
+  const done = await waitForFrame(lastFrame, (frame) => /Installed Skill "demo"/.test(frame) && /All skills are installed/.test(frame));
+  assert.ok(!done.includes("Demo skill"), "an installed Skill leaves the Catalog");
   const manifest = await new ProjectManifestStore(defaultProjectManifestPath(f.project)).load();
   assert.equal(manifest.skills.length, 1);
   assert.equal(await readFile(path.join(f.project, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
@@ -212,7 +234,7 @@ test("i installs into the project manifest and shows the project marker", async 
 test("fixed version policy asks for the version text", async (t) => {
   const f = await fixture(t);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["1"], "2", "2");
   await waitForFrame(lastFrame, /Fixed version:/);
   for (const character of AGENT_DEPOT_PACKAGE_VERSION!) await key(stdin, character);
@@ -232,7 +254,7 @@ test("adopting an identical Skill with a missing Host location needs a separate 
     await writeFile(destination, Buffer.from(file.content));
   }
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["1", "2"], "1", "1");
   const preview = await waitForFrame(lastFrame, /y\/n/);
   assert.match(preview, /ADDITIONAL HOST EXPOSURE/);
@@ -249,8 +271,8 @@ test("adopting an identical Skill with a missing Host location needs a separate 
   await key(stdin, "y");
   await waitForFrame(lastFrame, /--confirm-additional-host/);
   await key(stdin, "y");
-  const done = await waitForFrame(lastFrame, /\[project: pi, claude\]/);
-  assert.match(done, /Adopted Skill "demo"/);
+  const done = await waitForFrame(lastFrame, (frame) => /Adopted Skill "demo"/.test(frame) && /All skills are installed/.test(frame));
+  assert.ok(!done.includes("Demo skill"), "an adopted Skill leaves the Catalog");
   unmount();
 });
 
@@ -287,7 +309,7 @@ test("the Git Source is refreshed before the preview, which reflects the refresh
     current = [...tree, { path: "portable/demo/extra.md", content: Uint8Array.from([0x45]), executable: false }];
   }, () => current);
   const { lastFrame, stdin, unmount } = mount({ ...g });
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["2"], "2", "1");
   const preview = await waitForFrame(lastFrame, /y\/n/);
   assert.deepEqual(events, ["refresh"], "the refresh happens before the preview is shown");
@@ -306,7 +328,7 @@ test("a failed refresh aborts the install with an error and writes nothing", asy
     throw new Error("network unreachable");
   });
   const { lastFrame, stdin, unmount } = mount({ ...g });
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["2"], "2", "1");
   await waitForFrame(lastFrame, /network unreachable/);
   await assert.rejects(readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
@@ -314,73 +336,11 @@ test("a failed refresh aborts the install with an error and writes nothing", asy
   unmount();
 });
 
-test("install shows an error when the Skill is already installed there", async (t) => {
-  const f = await fixture(t);
-  await f.operations.addUserGlobalInstallation!(selection(["claude"]));
-  const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /\[global: claude\]/);
-  await key(stdin, "i");
-  // An installed Skill first offers adding hosts; "2" continues to the ordinary install steps.
-  await key(stdin, "2");
-  for (const step of ["2", ENTER, "2", "1"]) await key(stdin, step);
-  await waitForFrame(lastFrame, /already recorded/);
-  unmount();
-});
-
-test("u previews the whole-installation removal, requires confirmation and reloads the marker", async (t) => {
-  const f = await fixture(t);
-  const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /demo/);
-  await chooseInstall(stdin, ["2", "3"], "2", "1");
-  await waitForFrame(lastFrame, /y\/n/);
-  await key(stdin, "y");
-  await waitForFrame(lastFrame, /\[global: claude, codex\]/);
-  await key(stdin, "u");
-  await waitForFrame(lastFrame, /1 all hosts.*2 choose hosts/s);
-  await key(stdin, "1");
-  const preview = await waitForFrame(lastFrame, /remove "portable\/demo"/);
-  assert.match(preview, /removes the whole user-global installation, from hosts: claude, codex/);
-  assert.match(preview, /y\/n/);
-  await key(stdin, "n");
-  await waitForFrame(lastFrame, /Uninstall cancelled/);
-  assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
-  await key(stdin, "u");
-  await key(stdin, "1");
-  await waitForFrame(lastFrame, /y\/n/);
-  await key(stdin, "y");
-  const done = await waitForFrame(lastFrame, /Removed/);
-  assert.ok(!done.includes("[global"));
-  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
-  await assert.rejects(readFile(path.join(f.home, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
-  unmount();
-});
-
-test("u on a project-only installation says project uninstall is not supported", async (t) => {
-  const f = await fixture(t);
-  await new ProjectManifestStore(defaultProjectManifestPath(f.project)).save(
-    parseProjectManifest({ version: 1, skills: [selection(["codex"])] }),
-  );
-  const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /\[project: codex\]/);
-  await key(stdin, "u");
-  await waitForFrame(lastFrame, /Project uninstall is not supported/);
-  unmount();
-});
-
-test("u on a Skill that is not installed says so", async (t) => {
-  const f = await fixture(t);
-  const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /demo/);
-  await key(stdin, "u");
-  await waitForFrame(lastFrame, /not installed/i);
-  unmount();
-});
-
 test("install flow captures keys, and Esc cancels it", async (t) => {
   const f = await fixture(t);
   const changes: boolean[] = [];
   const { lastFrame, stdin, unmount } = mount(f, (value) => changes.push(value));
-  await waitForFrame(lastFrame, /demo/);
+  await showDemo(lastFrame, stdin);
   await key(stdin, "i");
   assert.equal(changes.at(-1), true);
   await key(stdin, ESC);
