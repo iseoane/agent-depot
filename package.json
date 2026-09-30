@@ -8,12 +8,12 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20.19"
+    "node": ">=24"
   },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\"",
     "test": "pnpm build && node --test \"dist/**/*.test.js\"",
     "test:single": "pnpm build && node -e \"const { spawnSync } = require('node:child_process'); const input = process.argv[1] || 'tests/version.test.ts'; const file = input.replace(/^tests[\\\\/]/, 'dist/tests/').replace(/\\\\.ts$/i, '.js'); process.exit(spawnSync(process.execPath, ['--test', file], { stdio: 'inherit' }).status ?? 1);\"",
     "test:coverage": "node -e \"require('node:fs').rmSync('coverage',{recursive:true,force:true})\" && tsc -p tsconfig.coverage.json && node -e \"const { spawnSync } = require('node:child_process'); process.exit(spawnSync(process.execPath, ['--enable-source-maps','--test','--test-reporter=dot','dist/**/*.test.js'], { stdio: 'inherit', env: { ...process.env, NODE_V8_COVERAGE: 'coverage/v8' } }).status ?? 1);\"",
@@ -24,9 +24,15 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "@types/node": "^20.17.10",
+    "@types/node": "^24.19.0",
+    "@types/react": "^19.3.0",
     "eslint": "^9.39.2",
+    "ink-testing-library": "^4.0.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.70.1"
+  },
+  "dependencies": {
+    "ink": "^7.1.1",
+    "react": "^19.3.0"
   }
 }

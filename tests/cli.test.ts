@@ -139,7 +139,7 @@ test("does not expose discovery selection or refresh the built-in Source", async
     stderr: (line) => errors.push(line),
   }), 1);
   assert.deepEqual(errors, [
-    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]\n  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]",
+    "Error: Usage:\n  agent-depot source list\n  agent-depot source add <url>\n  agent-depot source refresh <id> [--yes]\n  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]\n  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]\n  agent-depot discover <source-id> [source-id...]\n  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]\n  agent-depot update check --scope <project|user-global>\n  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]\n  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]\n  agent-depot tui",
     "Error: The package-owned built-in Source cannot be refreshed or changed",
   ]);
 });
@@ -2789,4 +2789,36 @@ test("checks and applies user-global updates with an external method preview thr
     await rm(homeDirectory, { recursive: true, force: true });
     await rm(adapterRoot, { recursive: true, force: true });
   }
+});
+
+test("tui command renders the TUI with the injected Source operations", async () => {
+  const operations = fakeOperations();
+  const rendered: SourceOperations[] = [];
+  const code = await runCli(["tui"], {
+    operations,
+    isInteractive: () => true,
+    renderTui: async (received) => {
+      rendered.push(received);
+    },
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(rendered, [operations]);
+});
+
+test("tui command fails with a clear error when the terminal is not interactive", async () => {
+  const errors: string[] = [];
+  let rendered = false;
+  const code = await runCli(["tui"], {
+    operations: fakeOperations(),
+    isInteractive: () => false,
+    stderr: (line) => errors.push(line),
+    renderTui: async () => {
+      rendered = true;
+    },
+  });
+
+  assert.equal(code, 1);
+  assert.deepEqual(errors, ["Error: agent-depot tui requires an interactive terminal"]);
+  assert.equal(rendered, false);
 });
