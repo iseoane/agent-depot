@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  defaultBuiltInSkillsRoot,
   discoverSkillsFromSources,
   NodeSourceContentAccess,
   parseSkillFrontmatter,
@@ -303,4 +304,15 @@ test("does not traverse symbolic links in a package-owned built-in root", async 
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("default built-in root resolves to the package skills directory containing the doctor skills", async () => {
+  const root = defaultBuiltInSkillsRoot();
+  assert.equal(path.basename(root), "skills");
+  for (const name of ["doctor-md-agents", "doctor-md-skill"]) {
+    const manifest = await readFile(path.join(root, name, "SKILL.md"), "utf8");
+    assert.match(manifest, new RegExp(`^---[\\s\\S]*name:\\s*"?${name}"?`, "m"));
+  }
+  assert.doesNotMatch(root.split(path.sep).join("/"), /\/dist\/skills$/);
+  await readFile(path.join(path.dirname(root), "package.json"), "utf8");
 });

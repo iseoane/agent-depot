@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { assertNoSymlinkPath } from "./path-safety.js";
 import { fileURLToPath } from "node:url";
@@ -77,7 +78,22 @@ export interface SourceContentAccessOptions {
  * built-in Source, which lets packages ship no built-in skills yet.
  */
 export function defaultBuiltInSkillsRoot(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "skills");
+  return path.join(findPackageRoot(path.dirname(fileURLToPath(import.meta.url))), "skills");
+}
+
+/** Walks up from a module directory (src/ or dist/src/) to the nearest package.json. */
+function findPackageRoot(startDirectory: string): string {
+  let current = startDirectory;
+  for (;;) {
+    if (existsSync(path.join(current, "package.json"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return path.resolve(startDirectory, "..");
+    }
+    current = parent;
+  }
 }
 
 /** Default read-only Source access used by the application operation. */

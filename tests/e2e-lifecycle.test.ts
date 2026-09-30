@@ -146,7 +146,14 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     const discovered = ok(cli(project, "discover", sourceId));
     assert.match(discovered, /skills\/alpha\talpha\tAlpha skill/);
     assert.match(discovered, /skills\/gamma\tgamma\tGamma skill/);
-    assert.equal(ok(cli(project, "discover", "builtin:agent-depot")).trim(), "");
+    const builtinCandidates = ok(cli(project, "discover", "builtin:agent-depot")).trim().split("\n");
+    assert.deepEqual(
+      builtinCandidates.map((line) => line.split("\t").slice(0, 3).join("\t")),
+      [
+        "Candidate: builtin:agent-depot\tdoctor-md-agents\tdoctor-md-agents",
+        "Candidate: builtin:agent-depot\tdoctor-md-skill\tdoctor-md-skill",
+      ],
+    );
 
     fails(cli(project, "discover", "git:000000000000000000000000"), /Source is not registered/);
     fails(
