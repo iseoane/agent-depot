@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
-import { filterReducer, filterSkills, initialFilter } from "./catalog-filter.js";
+import { filterReducer, filterSkills, initialFilter, type FilterEvent, type FilterState } from "./catalog-filter.js";
 
 const DESCRIPTION_LIMIT = 60;
 
@@ -28,7 +28,9 @@ export function CatalogView({ operations, sourceId, onCapturingChange }: Catalog
   const [all, setAll] = useState(sourceId === undefined);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selected, setSelected] = useState(0);
-  const [filter, dispatch] = useReducer(filterReducer, initialFilter);
+  const [filter, dispatchFilter] = useReducer(filterReducer, initialFilter);
+  // Mirrors the filter synchronously so the shell never sees a stale capturing state.
+  const filterRef = useRef<FilterState>(initialFilter);
   // Mirrors the typed query synchronously so keystrokes delivered in one burst are not lost to stale closures.
   const typed = useRef("");
 
@@ -57,16 +59,19 @@ export function CatalogView({ operations, sourceId, onCapturingChange }: Catalog
     };
   }, [operations, sourceId, all]);
 
-  useEffect(() => {
-    onCapturingChange?.(filter.editing);
-  }, [filter.editing, onCapturingChange]);
+  const dispatch = (event: FilterEvent) => {
+    filterRef.current = filterReducer(filterRef.current, event);
+    onCapturingChange?.(filterRef.current.editing);
+    dispatchFilter(event);
+  };
 
   const skills = state.status === "ready" ? state.skills : [];
   const visible = filterSkills(skills, filter.query);
   const index = Math.min(selected, Math.max(visible.length - 1, 0));
 
   useInput((input, key) => {
-    if (filter.editing) {
+    const current = filterRef.current;
+    if (current.editing) {
       if (key.escape) {
         typed.current = "";
         setSelected(0);
@@ -86,9 +91,9 @@ export function CatalogView({ operations, sourceId, onCapturingChange }: Catalog
     if (key.downArrow || input === "j") setSelected(Math.min(index + 1, Math.max(visible.length - 1, 0)));
     else if (key.upArrow || input === "k") setSelected(Math.max(index - 1, 0));
     else if (input === "/") {
-      typed.current = filter.query;
+      typed.current = current.query;
       dispatch({ type: "open" });
-    } else if (key.escape && filter.query !== "") {
+    } else if (key.escape && current.query !== "") {
       typed.current = "";
       dispatch({ type: "clear" });
     } else if (input === "s" && sourceId !== undefined) setAll((value) => !value);

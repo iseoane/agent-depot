@@ -2,7 +2,7 @@ import { Box, Text, useInput } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { Source, SourceOperations } from "../sources.js";
-import { initialMode, modeReducer, type Mode } from "./sources-mode.js";
+import { initialMode, modeReducer, type Mode, type ModeEvent } from "./sources-mode.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
@@ -33,8 +33,12 @@ function errorText(error: unknown): string {
 
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: SourcesViewProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [selected, setSelected] = useState(0);
-  const [mode, dispatch] = useReducer(modeReducer, initialMode);
+  // The highlight follows the source id; the index is only the fallback once that source is gone.
+  const [selection, setSelection] = useState<{ readonly id?: string; readonly index: number }>({ index: 0 });
+  const [mode, dispatchMode] = useReducer(modeReducer, initialMode);
+  // Mirrors the mode synchronously so the shell and later keystrokes never see a stale capturing state.
+  const modeRef = useRef<Mode>(initialMode);
+  const mounted = useRef(true);
   const [message, setMessage] = useState<Message | undefined>();
   // Mirrors the typed URL synchronously so keystrokes delivered in one burst are not lost to stale closures.
   const typed = useRef("");
@@ -42,12 +46,24 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: So
   const reload = useCallback(async () => {
     try {
       const sources = await operations.listSources();
-      setState({ status: "ready", sources });
-      setSelected((current) => Math.min(current, Math.max(sources.length - 1, 0)));
+      if (mounted.current) setState({ status: "ready", sources });
     } catch (error) {
-      setState({ status: "error", message: errorText(error) });
+      if (mounted.current) setState({ status: "error", message: errorText(error) });
     }
   }, [operations]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const dispatch = (event: ModeEvent) => {
+    modeRef.current = modeReducer(modeRef.current, event);
+    onCapturingChange?.(modeRef.current.kind !== "browse");
+    dispatchMode(event);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -64,24 +80,29 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: So
     };
   }, [operations]);
 
-  useEffect(() => {
-    onCapturingChange?.(mode.kind !== "browse");
-  }, [mode.kind, onCapturingChange]);
-
   const sources = state.status === "ready" ? state.sources : [];
+  const found = sources.findIndex((source) => source.id === selection.id);
+  const selected = found >= 0 ? found : Math.min(selection.index, Math.max(sources.length - 1, 0));
   const current = sources[selected];
+  const select = (index: number) => {
+    const bounded = Math.min(Math.max(index, 0), Math.max(sources.length - 1, 0));
+    setSelection({ id: sources[bounded]?.id, index: bounded });
+  };
 
   /** Runs a mutating action in the busy mode, reports its outcome and reloads the list. */
   const run = async (action: () => Promise<string>) => {
     dispatch({ type: "busy" });
     setMessage(undefined);
+    let outcome: Message;
     try {
-      setMessage({ kind: "ok", text: await action() });
+      outcome = { kind: "ok", text: await action() };
     } catch (error) {
-      setMessage({ kind: "error", text: `Error: ${errorText(error)}` });
+      outcome = { kind: "error", text: `Error: ${errorText(error)}` };
     }
+    if (!mounted.current) return;
+    setMessage(outcome);
     await reload();
-    dispatch({ type: "done" });
+    if (mounted.current) dispatch({ type: "done" });
   };
 
   const stop = (text: string) => setMessage({ kind: "error", text });
@@ -95,6 +116,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: So
     setMessage(undefined);
     try {
       const installations = await operations.listUserGlobalInstallations();
+      if (!mounted.current) return;
       const dependent = installations.some(
         (selection) => selection.source.kind === "external" && "url" in selection.source && source.kind === "git" && selection.source.url === source.url,
       );
@@ -105,12 +127,14 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: So
         dispatch({ type: "confirm", action: "remove", source });
       }
     } catch (error) {
+      if (!mounted.current) return;
       stop(`Error: ${errorText(error)}`);
       dispatch({ type: "done" });
     }
   };
 
   useInput((input, key) => {
+    const mode = modeRef.current;
     if (mode.kind === "busy") return;
     if (mode.kind === "input") {
       if (key.escape) dispatch({ type: "done" });
@@ -142,9 +166,9 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog }: So
     }
 
     if (key.downArrow || input === "j") {
-      setSelected((index) => Math.min(index + 1, Math.max(sources.length - 1, 0)));
+      select(selected + 1);
     } else if (key.upArrow || input === "k") {
-      setSelected((index) => Math.max(index - 1, 0));
+      select(selected - 1);
     } else if (key.return && current) {
       onOpenCatalog?.(current);
     } else if (input === "a") {

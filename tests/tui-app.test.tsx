@@ -102,3 +102,19 @@ test("App does not switch views or quit while the catalog filter captures keys",
   assert.match(lastFrame() ?? "", /Filter: q1/);
   unmount();
 });
+
+test("App ignores q and view keys sent in the same burst as the catalog filter key", async () => {
+  let exits = 0;
+  const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} onExit={() => { exits += 1; }} />);
+  await settle();
+  stdin.write("2");
+  await settle();
+  stdin.write("/");
+  stdin.write("q");
+  stdin.write("1");
+  await settle();
+  assert.equal(exits, 0);
+  assert.match(lastFrame() ?? "", /\[2 Catalog\]/);
+  assert.match(lastFrame() ?? "", /Filter: q1/);
+  unmount();
+});

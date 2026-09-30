@@ -249,3 +249,86 @@ test("App shows key hints and q does not quit while typing or confirming", async
   assert.equal(exits, 1);
   unmount();
 });
+
+test("App ignores q and view keys sent in the same burst as a capturing key", async () => {
+  const h = harness();
+  let exits = 0;
+  const { lastFrame, stdin, unmount } = render(<App operations={h.operations} onExit={() => { exits += 1; }} />);
+  await tick();
+  stdin.write("a");
+  stdin.write("q");
+  stdin.write("2");
+  await tick();
+  assert.equal(exits, 0);
+  assert.match(lastFrame() ?? "", /\[1 Sources\]/);
+  assert.match(lastFrame() ?? "", /URL: q2/);
+  unmount();
+});
+
+test("App does not quit or switch views while an action is busy", async () => {
+  let release: (() => void) | undefined;
+  const h = harness({
+    refreshSource: () => new Promise<GitSource>((resolve) => { release = () => resolve(external); }),
+  });
+  let exits = 0;
+  const { lastFrame, stdin, unmount } = render(<App operations={h.operations} onExit={() => { exits += 1; }} />);
+  await tick();
+  stdin.write(DOWN);
+  await tick();
+  stdin.write("r");
+  await tick();
+  stdin.write("y");
+  stdin.write("q");
+  stdin.write("2");
+  await tick();
+  assert.equal(exits, 0);
+  assert.match(lastFrame() ?? "", /\[1 Sources\]/);
+  release?.();
+  await tick();
+  unmount();
+});
+
+test("the highlight stays on the same source when a new source sorts before it", async () => {
+  const h = harness({
+    async addGitSource(url) {
+      h.calls.push(`add ${url}`);
+      h.sources = [BUILT_IN_SOURCE, added, external];
+      return added;
+    },
+  });
+  const { lastFrame, stdin, unmount } = await open(h);
+  stdin.write(DOWN);
+  await tick();
+  stdin.write("a");
+  await tick();
+  stdin.write(added.url);
+  await tick();
+  stdin.write("\r");
+  await tick();
+  assert.match(lastFrame() ?? "", new RegExp(`> ${external.id}`));
+  unmount();
+});
+
+test("no reload is issued after the view unmounts mid-action", async () => {
+  let release: (() => void) | undefined;
+  let lists = 0;
+  const h = harness({
+    async listSources() {
+      lists += 1;
+      return h.sources;
+    },
+    refreshSource: () => new Promise<GitSource>((resolve) => { release = () => resolve(external); }),
+  });
+  const { stdin, unmount } = await open(h);
+  stdin.write(DOWN);
+  await tick();
+  stdin.write("r");
+  await tick();
+  stdin.write("y");
+  await tick();
+  unmount();
+  const before = lists;
+  release?.();
+  await tick();
+  assert.equal(lists, before);
+});

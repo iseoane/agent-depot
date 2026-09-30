@@ -27,6 +27,7 @@ The CLI requires remembering subcommands, ids and `--yes` confirmations; a TUI m
 - [x] T2 — Sources view: list sources (id, kind, url), keyboard navigation, empty/error states.
 - [x] T3 — Sources actions: add Git Source (URL input), refresh and remove with confirmation; built-in protected.
 - [x] T4 — Catalog view: select source(s) → discovered skills with filter.
+- [x] T5 — Hardening from independent review of main..c4eeb79 (all minor): `q` may quit mid-operation (capturing state lags via useEffect); selection tracked by index instead of source id after reload; setState after unmount without isMounted guard. Done: capture state now synchronous (ref updated with each mode/filter dispatch), highlight follows source id, mounted guard on async paths; RED 4 new tests, GREEN 35 tui tests.
 
 ## Acceptance criteria
 - `agent-depot tui` opens, shows sources, and supports add/refresh/remove with confirmation.

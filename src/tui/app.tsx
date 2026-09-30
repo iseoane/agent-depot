@@ -1,5 +1,5 @@
 import { Box, Text, useApp, useInput } from "ink";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
 import { CatalogView } from "./catalog-view.js";
@@ -22,11 +22,17 @@ const HINTS: Record<ViewName, string> = {
 export function App({ operations, onExit }: AppProps) {
   const { exit } = useApp();
   const [capturing, setCapturing] = useState(false);
+  // Updated synchronously by the views so keys in the same burst never see a stale capturing state.
+  const capturingRef = useRef(false);
+  const onCapturingChange = useCallback((value: boolean) => {
+    capturingRef.current = value;
+    setCapturing(value);
+  }, []);
   const [view, setView] = useState<ViewName>("sources");
   const [catalogSourceId, setCatalogSourceId] = useState<string | undefined>();
 
   useInput((input) => {
-    if (capturing) return;
+    if (capturingRef.current) return;
     if (input === "q") {
       onExit?.();
       exit();
@@ -43,14 +49,14 @@ export function App({ operations, onExit }: AppProps) {
       {view === "sources" ? (
         <SourcesView
           operations={operations}
-          onCapturingChange={setCapturing}
+          onCapturingChange={onCapturingChange}
           onOpenCatalog={(source) => {
             setCatalogSourceId(source.id);
             setView("catalog");
           }}
         />
       ) : (
-        <CatalogView operations={operations} sourceId={catalogSourceId} onCapturingChange={setCapturing} />
+        <CatalogView operations={operations} sourceId={catalogSourceId} onCapturingChange={onCapturingChange} />
       )}
       <Text dimColor>{capturing ? "Enter submit  Esc cancel  y/n confirm" : HINTS[view]}</Text>
     </Box>
