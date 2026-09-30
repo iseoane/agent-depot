@@ -35,7 +35,7 @@ Never divide one by the other and never merge them into a single score. A rule w
 
 ### Nothing to resolve
 
-Every script this skill runs lives under `$SKILL_ROOT/scripts/`, including the session collector, which reads Claude Code, Codex, Pi, Grok Build and ZCode history. The skill has no runtime dependency on any other skill or harness. `scripts/collect_sessions.py` includes third-party code under the MIT licence; see `references/LICENSE-third-party.txt`.
+Every script this skill runs lives under `$SKILL_ROOT/scripts/`, including the session collector, which reads Claude Code, Codex, Pi, Grok Build and ZCode history. The skill has no runtime dependency on any other skill or harness.
 
 ### Arguments
 

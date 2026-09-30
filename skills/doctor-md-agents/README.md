@@ -42,8 +42,6 @@ Cada cita del juez se verifica mecánicamente contra la transcripción por subca
 | `references/` | modelo de regla, privacidad, licencia de terceros |
 | `scripts/` | 5 scripts stdlib + 5 suites (95 tests) |
 
-`scripts/collect_sessions.py` incluye código de terceros bajo licencia MIT; ver `references/LICENSE-third-party.txt`.
-
 ## Tests
 
 ```bash

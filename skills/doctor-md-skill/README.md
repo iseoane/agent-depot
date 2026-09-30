@@ -25,7 +25,3 @@ Stdlib `unittest` only, Python 3.9+, no network access required:
 ```bash
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
-
-## Licence
-
-`scripts/collect_sessions.py` includes third-party code under the MIT licence; see `references/LICENSE-third-party.txt`.

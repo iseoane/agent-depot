@@ -1,321 +1,280 @@
 #!/usr/bin/env python3
-"""Collect local Claude Code, Codex, Pi, Grok Build, and ZCode sessions and skills for scoring.
+"""Gather local agent-session history (Claude Code, Codex, Pi, Grok Build, ZCode) for scoring.
 
-Scans Claude Code project history, Codex rollout files, Pi agent session
-JSONL, Grok Build chat history, and/or ZCode model-io rollouts, discovers
-installed skills, detects which sessions used which skills, and emits:
+The script looks through the session logs each supported harness leaves on
+disk, finds the skills installed for the chosen projects, works out which
+sessions touched which skills, picks a sample, and writes:
 
   <out>/inventory.json        - skills, per-session stats, sampling decisions
-  <out>/transcripts/<id>.md   - condensed transcripts for sampled sessions
+  <out>/transcripts/<id>.md   - condensed transcripts for the sampled sessions
 
-Everything runs locally; nothing is uploaded. Python 3.9+, stdlib only.
+Everything happens on the local machine; nothing is sent anywhere.
+Python 3.9+, standard library only.
+
+Design in one paragraph: every harness has a small *reader* class that turns
+its native log format into one flat stream of neutral events (a user said
+something, a tool was called, a tool returned...). A single digest routine
+consumes any such stream and produces the statistics, the condensed
+transcript entries and the set of skills seen, so the counting rules live in
+exactly one place.
 """
 
 import argparse
-import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterator, NamedTuple
 from urllib.parse import unquote
 
-MAX_MSG_CHARS = 1500
-MAX_TOOL_CHARS = 500
-MAX_TRANSCRIPT_ENTRIES = 160
-TRANSCRIPT_HEAD = 100
-TRANSCRIPT_TAIL = 40
+# ---------------------------------------------------------------------------
+# Tunables
+# ---------------------------------------------------------------------------
 
-CODE_EDIT_HINTS = ("apply_patch", "*** Begin Patch", "edit_file", "create_file", "str_replace", "write_file")
-CLAUDE_CODE_EDIT_TOOLS = {"Edit", "MultiEdit", "NotebookEdit", "Write"}
-GENERIC_EDIT_TOOLS = {"edit", "write", "apply_patch", "edit_file", "write_file", "str_replace", "search_replace"}
+CHAT_CLIP = 1500          # characters kept from a user/assistant message
+TOOL_CLIP = 500           # characters kept from a tool call or tool output
+ENTRY_CEILING = 160       # transcripts longer than this are cut down
+KEEP_FIRST = 100          # entries retained from the start of a long transcript
+KEEP_LAST = 40            # entries retained from the end of a long transcript
+ERROR_SCAN_WINDOW = 2000  # leading characters of an output searched for failure words
 
-
-def parse_args():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        "--harness",
-        choices=("auto", "all", "claude", "codex", "pi", "grok", "zcode"),
-        default="auto",
-        help="session source (default: auto; scans every locally available source)",
-    )
-    p.add_argument(
-        "--claude-home",
-        default=os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"),
-        help="Claude Code config directory (default: CLAUDE_CONFIG_DIR or ~/.claude)",
-    )
-    p.add_argument("--codex-home", default=os.environ.get("CODEX_HOME", "~/.codex"))
-    p.add_argument(
-        "--pi-home",
-        default="~/.pi/agent",
-        help="Pi agent home (default: ~/.pi/agent)",
-    )
-    p.add_argument(
-        "--grok-home",
-        default="~/.grok",
-        help="Grok Build home (default: ~/.grok)",
-    )
-    p.add_argument(
-        "--zcode-home",
-        default="~/.zcode",
-        help="ZCode home (default: ~/.zcode)",
-    )
-    p.add_argument(
-        "--repo",
-        action="append",
-        default=[],
-        help="project to include (repeatable; default: git root of cwd, else cwd)",
-    )
-    p.add_argument(
-        "--all-conversations",
-        action="store_true",
-        help="score conversations from every project represented in local history",
-    )
-    p.add_argument("--include-global-skills", action="store_true",
-                   help="also discover skills outside the repo (~/.codex/skills, ~/.agents/skills, ~/.claude/skills, ~/.pi/agent/skills, ~/.grok/skills, ~/.zcode/skills)")
-    p.add_argument("--days", type=int, default=45, help="only consider sessions modified in the last N days")
-    p.add_argument("--max-sessions", type=int, default=12, help="max sessions to sample for scoring")
-    p.add_argument("--per-skill", type=int, default=3, help="max sampled sessions per skill")
-    p.add_argument("--no-skill", type=int, default=4, help="max sampled sessions that used no skill")
-    p.add_argument("--skills-dir", action="append", default=[], help="extra skills directory to scan (repeatable)")
-    p.add_argument("--include-subagents", action="store_true", help="include subagent/child sessions")
-    p.add_argument("--out", default="./doctor-md-skill-report")
-    return p.parse_args()
+EDIT_MARKERS = ("apply_patch", "*** Begin Patch", "edit_file", "create_file", "str_replace", "write_file")
+CLAUDE_EDIT_TOOLS = frozenset({"Edit", "MultiEdit", "NotebookEdit", "Write"})
+COMMON_EDIT_TOOLS = frozenset({"edit", "write", "apply_patch", "edit_file", "write_file", "str_replace", "search_replace"})
+FAILURE_WORDS = ("error", "failed", "traceback")
+INJECTED_TAGS = (
+    "environment_context", "user_instructions", "ENVIRONMENT", "system-reminder",
+    "permissions", "collaboration_mode", "recommended_plugins", "turn_context",
+    "user_info",
+)
+SKILL_MENTION_PATTERNS = (
+    re.compile(r"(?:^|/)skills/+([^/]+)/+"),
+    re.compile(r'"(?:skill|name|bundled_skill_id)"\s*:\s*"([^"]+)"'),
+)
+GIT_TIMEOUT_SECONDS = 10
 
 
-def resolve_repo(repo_arg) -> Path:
-    if repo_arg:
-        return Path(repo_arg).expanduser().resolve()
-    try:
-        res = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=10
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            return Path(res.stdout.strip()).resolve()
-    except (subprocess.TimeoutExpired, OSError):
-        pass
-    return Path.cwd().resolve()
+# ---------------------------------------------------------------------------
+# Small text helpers
+# ---------------------------------------------------------------------------
 
-
-def resolve_repos(repo_args):
-    if not repo_args:
-        return [resolve_repo(None)]
-    repos = []
-    seen = set()
-    for value in repo_args:
-        repo = resolve_repo(value)
-        if repo in seen:
-            continue
-        seen.add(repo)
-        repos.append(repo)
-    return repos
-
-
-def discover_skills(repos, codex_home: Path, extra_dirs, include_global: bool,
-                    pi_home: Path = None, grok_home: Path = None, zcode_home: Path = None):
-    if isinstance(repos, Path):
-        repos = [repos]
-    roots = []
-    for repo in repos:
-        roots.extend((
-            repo / ".agents" / "skills",
-            repo / ".claude" / "skills",
-            repo / ".codex" / "skills",
-        ))
-    if include_global:
-        roots += [
-            codex_home / "skills",
-            Path.home() / ".agents" / "skills",
-            Path.home() / ".claude" / "skills",
-        ]
-        for home in (pi_home, grok_home, zcode_home):
-            if home is not None:
-                roots.append(Path(home) / "skills")
-    roots += [Path(d).expanduser() for d in extra_dirs]
-
-    skills = {}
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for skill_md in sorted(root.glob("*/SKILL.md")):
-            name = skill_md.parent.name
-            if name in skills:
-                continue
-            try:
-                text = skill_md.read_text(errors="replace")
-            except OSError:
-                continue
-            desc = ""
-            m = re.search(r"^description:\s*(.+)$", text, re.MULTILINE)
-            if m:
-                desc = m.group(1).strip().strip("\"'")[:300]
-            skills[name] = {
-                "name": name,
-                "path": str(skill_md),
-                "description": desc,
-                "bytes": skill_md.stat().st_size,
-                "modified_at": datetime.fromtimestamp(skill_md.stat().st_mtime, tz=timezone.utc).isoformat(),
-            }
-    return skills
-
-
-def find_codex_session_files(codex_home: Path, cutoff: datetime):
-    files = []
-    for sub in ("sessions", "archived_sessions"):
-        root = codex_home / sub
-        if not root.is_dir():
-            continue
-        for f in root.rglob("rollout-*.jsonl"):
-            try:
-                mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
-            except OSError:
-                continue
-            if mtime >= cutoff:
-                files.append((mtime, f))
-    files.sort(key=lambda t: t[0], reverse=True)
-    return files
-
-
-def find_claude_session_files(claude_home: Path, cutoff: datetime, include_subagents: bool):
-    """Find recent Claude Code parent sessions and, optionally, sidechains."""
-    projects = claude_home / "projects"
-    if not projects.is_dir():
-        return []
-
-    candidates = list(projects.glob("*/*.jsonl"))
-    if include_subagents:
-        candidates.extend(projects.glob("*/*/subagents/*.jsonl"))
-
-    files = []
-    for path in candidates:
-        try:
-            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        except OSError:
-            continue
-        if mtime >= cutoff:
-            files.append((mtime, path))
-    files.sort(key=lambda item: item[0], reverse=True)
-    return files
-
-
-def truncate(text: str, limit: int) -> str:
+def clip(text: str, limit: int) -> str:
+    """Trim whitespace and cap the length, noting how much was dropped."""
     text = text.strip()
     if len(text) <= limit:
         return text
-    return text[:limit] + f" …[truncated {len(text) - limit} chars]"
+    return f"{text[:limit]} …[truncated {len(text) - limit} chars]"
 
 
-def extract_text(content) -> str:
+def stringify(value) -> str:
+    """Render a tool argument / output payload as text."""
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+
+
+def flatten_text(content) -> str:
+    """Join the textual parts of a message body (string or list of blocks)."""
     if isinstance(content, str):
         return content
-    parts = []
-    if isinstance(content, list):
-        for block in content:
-            if isinstance(block, dict):
-                t = block.get("text") or block.get("content") or ""
-                if isinstance(t, str) and t:
-                    parts.append(t)
-            elif isinstance(block, str):
-                parts.append(block)
-    return "\n".join(parts)
+    if not isinstance(content, list):
+        return ""
+    pieces = []
+    for block in content:
+        if isinstance(block, str):
+            pieces.append(block)
+        elif isinstance(block, dict):
+            piece = block.get("text") or block.get("content") or ""
+            if isinstance(piece, str) and piece:
+                pieces.append(piece)
+    return "\n".join(pieces)
 
 
-def iter_jsonl_records(path: Path):
-    """Yield every valid JSON object without loading the whole file."""
-    stream = path.open("r", encoding="utf-8", errors="replace")
-
-    def records():
-        with stream:
-            for line in stream:
-                try:
-                    yield json.loads(line)
-                except (json.JSONDecodeError, ValueError):
-                    continue
-
-    return records()
+def is_harness_injection(text: str) -> bool:
+    """True for text a harness injects on the user's behalf (system reminders etc.)."""
+    opening = text.lstrip()[:80]
+    return opening.startswith("<") and any(tag in opening for tag in INJECTED_TAGS)
 
 
-class TranscriptBuffer:
-    """Keep complete short transcripts and a bounded head/tail for long ones."""
-
-    def __init__(self):
-        self._entries = []
-        self._tail = None
-        self._total = 0
-
-    def append(self, entry):
-        self._total += 1
-        if self._tail is None:
-            self._entries.append(entry)
-            if len(self._entries) > MAX_TRANSCRIPT_ENTRIES:
-                self._tail = deque(self._entries[-TRANSCRIPT_TAIL:], maxlen=TRANSCRIPT_TAIL)
-                self._entries = self._entries[:TRANSCRIPT_HEAD]
-        else:
-            self._tail.append(entry)
-
-    def finish(self):
-        if self._tail is None:
-            return self._entries
-        omitted = self._total - TRANSCRIPT_HEAD - TRANSCRIPT_TAIL
-        return self._entries + [
-            ("note", f"[... {omitted} entries omitted ...]")
-        ] + list(self._tail)
+def mentions_failure(text: str) -> bool:
+    window = text[:ERROR_SCAN_WINDOW].lower()
+    return any(word in window for word in FAILURE_WORDS)
 
 
-def detect_skill_candidates(text: str):
-    """Extract possible installed-skill names from one tool argument payload."""
-    normalized = text.replace("\\", "/")
-    candidates = set(re.findall(r"(?:^|/)skills/+([^/]+)/+", normalized))
-    candidates.update(re.findall(
-        r'"(?:skill|name|bundled_skill_id)"\s*:\s*"([^"]+)"',
-        normalized,
-    ))
-    return candidates
+def skill_mentions(text: str) -> set:
+    """Names that look like installed skills inside one tool-call payload."""
+    text = text.replace("\\", "/")
+    found = set()
+    for pattern in SKILL_MENTION_PATTERNS:
+        found.update(pattern.findall(text))
+    return found
 
 
-def parse_claude_session(path: Path, skill_names, include_subagents: bool):
-    """Normalize one Claude Code JSONL session to the shared transcript shape."""
+def message_blocks(content) -> list:
+    """Normalise a message body to a list of content blocks."""
+    return content if isinstance(content, list) else [{"type": "text", "text": content}]
+
+
+def read_jsonl(path: Path) -> Iterator[dict]:
+    """Stream the JSON objects of a JSONL file, one line at a time."""
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for raw in handle:
+            try:
+                obj = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(obj, dict):
+                yield obj
+
+
+def file_mtime(path: Path):
     try:
-        records = iter_jsonl_records(path)
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
     except OSError:
         return None
 
-    meta = {}
-    stats = {
-        "user_turns": 0,
-        "assistant_turns": 0,
-        "tool_calls": 0,
-        "repeated_tool_calls": 0,
-        "error_outputs": 0,
-    }
-    entries = TranscriptBuffer()
-    seen_calls = {}
-    seen_assistant_messages = set()
-    used_tool_names = set()
-    skills_used = set()
-    has_code_edit_hint = False
-    first_ts = last_ts = None
-    is_sidechain = False
 
-    for obj in records:
-        ts = obj.get("timestamp")
-        if ts:
-            first_ts = first_ts or ts
-            last_ts = ts
+def recent_files(paths, cutoff: datetime):
+    """Pair each path with its mtime, drop stale ones, order newest first."""
+    hits = []
+    for path in paths:
+        stamp = file_mtime(path)
+        if stamp is not None and stamp >= cutoff:
+            hits.append((stamp, path))
+    hits.sort(key=lambda pair: pair[0], reverse=True)
+    return hits
 
-        if obj.get("isSidechain"):
-            is_sidechain = True
-            if not include_subagents:
-                return None
 
-        if not meta and obj.get("sessionId"):
-            session_id = obj.get("sessionId")
-            agent_id = obj.get("agentId")
-            meta = {
-                "id": f"{session_id}-{agent_id}" if agent_id else session_id,
+# ---------------------------------------------------------------------------
+# Neutral event stream
+# ---------------------------------------------------------------------------
+
+STAMP = "stamp"            # text = a timestamp seen in the log
+USER_TURN = "user_turn"    # one human turn happened
+AGENT_TURN = "agent_turn"  # one assistant turn happened
+USER_SAID = "user_said"    # text = transcript-worthy user message
+AGENT_SAID = "agent_said"  # text = transcript-worthy assistant message
+TOOL_CALL = "tool_call"    # name = tool, text = serialized arguments
+TOOL_OUTPUT = "tool_output"  # text = output, failed = harness flagged an error
+SKILL_HINT = "skill_hint"  # text = a skill name the harness stated explicitly
+
+
+class Event(NamedTuple):
+    kind: str
+    text: str = ""
+    name: str = ""
+    failed: bool = False
+
+
+class SkipSession(Exception):
+    """Raised by a reader to say the session must be left out entirely."""
+
+
+class EntryLog:
+    """Ordered transcript entries; long logs keep a head and a tail only."""
+
+    def __init__(self):
+        self._front = []
+        self._back = None
+        self._seen = 0
+
+    def __len__(self):
+        return self._seen
+
+    def add(self, role: str, text: str):
+        self._seen += 1
+        if self._back is not None:
+            self._back.append((role, text))
+            return
+        self._front.append((role, text))
+        if len(self._front) > ENTRY_CEILING:
+            self._back = deque(self._front[-KEEP_LAST:], maxlen=KEEP_LAST)
+            del self._front[KEEP_FIRST:]
+
+    def entries(self):
+        if self._back is None:
+            return self._front
+        dropped = self._seen - KEEP_FIRST - KEEP_LAST
+        marker = ("note", f"[... {dropped} entries omitted ...]")
+        return [*self._front, marker, *self._back]
+
+
+# ---------------------------------------------------------------------------
+# Readers: one per harness, each translating a log file into Events
+# ---------------------------------------------------------------------------
+
+class Reader:
+    """Base class. Subclasses describe where a harness keeps sessions and how to decode them."""
+
+    key = ""
+    restrict_skills = True             # intersect detected skills with the known set
+    edit_tools = COMMON_EDIT_TOOLS     # tool names that imply code edits
+    drop_when_silent = False           # discard sessions that yield no transcript entries
+
+    def __init__(self, path: Path, include_subagents: bool = False):
+        self.path = path
+        self.include_subagents = include_subagents
+
+    # -- discovery ---------------------------------------------------------
+    @classmethod
+    def required_dir(cls, home: Path) -> Path:
+        raise NotImplementedError
+
+    @classmethod
+    def absence_message(cls, home: Path) -> str:
+        raise NotImplementedError
+
+    @classmethod
+    def locate(cls, home: Path, cutoff: datetime, include_subagents: bool = False):
+        raise NotImplementedError
+
+    # -- decoding ----------------------------------------------------------
+    def events(self) -> Iterator[Event]:
+        raise NotImplementedError
+
+    def build_meta(self, first_ts) -> dict:
+        raise NotImplementedError
+
+
+class ClaudeReader(Reader):
+    key = "claude"
+    restrict_skills = False
+    edit_tools = CLAUDE_EDIT_TOOLS
+
+    def __init__(self, path, include_subagents=False):
+        super().__init__(path, include_subagents)
+        self._meta = {}
+        self._sidechain = False
+        self._counted_messages = set()
+
+    @classmethod
+    def required_dir(cls, home):
+        return home / "projects"
+
+    @classmethod
+    def absence_message(cls, home):
+        return f"Claude Code project history not found at {home / 'projects'}"
+
+    @classmethod
+    def locate(cls, home, cutoff, include_subagents=False):
+        root = home / "projects"
+        if not root.is_dir():
+            return []
+        paths = list(root.glob("*/*.jsonl"))
+        if include_subagents:
+            paths += root.glob("*/*/subagents/*.jsonl")
+        return recent_files(paths, cutoff)
+
+    def _track_envelope(self, obj, ts):
+        agent = obj.get("agentId")
+        if not self._meta:
+            if not obj.get("sessionId"):
+                return
+            sid = obj["sessionId"]
+            self._meta = {
+                "id": f"{sid}-{agent}" if agent else sid,
                 "cwd": obj.get("cwd"),
                 "started_at": ts,
                 "originator": "claude-code",
@@ -323,551 +282,638 @@ def parse_claude_session(path: Path, skill_names, include_subagents: bool):
                 "cli_version": obj.get("version"),
                 "entrypoint": obj.get("entrypoint"),
             }
-        elif meta:
-            meta["cwd"] = meta.get("cwd") or obj.get("cwd")
-            meta["started_at"] = meta.get("started_at") or ts
-            meta["cli_version"] = meta.get("cli_version") or obj.get("version")
-            meta["entrypoint"] = meta.get("entrypoint") or obj.get("entrypoint")
-            agent_id = obj.get("agentId")
-            if agent_id and not meta["id"].endswith(f"-{agent_id}"):
-                meta["id"] = f"{obj.get('sessionId') or meta['id']}-{agent_id}"
+            return
+        meta = self._meta
+        for field, value in (("cwd", obj.get("cwd")), ("started_at", ts),
+                             ("cli_version", obj.get("version")),
+                             ("entrypoint", obj.get("entrypoint"))):
+            meta[field] = meta.get(field) or value
+        if agent and not meta["id"].endswith(f"-{agent}"):
+            meta["id"] = f"{obj.get('sessionId') or meta['id']}-{agent}"
 
-        record_type = obj.get("type")
-        message = obj.get("message")
-        if record_type not in ("user", "assistant") or not isinstance(message, dict):
-            continue
+    def events(self):
+        for obj in read_jsonl(self.path):
+            ts = obj.get("timestamp")
+            if ts:
+                yield Event(STAMP, ts)
+            if obj.get("isSidechain"):
+                self._sidechain = True
+                if not self.include_subagents:
+                    raise SkipSession
+            self._track_envelope(obj, ts)
 
-        role = message.get("role") or record_type
-        content = message.get("content")
-        blocks = content if isinstance(content, list) else [{"type": "text", "text": content}]
-        has_user_text = False
+            message = obj.get("message")
+            if obj.get("type") not in ("user", "assistant") or not isinstance(message, dict):
+                continue
+            yield from self._decode_message(obj, message)
 
+    def _decode_message(self, obj, message):
+        role = message.get("role") or obj.get("type")
         if role == "assistant":
-            message_id = message.get("id") or obj.get("uuid")
-            if message_id and message_id not in seen_assistant_messages:
-                seen_assistant_messages.add(message_id)
-                stats["assistant_turns"] += 1
-
-        for block in blocks:
+            msg_id = message.get("id") or obj.get("uuid")
+            if msg_id and msg_id not in self._counted_messages:
+                self._counted_messages.add(msg_id)
+                yield Event(AGENT_TURN)
+        human_spoke = False
+        for block in message_blocks(message.get("content")):
             if not isinstance(block, dict):
                 continue
-            block_type = block.get("type")
-            if block_type == "text":
+            btype = block.get("type")
+            if btype == "text":
                 text = block.get("text")
-                if not isinstance(text, str) or not text or looks_injected(text):
+                if not isinstance(text, str) or not text or is_harness_injection(text):
                     continue
                 if role == "user":
-                    has_user_text = True
-                    entries.append(("user", truncate(text, MAX_MSG_CHARS)))
+                    human_spoke = True
+                    yield Event(USER_SAID, text)
                 elif role == "assistant":
-                    entries.append(("assistant", truncate(text, MAX_MSG_CHARS)))
-            elif block_type == "tool_use":
-                stats["tool_calls"] += 1
+                    yield Event(AGENT_SAID, text)
+            elif btype == "tool_use":
                 name = str(block.get("name") or "unknown")
                 args = block.get("input") or {}
-                args_text = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-                key = hashlib.sha1((name + args_text).encode()).hexdigest()
-                seen_calls[key] = seen_calls.get(key, 0) + 1
-                if seen_calls[key] > 1:
-                    stats["repeated_tool_calls"] += 1
-                used_tool_names.add(name)
-                skills_used.update(detect_skill_candidates(args_text))
-                has_code_edit_hint = has_code_edit_hint or any(
-                    hint in args_text for hint in CODE_EDIT_HINTS
-                )
-                if name == "Skill" and isinstance(args, dict):
-                    skill_name = args.get("skill")
-                    if skill_name:
-                        skills_used.add(skill_name)
-                entries.append((f"tool:{name}", truncate(args_text, MAX_TOOL_CHARS)))
-            elif block_type == "tool_result":
-                result = extract_text(block.get("content"))
-                low = result[:2000].lower()
-                if block.get("is_error") or "error" in low or "failed" in low or "traceback" in low:
-                    stats["error_outputs"] += 1
-                entries.append(("output", truncate(result, MAX_TOOL_CHARS)))
+                yield Event(TOOL_CALL, stringify(args), name)
+                if name == "Skill" and isinstance(args, dict) and args.get("skill"):
+                    yield Event(SKILL_HINT, args["skill"])
+            elif btype == "tool_result":
+                yield Event(TOOL_OUTPUT, flatten_text(block.get("content")),
+                            failed=bool(block.get("is_error")))
+        if role == "user" and human_spoke:
+            yield Event(USER_TURN)
 
-        if role == "user" and has_user_text:
-            stats["user_turns"] += 1
-
-    if not meta:
-        meta = {
-            "id": path.stem,
-            "cwd": None,
-            "started_at": first_ts,
-            "originator": "claude-code",
-            "thread_source": "subagent" if is_sidechain else None,
-        }
-    elif is_sidechain:
-        meta["thread_source"] = "subagent"
-
-    stats["first_ts"] = first_ts
-    stats["last_ts"] = last_ts
-    stats["has_code_edits"] = (
-        bool(used_tool_names & CLAUDE_CODE_EDIT_TOOLS)
-        or has_code_edit_hint
-    )
-    return meta, stats, entries.finish(), sorted(skills_used)
-
-
-def looks_injected(text: str) -> bool:
-    head = text.lstrip()[:80]
-    return head.startswith("<") and any(
-        tag in head
-        for tag in (
-            "environment_context", "user_instructions", "ENVIRONMENT", "system-reminder",
-            "permissions", "collaboration_mode", "recommended_plugins", "turn_context",
-            "user_info",
-        )
-    )
-
-
-def parse_codex_session(path: Path, skill_names, include_subagents: bool):
-    """Returns (meta, stats, entries) or None if the session should be skipped."""
-    try:
-        records = iter_jsonl_records(path)
-    except OSError:
-        return None
-
-    meta = {}
-    stats = {"user_turns": 0, "assistant_turns": 0, "tool_calls": 0, "repeated_tool_calls": 0, "error_outputs": 0}
-    entries = TranscriptBuffer()
-    seen_calls = {}
-    skills_used = set()
-    has_code_edits = False
-    first_ts = last_ts = None
-
-    for obj in records:
-        ltype = obj.get("type")
-        payload = obj.get("payload") or {}
-        if not isinstance(payload, dict):
-            continue
-        ts = obj.get("timestamp")
-        if ts:
-            first_ts = first_ts or ts
-            last_ts = ts
-
-        if ltype == "session_meta":
-            meta = {
-                "id": payload.get("id") or payload.get("session_id") or path.stem,
-                "cwd": payload.get("cwd"),
-                "started_at": payload.get("timestamp"),
-                "originator": payload.get("originator"),
-                "thread_source": payload.get("thread_source"),
-                "cli_version": payload.get("cli_version"),
+    def build_meta(self, first_ts):
+        if not self._meta:
+            return {
+                "id": self.path.stem,
+                "cwd": None,
+                "started_at": first_ts,
+                "originator": "claude-code",
+                "thread_source": "subagent" if self._sidechain else None,
             }
-            source = payload.get("source")
-            is_subagent = payload.get("thread_source") == "subagent" or (
-                isinstance(source, dict) and "subagent" in source
-            )
-            if is_subagent and not include_subagents:
-                return None
-
-        elif ltype == "event_msg":
-            ptype = payload.get("type")
-            if ptype == "user_message":
-                stats["user_turns"] += 1
-            elif ptype == "agent_message":
-                stats["assistant_turns"] += 1
-
-        elif ltype == "response_item":
-            ptype = payload.get("type")
-            if ptype == "message":
-                role = payload.get("role")
-                text = extract_text(payload.get("content"))
-                if not text:
-                    continue
-                if role == "user":
-                    if looks_injected(text):
-                        continue
-                    entries.append(("user", truncate(text, MAX_MSG_CHARS)))
-                elif role == "assistant":
-                    entries.append(("assistant", truncate(text, MAX_MSG_CHARS)))
-            elif ptype in ("function_call", "custom_tool_call", "local_shell_call"):
-                stats["tool_calls"] += 1
-                name = payload.get("name") or ptype
-                args = payload.get("arguments") or payload.get("input") or ""
-                if not isinstance(args, str):
-                    args = json.dumps(args)
-                key = hashlib.sha1((name + args).encode()).hexdigest()
-                seen_calls[key] = seen_calls.get(key, 0) + 1
-                if seen_calls[key] > 1:
-                    stats["repeated_tool_calls"] += 1
-                skills_used.update(detect_skill_candidates(args))
-                has_code_edits = has_code_edits or any(
-                    hint in args for hint in CODE_EDIT_HINTS
-                )
-                entries.append((f"tool:{name}", truncate(args, MAX_TOOL_CHARS)))
-            elif ptype in ("function_call_output", "custom_tool_call_output"):
-                out = payload.get("output") or ""
-                if not isinstance(out, str):
-                    out = json.dumps(out)
-                low = out[:2000].lower()
-                if "error" in low or "failed" in low or "traceback" in low:
-                    stats["error_outputs"] += 1
-                entries.append(("output", truncate(out, MAX_TOOL_CHARS)))
-
-    if not meta:
-        meta = {"id": path.stem, "cwd": None, "started_at": first_ts}
-
-    stats["first_ts"] = first_ts
-    stats["last_ts"] = last_ts
-    stats["has_code_edits"] = has_code_edits
-    return meta, stats, entries.finish(), sorted(skills_used)
+        if self._sidechain:
+            self._meta["thread_source"] = "subagent"
+        return self._meta
 
 
+class CodexReader(Reader):
+    key = "codex"
+    restrict_skills = False
+    edit_tools = frozenset()
+    _CALL_TYPES = ("function_call", "custom_tool_call", "local_shell_call")
+    _OUTPUT_TYPES = ("function_call_output", "custom_tool_call_output")
 
-def find_pi_session_files(pi_home: Path, cutoff: datetime):
-    root = pi_home / "sessions"
-    if not root.is_dir():
-        return []
-    files = []
-    for path in root.glob("*/*.jsonl"):
-        try:
-            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        except OSError:
-            continue
-        if mtime >= cutoff:
-            files.append((mtime, path))
-    files.sort(key=lambda item: item[0], reverse=True)
-    return files
+    def __init__(self, path, include_subagents=False):
+        super().__init__(path, include_subagents)
+        self._meta = {}
+
+    @classmethod
+    def required_dir(cls, home):
+        return home
+
+    @classmethod
+    def absence_message(cls, home):
+        return f"Codex home not found at {home}"
+
+    @classmethod
+    def locate(cls, home, cutoff, include_subagents=False):
+        paths = []
+        for sub in ("sessions", "archived_sessions"):
+            folder = home / sub
+            if folder.is_dir():
+                paths.extend(folder.rglob("rollout-*.jsonl"))
+        return recent_files(paths, cutoff)
+
+    def _read_header(self, payload):
+        self._meta = {
+            "id": payload.get("id") or payload.get("session_id") or self.path.stem,
+            "cwd": payload.get("cwd"),
+            "started_at": payload.get("timestamp"),
+            "originator": payload.get("originator"),
+            "thread_source": payload.get("thread_source"),
+            "cli_version": payload.get("cli_version"),
+        }
+        origin = payload.get("source")
+        delegated = payload.get("thread_source") == "subagent" or (
+            isinstance(origin, dict) and "subagent" in origin
+        )
+        if delegated and not self.include_subagents:
+            raise SkipSession
+
+    def events(self):
+        for obj in read_jsonl(self.path):
+            payload = obj.get("payload") or {}
+            if not isinstance(payload, dict):
+                continue
+            if obj.get("timestamp"):
+                yield Event(STAMP, obj["timestamp"])
+            record = obj.get("type")
+            inner = payload.get("type")
+            if record == "session_meta":
+                self._read_header(payload)
+            elif record == "event_msg":
+                if inner == "user_message":
+                    yield Event(USER_TURN)
+                elif inner == "agent_message":
+                    yield Event(AGENT_TURN)
+            elif record == "response_item":
+                yield from self._decode_item(payload, inner)
+
+    def _decode_item(self, payload, inner):
+        if inner == "message":
+            text = flatten_text(payload.get("content"))
+            role = payload.get("role")
+            if not text:
+                return
+            if role == "user" and not is_harness_injection(text):
+                yield Event(USER_SAID, text)
+            elif role == "assistant":
+                yield Event(AGENT_SAID, text)
+        elif inner in self._CALL_TYPES:
+            args = payload.get("arguments") or payload.get("input") or ""
+            yield Event(TOOL_CALL, stringify(args), payload.get("name") or inner)
+        elif inner in self._OUTPUT_TYPES:
+            yield Event(TOOL_OUTPUT, stringify(payload.get("output") or ""))
+
+    def build_meta(self, first_ts):
+        return self._meta or {"id": self.path.stem, "cwd": None, "started_at": first_ts}
 
 
-def parse_pi_session(path: Path, skill_names, include_subagents: bool):
-    """Normalize one Pi agent JSONL session to the shared transcript shape.
+class PiReader(Reader):
+    key = "pi"
 
-    Pi has no subagent sessions; include_subagents is accepted for signature
-    compatibility with the Claude parser and ignored.
-    """
-    try:
-        records = iter_jsonl_records(path)
-    except OSError:
-        return None
+    def __init__(self, path, include_subagents=False):
+        super().__init__(path, include_subagents)
+        self._meta = {}
 
-    meta = {}
-    stats = {"user_turns": 0, "assistant_turns": 0, "tool_calls": 0, "repeated_tool_calls": 0, "error_outputs": 0}
-    entries = TranscriptBuffer()
-    seen_calls = {}
-    used_tool_names = set()
-    skills_used = set()
-    has_code_edit_hint = False
-    first_ts = last_ts = None
+    @classmethod
+    def required_dir(cls, home):
+        return home / "sessions"
 
-    for obj in records:
-        record_type = obj.get("type")
+    @classmethod
+    def absence_message(cls, home):
+        return f"Pi session home not found at {home / 'sessions'}"
+
+    @classmethod
+    def locate(cls, home, cutoff, include_subagents=False):
+        root = home / "sessions"
+        return recent_files(root.glob("*/*.jsonl"), cutoff) if root.is_dir() else []
+
+    def _read_header(self, obj):
         ts = obj.get("timestamp")
-        if ts:
-            first_ts = first_ts or ts
-            last_ts = ts
+        if not self._meta:
+            self._meta = {
+                "id": obj.get("id") or self.path.stem,
+                "cwd": obj.get("cwd"),
+                "started_at": ts,
+                "originator": "pi",
+                "thread_source": None,
+            }
+        else:
+            self._meta["cwd"] = self._meta.get("cwd") or obj.get("cwd")
+            self._meta["started_at"] = self._meta.get("started_at") or ts
 
-        if record_type == "session":
-            if not meta:
-                meta = {
-                    "id": obj.get("id") or path.stem,
-                    "cwd": obj.get("cwd"),
-                    "started_at": ts,
-                    "originator": "pi",
-                    "thread_source": None,
-                }
-            else:
-                meta["cwd"] = meta.get("cwd") or obj.get("cwd")
-                meta["started_at"] = meta.get("started_at") or ts
-            continue
+    def events(self):
+        for obj in read_jsonl(self.path):
+            if obj.get("timestamp"):
+                yield Event(STAMP, obj["timestamp"])
+            kind = obj.get("type")
+            if kind == "session":
+                self._read_header(obj)
+            elif kind == "message" and isinstance(obj.get("message"), dict):
+                yield from self._decode_message(obj["message"])
 
-        if record_type != "message":
-            continue
-        message = obj.get("message")
-        if not isinstance(message, dict):
-            continue
+    def _decode_message(self, message):
         role = message.get("role")
-        content = message.get("content")
-        blocks = content if isinstance(content, list) else [{"type": "text", "text": content}]
-
+        blocks = message_blocks(message.get("content"))
         if role == "toolResult":
-            message_error = bool(message.get("isError"))
+            message_failed = bool(message.get("isError"))
             for block in blocks:
                 if not isinstance(block, dict):
                     continue
-                result = block.get("text") or ""
-                if not isinstance(result, str) or not result:
-                    continue
-                low = result[:2000].lower()
-                if (
-                    message_error
-                    or block.get("isError")
-                    or "error" in low
-                    or "failed" in low
-                    or "traceback" in low
-                ):
-                    stats["error_outputs"] += 1
-                entries.append(("output", truncate(result, MAX_TOOL_CHARS)))
-            continue
-
-        has_user_text = False
+                text = block.get("text") or ""
+                if isinstance(text, str) and text:
+                    yield Event(TOOL_OUTPUT, text, failed=message_failed or bool(block.get("isError")))
+            return
         if role == "assistant":
-            stats["assistant_turns"] += 1
-
+            yield Event(AGENT_TURN)
+        human_spoke = False
         for block in blocks:
             if not isinstance(block, dict):
                 continue
-            block_type = block.get("type")
-            if block_type == "text":
+            btype = block.get("type")
+            if btype == "text":
                 text = block.get("text")
-                if not isinstance(text, str) or not text or looks_injected(text):
+                if not isinstance(text, str) or not text or is_harness_injection(text):
                     continue
                 if role == "user":
-                    has_user_text = True
-                    entries.append(("user", truncate(text, MAX_MSG_CHARS)))
+                    human_spoke = True
+                    yield Event(USER_SAID, text)
                 elif role == "assistant":
-                    entries.append(("assistant", truncate(text, MAX_MSG_CHARS)))
-            elif block_type == "toolCall":
-                stats["tool_calls"] += 1
-                name = str(block.get("name") or "unknown")
-                args = block.get("arguments") or {}
-                args_text = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-                key = hashlib.sha1((name + args_text).encode()).hexdigest()
-                seen_calls[key] = seen_calls.get(key, 0) + 1
-                if seen_calls[key] > 1:
-                    stats["repeated_tool_calls"] += 1
-                used_tool_names.add(name)
-                skills_used.update(detect_skill_candidates(args_text))
-                has_code_edit_hint = has_code_edit_hint or any(
-                    hint in args_text for hint in CODE_EDIT_HINTS
-                )
-                entries.append((f"tool:{name}", truncate(args_text, MAX_TOOL_CHARS)))
+                    yield Event(AGENT_SAID, text)
+            elif btype == "toolCall":
+                yield Event(TOOL_CALL, stringify(block.get("arguments") or {}),
+                            str(block.get("name") or "unknown"))
+        if role == "user" and human_spoke:
+            yield Event(USER_TURN)
 
-        if role == "user" and has_user_text:
-            stats["user_turns"] += 1
-
-    if not meta:
-        meta = {
-            "id": path.stem,
+    def build_meta(self, first_ts):
+        return self._meta or {
+            "id": self.path.stem,
             "cwd": None,
             "started_at": first_ts,
             "originator": "pi",
             "thread_source": None,
         }
 
-    stats["first_ts"] = first_ts
-    stats["last_ts"] = last_ts
-    stats["has_code_edits"] = (
-        bool(used_tool_names & GENERIC_EDIT_TOOLS)
-        or has_code_edit_hint
-    )
-    return meta, stats, entries.finish(), sorted(skills_used & set(skill_names))
 
-
-def find_grok_session_files(grok_home: Path, cutoff: datetime):
-    root = grok_home / "sessions"
-    if not root.is_dir():
-        return []
-    files = []
-    for path in root.glob("*/*/chat_history.jsonl"):
-        try:
-            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        except OSError:
-            continue
-        if mtime >= cutoff:
-            files.append((mtime, path))
-    files.sort(key=lambda item: item[0], reverse=True)
-    return files
-
-
-def assistant_tool_calls(message):
-    """Extract (name, args_text) pairs from OpenAI-style tool_calls entries."""
-    calls = []
+def openai_style_calls(message) -> list:
+    """(tool name, argument text) pairs from an OpenAI-style `tool_calls` list."""
+    pairs = []
     for call in message.get("tool_calls") or []:
         if not isinstance(call, dict):
             continue
-        fn = call.get("function") or {}
-        name = call.get("name") or fn.get("name") or "unknown"
+        function = call.get("function") or {}
+        name = call.get("name") or function.get("name") or "unknown"
         args = call.get("arguments")
         if args is None:
-            args = fn.get("arguments")
-        if not isinstance(args, str):
-            args = json.dumps(args, ensure_ascii=False)
-        calls.append((str(name), args))
-    return calls
+            args = function.get("arguments")
+        pairs.append((str(name), stringify(args)))
+    return pairs
+
+
+def chat_events(role: str, message: dict) -> Iterator[Event]:
+    """Events for one chat-completions style message; role is user/assistant/result."""
+    text = flatten_text(message.get("content"))
+    if role == "user":
+        if text and not is_harness_injection(text):
+            yield Event(USER_TURN)
+            yield Event(USER_SAID, text)
+    elif role == "assistant":
+        if text:
+            yield Event(AGENT_TURN)
+            yield Event(AGENT_SAID, text)
+        for name, args in openai_style_calls(message):
+            yield Event(TOOL_CALL, args, name)
+    elif role == "result" and text:
+        yield Event(TOOL_OUTPUT, text)
+
+
+class GrokReader(Reader):
+    key = "grok"
+    _IGNORED_TYPES = ("system", "reasoning", "backend_tool_call")
+    _ROLE_OF_TYPE = {"user": "user", "assistant": "assistant", "tool_result": "result"}
+
+    @classmethod
+    def required_dir(cls, home):
+        return home / "sessions"
+
+    @classmethod
+    def absence_message(cls, home):
+        return f"Grok Build session home not found at {home / 'sessions'}"
+
+    @classmethod
+    def locate(cls, home, cutoff, include_subagents=False):
+        root = home / "sessions"
+        return recent_files(root.glob("*/*/chat_history.jsonl"), cutoff) if root.is_dir() else []
+
+    def events(self):
+        for obj in read_jsonl(self.path):
+            if obj.get("type") in self._IGNORED_TYPES or obj.get("synthetic_reason"):
+                continue
+            role = self._ROLE_OF_TYPE.get(obj.get("type"))
+            if role:
+                yield from chat_events(role, obj)
+
+    def build_meta(self, first_ts):
+        return {
+            "id": self.path.parent.name,
+            "cwd": unquote(self.path.parent.parent.name),
+            "started_at": None,
+            "originator": "grok",
+            "thread_source": None,
+        }
+
+
+class ZcodeReader(Reader):
+    key = "zcode"
+    drop_when_silent = True
+    _ROLE_OF_ROLE = {"user": "user", "assistant": "assistant", "tool": "result"}
+
+    @classmethod
+    def required_dir(cls, home):
+        return home / "cli" / "rollout"
+
+    @classmethod
+    def absence_message(cls, home):
+        return f"ZCode model-io rollouts not found at {home / 'cli' / 'rollout'}"
+
+    @classmethod
+    def locate(cls, home, cutoff, include_subagents=False):
+        root = home / "cli" / "rollout"
+        return recent_files(root.glob("model-io-*.jsonl"), cutoff) if root.is_dir() else []
+
+    def events(self):
+        # Each line is a full request dump; only the final non-empty message
+        # list describes the session as it ended, so keep just that one.
+        latest = None
+        for obj in read_jsonl(self.path):
+            body = (obj.get("request") or {}).get("body") or {}
+            batch = body.get("messages")
+            if isinstance(batch, list) and batch:
+                latest = batch
+        if not latest:
+            raise SkipSession
+        for message in latest:
+            if isinstance(message, dict):
+                role = self._ROLE_OF_ROLE.get(message.get("role"))
+                if role:
+                    yield from chat_events(role, message)
+
+    def build_meta(self, first_ts):
+        stem = self.path.stem
+        prefix = "model-io-"
+        return {
+            "id": stem[len(prefix):] if stem.startswith(prefix) else stem,
+            "cwd": None,
+            "started_at": None,
+            "originator": "zcode",
+            "thread_source": None,
+        }
+
+
+READERS = {cls.key: cls for cls in (ClaudeReader, CodexReader, PiReader, GrokReader, ZcodeReader)}
+
+
+# ---------------------------------------------------------------------------
+# Digest: the single place where events become statistics and transcript
+# ---------------------------------------------------------------------------
+
+def digest_session(reader: Reader, known_skills):
+    """Consume a reader's events -> (meta, stats, entries, skills) or None to skip."""
+    known = set(known_skills)
+    tally = Counter()
+    calls_seen = set()
+    tools_used = set()
+    skills = set()
+    log = EntryLog()
+    first_ts = last_ts = None
+    edit_marker_hit = False
+
+    try:
+        for ev in reader.events():
+            kind = ev.kind
+            if kind == STAMP:
+                first_ts = first_ts or ev.text
+                last_ts = ev.text
+            elif kind == USER_TURN:
+                tally["user_turns"] += 1
+            elif kind == AGENT_TURN:
+                tally["assistant_turns"] += 1
+            elif kind == USER_SAID:
+                log.add("user", clip(ev.text, CHAT_CLIP))
+            elif kind == AGENT_SAID:
+                log.add("assistant", clip(ev.text, CHAT_CLIP))
+            elif kind == TOOL_CALL:
+                tally["tool_calls"] += 1
+                signature = (ev.name, ev.text)
+                if signature in calls_seen:
+                    tally["repeated_tool_calls"] += 1
+                calls_seen.add(signature)
+                tools_used.add(ev.name)
+                skills |= skill_mentions(ev.text)
+                edit_marker_hit = edit_marker_hit or any(m in ev.text for m in EDIT_MARKERS)
+                log.add(f"tool:{ev.name}", clip(ev.text, TOOL_CLIP))
+            elif kind == TOOL_OUTPUT:
+                if ev.failed or mentions_failure(ev.text):
+                    tally["error_outputs"] += 1
+                log.add("output", clip(ev.text, TOOL_CLIP))
+            elif kind == SKILL_HINT:
+                skills.add(ev.text)
+    except (SkipSession, OSError):
+        return None
+
+    if reader.drop_when_silent and not len(log):
+        return None
+
+    stats = {
+        name: tally[name]
+        for name in ("user_turns", "assistant_turns", "tool_calls",
+                     "repeated_tool_calls", "error_outputs")
+    }
+    stats["first_ts"] = first_ts
+    stats["last_ts"] = last_ts
+    stats["has_code_edits"] = bool(tools_used & reader.edit_tools) or edit_marker_hit
+    if reader.restrict_skills:
+        skills &= known
+    return reader.build_meta(first_ts), stats, log.entries(), sorted(skills)
+
+
+# Stable module-level entry points (other scripts import these).
+
+def find_claude_session_files(claude_home: Path, cutoff: datetime, include_subagents: bool):
+    return ClaudeReader.locate(claude_home, cutoff, include_subagents)
+
+
+def parse_claude_session(path: Path, skill_names, include_subagents: bool):
+    return digest_session(ClaudeReader(path, include_subagents), skill_names)
+
+
+def find_codex_session_files(codex_home: Path, cutoff: datetime):
+    return CodexReader.locate(codex_home, cutoff)
+
+
+def parse_codex_session(path: Path, skill_names, include_subagents: bool):
+    return digest_session(CodexReader(path, include_subagents), skill_names)
+
+
+def find_pi_session_files(pi_home: Path, cutoff: datetime):
+    return PiReader.locate(pi_home, cutoff)
+
+
+def parse_pi_session(path: Path, skill_names, include_subagents: bool):
+    return digest_session(PiReader(path, include_subagents), skill_names)
+
+
+def find_grok_session_files(grok_home: Path, cutoff: datetime):
+    return GrokReader.locate(grok_home, cutoff)
 
 
 def parse_grok_session(path: Path, skill_names, include_subagents: bool):
-    """Normalize one Grok Build chat_history.jsonl to the shared transcript shape.
-
-    Grok stores a session as one flat file; subagent activity appears as
-    synthetic_reason injections which are skipped, so include_subagents is
-    accepted for signature compatibility and ignored.
-    """
-    try:
-        records = iter_jsonl_records(path)
-    except OSError:
-        return None
-
-    stats = {"user_turns": 0, "assistant_turns": 0, "tool_calls": 0, "repeated_tool_calls": 0, "error_outputs": 0}
-    entries = TranscriptBuffer()
-    seen_calls = {}
-    used_tool_names = set()
-    skills_used = set()
-    has_code_edit_hint = False
-
-    for obj in records:
-        record_type = obj.get("type")
-        if record_type in ("system", "reasoning", "backend_tool_call"):
-            continue
-        if obj.get("synthetic_reason"):
-            continue
-
-        if record_type == "user":
-            text = extract_text(obj.get("content"))
-            if not text or looks_injected(text):
-                continue
-            stats["user_turns"] += 1
-            entries.append(("user", truncate(text, MAX_MSG_CHARS)))
-        elif record_type == "assistant":
-            text = extract_text(obj.get("content"))
-            if text:
-                stats["assistant_turns"] += 1
-                entries.append(("assistant", truncate(text, MAX_MSG_CHARS)))
-            for name, args_text in assistant_tool_calls(obj):
-                stats["tool_calls"] += 1
-                key = hashlib.sha1((name + args_text).encode()).hexdigest()
-                seen_calls[key] = seen_calls.get(key, 0) + 1
-                if seen_calls[key] > 1:
-                    stats["repeated_tool_calls"] += 1
-                used_tool_names.add(name)
-                skills_used.update(detect_skill_candidates(args_text))
-                has_code_edit_hint = has_code_edit_hint or any(
-                    hint in args_text for hint in CODE_EDIT_HINTS
-                )
-                entries.append((f"tool:{name}", truncate(args_text, MAX_TOOL_CHARS)))
-        elif record_type == "tool_result":
-            result = extract_text(obj.get("content"))
-            if not result:
-                continue
-            low = result[:2000].lower()
-            if "error" in low or "failed" in low or "traceback" in low:
-                stats["error_outputs"] += 1
-            entries.append(("output", truncate(result, MAX_TOOL_CHARS)))
-
-    meta = {
-        "id": path.parent.name,
-        "cwd": unquote(path.parent.parent.name),
-        "started_at": None,
-        "originator": "grok",
-        "thread_source": None,
-    }
-    stats["first_ts"] = None
-    stats["last_ts"] = None
-    stats["has_code_edits"] = (
-        bool(used_tool_names & GENERIC_EDIT_TOOLS)
-        or has_code_edit_hint
-    )
-    return meta, stats, entries.finish(), sorted(skills_used & set(skill_names))
+    return digest_session(GrokReader(path, include_subagents), skill_names)
 
 
 def find_zcode_session_files(zcode_home: Path, cutoff: datetime):
-    root = zcode_home / "cli" / "rollout"
-    if not root.is_dir():
-        return []
-    files = []
-    for path in root.glob("model-io-*.jsonl"):
-        try:
-            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        except OSError:
-            continue
-        if mtime >= cutoff:
-            files.append((mtime, path))
-    files.sort(key=lambda item: item[0], reverse=True)
-    return files
+    return ZcodeReader.locate(zcode_home, cutoff)
 
 
 def parse_zcode_session(path: Path, skill_names, include_subagents: bool):
-    """Normalize one ZCode model-io rollout to the shared transcript shape.
+    return digest_session(ZcodeReader(path, include_subagents), skill_names)
 
-    Model-io logs are request dumps: only the last request's message list is
-    reconstructed, so stats describe the final context window rather than the
-    full session.
-    """
+
+# ---------------------------------------------------------------------------
+# Repositories and skills
+# ---------------------------------------------------------------------------
+
+def git_toplevel(directory=None):
+    """Repository root containing `directory` (or the cwd), or None."""
+    command = ["git"] + (["-C", str(directory)] if directory else []) + ["rev-parse", "--show-toplevel"]
     try:
-        records = iter_jsonl_records(path)
+        done = subprocess.run(command, capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    top = done.stdout.strip()
+    return Path(top).resolve() if done.returncode == 0 and top else None
+
+
+def resolve_project_roots(explicit):
+    """Turn --repo values into distinct absolute paths (default: git root of cwd)."""
+    if not explicit:
+        return [git_toplevel() or Path.cwd().resolve()]
+    roots = []
+    for value in explicit:
+        root = Path(value).expanduser().resolve()
+        if root not in roots:
+            roots.append(root)
+    return roots
+
+
+def cwd_belongs_to(cwd, repo: Path) -> bool:
+    """Does a session's recorded working directory belong to `repo`?
+
+    Accepts a cwd nested under the repo root, and also any cwd whose last
+    component (or any component) equals the repo's directory name; that
+    catches worktrees stored elsewhere and sessions copied from another
+    machine. Name matching can be generous when unrelated projects share a
+    folder name, which is acceptable for a report.
+    """
+    if not cwd:
+        return False
+    location = Path(cwd)
+    try:
+        location.resolve().relative_to(repo)
+        return True
+    except (ValueError, OSError):
+        pass
+    return location.name == repo.name or repo.name in location.parts
+
+
+def session_matches_repos(cwd, repos) -> bool:
+    return any(cwd_belongs_to(cwd, repo) for repo in repos)
+
+
+def repos_seen_in(sessions):
+    """Git roots of every existing working directory the sessions recorded."""
+    roots = []
+    for session in sessions:
+        cwd = session["meta"].get("cwd")
+        if not cwd:
+            continue
+        folder = Path(cwd).expanduser()
+        if not folder.is_dir():
+            continue
+        top = git_toplevel(folder)
+        if top is not None and top not in roots:
+            roots.append(top)
+    return roots
+
+
+def skill_search_roots(repos, codex_home, extra_dirs, include_global, pi_home, grok_home, zcode_home):
+    roots = []
+    for repo in repos:
+        roots += [repo / ".agents" / "skills", repo / ".claude" / "skills", repo / ".codex" / "skills"]
+    if include_global:
+        roots += [codex_home / "skills", Path.home() / ".agents" / "skills", Path.home() / ".claude" / "skills"]
+        roots += [Path(home) / "skills" for home in (pi_home, grok_home, zcode_home) if home is not None]
+    roots += [Path(extra).expanduser() for extra in extra_dirs]
+    return roots
+
+
+def describe_skill(manifest: Path):
+    try:
+        body = manifest.read_text(errors="replace")
+        info = manifest.stat()
     except OSError:
         return None
-
-    messages = None
-    for obj in records:
-        if not isinstance(obj, dict):
-            continue
-        body = (obj.get("request") or {}).get("body") or {}
-        candidate = body.get("messages")
-        if isinstance(candidate, list) and candidate:
-            messages = candidate
-    if not messages:
-        return None
-
-    stats = {"user_turns": 0, "assistant_turns": 0, "tool_calls": 0, "repeated_tool_calls": 0, "error_outputs": 0}
-    entries = TranscriptBuffer()
-    seen_calls = {}
-    used_tool_names = set()
-    skills_used = set()
-    has_code_edit_hint = False
-
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        role = message.get("role")
-        if role == "user":
-            text = extract_text(message.get("content"))
-            if not text or looks_injected(text):
-                continue
-            stats["user_turns"] += 1
-            entries.append(("user", truncate(text, MAX_MSG_CHARS)))
-        elif role == "assistant":
-            text = extract_text(message.get("content"))
-            if text:
-                stats["assistant_turns"] += 1
-                entries.append(("assistant", truncate(text, MAX_MSG_CHARS)))
-            for name, args_text in assistant_tool_calls(message):
-                stats["tool_calls"] += 1
-                key = hashlib.sha1((name + args_text).encode()).hexdigest()
-                seen_calls[key] = seen_calls.get(key, 0) + 1
-                if seen_calls[key] > 1:
-                    stats["repeated_tool_calls"] += 1
-                used_tool_names.add(name)
-                skills_used.update(detect_skill_candidates(args_text))
-                has_code_edit_hint = has_code_edit_hint or any(
-                    hint in args_text for hint in CODE_EDIT_HINTS
-                )
-                entries.append((f"tool:{name}", truncate(args_text, MAX_TOOL_CHARS)))
-        elif role == "tool":
-            result = extract_text(message.get("content"))
-            if not result:
-                continue
-            low = result[:2000].lower()
-            if "error" in low or "failed" in low or "traceback" in low:
-                stats["error_outputs"] += 1
-            entries.append(("output", truncate(result, MAX_TOOL_CHARS)))
-
-    entries = entries.finish()
-    if not entries:
-        return None
-
-    meta = {
-        "id": path.stem.removeprefix("model-io-"),
-        "cwd": None,
-        "started_at": None,
-        "originator": "zcode",
-        "thread_source": None,
+    found = re.search(r"^description:\s*(.+)$", body, re.MULTILINE)
+    summary = found.group(1).strip().strip("\"'")[:300] if found else ""
+    return {
+        "name": manifest.parent.name,
+        "path": str(manifest),
+        "description": summary,
+        "bytes": info.st_size,
+        "modified_at": datetime.fromtimestamp(info.st_mtime, tz=timezone.utc).isoformat(),
     }
-    stats["first_ts"] = None
-    stats["last_ts"] = None
-    stats["has_code_edits"] = (
-        bool(used_tool_names & GENERIC_EDIT_TOOLS)
-        or has_code_edit_hint
-    )
-    return meta, stats, entries, sorted(skills_used & set(skill_names))
 
+
+def discover_skills(repos, codex_home: Path, extra_dirs, include_global: bool,
+                    pi_home: Path = None, grok_home: Path = None, zcode_home: Path = None):
+    """Map skill name -> descriptor; the first root that provides a name wins."""
+    if isinstance(repos, Path):
+        repos = [repos]
+    catalogue = {}
+    for root in skill_search_roots(repos, codex_home, extra_dirs, include_global,
+                                   pi_home, grok_home, zcode_home):
+        if not root.is_dir():
+            continue
+        for manifest in sorted(root.glob("*/SKILL.md")):
+            if manifest.parent.name in catalogue:
+                continue
+            entry = describe_skill(manifest)
+            if entry is not None:
+                catalogue[entry["name"]] = entry
+    return catalogue
+
+
+def detect_skills_from_entries(entries, skill_names):
+    """Skills referenced by tool-call entries (chat text is deliberately ignored)."""
+    haystack = "\n".join(
+        text for role, text in entries if role == "skill" or role.startswith("tool:")
+    ).replace("\\", "/")
+    hits = set()
+    for name in skill_names:
+        signs = (
+            f"skills/{name}/",
+            f"{name}/SKILL.md",
+            f'"skill": "{name}"',
+            f'"name": "{name}"',
+            f'"bundled_skill_id": "{name}"',
+        )
+        if any(sign in haystack for sign in signs):
+            hits.add(name)
+    return hits
+
+
+# ---------------------------------------------------------------------------
+# Sampling
+# ---------------------------------------------------------------------------
+
+def sample_by_skill(sessions, limit, per_skill, no_skill, skill_names):
+    """Fill the sample per skill first, then top up with skill-less sessions."""
+    chosen = set()
+    quota_used = {name: 0 for name in skill_names}
+    for item in sessions:
+        if len(chosen) >= limit:
+            break
+        for name in item["skills_used"]:
+            if quota_used.get(name, 0) < per_skill:
+                quota_used[name] = quota_used.get(name, 0) + 1
+                chosen.add(item["_key"])
+                break
+    plain_taken = 0
+    for item in sessions:
+        if len(chosen) >= limit or plain_taken >= no_skill:
+            break
+        if not item["skills_used"] and item["_key"] not in chosen:
+            chosen.add(item["_key"])
+            plain_taken += 1
+    return chosen
+
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
 
 def render_transcript(meta, stats, skills_used, entries) -> str:
-    lines = [
+    header = [
         f"# Session {meta.get('id')}",
         f"- cwd: {meta.get('cwd')}",
         f"- started: {meta.get('started_at') or stats.get('first_ts')}",
@@ -879,413 +925,186 @@ def render_transcript(meta, stats, skills_used, entries) -> str:
         "## Condensed transcript",
         "",
     ]
-    shown = entries
-    if len(entries) > MAX_TRANSCRIPT_ENTRIES:
-        omitted = len(entries) - TRANSCRIPT_HEAD - TRANSCRIPT_TAIL
-        shown = entries[:TRANSCRIPT_HEAD] + [("note", f"[... {omitted} entries omitted ...]")] + entries[-TRANSCRIPT_TAIL:]
-    for role, text in shown:
-        lines.append(f"[{role}] {text}")
-        lines.append("")
-    return "\n".join(lines)
+    body = []
+    for role, text in entries:
+        body += [f"[{role}] {text}", ""]
+    return "\n".join(header + body)
 
 
-def session_matches_repo(cwd, repo: Path) -> bool:
-    """True when a session's recorded cwd belongs to this repo.
+def parse_args():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--harness", choices=("auto", "all", *READERS), default="auto",
+                    help="session source (default: auto; scans every locally available source)")
+    ap.add_argument("--claude-home", default=os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"),
+                    help="Claude Code config directory (default: CLAUDE_CONFIG_DIR or ~/.claude)")
+    ap.add_argument("--codex-home", default=os.environ.get("CODEX_HOME", "~/.codex"))
+    ap.add_argument("--pi-home", default="~/.pi/agent", help="Pi agent home (default: ~/.pi/agent)")
+    ap.add_argument("--grok-home", default="~/.grok", help="Grok Build home (default: ~/.grok)")
+    ap.add_argument("--zcode-home", default="~/.zcode", help="ZCode home (default: ~/.zcode)")
+    ap.add_argument("--repo", action="append", default=[],
+                    help="project to include (repeatable; default: git root of cwd, else cwd)")
+    ap.add_argument("--all-conversations", action="store_true",
+                    help="score conversations from every project represented in local history")
+    ap.add_argument("--include-global-skills", action="store_true",
+                    help="also discover skills outside the repo (~/.codex/skills, ~/.agents/skills, "
+                         "~/.claude/skills, ~/.pi/agent/skills, ~/.grok/skills, ~/.zcode/skills)")
+    ap.add_argument("--days", type=int, default=45, help="only consider sessions modified in the last N days")
+    ap.add_argument("--max-sessions", type=int, default=12, help="max sessions to sample for scoring")
+    ap.add_argument("--per-skill", type=int, default=3, help="max sampled sessions per skill")
+    ap.add_argument("--no-skill", type=int, default=4, help="max sampled sessions that used no skill")
+    ap.add_argument("--skills-dir", action="append", default=[], help="extra skills directory to scan (repeatable)")
+    ap.add_argument("--include-subagents", action="store_true", help="include subagent/child sessions")
+    ap.add_argument("--out", default="./doctor-md-skill-report")
+    return ap.parse_args()
 
-    Two ways to match:
-    1. cwd is inside the repo root (same-machine sessions).
-    2. cwd's trailing directory name equals the repo's name (git/Codex
-       worktrees like ~/.codex/worktrees/<id>/<repo-name>, and sessions
-       imported from another machine where the checkout path differs).
-    Basename matching can over-match if two different projects share a
-    directory name; acceptable for a report, and prefix matching alone
-    misses every worktree session.
-    """
-    if not cwd:
-        return False
-    p = Path(cwd)
-    try:
-        if p.resolve().is_relative_to(repo):
-            return True
-    except OSError:
-        pass  # cwd from another machine may not exist locally
-    return p.name == repo.name or repo.name in p.parts
+
+class Scan:
+    """Running totals while the selected sources are read."""
+
+    def __init__(self):
+        self.sessions = []
+        self.sources = {}
+        self.files_seen = 0
+        self.in_scope = 0
 
 
-def session_matches_repos(cwd, repos) -> bool:
-    return any(session_matches_repo(cwd, repo) for repo in repos)
-
-
-def infer_session_repos(sessions):
-    repos = []
-    seen = set()
-    for session in sessions:
-        cwd = session["meta"].get("cwd")
-        if not cwd:
+def scan_source(reader_cls, home, args, cutoff, skills, repos, scan: Scan):
+    files = reader_cls.locate(home, cutoff, args.include_subagents)
+    scan.sources[reader_cls.key] = {"home": str(home), "records_in_window": len(files)}
+    scan.files_seen += len(files)
+    for mtime, path in files:
+        parsed = digest_session(reader_cls(path, args.include_subagents), skills.keys())
+        if parsed is None:
             continue
-        path = Path(cwd).expanduser()
-        if not path.is_dir():
+        meta, stats, entries, used = parsed
+        if not args.all_conversations and not session_matches_repos(meta.get("cwd"), repos):
             continue
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        except (subprocess.TimeoutExpired, OSError):
+        scan.in_scope += 1
+        if stats["assistant_turns"] < 1 or stats["tool_calls"] < 1:
             continue
-        if result.returncode != 0 or not result.stdout.strip():
-            continue
-        repo = Path(result.stdout.strip()).resolve()
-        if repo in seen:
-            continue
-        seen.add(repo)
-        repos.append(repo)
-    return repos
-
-
-def detect_skills_from_entries(entries, skill_names):
-    tool_text = "\n".join(
-        text
-        for role, text in entries
-        if role == "skill" or role.startswith("tool:")
-    ).replace("\\", "/")
-    detected = set()
-    for name in skill_names:
-        markers = (
-            f"skills/{name}/",
-            f"{name}/SKILL.md",
-            f'"skill": "{name}"',
-            f'"name": "{name}"',
-            f'"bundled_skill_id": "{name}"',
-        )
-        if any(marker in tool_text for marker in markers):
-            detected.add(name)
-    return detected
+        scan.sessions.append({
+            "harness": reader_cls.key,
+            "meta": meta,
+            "stats": stats,
+            "skills_used": used,
+            "file": str(path),
+            "modified_at": mtime.isoformat(),
+            "_entries": entries,
+        })
 
 
 def main():
     args = parse_args()
     if args.all_conversations and args.repo:
-        print(
-            "error: --all-conversations cannot be combined with --repo",
-            file=sys.stderr,
-        )
+        print("error: --all-conversations cannot be combined with --repo", file=sys.stderr)
         sys.exit(2)
-    claude_home = Path(args.claude_home).expanduser()
-    codex_home = Path(args.codex_home).expanduser()
-    pi_home = Path(args.pi_home).expanduser()
-    grok_home = Path(args.grok_home).expanduser()
-    zcode_home = Path(args.zcode_home).expanduser()
+
+    homes = {
+        "claude": Path(args.claude_home).expanduser(),
+        "codex": Path(args.codex_home).expanduser(),
+        "pi": Path(args.pi_home).expanduser(),
+        "grok": Path(args.grok_home).expanduser(),
+        "zcode": Path(args.zcode_home).expanduser(),
+    }
     out_dir = Path(args.out).expanduser()
     transcripts_dir = out_dir / "transcripts"
     transcripts_dir.mkdir(parents=True, exist_ok=True)
 
-    repos = [] if args.all_conversations else resolve_repos(args.repo)
-    skills = discover_skills(
-        repos,
-        codex_home,
-        args.skills_dir,
-        args.include_global_skills,
-        pi_home=pi_home,
-        grok_home=grok_home,
-        zcode_home=zcode_home,
-    )
+    def find_skills(repo_list):
+        return discover_skills(repo_list, homes["codex"], args.skills_dir, args.include_global_skills,
+                               pi_home=homes["pi"], grok_home=homes["grok"], zcode_home=homes["zcode"])
+
+    repos = [] if args.all_conversations else resolve_project_roots(args.repo)
+    skills = find_skills(repos)
     cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
 
-    sessions = []
-    in_scope_count = 0
-    scanned_count = 0
-    sources = {}
+    scan = Scan()
+    for key, reader_cls in READERS.items():
+        home = homes[key]
+        wanted = args.harness in ("auto", "all", key)
+        if wanted and reader_cls.required_dir(home).is_dir():
+            scan_source(reader_cls, home, args, cutoff, skills, repos, scan)
+        elif args.harness == key:
+            print(f"error: {reader_cls.absence_message(home)}", file=sys.stderr)
+            sys.exit(1)
 
-    requested_claude = args.harness in ("auto", "all", "claude")
-    if requested_claude and (claude_home / "projects").is_dir():
-        claude_files = find_claude_session_files(
-            claude_home,
-            cutoff,
-            args.include_subagents,
-        )
-        sources["claude"] = {
-            "home": str(claude_home),
-            "records_in_window": len(claude_files),
-        }
-        scanned_count += len(claude_files)
-        for mtime, path in claude_files:
-            parsed = parse_claude_session(path, skills.keys(), args.include_subagents)
-            if parsed is None:
-                continue
-            meta, stats, entries, skills_used = parsed
-            if not args.all_conversations and not session_matches_repos(
-                meta.get("cwd"),
-                repos,
-            ):
-                continue
-            in_scope_count += 1
-            if stats["assistant_turns"] < 1 or stats["tool_calls"] < 1:
-                continue
-            sessions.append({
-                "harness": "claude",
-                "meta": meta,
-                "stats": stats,
-                "skills_used": skills_used,
-                "file": str(path),
-                "modified_at": mtime.isoformat(),
-                "_entries": entries,
-            })
-    elif args.harness == "claude":
-        print(
-            f"error: Claude Code project history not found at {claude_home / 'projects'}",
-            file=sys.stderr,
-        )
+    if not scan.sources:
+        print("error: no supported session source found (Claude Code, Codex, Pi, Grok, or ZCode)",
+              file=sys.stderr)
         sys.exit(1)
 
-    requested_codex = args.harness in ("auto", "all", "codex")
-    if requested_codex and codex_home.is_dir():
-        codex_files = find_codex_session_files(codex_home, cutoff)
-        sources["codex"] = {"home": str(codex_home), "records_in_window": len(codex_files)}
-        scanned_count += len(codex_files)
-        for mtime, path in codex_files:
-            parsed = parse_codex_session(path, skills.keys(), args.include_subagents)
-            if parsed is None:
-                continue
-            meta, stats, entries, skills_used = parsed
-            if not args.all_conversations and not session_matches_repos(
-                meta.get("cwd"),
-                repos,
-            ):
-                continue
-            in_scope_count += 1
-            if stats["assistant_turns"] < 1 or stats["tool_calls"] < 1:
-                continue
-            sessions.append({
-                "harness": "codex",
-                "meta": meta,
-                "stats": stats,
-                "skills_used": skills_used,
-                "file": str(path),
-                "modified_at": mtime.isoformat(),
-                "_entries": entries,
-            })
-    elif args.harness == "codex":
-        print(f"error: Codex home not found at {codex_home}", file=sys.stderr)
-        sys.exit(1)
-
-    requested_pi = args.harness in ("auto", "all", "pi")
-    if requested_pi and (pi_home / "sessions").is_dir():
-        pi_files = find_pi_session_files(pi_home, cutoff)
-        sources["pi"] = {"home": str(pi_home), "records_in_window": len(pi_files)}
-        scanned_count += len(pi_files)
-        for mtime, path in pi_files:
-            parsed = parse_pi_session(path, skills.keys(), args.include_subagents)
-            if parsed is None:
-                continue
-            meta, stats, entries, skills_used = parsed
-            if not args.all_conversations and not session_matches_repos(
-                meta.get("cwd"),
-                repos,
-            ):
-                continue
-            in_scope_count += 1
-            if stats["assistant_turns"] < 1 or stats["tool_calls"] < 1:
-                continue
-            sessions.append({
-                "harness": "pi",
-                "meta": meta,
-                "stats": stats,
-                "skills_used": skills_used,
-                "file": str(path),
-                "modified_at": mtime.isoformat(),
-                "_entries": entries,
-            })
-    elif args.harness == "pi":
-        print(f"error: Pi session home not found at {pi_home / 'sessions'}", file=sys.stderr)
-        sys.exit(1)
-
-    requested_grok = args.harness in ("auto", "all", "grok")
-    if requested_grok and (grok_home / "sessions").is_dir():
-        grok_files = find_grok_session_files(grok_home, cutoff)
-        sources["grok"] = {"home": str(grok_home), "records_in_window": len(grok_files)}
-        scanned_count += len(grok_files)
-        for mtime, path in grok_files:
-            parsed = parse_grok_session(path, skills.keys(), args.include_subagents)
-            if parsed is None:
-                continue
-            meta, stats, entries, skills_used = parsed
-            if not args.all_conversations and not session_matches_repos(
-                meta.get("cwd"),
-                repos,
-            ):
-                continue
-            in_scope_count += 1
-            if stats["assistant_turns"] < 1 or stats["tool_calls"] < 1:
-                continue
-            sessions.append({
-                "harness": "grok",
-                "meta": meta,
-                "stats": stats,
-                "skills_used": skills_used,
-                "file": str(path),
-                "modified_at": mtime.isoformat(),
-                "_entries": entries,
-            })
-    elif args.harness == "grok":
-        print(f"error: Grok Build session home not found at {grok_home / 'sessions'}", file=sys.stderr)
-        sys.exit(1)
-
-    requested_zcode = args.harness in ("auto", "all", "zcode")
-    if requested_zcode and (zcode_home / "cli" / "rollout").is_dir():
-        zcode_files = find_zcode_session_files(zcode_home, cutoff)
-        sources["zcode"] = {"home": str(zcode_home), "records_in_window": len(zcode_files)}
-        scanned_count += len(zcode_files)
-        for mtime, path in zcode_files:
-            parsed = parse_zcode_session(path, skills.keys(), args.include_subagents)
-            if parsed is None:
-                continue
-            meta, stats, entries, skills_used = parsed
-            if not args.all_conversations and not session_matches_repos(
-                meta.get("cwd"),
-                repos,
-            ):
-                continue
-            in_scope_count += 1
-            if stats["assistant_turns"] < 1 or stats["tool_calls"] < 1:
-                continue
-            sessions.append({
-                "harness": "zcode",
-                "meta": meta,
-                "stats": stats,
-                "skills_used": skills_used,
-                "file": str(path),
-                "modified_at": mtime.isoformat(),
-                "_entries": entries,
-            })
-    elif args.harness == "zcode":
-        print(
-            f"error: ZCode model-io rollouts not found at {zcode_home / 'cli' / 'rollout'}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    if not sources:
-        print(
-            "error: no supported session source found (Claude Code, Codex, Pi, Grok, or ZCode)",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    sessions = scan.sessions
     if args.all_conversations:
-        repos = infer_session_repos(sessions)
-        skills = discover_skills(
-            repos,
-            codex_home,
-            args.skills_dir,
-            args.include_global_skills,
-            pi_home=pi_home,
-            grok_home=grok_home,
-            zcode_home=zcode_home,
-        )
-    installed_skill_names = set(skills)
+        repos = repos_seen_in(sessions)
+        skills = find_skills(repos)
+    installed = set(skills)
     for session in sessions:
-        detected = detect_skills_from_entries(
-            session["_entries"],
-            installed_skill_names,
-        )
-        session["skills_used"] = sorted(
-            (set(session["skills_used"]) | detected) & installed_skill_names
-        )
+        extra = detect_skills_from_entries(session["_entries"], installed)
+        session["skills_used"] = sorted((set(session["skills_used"]) | extra) & installed)
 
-    sessions.sort(key=lambda session: session["modified_at"], reverse=True)
+    sessions.sort(key=lambda item: item["modified_at"], reverse=True)
     for session in sessions:
         session["_key"] = f"{session['harness']}:{session['meta']['id']}"
 
-    # Sample: newest-first, up to per-skill sessions per skill, then no-skill sessions.
-    sampled_keys = set()
-    per_skill_count = {name: 0 for name in skills}
-    for s in sessions:
-        if len(sampled_keys) >= args.max_sessions:
-            break
-        for name in s["skills_used"]:
-            if per_skill_count.get(name, 0) < args.per_skill:
-                per_skill_count[name] = per_skill_count.get(name, 0) + 1
-                sampled_keys.add(s["_key"])
-                break
-    no_skill_taken = 0
-    for s in sessions:
-        if len(sampled_keys) >= args.max_sessions or no_skill_taken >= args.no_skill:
-            break
-        if not s["skills_used"] and s["_key"] not in sampled_keys:
-            sampled_keys.add(s["_key"])
-            no_skill_taken += 1
+    chosen = sample_by_skill(sessions, args.max_sessions, args.per_skill, args.no_skill, skills)
 
-    for s in sessions:
-        sid = s["meta"]["id"]
-        s["sampled"] = s["_key"] in sampled_keys
-        if s["sampled"]:
-            tpath = transcripts_dir / f"{s['harness']}-{sid}.md"
-            tpath.write_text(render_transcript(s["meta"], s["stats"], s["skills_used"], s["_entries"]))
-            s["transcript_path"] = str(tpath)
-        del s["_entries"]
-        del s["_key"]
+    for session in sessions:
+        session["sampled"] = session["_key"] in chosen
+        if session["sampled"]:
+            target = transcripts_dir / f"{session['harness']}-{session['meta']['id']}.md"
+            target.write_text(render_transcript(session["meta"], session["stats"],
+                                                session["skills_used"], session["_entries"]))
+            session["transcript_path"] = str(target)
+        del session["_entries"]
+        del session["_key"]
 
-    skill_usage = {name: 0 for name in skills}
-    for s in sessions:
-        for name in s["skills_used"]:
-            skill_usage[name] += 1
+    usage = {name: 0 for name in skills}
+    for session in sessions:
+        for name in session["skills_used"]:
+            usage[name] += 1
 
     if args.all_conversations:
-        conversation_scope = "all"
-        scope_name = "all-conversations"
-    elif len(repos) == 1:
-        conversation_scope = "projects"
-        scope_name = repos[0].name
+        scope_kind, scope_label = "all", "all-conversations"
     else:
-        conversation_scope = "projects"
-        scope_name = "multiple-projects"
+        scope_kind = "projects"
+        scope_label = repos[0].name if len(repos) == 1 else "multiple-projects"
 
+    active = scan.sources
     inventory = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "harness": next(iter(sources)) if len(sources) == 1 else "mixed",
-        "sources": sources,
-        "claude_home": str(claude_home) if "claude" in sources else None,
-        "codex_home": str(codex_home) if "codex" in sources else None,
-        "pi_home": str(pi_home) if "pi" in sources else None,
-        "grok_home": str(grok_home) if "grok" in sources else None,
-        "zcode_home": str(zcode_home) if "zcode" in sources else None,
-        "conversation_scope": conversation_scope,
+        "harness": next(iter(active)) if len(active) == 1 else "mixed",
+        "sources": active,
+        **{f"{key}_home": (str(homes[key]) if key in active else None) for key in READERS},
+        "conversation_scope": scope_kind,
         "repo": str(repos[0]) if len(repos) == 1 else None,
         "repos": [str(repo) for repo in repos],
-        "repo_name": scope_name,
+        "repo_name": scope_label,
         "repo_names": [repo.name for repo in repos],
         "window_days": args.days,
-        "skills": sorted(skills.values(), key=lambda x: x["name"]),
-        "skill_usage": skill_usage,
+        "skills": sorted(skills.values(), key=lambda entry: entry["name"]),
+        "skill_usage": usage,
         "stats": {
-            "session_files_in_window": scanned_count,
-            "session_records_in_window": scanned_count,
-            "sessions_in_repo": in_scope_count,
-            "sessions_in_scope": in_scope_count,
+            "session_files_in_window": scan.files_seen,
+            "session_records_in_window": scan.files_seen,
+            "sessions_in_repo": scan.in_scope,
+            "sessions_in_scope": scan.in_scope,
             "sessions_considered": len(sessions),
-            "sessions_sampled": len(sampled_keys),
+            "sessions_sampled": len(chosen),
             "skills_found": len(skills),
-            "skills_used": sum(1 for v in skill_usage.values() if v > 0),
+            "skills_used": sum(1 for count in usage.values() if count > 0),
         },
         "sessions": sessions,
     }
     (out_dir / "inventory.json").write_text(json.dumps(inventory, indent=2))
 
-    st = inventory["stats"]
-    print(
-        "scope:             "
-        + (
-            "all conversations"
-            if args.all_conversations
-            else ", ".join(str(repo) for repo in repos)
-        )
-    )
-    print(f"sources:           {', '.join(sources)}")
-    print(f"skills found:      {st['skills_found']} ({st['skills_used']} used in window)")
-    print(f"sessions in window: {st['session_records_in_window']} records, {st['sessions_in_scope']} in scope, {st['sessions_considered']} scoreable")
-    print(f"sessions sampled:  {st['sessions_sampled']} -> {transcripts_dir}")
+    totals = inventory["stats"]
+    scope_text = "all conversations" if args.all_conversations else ", ".join(str(r) for r in repos)
+    print(f"scope:             {scope_text}")
+    print(f"sources:           {', '.join(active)}")
+    print(f"skills found:      {totals['skills_found']} ({totals['skills_used']} used in window)")
+    print(f"sessions in window: {totals['session_records_in_window']} records, "
+          f"{totals['sessions_in_scope']} in scope, {totals['sessions_considered']} scoreable")
+    print(f"sessions sampled:  {totals['sessions_sampled']} -> {transcripts_dir}")
     print(f"inventory:         {out_dir / 'inventory.json'}")
 
 
