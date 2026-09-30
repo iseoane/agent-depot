@@ -316,3 +316,14 @@ test("default built-in root resolves to the package skills directory containing 
   assert.doesNotMatch(root.split(path.sep).join("/"), /\/dist\/skills$/);
   await readFile(path.join(path.dirname(root), "package.json"), "utf8");
 });
+
+test("reads the full tree of each shipped built-in skill, including large bundled assets", async () => {
+  const access = new NodeSourceContentAccess();
+  for (const name of ["doctor-md-agents", "doctor-md-skill"]) {
+    const files = await access.readSkillTree(builtin, name);
+    assert.ok(files.some((file) => file.path === `${name}/SKILL.md`));
+  }
+  const skillFiles = await access.readSkillTree(builtin, "doctor-md-skill");
+  const bundle = skillFiles.find((file) => file.path.endsWith("assets/pierre-diffs.js"));
+  assert.ok(bundle && bundle.content.byteLength > 1024 * 1024);
+});

@@ -56,7 +56,7 @@ export interface GitSourceSkillTreeSnapshot {
 
 export const SKILL_TREE_LIMITS = Object.freeze({
   maxFiles: 256,
-  maxFileBytes: 1024 * 1024,
+  maxFileBytes: 2 * 1024 * 1024,
   maxTotalBytes: 8 * 1024 * 1024,
   maxPathBytes: 4096,
   maxDepth: 32,
