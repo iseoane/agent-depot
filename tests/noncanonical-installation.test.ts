@@ -220,31 +220,108 @@ test("user-global records keep any in-home installation path because the state f
   }
 });
 
-test("update apply previews a non-canonical project path and requires --yes to change it", async () => {
+function updateDependencies(root: string, output: string[], errors: string[] = []) {
+  const nameOf = (skillPath: string) => skillPath.split("/").pop()!;
+  return {
+    operations: {} as SourceOperations,
+    projectRoot: root,
+    sourceAccess: {
+      async readSkillTree(_source: unknown, skillPath: string) { return tree(nameOf(skillPath), "new"); },
+      async readSkillTreeSnapshot(_source: unknown, skillPath: string) { return { files: tree(nameOf(skillPath), "new"), resolvedVersion: newVersion }; },
+    },
+    stdout: (line: string) => output.push(line),
+    stderr: (line: string) => errors.push(line),
+  };
+}
+
+test("update apply previews a non-canonical project path and requires --yes plus --confirm-path to change it", async () => {
   const root = await makeRoot();
   try {
     const directory = await writeSkill(root, "tools/skills/demo");
     await writeFile(path.join(root, "agent-depot.json"), JSON.stringify({ version: 1, skills: [selectionAt("tools/skills/demo")] }), "utf8");
     const output: string[] = [];
     const errors: string[] = [];
-    const dependencies = {
-      operations: {} as SourceOperations,
-      projectRoot: root,
-      sourceAccess: {
-        async readSkillTree() { return tree("demo", "new"); },
-        async readSkillTreeSnapshot() { return { files: tree("demo", "new"), resolvedVersion: newVersion }; },
-      },
-      stdout: (line: string) => output.push(line),
-      stderr: (line: string) => errors.push(line),
-    };
+    const dependencies = updateDependencies(root, output, errors);
+    const base = ["update", "apply", "--scope", "project", "--all"];
 
-    assert.equal(await runCli(["update", "apply", "--scope", "project", "--all"], dependencies), 1);
+    assert.equal(await runCli(base, dependencies), 1);
     assert.match(output.join("\n"), /non-canonical/iu);
-    assert.ok(output.join("\n").includes(directory), "the preview must show the exact path");
+    assert.ok(output.join("\n").includes('"tools/skills/demo"'), "the preview must show the exact relative path");
     assert.match(await content(directory), /old/u);
 
-    output.length = 0;
-    assert.equal(await runCli(["update", "apply", "--scope", "project", "--all", "--yes"], dependencies), 0);
+    // --yes alone is not enough: the exact path must be confirmed.
+    errors.length = 0;
+    assert.equal(await runCli([...base, "--yes"], dependencies), 1);
+    assert.match(errors.join("\n"), /--confirm-path tools\/skills\/demo/u);
+    assert.match(await content(directory), /old/u);
+
+    // --confirm-path without --yes is still an unconfirmed update.
+    errors.length = 0;
+    assert.equal(await runCli([...base, "--confirm-path", "tools/skills/demo"], dependencies), 1);
+    assert.match(errors.join("\n"), /Update not confirmed; rerun with --yes/u);
+    assert.match(await content(directory), /old/u);
+
+    // A path that matches no pending non-canonical location is an error, not ignored.
+    errors.length = 0;
+    assert.equal(await runCli([...base, "--yes", "--confirm-path", "tools/skills/demp"], dependencies), 1);
+    assert.match(errors.join("\n"), /does not match any pending non-canonical location/u);
+    assert.match(await content(directory), /old/u);
+
+    // A correct path plus a stray one is rejected too, without changing anything.
+    errors.length = 0;
+    assert.equal(await runCli([...base, "--yes", "--confirm-path", "tools/skills/demo", "--confirm-path", "other"], dependencies), 1);
+    assert.match(errors.join("\n"), /does not match any pending non-canonical location/u);
+    assert.match(await content(directory), /old/u);
+
+    assert.equal(await runCli([...base, "--yes", "--confirm-path", "tools/skills/demo"], dependencies), 0);
+    assert.match(await content(directory), /new/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("update apply --all needs a separate --confirm-path for every non-canonical path", async () => {
+  const root = await makeRoot();
+  try {
+    const alpha = await writeSkill(root, "vendor/alpha", "alpha");
+    const beta = await writeSkill(root, "vendor/beta", "beta");
+    await writeFile(path.join(root, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: [selectionAt("vendor/alpha", "alpha"), selectionAt("vendor/beta", "beta")],
+    }), "utf8");
+    const errors: string[] = [];
+    const dependencies = updateDependencies(root, [], errors);
+    const base = ["update", "apply", "--scope", "project", "--all", "--yes"];
+
+    assert.equal(await runCli([...base, "--confirm-path", "vendor/alpha"], dependencies), 1);
+    assert.match(errors.join("\n"), /--confirm-path vendor\/beta/u);
+    assert.doesNotMatch(errors.join("\n"), /--confirm-path vendor\/alpha/u);
+    assert.match(await content(alpha), /old/u);
+    assert.match(await content(beta), /old/u);
+
+    assert.equal(await runCli([...base, "--confirm-path", "vendor/alpha", "--confirm-path", "vendor/beta"], dependencies), 0);
+    assert.match(await content(alpha), /new/u);
+    assert.match(await content(beta), /new/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("update apply rejects --confirm-path when nothing needs path confirmation", async () => {
+  const root = await makeRoot();
+  try {
+    const directory = await writeSkill(root, ".agents/skills/demo");
+    await writeFile(path.join(root, "agent-depot.json"), JSON.stringify({ version: 1, skills: [selectionAt(".agents/skills/demo")] }), "utf8");
+    const errors: string[] = [];
+    const dependencies = updateDependencies(root, [], errors);
+    const base = ["update", "apply", "--scope", "project", "--all", "--yes"];
+
+    assert.equal(await runCli([...base, "--confirm-path", ".agents/skills/demo"], dependencies), 1);
+    assert.match(errors.join("\n"), /does not match any pending non-canonical location/u);
+    assert.match(await content(directory), /old/u);
+
+    // Canonical paths need no --confirm-path.
+    assert.equal(await runCli(base, dependencies), 0);
     assert.match(await content(directory), /new/u);
   } finally {
     await rm(root, { recursive: true, force: true });

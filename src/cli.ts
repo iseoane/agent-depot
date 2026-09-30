@@ -88,7 +88,7 @@ const USAGE = [
   "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot update check --scope <project|user-global>",
-  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
+  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]",
   "  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]",
 ].join("\n");
 const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host]";
@@ -778,6 +778,8 @@ interface UpdateOptions {
   readonly all: boolean;
   readonly requested: readonly string[];
   readonly confirmed: boolean;
+  /** Exact relative non-canonical project paths the user confirmed with --confirm-path. */
+  readonly confirmedPaths: readonly string[];
 }
 
 async function runUpdate(
@@ -821,9 +823,10 @@ async function runUpdate(
     ...(installationFileSystem === undefined ? {} : { installationFileSystem }),
   };
   const selected = selectUpdateCandidates(assessment, options);
-  const previewFailures = await previewUpdateCandidates(selected, context, options.scope, output);
+  const { failures: previewFailures, nonCanonicalPaths } = await previewUpdateCandidates(selected, context, options.scope, output);
 
   requireConfirmation(options.confirmed, "Update not confirmed; rerun with --yes after reviewing every candidate preview");
+  requireNonCanonicalPathConfirmations(nonCanonicalPaths, options.confirmedPaths);
   const result = await applyUpdateBatch(selected, {
     ...context,
     // The callback is invoked independently for every candidate. In particular,
@@ -832,7 +835,9 @@ async function runUpdate(
     confirm: async (plan) => ({
       overwriteModifiedInstallation: options.confirmed,
       externalMethod: options.confirmed,
-      ...(options.confirmed && plan.nonCanonicalPath !== undefined ? { nonCanonicalPath: plan.nonCanonicalPath } : {}),
+      ...(options.confirmed && plan.nonCanonicalPath !== undefined && options.confirmedPaths.includes(relativeProjectPath(projectRoot, plan.nonCanonicalPath))
+        ? { nonCanonicalPath: plan.nonCanonicalPath }
+        : {}),
     }),
   });
 
@@ -866,22 +871,49 @@ function selectUpdateCandidates(
   }
 }
 
+interface UpdatePreviewOutcome {
+  readonly failures: readonly UpdateBatchAssessmentItem[];
+  /** Relative non-canonical project paths that need --confirm-path, in preview order. */
+  readonly nonCanonicalPaths: readonly string[];
+}
+
 async function previewUpdateCandidates(
   selected: readonly UpdateBatchAssessmentItem[],
   context: Parameters<typeof previewSkillUpdate>[1],
   scope: UpdateOptions["scope"],
   output: (line: string) => void,
-): Promise<readonly UpdateBatchAssessmentItem[]> {
+): Promise<UpdatePreviewOutcome> {
   const failures: UpdateBatchAssessmentItem[] = [];
+  const nonCanonicalPaths: string[] = [];
   for (const item of selected) {
     try {
-      outputUpdatePreview(await previewSkillUpdate(item, context), scope, output);
+      const plan = await previewSkillUpdate(item, context);
+      if (plan.nonCanonicalPath !== undefined) nonCanonicalPaths.push(relativeProjectPath(context.projectRoot, plan.nonCanonicalPath));
+      outputUpdatePreview(plan, scope, output, context.projectRoot);
     } catch (error) {
       failures.push(item);
       output(`Preview failed for ${JSON.stringify(item.id)}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return failures;
+  return { failures, nonCanonicalPaths };
+}
+
+/**
+ * `--yes` alone never confirms a repository-controlled non-canonical location:
+ * every pending path needs its own exact `--confirm-path`, and a value that
+ * matches no pending path is an error rather than silently ignored.
+ */
+function requireNonCanonicalPathConfirmations(pending: readonly string[], confirmedPaths: readonly string[]): void {
+  const unmatched = confirmedPaths.filter((value) => !pending.includes(value));
+  if (unmatched.length > 0) {
+    const shown = pending.length === 0 ? "none" : pending.map((value) => JSON.stringify(value)).join(", ");
+    throw new CliUsageError(`--confirm-path ${unmatched.map((value) => JSON.stringify(value)).join(", ")} does not match any pending non-canonical location (pending: ${shown}); no path was changed`);
+  }
+  const missing = pending.filter((value) => !confirmedPaths.includes(value));
+  if (missing.length > 0) {
+    const flags = missing.map((value) => `--confirm-path ${value}`).join(" ");
+    throw new CliUsageError(`Non-canonical location ${missing.map((value) => JSON.stringify(value)).join(", ")} needs explicit path confirmation; --yes alone is not enough. Rerun with ${flags}; no path was changed`);
+  }
 }
 
 function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
@@ -894,10 +926,14 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
   let all = false;
   let confirmed = false;
   const requested: string[] = [];
+  const confirmedPaths: string[] = [];
   for (let index = 1; index < argv.length; index += 1) {
     switch (argv[index]) {
       case "--scope":
         scope = requireOptionValue(argv, ++index, "--scope");
+        break;
+      case "--confirm-path":
+        confirmedPaths.push(normalizeConfirmedPath(requireOptionValue(argv, ++index, "--confirm-path")));
         break;
       case "--all":
         all = true;
@@ -916,11 +952,14 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
   if (scope !== "project" && scope !== "user-global") {
     throw new CliUsageError("Update scope must be explicit: use --scope project or --scope user-global");
   }
-  if (action === "check" && (all || requested.length > 0 || confirmed)) {
+  if (action === "check" && (all || requested.length > 0 || confirmed || confirmedPaths.length > 0)) {
     throw new CliUsageError("update check only accepts --scope; use update apply to select and apply updates");
   }
   if (action === "apply" && (all === (requested.length > 0))) {
     throw new CliUsageError("update apply requires exactly one selection mode: --all or one or more --skill values");
+  }
+  if (scope === "user-global" && confirmedPaths.length > 0) {
+    throw new CliUsageError("--confirm-path only applies to --scope project");
   }
   return {
     action,
@@ -928,7 +967,14 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
     all,
     requested: Object.freeze(requested),
     confirmed,
+    confirmedPaths: Object.freeze(confirmedPaths),
   };
+}
+
+/** Normalizes a --confirm-path value like the relative path shown in the preview. */
+function normalizeConfirmedPath(value: string): string {
+  const normalized = path.posix.normalize(value);
+  return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 
 async function requireUserGlobalInstallations(operations: SourceOperations): Promise<readonly ProjectSkillSelection[]> {
@@ -990,11 +1036,13 @@ function outputUpdatePreview(
   plan: Awaited<ReturnType<typeof previewSkillUpdate>>,
   scope: "project" | "user-global",
   output: (line: string) => void,
+  projectRoot: string,
 ): void {
   output(`Preview: update Skill ${JSON.stringify(plan.selection.path)} from ${plan.source.id} (scope: ${scope})`);
   output(`  target: ${plan.target}`);
   if (plan.nonCanonicalPath !== undefined) {
-    output(`  WARNING: non-canonical location ${JSON.stringify(plan.nonCanonicalPath)} (outside .agents/skills and .claude/skills); --yes explicitly confirms replacing this exact path`);
+    const relative = relativeProjectPath(projectRoot, plan.nonCanonicalPath);
+    output(`  WARNING: non-canonical location ${JSON.stringify(relative)} (outside .agents/skills and .claude/skills); --yes together with --confirm-path ${relative} explicitly confirms replacing this exact path`);
   }
   output(`  proposed changes: replace ${plan.snapshot.files.length} managed files and persist the new version/content baseline`);
   if (plan.overwriteRequired) {

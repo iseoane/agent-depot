@@ -216,7 +216,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     assert.match(await readFile(path.join(home, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v2/);
   });
 
-  test("requires --yes to update a non-canonical adopted project Skill", async () => {
+  test("requires --yes and --confirm-path to update a non-canonical adopted project Skill", async () => {
     const adopted = await makeProject("project-adopted");
     await writeFiles(adopted, {
       "vendor/alpha/SKILL.md": skillMarkdown("alpha", "Alpha skill", "Alpha v1"),
@@ -244,7 +244,11 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     assert.match(withoutYes.output, /WARNING: non-canonical location/);
     assert.doesNotMatch(await readFile(path.join(adopted, "vendor/alpha/SKILL.md"), "utf8"), /v2/);
 
-    assert.match(ok(cli(adopted, ...applyArgs, "--yes")), /1 updated, 0 failed/);
+    const yesOnly = cli(adopted, ...applyArgs, "--yes");
+    fails(yesOnly, /--confirm-path vendor\/alpha/);
+    assert.doesNotMatch(await readFile(path.join(adopted, "vendor/alpha/SKILL.md"), "utf8"), /v2/);
+
+    assert.match(ok(cli(adopted, ...applyArgs, "--yes", "--confirm-path", "vendor/alpha")), /1 updated, 0 failed/);
     assert.match(await readFile(path.join(adopted, "vendor/alpha/SKILL.md"), "utf8"), /Alpha v2/);
   });
 

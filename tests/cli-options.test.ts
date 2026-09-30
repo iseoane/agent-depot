@@ -66,3 +66,19 @@ test("source refresh validates its arguments before touching Sources", async () 
     assert.equal(await failure(argv), "Error: Usage: agent-depot source refresh <id> [--yes]", argv.join(" "));
   }
 });
+
+test("update option parsing handles --confirm-path", async () => {
+  const cases: ReadonlyArray<readonly [readonly string[], string]> = [
+    [["update", "apply", "--scope", "project", "--all", "--confirm-path"], "Error: Missing value for --confirm-path"],
+    [["update", "apply", "--scope", "project", "--all", "--confirm-path", "--yes"], "Error: Missing value for --confirm-path"],
+    [["update", "check", "--scope", "project", "--confirm-path", "a"], "Error: update check only accepts --scope; use update apply to select and apply updates"],
+    [["update", "apply", "--scope", "user-global", "--all", "--confirm-path", "a"], "Error: --confirm-path only applies to --scope project"],
+  ];
+  for (const [argv, expected] of cases) {
+    assert.equal(await failure(argv), expected, argv.join(" "));
+  }
+});
+
+test("usage text documents update apply --confirm-path", async () => {
+  assert.match(await failure(["bogus"]), /agent-depot update apply --scope <project\|user-global> \(--all \| --skill <id\|path>\.\.\.\) \[--yes\] \[--confirm-path <relative-path>\.\.\.\]/u);
+});
