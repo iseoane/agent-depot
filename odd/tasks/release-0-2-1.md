@@ -24,9 +24,12 @@ Ship every finding of the 0.2.1 review (2026-09-30) as a patch release of @iseoa
 - [x] A6 README relative links (CONTEXT.md, docs/adr) → absolute GitHub URLs.
   - Evidence: README line 418 links now absolute (`blob/main/CONTEXT.md`, `tree/main/docs/adr` for the directory); no other relative links. Route: inline.
 ### B — Hardening and packaging
-- [ ] B1 tarball: drop `.js.map` (or ship src) and skill `test_*.py` / `testdata`; pack-smoke asserts it.
-- [ ] B2 bulk actions: strict drift detection between items (only the expected change from the previous item is absorbed).
-- [ ] B3 `src/tui/keys.ts` ESCAPE_REMNANT only matches real CSI/SS3 final bytes.
+- [x] B1 tarball: drop `.js.map` (or ship src) and skill `test_*.py` / `testdata`; pack-smoke asserts it.
+  - Evidence: RED (pack-smoke "dev-only files in tarball": 43 `.map` from the coverage build + 10 skill test/testdata files) -> GREEN with `files` negations (`!dist/src/**/*.map`, `!skills/**/test_*.py`, `!skills/**/testdata`). Clean `pnpm build` emits no maps (only `test:coverage` does), so negations protect a dirty dist; build left unchanged. Tarball 595.5 kB / 2.2 MB / 80 files -> 564.3 kB / 2.0 MB / 70 files. Nothing in src/scripts/skills imports `test_*.py` or `testdata` (only skill READMEs mention running the tests). Route: inline.
+- [x] B2 bulk actions: strict drift detection between items (only the expected change from the previous item is absorbed).
+  - Evidence: RED (2 new tests: intruder record added after item 1 was absorbed, items 2-3 applied) -> GREEN. Baseline now advances only by the item's own change (removed selections / `plan.updated`), and `assertNoDrift` runs before every item, failing it with "The installation records changed outside this batch ... left untouched". Normal multi-item bulks covered by the existing tests. Route: inline.
+- [x] B3 `src/tui/keys.ts` ESCAPE_REMNANT only matches real CSI/SS3 final bytes.
+  - Evidence: RED (`Ok`/`OK`/`Oa`/`[a`/`Oz` not split) -> GREEN. Regex `^(?:\[[\d;<:?]*[A-DFHIMOPQRSZm~]|O[A-DFHPQRS])$`; real remnants still whole; pasting `Ok`/`OK` into the Source URL input and the catalog filter keeps the text. Route: inline.
 ### C — Maintainability
 - [ ] C1 remove duplicated blocks (18 groups) in `project-installation.ts` and the TUI views.
 - [ ] C2 reduce complexity: `CatalogView`, `UpdatesView`, `handleManageKey`, split `installations-view.tsx`.
