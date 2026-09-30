@@ -1673,11 +1673,22 @@ async function writeStagedTree(
   }
 }
 
+const MANAGED_SKILL_ROOTS: ReadonlySet<string> = new Set([".agents", ".claude"]);
+
 function resolveInstallationPath(projectRoot: string, installationPath: string): string {
   const candidate = path.resolve(projectRoot, ...installationPath.split("/"));
   const relative = path.relative(projectRoot, candidate);
   if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new ProjectInstallationError("unsafe-target", `Tracked Skill installation escapes the project root: ${installationPath}`);
+  }
+  // A manifest is repository-controlled input: only the managed Skill layout
+  // (<root>/.agents|.claude/skills/<name>) may ever be replaced or deleted.
+  const segments = relative.split(path.sep);
+  if (segments.length !== 3 || !MANAGED_SKILL_ROOTS.has(segments[0]!) || segments[1] !== "skills" || !isSafeSegment(segments[2]!)) {
+    throw new ProjectInstallationError(
+      "unsafe-target",
+      `Tracked Skill installation is not an immediate child of .agents/skills or .claude/skills: ${installationPath}`,
+    );
   }
   return candidate;
 }
