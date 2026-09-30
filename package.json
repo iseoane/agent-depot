@@ -25,7 +25,10 @@
   },
   "files": [
     "dist/src",
+    "!dist/src/**/*.map",
     "skills",
+    "!skills/**/test_*.py",
+    "!skills/**/testdata",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

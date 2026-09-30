@@ -29,6 +29,9 @@ try {
   assert.deepEqual(unexpected, [], `unexpected files in tarball: ${unexpected.join(", ")}`);
   const forbidden = files.filter((file) => /(^|\/)(tests?|coverage|odd|\.scratch)\/|\.test\.(js|d\.ts|js\.map)$/u.test(file));
   assert.deepEqual(forbidden, [], `forbidden files in tarball: ${forbidden.join(", ")}`);
+  // Source maps point at ../../src (not shipped); skill tests and fixtures are dev-only.
+  const devOnly = files.filter((file) => /\.map$/u.test(file) || /(^|\/)test_[^/]*\.py$/u.test(file) || /(^|\/)testdata\//u.test(file));
+  assert.deepEqual(devOnly, [], `dev-only files in tarball: ${devOnly.join(", ")}`);
   for (const required of ["dist/src/cli.js", "package.json", "README.md", "LICENSE", "CHANGELOG.md", "skills/doctor-md-agents/SKILL.md"]) {
     assert.ok(files.includes(required), `missing from tarball: ${required}`);
   }
