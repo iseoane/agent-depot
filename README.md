@@ -18,6 +18,8 @@ node dist/src/cli.js source migrate git:<old-source-id> git:<new-source-id> --sk
 node dist/src/cli.js discover builtin:agent-depot git:<source-id>
 node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
 node dist/src/cli.js install --scope user-global --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
+# Only for an explicitly reviewed, untracked real-directory conflict:
+node dist/src/cli.js install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --overwrite --yes
 node dist/src/cli.js install --scope project --manifest --portable-v1 --yes
 node dist/src/cli.js update check --scope project
 node dist/src/cli.js update apply --scope project --all --yes
@@ -153,7 +155,9 @@ remain outside the portable V1 format.
 
 The CLI reads the selected immutable Skill tree before asking for `--yes`.
 Portable incompatibilities are rejected before confirmation or any write, with
-the rejected source path and reason shown in the error. A successful preview
+the rejected source path and reason shown in the error. The inspected destination
+identity and content are carried through confirmation and checked again immediately
+before replacement; drift aborts without moving the target. A successful preview
 lists the exact selected files, including supported skill-relative agents
 files, and only a confirmed `--yes` proceeds to installation.
 
@@ -165,9 +169,39 @@ Sources because their identity is not independently resolvable. External Git
 Sources are refreshed only
 after confirmation.
 
-The complete Skill tree is copied byte-for-byte and existing paths are never
-overwritten. Claude is exposed through a symlink to the canonical
-`.agents/skills/<skill>` installation.
+The complete Skill tree is copied byte-for-byte and executable modes are preserved.
+Before confirmation, existing Host locations are inspected and conflicts are shown.
+Identical content is adopted in place; a Skill already recorded as managed must be
+changed with `update apply`, not a repeat install. By default, no existing path is
+overwritten. For an untracked, real directory whose content differs, replacement
+requires both `--overwrite` and `--yes`:
+
+```sh
+node dist/src/cli.js install --scope project --source builtin:agent-depot \
+  --skill architecture --host pi --version latest --portable-v1 --overwrite --yes
+```
+
+The preview is explicit about this distinction: without `--yes`, zero files or
+installation state are changed; with both flags, it reports that the target will
+be replaced and shows the `.agent-depot-backup-<generated-suffix>` backup pattern.
+The same contract applies to `--scope user-global`. Symlinks, special files,
+unsafe trees, ambiguous Claude locations, and races between preview and mutation
+fail closed. Replacement first moves the exact original directory to a persistent
+backup beside the installation, then installs the immutable preview tree. The CLI
+prints the backup path; successful backups are never deleted automatically. Filesystem
+replacement and manifest/global-state failures are restored in-process before the
+error is returned. Rollback verifies the retained backup and replacement content
+before deleting the replacement and fails closed when either has changed. These are
+the strongest portable filesystem checks available, not an atomic cross-process
+compare-and-swap: an external writer can still race after the final check, so Agent
+Depot does not claim to serialize concurrent writers. This is not crash recovery: a
+process crash after the original is moved can leave the retained
+`.agent-depot-backup-*` directory with no guaranteed replacement state. Stop the CLI,
+inspect the backup and target, and manually rename the retained backup back to the intended installation path when recovery is needed;
+then rerun the install. External installation methods run only after the filesystem
+and selected-scope state transaction succeeds.
+Claude is exposed through a symlink to the canonical `.agents/skills/<skill>`
+installation.
 
 ## User-provided installation methods
 

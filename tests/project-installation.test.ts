@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, rmdir, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import type { ProjectSkillSelection } from "../src/project-manifest.js";
 import {
+  inspectProjectSkillInstallation,
   inspectProjectSkillUpdate,
   installProjectSkill,
   installProjectSkillTransaction,
@@ -414,6 +415,322 @@ test("never overwrites an existing canonical target", async () => {
   }
 });
 
+test("classifies a real target collision without writing or rereading the mutable Source", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  let sourceReads = 0;
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    const inspection = await inspectProjectSkillInstallation({
+      selection,
+      source,
+      portableV1: true,
+      previewTree: tree,
+    }, {
+      projectRoot,
+      sourceAccess: {
+        async readSkillTree() {
+          sourceReads += 1;
+          return tree;
+        },
+      },
+    });
+
+    assert.equal(sourceReads, 0);
+    assert.equal(inspection.targetPath, existing);
+    assert.deepEqual(inspection.collision, { path: existing, reason: "content-mismatch" });
+    assert.equal(inspection.locations[0]?.status, "collision");
+    assert.equal(inspection.locations[1]?.status, "missing");
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "locally owned");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("overwrites one untracked real directory with a retained exact backup", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    await chmod(path.join(existing, "SKILL.md"), 0o755);
+    const result = await installProjectSkill({
+      selection: { ...selection, hosts: ["pi"] },
+      source,
+      previewTree: tree,
+      portableV1: true,
+      overwrite: true,
+      resolvedVersion: { kind: "builtin-package", version: "0.1.0" },
+    }, { projectRoot, sourceAccess: accessFor() });
+
+    assert.ok(result.backupPath);
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "SKILL");
+    assert.equal(await readFile(path.join(result.backupPath!, "SKILL.md"), "utf8"), "locally owned");
+    assert.equal((await lstat(path.join(result.backupPath!, "SKILL.md"))).mode & 0o111, 0o111);
+    assert.equal(await readFile(path.join(existing, "assets", "data.bin")).then((value) => value[1]), 0xff);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects an overwrite when the inspected target changes before the atomic move", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  let staged = false;
+  const base = {
+    lstat,
+    mkdir: async (candidate: string) => { await mkdir(candidate); },
+    writeFile: async (candidate: string, content: Uint8Array) => {
+      await writeFile(candidate, content, { flag: "wx" });
+      if (!staged && candidate.includes(".agent-depot-overwrite-")) {
+        staged = true;
+        await writeFile(path.join(existing, "SKILL.md"), "raced replacement");
+      }
+    },
+    chmod: async (candidate: string, mode: number) => { await chmod(candidate, mode); },
+    symlink,
+    readlink,
+    rm: async (candidate: string) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+    rename,
+    readdir: async (candidate: string) => readdir(candidate),
+    readFile: async (candidate: string) => readFile(candidate),
+  } satisfies ProjectInstallationFileSystem;
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi"] }, source, previewTree: tree, portableV1: true, overwrite: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: base,
+      }),
+      /target changed before mutation/i,
+    );
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "raced replacement");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("restores the moved tree when the backup changes before staged installation", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  let renames = 0;
+  const base = {
+    lstat,
+    mkdir: async (candidate: string) => { await mkdir(candidate); },
+    writeFile: async (candidate: string, content: Uint8Array) => { await writeFile(candidate, content, { flag: "wx" }); },
+    chmod,
+    symlink,
+    readlink,
+    rm: async (candidate: string) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+    rename: async (from: string, to: string) => {
+      renames += 1;
+      await rename(from, to);
+      if (renames === 1) await writeFile(path.join(to, "SKILL.md"), "raced backup");
+    },
+    readdir: async (candidate: string) => readdir(candidate),
+    readFile: async (candidate: string) => readFile(candidate),
+  } satisfies ProjectInstallationFileSystem;
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi"] }, source, previewTree: tree, portableV1: true, overwrite: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: base,
+      }),
+      /retained backup.*differs from the preview receipt/i,
+    );
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "raced backup");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("fails closed when rollback backup content changes", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    const transaction = await installProjectSkillTransaction({
+      selection: { ...selection, hosts: ["pi"] },
+      source,
+      previewTree: tree,
+      portableV1: true,
+      overwrite: true,
+    }, { projectRoot, sourceAccess: accessFor() });
+    await writeFile(path.join(transaction.result.backupPath!, "SKILL.md"), "concurrent backup mutation");
+
+    await assert.rejects(transaction.rollback(), /Rollback was incomplete.*retained backup.*differs/i);
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "SKILL");
+    assert.equal(await readFile(path.join(transaction.result.backupPath!, "SKILL.md"), "utf8"), "concurrent backup mutation");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("preserves a concurrently modified replacement during rollback", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    const transaction = await installProjectSkillTransaction({
+      selection: { ...selection, hosts: ["pi"] },
+      source,
+      previewTree: tree,
+      portableV1: true,
+      overwrite: true,
+    }, { projectRoot, sourceAccess: accessFor() });
+    await writeFile(path.join(existing, "SKILL.md"), "concurrent replacement mutation");
+
+    await assert.rejects(transaction.rollback(), /Rollback was incomplete.*concurrently modified Skill/i);
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "concurrent replacement mutation");
+    assert.equal(await readFile(path.join(transaction.result.backupPath!, "SKILL.md"), "utf8"), "locally owned");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects canonical overwrite when Claude is a separate identical real directory", async () => {
+  const projectRoot = await makeProject();
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  try {
+    await mkdir(canonicalPath, { recursive: true });
+    await writeFile(path.join(canonicalPath, "SKILL.md"), "locally owned");
+    await mkdir(claudePath, { recursive: true });
+    for (const file of tree) {
+      const destination = path.join(claudePath, ...file.path.slice("portable/demo/".length).split("/"));
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, Buffer.from(file.content));
+    }
+
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi", "claude"] }, source, previewTree: tree, portableV1: true, overwrite: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+      }),
+      /Claude location is a separate real directory.*ambiguous|separate real directory/i,
+    );
+    assert.equal(await readFile(path.join(canonicalPath, "SKILL.md"), "utf8"), "locally owned");
+    assert.equal(await readFile(path.join(claudePath, "SKILL.md"), "utf8"), "SKILL");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("binds an overwrite to the inspected destination receipt", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    const inspection = await inspectProjectSkillInstallation({
+      selection: { ...selection, hosts: ["pi"] },
+      source,
+      previewTree: tree,
+      portableV1: true,
+    }, { projectRoot, sourceAccess: accessFor() });
+    await writeFile(path.join(existing, "SKILL.md"), "changed after preview");
+    await assert.rejects(
+      installProjectSkill({
+        selection: { ...selection, hosts: ["pi"] },
+        source,
+        previewTree: tree,
+        portableV1: true,
+        overwrite: true,
+        inspection,
+      }, { projectRoot, sourceAccess: accessFor() }),
+      /target changed before mutation/i,
+    );
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "changed after preview");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rolls back an overwrite when the replacement move fails", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  let renames = 0;
+  const base = {
+    lstat,
+    mkdir: async (candidate: string) => { await mkdir(candidate); },
+    writeFile: async (candidate: string, content: Uint8Array) => { await writeFile(candidate, content, { flag: "wx" }); },
+    chmod,
+    symlink,
+    readlink,
+    rm: async (candidate: string) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+    rename: async (from: string, to: string) => {
+      renames += 1;
+      if (renames === 2) throw new Error("replacement move failed");
+      await rename(from, to);
+    },
+    readdir: async (candidate: string) => readdir(candidate),
+    readFile: async (candidate: string) => readFile(candidate),
+  } satisfies ProjectInstallationFileSystem;
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi"] }, source, previewTree: tree, portableV1: true, overwrite: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: base,
+      }),
+      /replacement move failed/i,
+    );
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "locally owned");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("reports an incomplete rollback when restoring the original tree fails", async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  let renames = 0;
+  const base = {
+    lstat,
+    mkdir: async (candidate: string) => { await mkdir(candidate); },
+    writeFile: async (candidate: string, content: Uint8Array) => { await writeFile(candidate, content, { flag: "wx" }); },
+    chmod,
+    symlink,
+    readlink,
+    rm: async (candidate: string) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+    rename: async (from: string, to: string) => {
+      renames += 1;
+      if (renames === 2 || renames === 3) throw new Error("restore denied");
+      await rename(from, to);
+    },
+    readdir: async (candidate: string) => readdir(candidate),
+    readFile: async (candidate: string) => readFile(candidate),
+  } satisfies ProjectInstallationFileSystem;
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned");
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi"] }, source, previewTree: tree, portableV1: true, overwrite: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+        fileSystem: base,
+      }),
+      /rollback was incomplete.*restore denied/i,
+    );
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("rolls back the canonical target when Claude symlink creation fails", async () => {
   const projectRoot = await makeProject();
   const baseFileSystem: ProjectInstallationFileSystem = {
@@ -543,6 +860,35 @@ test("rolls back a partially written target after an injected file failure", asy
     await assert.rejects(lstat(path.join(projectRoot, ".agents", "skills", "demo")), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("refuses a symlink collision during read-only inspection", async (t) => {
+  const projectRoot = await makeProject();
+  const outsideRoot = await makeProject();
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  try {
+    try {
+      await mkdir(path.dirname(canonicalPath), { recursive: true });
+      await symlink(outsideRoot, canonicalPath, "dir");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+        t.skip("symbolic links are unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+
+    const inspection = await inspectProjectSkillInstallation({ selection, source, portableV1: true, previewTree: tree }, {
+      projectRoot,
+      sourceAccess: accessFor(),
+    });
+    assert.equal(inspection.targetPath, canonicalPath);
+    assert.deepEqual(inspection.collision, { path: canonicalPath, reason: "symbolic-link" });
+    await assert.rejects(lstat(path.join(outsideRoot, "SKILL.md")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
   }
 });
 

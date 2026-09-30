@@ -5,7 +5,7 @@ import path from "node:path";
 
 import type { ProjectHost, ProjectSkillSelection } from "./project-manifest.js";
 import { compareSkillTrees, readExistingSkillTree } from "./skill-adoption.js";
-import type { SkillTreeFileSystem } from "./skill-adoption.js";
+import type { SkillTreeComparisonReason, SkillTreeFileSystem } from "./skill-adoption.js";
 import { skillTreeBaseline } from "./skill-discovery.js";
 import type { SkillTreeFile, SourceSkillTreeSnapshot } from "./skill-discovery.js";
 import type { ResolvedVersionEvidence, SkillInstallationBaseline } from "./project-manifest.js";
@@ -35,6 +35,8 @@ export interface ProjectInstallationFileSystem {
 
 export interface ProjectSkillInstallationRequest {
   readonly selection: ProjectSkillSelection;
+  /** Explicitly replace one untracked, real directory after a confirmed collision. */
+  readonly overwrite?: boolean;
   /** The resolved Source used by the full Skill tree reader. */
   readonly source: Source;
   /**
@@ -43,6 +45,10 @@ export interface ProjectSkillInstallationRequest {
    * the bytes the user confirmed.
    */
   readonly previewTree?: readonly SkillTreeFile[];
+  /** Read-only destination receipt captured before confirmation. */
+  readonly inspection?: ProjectSkillInstallationInspection;
+  /** Existing managed installation paths in this scope that must not overlap a replacement. */
+  readonly protectedPaths?: readonly string[];
   /** Explicit compatibility evidence for the selected Skill. */
   readonly compatibleHosts?: readonly ProjectHost[];
   /**
@@ -64,9 +70,41 @@ export interface ProjectInstallationOptions {
   readonly fileSystem?: ProjectInstallationFileSystem;
 }
 
+export type ProjectSkillInstallationCollisionReason =
+  | SkillTreeComparisonReason
+  | "not-directory"
+  | "symbolic-link";
+
+export interface ProjectSkillInstallationCollision {
+  readonly path: string;
+  readonly reason: ProjectSkillInstallationCollisionReason;
+}
+
+export interface ProjectSkillInstallationLocationInspection {
+  readonly path: string;
+  readonly status: "missing" | "identical" | "collision";
+  readonly collision?: ProjectSkillInstallationCollision;
+  /** Stable identity captured for the immediate pre-mutation race check. */
+  readonly identity?: string;
+  /** Content digest captured for the immediate pre-mutation race check. */
+  readonly digest?: string;
+}
+
+/** Read-only destination receipt captured before installation confirmation. */
+export interface ProjectSkillInstallationInspection {
+  readonly canonicalPath: string;
+  readonly claudePath: string;
+  /** The existing location to adopt, or the canonical destination for a fresh install. */
+  readonly targetPath: string;
+  readonly locations: readonly ProjectSkillInstallationLocationInspection[];
+  readonly collision?: ProjectSkillInstallationCollision;
+}
+
 export interface ProjectSkillInstallationResult {
   readonly skillName: string;
   readonly canonicalPath: string;
+  /** Persistent copy of the replaced original tree; never pruned automatically. */
+  readonly backupPath?: string;
   readonly claudePath?: string;
   readonly hosts: readonly ProjectHost[];
   readonly files: readonly string[];
@@ -449,6 +487,118 @@ const nodeFileSystem: ProjectInstallationFileSystem = {
   rmdir,
 };
 
+/**
+ * Classifies known installation locations without changing the filesystem.
+ * Existing directories are read through lstat/readdir/readFile only; symlinks
+ * are never followed while deciding whether a destination is safe.
+ */
+export async function inspectProjectSkillInstallation(
+  request: ProjectSkillInstallationRequest,
+  options: ProjectInstallationOptions,
+): Promise<ProjectSkillInstallationInspection> {
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  if (!fileSystem.readdir || !fileSystem.readFile) {
+    throw new ProjectInstallationError(
+      "adoption-unavailable",
+      "Cannot inspect an existing project Skill because directory and file reading are unavailable; retry with the standard filesystem adapter.",
+    );
+  }
+
+  const skillName = skillNameFromSelection(request.selection);
+  const projectRoot = path.resolve(options.projectRoot);
+  await assertNoSymlinkComponents(projectRoot, fileSystem);
+  await assertDirectory(projectRoot, fileSystem, "project root");
+  const files = await readAndValidateTree(request, skillName, options.sourceAccess);
+  validateCompatibility(request, skillName, files);
+
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
+  const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
+  await assertNoSymlinkAncestors(projectRoot, [".agents", "skills"], fileSystem);
+  await assertNoSymlinkAncestors(projectRoot, [".claude", "skills"], fileSystem);
+
+  const existingPaths: string[] = [];
+  const locations: ProjectSkillInstallationLocationInspection[] = [];
+  const expectedTree = files.map((file) => file.source);
+  for (const candidate of [canonicalPath, claudePath]) {
+    let information: Stats;
+    try {
+      information = await fileSystem.lstat(candidate);
+    } catch (error) {
+      if (isMissing(error)) {
+        locations.push(Object.freeze({ path: candidate, status: "missing" }));
+        continue;
+      }
+      throw error;
+    }
+
+    if (information.isSymbolicLink()) {
+      if (candidate !== claudePath || !existingPaths.includes(canonicalPath)) {
+        const collision = Object.freeze({ path: candidate, reason: "symbolic-link" as const });
+        locations.push(Object.freeze({ path: candidate, status: "collision", collision }));
+        continue;
+      }
+      let target: string;
+      try {
+        target = await fileSystem.readlink(candidate);
+      } catch {
+        const collision = Object.freeze({ path: candidate, reason: "symbolic-link" as const });
+        locations.push(Object.freeze({ path: candidate, status: "collision", collision }));
+        continue;
+      }
+      if (path.resolve(path.dirname(candidate), target) !== canonicalPath) {
+        const collision = Object.freeze({ path: candidate, reason: "symbolic-link" as const });
+        locations.push(Object.freeze({ path: candidate, status: "collision", collision }));
+        continue;
+      }
+      existingPaths.push(candidate);
+      locations.push(Object.freeze({ path: candidate, status: "identical" }));
+      continue;
+    }
+    if (!information.isDirectory()) {
+      const collision = Object.freeze({ path: candidate, reason: "not-directory" as const });
+      locations.push(Object.freeze({ path: candidate, status: "collision", collision, identity: pathIdentityKey(pathIdentity(information)) }));
+      continue;
+    }
+
+    let actualTree: readonly SkillTreeFile[];
+    try {
+      actualTree = await readExistingSkillTree(candidate, request.selection.path, {
+        lstat: fileSystem.lstat,
+        readdir: fileSystem.readdir,
+        readFile: fileSystem.readFile,
+      });
+    } catch {
+      const collision = Object.freeze({ path: candidate, reason: "unsafe-file" as const });
+      locations.push(Object.freeze({ path: candidate, status: "collision", collision }));
+      continue;
+    }
+    const comparison = compareSkillTrees(expectedTree, actualTree);
+    const digest = skillTreeBaseline(actualTree).digest;
+    const identity = pathIdentityKey(pathIdentity(information));
+    if (!comparison.identical) {
+      const collision = Object.freeze({
+        path: candidate,
+        reason: comparison.reason ?? "content-mismatch",
+      });
+      locations.push(Object.freeze({ path: candidate, status: "collision", collision, identity, digest }));
+      continue;
+    }
+    existingPaths.push(candidate);
+    locations.push(Object.freeze({ path: candidate, status: "identical", identity, digest }));
+  }
+
+  const firstExisting = locations.find((location) => location.status !== "missing");
+  const targetPath = firstExisting?.path ?? canonicalPath;
+  const collision = locations.find((location) => location.status === "collision")?.collision;
+  return Object.freeze({
+    canonicalPath,
+    claudePath,
+    targetPath,
+    locations: Object.freeze(locations),
+    ...(collision === undefined ? {} : { collision }),
+  });
+}
+
 /** Validates the immutable preview tree and its requested Host compatibility without writing. */
 export async function validateProjectSkillInstallationPreview(
   request: ProjectSkillInstallationRequest,
@@ -460,8 +610,9 @@ export async function validateProjectSkillInstallationPreview(
 }
 
 /**
- * Installs one selected Skill into a project without consulting user-global
- * state, adopting existing paths, or overwriting any existing path.
+ * Installs one selected Skill into a scope without consulting user-global
+ * state. Existing identical paths are adopted; explicit overwrite is limited
+ * to an inspected, untracked real directory and retains a persistent backup.
  */
 export async function installProjectSkill(
   request: ProjectSkillInstallationRequest,
@@ -472,9 +623,9 @@ export async function installProjectSkill(
 }
 
 /**
- * Installs one Skill and retains the created-path receipt for a surrounding
- * manifest/batch transaction. Existing paths are never included in the
- * receipt and are therefore never removed by rollback.
+ * Installs one Skill and retains a transaction receipt for a surrounding
+ * manifest/state transaction. Explicit overwrite moves the original directory
+ * aside atomically so rollback can restore it if persistence fails.
  */
 export async function installProjectSkillTransaction(
   request: ProjectSkillInstallationRequest,
@@ -504,6 +655,25 @@ export async function installProjectSkillTransaction(
   const canonicalPath = path.join(canonicalSkillsPath, skillName);
   const claudeSkillsPath = path.join(projectRoot, ".claude", "skills");
   const claudePath = path.join(claudeSkillsPath, skillName);
+  if (request.overwrite === true) {
+    const inspection = request.inspection ?? await inspectProjectSkillInstallation(request, options);
+    if (inspection.canonicalPath !== canonicalPath || inspection.claudePath !== claudePath) {
+      throw new ProjectInstallationError(
+        "target-changed",
+        "The inspected overwrite receipt belongs to a different Skill destination; no path was changed",
+      );
+    }
+    if (inspection.collision !== undefined) {
+      assertOverwriteCollision(inspection);
+      return overwriteProjectSkillTransaction(
+        request,
+        options,
+        files,
+        hosts,
+        inspection,
+      );
+    }
+  }
   const createdPaths: CreatedPath[] = [];
   const uncertainCreates = new Set<string>();
 
@@ -633,6 +803,326 @@ export async function installProjectSkillTransaction(
     }
     throw error;
   }
+}
+
+function assertOverwriteCollision(inspection: ProjectSkillInstallationInspection): void {
+  const collision = inspection.collision;
+  if (!collision) return;
+  if (collision.reason !== "missing-file" && collision.reason !== "extra-file" && collision.reason !== "content-mismatch") {
+    throw new ProjectInstallationError(
+      "unsafe-target",
+      `Cannot overwrite ${JSON.stringify(collision.path)} because it is not an untracked real Skill directory; no path was changed`,
+    );
+  }
+
+  const conflictingLocations = inspection.locations.filter((location) => location.status === "collision");
+  if (conflictingLocations.length !== 1) {
+    throw new ProjectInstallationError(
+      "ambiguous-target",
+      `Cannot overwrite Skill ${JSON.stringify(inspection.targetPath)} because its Host locations are ambiguous; no path was changed`,
+    );
+  }
+  const otherExisting = inspection.locations.filter((location) => location.path !== collision.path && location.status !== "missing");
+  if (otherExisting.some((location) => location.path !== inspection.claudePath || location.status !== "identical")) {
+    throw new ProjectInstallationError(
+      "ambiguous-target",
+      `Cannot overwrite Skill ${JSON.stringify(inspection.targetPath)} because another Host location is also present; no path was changed`,
+    );
+  }
+  // A real Claude directory is an intentional adoption when it is the only
+  // existing location (see adoptExistingProjectSkill). It is ambiguous during
+  // canonical replacement, however: leaving that duplicate directory in place
+  // would make Claude continue reading the old bytes after the canonical move.
+  const claudeLocation = inspection.locations.find((location) => location.path === inspection.claudePath);
+  if (inspection.targetPath === inspection.canonicalPath && claudeLocation?.status === "identical" && claudeLocation.identity !== undefined) {
+    throw new ProjectInstallationError(
+      "ambiguous-target",
+      `Cannot overwrite ${JSON.stringify(inspection.targetPath)} because the Claude location is a separate real directory rather than the managed symlink; no path was changed`,
+    );
+  }
+}
+
+function targetLocation(inspection: ProjectSkillInstallationInspection): ProjectSkillInstallationLocationInspection {
+  return inspection.locations.find((location) => location.path === inspection.targetPath) ??
+    (() => { throw new ProjectInstallationError("unsafe-target", `Cannot identify overwrite target ${inspection.targetPath}`); })();
+}
+
+function assertNoOverlappingOverwritePaths(targetPath: string, backupPath: string, protectedPaths: readonly string[]): void {
+  const candidates = [targetPath, backupPath, ...protectedPaths].map((candidate) => path.resolve(candidate));
+  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
+      if (!pathsOverlap(candidates[leftIndex]!, candidates[rightIndex]!)) continue;
+      throw new ProjectInstallationError(
+        "managed-target",
+        `Cannot overwrite ${JSON.stringify(targetPath)} because the installation or retained backup overlaps a managed Skill path; no path was changed`,
+      );
+    }
+  }
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  const relative = path.relative(left, right);
+  const reverse = path.relative(right, left);
+  return relative === "" || reverse === "" ||
+    (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) ||
+    (!reverse.startsWith(`..${path.sep}`) && !path.isAbsolute(reverse));
+}
+
+async function assertOverwriteInspectionUnchanged(
+  request: ProjectSkillInstallationRequest,
+  options: ProjectInstallationOptions,
+  expected: ProjectSkillInstallationInspection,
+): Promise<void> {
+  const current = await inspectProjectSkillInstallation(request, options);
+  const expectedTarget = targetLocation(expected);
+  const currentTarget = targetLocation(current);
+  const locationsMatch = current.locations.length === expected.locations.length && current.locations.every((location, index) => {
+    const expectedLocation = expected.locations[index];
+    return expectedLocation !== undefined &&
+      location.path === expectedLocation.path &&
+      location.status === expectedLocation.status &&
+      location.collision?.reason === expectedLocation.collision?.reason &&
+      location.identity === expectedLocation.identity &&
+      location.digest === expectedLocation.digest;
+  });
+  if (current.canonicalPath !== expected.canonicalPath ||
+    current.claudePath !== expected.claudePath ||
+    current.targetPath !== expected.targetPath ||
+    current.collision?.path !== expected.collision?.path ||
+    current.collision?.reason !== expected.collision?.reason ||
+    !locationsMatch ||
+    currentTarget.identity !== expectedTarget.identity ||
+    currentTarget.digest !== expectedTarget.digest) {
+    throw new ProjectInstallationError(
+      "target-changed",
+      `The inspected overwrite target changed before mutation; no path was changed`,
+    );
+  }
+}
+
+async function assertBackupMatchesInspection(
+  backupPath: string,
+  request: ProjectSkillInstallationRequest,
+  expected: ProjectSkillInstallationLocationInspection,
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<void> {
+  if (expected.identity === undefined || expected.digest === undefined) {
+    throw new ProjectInstallationError(
+      "backup-changed",
+      `The retained backup at ${JSON.stringify(backupPath)} has no complete inspection receipt; the operation was stopped without deleting data`,
+    );
+  }
+  const information = await fileSystem.lstat(backupPath);
+  if (information.isSymbolicLink() || !information.isDirectory() || pathIdentityKey(pathIdentity(information)) !== expected.identity) {
+    throw new ProjectInstallationError(
+      "backup-changed",
+      `The retained backup at ${JSON.stringify(backupPath)} changed identity after the original tree was moved; the operation was stopped without deleting data`,
+    );
+  }
+  if (!fileSystem.readdir || !fileSystem.readFile) {
+    throw new ProjectInstallationError("backup-changed", "The retained backup cannot be verified without directory and file reads; the operation was stopped without deleting data");
+  }
+  let tree: readonly SkillTreeFile[];
+  try {
+    tree = await readExistingSkillTree(backupPath, request.selection.path, {
+      lstat: fileSystem.lstat,
+      readdir: fileSystem.readdir,
+      readFile: fileSystem.readFile,
+    });
+  } catch (error) {
+    throw new ProjectInstallationError(
+      "backup-changed",
+      `The retained backup at ${JSON.stringify(backupPath)} could not be read safely (${errorMessage(error)}); the operation was stopped without deleting data`,
+    );
+  }
+  const digest = skillTreeBaseline(tree).digest;
+  if (digest !== expected.digest) {
+    throw new ProjectInstallationError(
+      "backup-changed",
+      `The retained backup at ${JSON.stringify(backupPath)} differs from the preview receipt; the operation was stopped without deleting data`,
+    );
+  }
+}
+
+async function assertReplacementMatchesPreview(
+  targetPath: string,
+  request: ProjectSkillInstallationRequest,
+  files: readonly ValidatedTreeFile[],
+  expectedIdentity: PathIdentity,
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<void> {
+  const information = await fileSystem.lstat(targetPath);
+  if (information.isSymbolicLink() || !information.isDirectory() || !samePathIdentity(expectedIdentity, pathIdentity(information))) {
+    throw new ProjectInstallationError(
+      "replacement-changed",
+      `Preserved concurrently replaced Skill at ${JSON.stringify(targetPath)}; rollback did not delete it`,
+    );
+  }
+  if (!fileSystem.readdir || !fileSystem.readFile) {
+    throw new ProjectInstallationError("replacement-changed", "The replacement cannot be verified without directory and file reads; rollback did not delete it");
+  }
+  let tree: readonly SkillTreeFile[];
+  try {
+    tree = await readExistingSkillTree(targetPath, request.selection.path, {
+      lstat: fileSystem.lstat,
+      readdir: fileSystem.readdir,
+      readFile: fileSystem.readFile,
+    });
+  } catch (error) {
+    throw new ProjectInstallationError(
+      "replacement-changed",
+      `Preserved concurrently replaced Skill at ${JSON.stringify(targetPath)} (${errorMessage(error)}); rollback did not delete it`,
+    );
+  }
+  const expectedDigest = skillTreeBaseline(files.map((file) => file.source)).digest;
+  if (skillTreeBaseline(tree).digest !== expectedDigest) {
+    throw new ProjectInstallationError(
+      "replacement-changed",
+      `Preserved concurrently modified Skill at ${JSON.stringify(targetPath)}; rollback did not delete it`,
+    );
+  }
+}
+
+async function overwriteProjectSkillTransaction(
+  request: ProjectSkillInstallationRequest,
+  options: ProjectInstallationOptions,
+  files: readonly ValidatedTreeFile[],
+  hosts: readonly ProjectHost[],
+  inspection: ProjectSkillInstallationInspection,
+): Promise<ProjectSkillInstallationTransaction> {
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  if (!fileSystem.rename) {
+    throw new ProjectInstallationError("overwrite-unavailable", "Explicit Skill overwrite requires an atomic filesystem rename adapter");
+  }
+  const targetPath = inspection.targetPath;
+  const projectRoot = path.resolve(options.projectRoot);
+  const parent = path.dirname(targetPath);
+  await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, parent), fileSystem);
+  const stagePath = path.join(parent, `.agent-depot-overwrite-${randomUUID()}`);
+  const backupPath = path.join(parent, `.agent-depot-backup-${randomUUID()}`);
+  assertNoOverlappingOverwritePaths(targetPath, backupPath, request.protectedPaths ?? []);
+  await assertMissing(stagePath, fileSystem, stagePath);
+  await assertMissing(backupPath, fileSystem, backupPath);
+
+  let stageCreated = false;
+  let moved = false;
+  let replacementInstalled = false;
+  let replacementIdentity: PathIdentity | undefined;
+  const exposureCreated: CreatedPath[] = [];
+  const exposureUncertain = new Set<string>();
+
+  const restore = async (): Promise<string[]> => {
+    const errors: string[] = [];
+    errors.push(...await rollbackCreatedPaths(exposureCreated, exposureUncertain, fileSystem));
+    if (stageCreated) {
+      await fileSystem.rm(stagePath).catch((error: unknown) => errors.push(`could not remove staging tree: ${errorMessage(error)}`));
+    }
+    if (moved) {
+      if (replacementIdentity !== undefined) {
+        try {
+          await assertReplacementMatchesPreview(targetPath, request, files, replacementIdentity, fileSystem);
+        } catch (error) {
+          errors.push(errorMessage(error));
+        }
+      } else if (replacementInstalled) {
+        errors.push(`preserved replacement at ${JSON.stringify(targetPath)} because its identity could not be verified`);
+      }
+      if (errors.length === 0 && replacementIdentity !== undefined) {
+        try {
+          await assertBackupMatchesInspection(backupPath, request, targetLocation(inspection), fileSystem);
+        } catch (error) {
+          errors.push(errorMessage(error));
+        }
+      }
+      if (errors.length === 0 && replacementIdentity !== undefined) {
+        // Recheck ownership immediately before the destructive remove. Portable
+        // filesystem APIs do not provide a cross-process compare-and-swap, so a
+        // writer can still race after this check; any observed identity/content
+        // drift is nevertheless preserved and fails closed.
+        try {
+          const current = await fileSystem.lstat(targetPath);
+          if (!samePathIdentity(replacementIdentity, pathIdentity(current))) {
+            errors.push(`preserved concurrently replaced Skill at ${JSON.stringify(targetPath)}`);
+          } else {
+            await fileSystem.rm(targetPath);
+          }
+        } catch (error) {
+          if (!isMissing(error)) errors.push(`could not remove replacement: ${errorMessage(error)}`);
+        }
+      }
+      if (errors.length === 0) {
+        await fileSystem.rename!(backupPath, targetPath).catch((error: unknown) => {
+          errors.push(`could not restore original Skill: ${errorMessage(error)}`);
+        });
+      }
+    }
+    return errors;
+  };
+
+  try {
+    await fileSystem.mkdir(stagePath);
+    stageCreated = true;
+    await writeStagedTree(stagePath, files, fileSystem);
+    // Revalidate after all potentially slow staging work and immediately before
+    // moving the user's original tree. The preview bytes are immutable and no
+    // external installation method has run at this point.
+    await assertOverwriteInspectionUnchanged(request, options, inspection);
+    await fileSystem.rename(targetPath, backupPath);
+    moved = true;
+    // Rename preserves the original tree as a recovery boundary. Verify both
+    // its native directory identity and its complete content receipt before the
+    // staged tree is exposed at the installation path.
+    await assertBackupMatchesInspection(backupPath, request, targetLocation(inspection), fileSystem);
+    await fileSystem.rename(stagePath, targetPath);
+    stageCreated = false;
+    replacementInstalled = true;
+    replacementIdentity = pathIdentity(await fileSystem.lstat(targetPath));
+
+    const claudeLocation = inspection.locations.find((location) => location.path === inspection.claudePath);
+    if (targetPath === inspection.canonicalPath && hosts.includes("claude") && claudeLocation?.status === "missing") {
+      await ensureDirectoryTree(projectRoot, [".claude", "skills"], exposureCreated, exposureUncertain, fileSystem);
+      const linkTarget = path.relative(path.dirname(inspection.claudePath), inspection.canonicalPath);
+      exposureUncertain.add(inspection.claudePath);
+      await fileSystem.symlink(linkTarget, inspection.claudePath, "dir");
+      const linkInformation = await fileSystem.lstat(inspection.claudePath);
+      if (!linkInformation.isSymbolicLink()) {
+        throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${inspection.claudePath}`);
+      }
+      exposureCreated.push({ path: inspection.claudePath, kind: "symlink", identity: pathIdentity(linkInformation) });
+      exposureUncertain.delete(inspection.claudePath);
+    }
+  } catch (error) {
+    const rollbackErrors = await restore();
+    if (rollbackErrors.length > 0) {
+      throw new ProjectInstallationError("rollback-failed", `${errorMessage(error)}; rollback was incomplete: ${rollbackErrors.join("; ")}`);
+    }
+    throw error;
+  }
+
+  const result = Object.freeze({
+    skillName: skillNameFromSelection(request.selection),
+    canonicalPath: targetPath,
+    ...(hosts.includes("claude") ? { claudePath: inspection.claudePath } : {}),
+    backupPath,
+    hosts: Object.freeze([...hosts]),
+    files: Object.freeze(files.map((file) => file.relativePath)),
+    adopted: false,
+    adoptedPaths: Object.freeze([]),
+    baseline: skillTreeBaseline(files.map((file) => file.source)),
+    ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
+  });
+  let state: "open" | "rolled-back" = "open";
+  return Object.freeze({
+    result,
+    rollback: async () => {
+      if (state !== "open") return;
+      state = "rolled-back";
+      const rollbackErrors = await restore();
+      if (rollbackErrors.length > 0) {
+        throw new ProjectInstallationError("rollback-failed", `Rollback was incomplete: ${rollbackErrors.join("; ")}`);
+      }
+    },
+  });
 }
 
 interface ValidatedTreeFile {
@@ -1112,6 +1602,17 @@ function pathIdentity(information: Stats): PathIdentity {
     size: information.size,
     mode: information.mode,
   };
+}
+
+function pathIdentityKey(identity: PathIdentity): string {
+  // Rename may update ctime while preserving the native directory identity.
+  // Use dev/inode when the platform provides them; only the fallback needs the
+  // additional metadata because it has no native identity to compare.
+  if (Number.isFinite(identity.device) && Number.isFinite(identity.inode) &&
+    (identity.device !== 0 || identity.inode !== 0)) {
+    return `native:${identity.device}:${identity.inode}`;
+  }
+  return `fallback:${identity.birthtimeMs}:${identity.size}:${identity.mode}`;
 }
 
 function samePathIdentity(left: PathIdentity, right: PathIdentity): boolean {

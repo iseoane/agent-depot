@@ -860,6 +860,130 @@ test("previews project selection before confirmation, then installs and persists
   }
 });
 
+test("classifies project collisions before confirmation and never overwrites without the future flag", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-project-collision-"));
+  const target = path.join(projectRoot, ".agents", "skills", "demo");
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, "SKILL.md"), "locally owned", "utf8");
+    const dependencies = {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+    const args = [
+      "install", "--scope", "project", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1",
+    ];
+
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.ok(output.some((line) => line.includes(`target: ${target}`)));
+    assert.ok(output.some((line) => /COLLISION:.*content-mismatch/i.test(line)));
+    assert.ok(output.some((line) => /collision handling: fail-closed; no path will be changed/i.test(line)));
+    assert.ok(output.some((line) => /no --yes supplied; zero files or installation state will be changed/i.test(line)));
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "locally owned");
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli([...args, "--overwrite"], dependencies), 1);
+    assert.ok(output.some((line) => /fail-closed; no path will be changed without --yes/i.test(line)));
+    assert.ok(output.some((line) => /if confirmed: old Skill would be moved to a retained backup at .*\.agent-depot-backup-<generated-suffix>/i.test(line)));
+    assert.ok(output.some((line) => /no --yes supplied; zero files or installation state will be changed/i.test(line)));
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "locally owned");
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli([...args, "--yes"], dependencies), 1);
+    assert.match(errors[0] ?? "", /content-mismatch.*--overwrite --yes/i);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "locally owned");
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli([...args, "--overwrite", "--yes"], dependencies), 0);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "## D");
+    const installedOutput = output.join("\n");
+    assert.match(installedOutput, /target will be replaced because --overwrite --yes was supplied/i);
+    assert.match(installedOutput, /overwrite backup: old Skill will be moved to a retained backup at .*\.agent-depot-backup-<generated-suffix>/i);
+    assert.match(installedOutput, /replace the colliding target .* retain a backup of the existing Skill .* install the selected source files/i);
+    assert.match(installedOutput, /SKILL\.md .* install into the replacement target/i);
+    assert.doesNotMatch(installedOutput, /adopt identical files|create missing files|refuse conflicts|adopt if identical|create if missing/i);
+    const backupMatch = installedOutput.match(/Persistent backup retained at (.+)$/m);
+    assert.ok(backupMatch?.[1]);
+    assert.equal(await readFile(path.join(backupMatch![1]!, "SKILL.md"), "utf8"), "locally owned");
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as { skills: unknown[] };
+    assert.equal(manifest.skills.length, 1);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("refuses overwrite of a path managed by another selection in both scopes", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-managed-overlap-project-"));
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-managed-overlap-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-managed-overlap-state-"));
+  try {
+    const target = path.join(projectRoot, ".agents", "skills", "demo");
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, "SKILL.md"), "managed owner", "utf8");
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: [{
+        source: { kind: "external", url: external.url },
+        path: "other/demo",
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        installation: { path: ".agents/skills/demo", adopted: false },
+      }],
+    }), "utf8");
+    const projectErrors: string[] = [];
+    assert.equal(await runCli([
+      "install", "--scope", "project", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1", "--overwrite", "--yes",
+    ], {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      stderr: (line) => projectErrors.push(line),
+    }), 1);
+    assert.match(projectErrors[0] ?? "", /overlaps the managed installation.*another Source\/Skill selection/i);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "managed owner");
+
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    await operations.addUserGlobalInstallation!({
+      source: { kind: "external", url: external.url },
+      path: "other/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    });
+    const globalTarget = path.join(homeDirectory, ".agents", "skills", "demo");
+    await mkdir(globalTarget, { recursive: true });
+    await writeFile(path.join(globalTarget, "SKILL.md"), "managed owner", "utf8");
+    const globalErrors: string[] = [];
+    assert.equal(await runCli([
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1", "--overwrite", "--yes",
+    ], {
+      operations,
+      homeDirectory,
+      sourceAccess: cliSourceAccess(),
+      stderr: (line) => globalErrors.push(line),
+    }), 1);
+    assert.match(globalErrors[0] ?? "", /overlaps the managed installation.*another Source\/Skill selection/i);
+    assert.equal(await readFile(path.join(globalTarget, "SKILL.md"), "utf8"), "managed owner");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
 test("rejects an incompatible Git Skill tree before asking for confirmation", async () => {
   const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-git-incompatible-"));
   const output: string[] = [];
@@ -992,6 +1116,67 @@ test("previews and installs a user-global Skill in the injected home while shari
     const sharedOperations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
     assert.ok(sharedOperations.listUserGlobalInstallations);
     assert.equal((await sharedOperations.listUserGlobalInstallations()).length, 1);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("classifies user-global collisions at the injected home before confirmation and retains the backup", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-collision-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-global-collision-state-"));
+  const target = path.join(homeDirectory, ".agents", "skills", "demo");
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, "SKILL.md"), "locally owned", "utf8");
+    const dependencies = {
+      operations: createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") }),
+      homeDirectory,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line: string) => output.push(line),
+      stderr: (line: string) => errors.push(line),
+    };
+    const args = [
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1",
+    ];
+
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.ok(output.some((line) => line.includes(`target: ${target}`)));
+    assert.ok(output.some((line) => /COLLISION:.*content-mismatch/i.test(line)));
+    assert.ok(output.some((line) => /collision handling: fail-closed; no path will be changed/i.test(line)));
+    assert.ok(output.some((line) => /no --yes supplied; zero files or installation state will be changed/i.test(line)));
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "locally owned");
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli([...args, "--overwrite"], dependencies), 1);
+    assert.ok(output.some((line) => /fail-closed; no path will be changed without --yes/i.test(line)));
+    assert.ok(output.some((line) => /if confirmed: old Skill would be moved to a retained backup at .*\.agent-depot-backup-<generated-suffix>/i.test(line)));
+    assert.ok(output.some((line) => /no --yes supplied; zero files or installation state will be changed/i.test(line)));
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "locally owned");
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli([...args, "--yes"], dependencies), 1);
+    assert.match(errors[0] ?? "", /content-mismatch.*--overwrite --yes/i);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "locally owned");
+
+    output.length = 0;
+    errors.length = 0;
+    assert.equal(await runCli([...args, "--overwrite", "--yes"], dependencies), 0);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "## D");
+    const installedOutput = output.join("\n");
+    assert.match(installedOutput, /target will be replaced because --overwrite --yes was supplied/i);
+    assert.match(installedOutput, /overwrite backup: old Skill will be moved to a retained backup at .*\.agent-depot-backup-<generated-suffix>/i);
+    const backupMatch = installedOutput.match(/Persistent backup retained at (.+)$/m);
+    assert.ok(backupMatch?.[1]);
+    assert.equal(await readFile(path.join(backupMatch![1]!, "SKILL.md"), "utf8"), "locally owned");
+    assert.equal((await dependencies.operations.listUserGlobalInstallations!()).length, 1);
   } finally {
     await rm(homeDirectory, { recursive: true, force: true });
     await rm(stateDirectory, { recursive: true, force: true });
@@ -1190,6 +1375,80 @@ test("rejects --ref for the built-in Source instead of silently ignoring it", as
     }), 1);
     assert.deepEqual(errors, ["Error: The built-in Source does not support --ref; its version follows the Agent Depot package"]);
     await assert.rejects(readFile(path.join(projectRoot, "agent-depot.json")), { code: "ENOENT" });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects manifest selections with the same physical basename before confirmation", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-manifest-collision-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: ["one", "two"].map((name) => ({
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: `portable/${name}/demo`,
+        version: { policy: "latest" },
+        hosts: ["pi"],
+      })),
+    }), "utf8");
+    const exitCode = await runCli(["install", "--scope", "project", "--manifest", "--portable-v1", "--yes"], {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: {
+        async readSkillTree(_source, skillPath) {
+          return [{
+            path: `${skillPath}/SKILL.md`,
+            content: Uint8Array.from(Buffer.from("## D")),
+            executable: false,
+          }];
+        },
+      },
+      stdout: (line) => output.push(line),
+      stderr: (line) => errors.push(line),
+    });
+
+    assert.equal(exitCode, 1);
+    assert.match(errors[0] ?? "", /same physical installation target/);
+    assert.deepEqual(output, []);
+    await assert.rejects(readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as { skills: unknown[] };
+    assert.equal(manifest.skills.length, 2);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("previews collisions for each manifest selection before confirmation", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-manifest-preview-collision-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    const target = path.join(projectRoot, ".agents", "skills", "demo");
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, "SKILL.md"), "locally owned", "utf8");
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: [{
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: "portable/demo",
+        version: { policy: "latest" },
+        hosts: ["pi"],
+      }],
+    }), "utf8");
+
+    assert.equal(await runCli(["install", "--scope", "project", "--manifest", "--portable-v1"], {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line) => output.push(line),
+      stderr: (line) => errors.push(line),
+    }), 1);
+    assert.ok(output.some((line) => /COLLISION:.*content-mismatch/i.test(line)));
+    assert.match(errors[0] ?? "", /Installation not confirmed/);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "locally owned");
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -1562,6 +1821,62 @@ test("rolls back installed files when the manifest transaction cannot be committ
     await assert.rejects(readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md")), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("rolls back the original tree when overwrite persistence fails in both scopes", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-overwrite-manifest-rollback-"));
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-overwrite-global-rollback-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-overwrite-global-state-"));
+  try {
+    const makeExisting = async (root: string) => {
+      const target = path.join(root, ".agents", "skills", "demo");
+      await mkdir(target, { recursive: true });
+      await writeFile(path.join(target, "SKILL.md"), "locally owned", "utf8");
+      return target;
+    };
+    const projectTarget = await makeExisting(projectRoot);
+    const projectErrors: string[] = [];
+    const manifestStore = {
+      path: path.join(projectRoot, "agent-depot.json"),
+      async load() { return { version: 1 as const, skills: [] as const }; },
+      async save() { throw new Error("manifest overwrite save failed"); },
+    };
+    assert.equal(await runCli([
+      "install", "--scope", "project", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1", "--overwrite", "--yes",
+    ], {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      projectManifestStore: manifestStore,
+      stderr: (line) => projectErrors.push(line),
+    }), 1);
+    assert.match(projectErrors[0] ?? "", /manifest overwrite save failed/);
+    assert.equal(await readFile(path.join(projectTarget, "SKILL.md"), "utf8"), "locally owned");
+
+    const globalTarget = await makeExisting(homeDirectory);
+    const globalErrors: string[] = [];
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const failingOperations = {
+      ...operations,
+      async addUserGlobalInstallation() { throw new Error("global state overwrite save failed"); },
+    };
+    assert.equal(await runCli([
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1", "--overwrite", "--yes",
+    ], {
+      operations: failingOperations,
+      homeDirectory,
+      sourceAccess: cliSourceAccess(),
+      stderr: (line) => globalErrors.push(line),
+    }), 1);
+    assert.match(globalErrors[0] ?? "", /global state overwrite save failed/);
+    assert.equal(await readFile(path.join(globalTarget, "SKILL.md"), "utf8"), "locally owned");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
   }
 });
 

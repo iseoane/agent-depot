@@ -33,12 +33,14 @@ import {
   type VersionPolicy,
 } from "./project-manifest.js";
 import {
+  inspectProjectSkillInstallation,
   inspectProjectSkillRemoval,
   installProjectSkillTransaction,
   removeProjectSkill,
   validateProjectSkillInstallationPreview,
   assertNoOverlappingProjectSkillRemovalTargets,
   type ProjectInstallationOptions,
+  type ProjectSkillInstallationInspection,
   type ProjectSkillInstallationResult,
   type ProjectSkillInstallationTransaction,
   type ProjectSkillRemovalInspection,
@@ -80,7 +82,7 @@ const USAGE = [
   "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes]",
   "  agent-depot uninstall [--skills] [--data] [--cli] [--yes]",
 ].join("\n");
-const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]";
+const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 const REMOVE_SOURCE_USAGE = "Usage: agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]";
 const MIGRATE_SOURCE_USAGE = "Usage: agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]";
@@ -837,17 +839,26 @@ async function runInstall(
     if (resolved.some((item) => item.method !== undefined) && resolved.length > 1) {
       throw new SourceMetadataError("A batch install containing an external method is refused because command side effects cannot be rolled back safely; install that Skill separately");
     }
-    for (const item of resolved) {
-      outputInstallPreview(item.selection, item.source, projectRoot, output, item.files, item.method, "project");
+    // Inspect every physical destination before printing a confirmation preview.
+    // Two different manifest selections can have different Source/path
+    // identities while still resolving to the same basename directory.
+    const inspections = await inspectManifestInstallations(resolved, projectRoot, sourceAccess, dependencies);
+    for (let index = 0; index < resolved.length; index += 1) {
+      const item = resolved[index]!;
+      outputInstallPreview(item.selection, item.source, projectRoot, output, item.files, item.method, "project", inspections[index], false, options.confirmed);
     }
     requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
+    for (const inspection of inspections) {
+      rejectInstallationCollision(inspection, false);
+    }
 
     const transactions: ProjectSkillInstallationTransaction[] = [];
     const installed: Array<{ readonly item: ResolvedManifestSelection; readonly result: ProjectSkillInstallationResult }> = [];
     let methodFailed = false;
     try {
-      for (const item of resolved) {
-        const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, item.resolvedVersion, options.confirmAdditionalHostExposure);
+      for (let index = 0; index < resolved.length; index += 1) {
+        const item = resolved[index]!;
+        const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, item.resolvedVersion, options.confirmAdditionalHostExposure, false, inspections[index]);
         if (transaction) {
           transactions.push(transaction);
           installed.push({ item, result: transaction.result });
@@ -907,19 +918,33 @@ async function runInstall(
 
   const existing = await manifestStore.load();
   if (existing.skills.some((candidate) => JSON.stringify(candidate.source) === JSON.stringify(selection.source) && candidate.path === selection.path)) {
-    throw new CliUsageError(`Skill selection ${JSON.stringify(selection.path)} is already recorded in ${manifestStore.path}; repeat installs never overwrite existing paths`);
+    throw new CliUsageError(`Skill selection ${JSON.stringify(selection.path)} is already recorded in ${manifestStore.path}; already managed Skills must be changed with update apply`);
   }
-  const resolvedSource = projectSource.kind === "builtin"
+  const initialResolvedSource = projectSource.kind === "builtin"
     ? source
     : operations.resolveProjectSource
       ? await operations.resolveProjectSource(projectSource)
       : resolveProjectSource(projectSource);
-  await refreshResolvedSource(operations, projectSource, resolvedSource, options.confirmed);
+  const resolvedSource = await refreshResolvedSource(operations, projectSource, initialResolvedSource, options.confirmed);
   const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
-  outputInstallPreview(selection, source, projectRoot, output, resolved.files, resolved.method, "project");
+  const installationInspection = await inspectProjectSkillInstallation({
+    selection,
+    source: resolvedSource,
+    previewTree: resolved.files,
+    portableV1: options.portableV1,
+    confirmAdditionalHostExposure: options.confirmAdditionalHostExposure,
+    resolvedVersion: resolved.resolvedVersion,
+  }, {
+    projectRoot,
+    sourceAccess,
+    ...dependencies.installationOptions,
+  });
+  outputInstallPreview(selection, source, projectRoot, output, resolved.files, resolved.method, "project", installationInspection, options.overwrite, options.confirmed);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
+  const protectedPaths = assertNoManagedInstallationOverlap(existing.skills, selection, installationInspection, projectRoot, options.overwrite);
+  rejectInstallationCollision(installationInspection, options.overwrite);
 
-  const transaction = await installOne(selection, resolvedSource, sourceAccess, projectRoot, dependencies, resolved.method, options.portableV1, resolved.files, resolved.resolvedVersion, options.confirmAdditionalHostExposure);
+  const transaction = await installOne(selection, resolvedSource, sourceAccess, projectRoot, dependencies, resolved.method, options.portableV1, resolved.files, resolved.resolvedVersion, options.confirmAdditionalHostExposure, options.overwrite, installationInspection, protectedPaths);
   const nextManifest = parseProjectManifest({
     version: 1,
     skills: [...existing.skills, selectionWithInstallation(selection, transaction.result, projectRoot)],
@@ -977,17 +1002,31 @@ async function runUserGlobalInstall(
 
   const existing = await operations.listUserGlobalInstallations();
   if (existing.some((candidate) => JSON.stringify([candidate.source, candidate.path]) === JSON.stringify([selection.source, selection.path]))) {
-    throw new CliUsageError(`Skill selection ${JSON.stringify(selection.path)} is already recorded in user-global state`);
+    throw new CliUsageError(`Skill selection ${JSON.stringify(selection.path)} is already recorded in user-global state; already managed Skills must be changed with update apply`);
   }
-  const resolvedSource = projectSource.kind === "builtin"
+  const initialResolvedSource = projectSource.kind === "builtin"
     ? source
     : operations.resolveProjectSource
       ? await operations.resolveProjectSource(projectSource)
       : resolveProjectSource(projectSource);
-  await refreshResolvedSource(operations, projectSource, resolvedSource, options.confirmed);
+  const resolvedSource = await refreshResolvedSource(operations, projectSource, initialResolvedSource, options.confirmed);
   const resolved = await resolveSelection(selection, resolvedSource, operations, sourceAccess);
-  outputInstallPreview(selection, source, homeDirectory, output, resolved.files, resolved.method, "user-global");
+  const installationInspection = await inspectProjectSkillInstallation({
+    selection,
+    source: resolvedSource,
+    previewTree: resolved.files,
+    portableV1: options.portableV1,
+    confirmAdditionalHostExposure: options.confirmAdditionalHostExposure,
+    resolvedVersion: resolved.resolvedVersion,
+  }, {
+    projectRoot: homeDirectory,
+    sourceAccess,
+    ...dependencies.installationOptions,
+  });
+  outputInstallPreview(selection, source, homeDirectory, output, resolved.files, resolved.method, "user-global", installationInspection, options.overwrite, options.confirmed);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
+  const protectedPaths = assertNoManagedInstallationOverlap(existing, selection, installationInspection, homeDirectory, options.overwrite);
+  rejectInstallationCollision(installationInspection, options.overwrite);
 
   const transaction = await installOne(
     selection,
@@ -1000,6 +1039,9 @@ async function runUserGlobalInstall(
     resolved.files,
     resolved.resolvedVersion,
     options.confirmAdditionalHostExposure,
+    options.overwrite,
+    installationInspection,
+    protectedPaths,
   );
   const record = selectionWithInstallation(selection, transaction.result, homeDirectory);
   try {
@@ -1027,6 +1069,7 @@ interface InstallOptions {
   readonly method?: unknown;
   readonly portableV1: boolean;
   readonly confirmed: boolean;
+  readonly overwrite: boolean;
   readonly confirmAdditionalHostExposure: boolean;
 }
 
@@ -1040,6 +1083,7 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
   let fromManifest = false;
   let portableV1 = false;
   let confirmed = false;
+  let overwrite = false;
   let confirmAdditionalHostExposure = false;
   const hosts: ProjectHost[] = [];
 
@@ -1081,6 +1125,9 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
       case "--yes":
         confirmed = true;
         break;
+      case "--overwrite":
+        overwrite = true;
+        break;
       case "--confirm-additional-host":
         confirmAdditionalHostExposure = true;
         break;
@@ -1095,8 +1142,8 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
   if (fromManifest && scope !== "project") {
     throw new CliUsageError("--manifest is only supported with --scope project");
   }
-  if (fromManifest && (sourceId !== undefined || skillPath !== undefined || versionValue !== undefined || ref !== undefined || method !== undefined || hosts.length > 0)) {
-    throw new CliUsageError("--manifest cannot be combined with --source, --skill, --host, --version, --ref, or --method");
+  if (fromManifest && (sourceId !== undefined || skillPath !== undefined || versionValue !== undefined || ref !== undefined || method !== undefined || hosts.length > 0 || overwrite)) {
+    throw new CliUsageError("--manifest cannot be combined with --source, --skill, --host, --version, --ref, --method, or --overwrite");
   }
   if (!fromManifest && !versionValue && (sourceId || skillPath || ref || hosts.length > 0)) {
     throw new CliUsageError("--version is required for a selected Skill");
@@ -1115,6 +1162,7 @@ function parseInstallOptions(argv: readonly string[]): InstallOptions {
     method,
     portableV1,
     confirmed,
+    overwrite,
     confirmAdditionalHostExposure,
   };
 }
@@ -1166,13 +1214,50 @@ async function resolveManifestSelections(
 ): Promise<readonly ResolvedManifestSelection[]> {
   const resolved: ResolvedManifestSelection[] = [];
   for (const selection of manifest.skills) {
-    const source = operations.resolveProjectSource
+    const initialSource = operations.resolveProjectSource
       ? await operations.resolveProjectSource(selection.source)
       : resolveProjectSource(selection.source);
-    await refreshResolvedSource(operations, selection.source, source, confirmed);
+    const source = await refreshResolvedSource(operations, selection.source, initialSource, confirmed);
     resolved.push(await resolveSelection(selection, source, operations, sourceAccess));
   }
   return Object.freeze(resolved);
+}
+
+async function inspectManifestInstallations(
+  resolved: readonly ResolvedManifestSelection[],
+  projectRoot: string,
+  sourceAccess: ProjectSkillTreeAccess,
+  dependencies: CliDependencies,
+): Promise<readonly ProjectSkillInstallationInspection[]> {
+  const inspections: ProjectSkillInstallationInspection[] = [];
+  const owners = new Map<string, string>();
+  for (const item of resolved) {
+    const inspection = await inspectProjectSkillInstallation({
+      selection: item.selection,
+      source: item.source,
+      previewTree: item.files,
+      portableV1: true,
+      resolvedVersion: item.resolvedVersion,
+    }, {
+      projectRoot,
+      sourceAccess,
+      ...dependencies.installationOptions,
+    });
+    // Reserve both known Host paths, not only the currently selected target:
+    // a later adoption decision may choose either physical location.
+    for (const candidate of [inspection.canonicalPath, inspection.claudePath]) {
+      const normalized = path.resolve(candidate);
+      const previous = owners.get(normalized);
+      if (previous !== undefined) {
+        throw new CliUsageError(
+          `Manifest selections ${JSON.stringify(previous)} and ${JSON.stringify(item.selection.path)} resolve to the same physical installation target ${JSON.stringify(normalized)}; remove one record before confirmation; no path was changed`,
+        );
+      }
+      owners.set(normalized, item.selection.path);
+    }
+    inspections.push(inspection);
+  }
+  return Object.freeze(inspections);
 }
 
 async function resolveSelection(
@@ -1211,11 +1296,16 @@ async function refreshResolvedSource(
   projectSource: ProjectSource,
   source: Source,
   confirmed: boolean,
-): Promise<void> {
+): Promise<Source> {
   if (!confirmed || source.kind === "builtin" || !operations.refreshProjectSource) {
-    return;
+    return source;
   }
-  await operations.refreshProjectSource(projectSource);
+  const refreshed = await operations.refreshProjectSource(projectSource);
+  if (refreshed.kind !== source.kind || refreshed.id !== source.id ||
+    (refreshed.kind === "git" && source.kind === "git" && refreshed.url !== source.url)) {
+    throw new Error(`Refreshed Source identity changed from ${JSON.stringify(source.id)} to ${JSON.stringify(refreshed.id)}; no installation was attempted`);
+  }
+  return refreshed;
 }
 
 async function readPreviewTree(
@@ -1277,17 +1367,47 @@ function outputInstallPreview(
   files: readonly SkillTreeFile[],
   method: SourceInstallationMethod | undefined,
   scope: "project" | "user-global",
+  inspection: ProjectSkillInstallationInspection | undefined,
+  overwrite: boolean,
+  confirmed: boolean,
 ): void {
   const skillName = path.posix.basename(selection.path);
   const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
   const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
   output(`Preview: reconcile Skill ${JSON.stringify(skillName)} from ${source.id} (destination determined by safe inspection)`);
   output(`  scope: ${scope}; hosts: ${selection.hosts.join(",")}; version policy: ${formatVersionPolicy(selection.version)}`);
+  if (inspection) {
+    output(`  target: ${inspection.targetPath}`);
+    if (inspection.collision) {
+      output(`  COLLISION: ${inspection.collision.path} (${inspection.collision.reason})`);
+      if (overwrite && confirmed) {
+        output("  collision handling: target will be replaced because --overwrite --yes was supplied");
+        output(`  overwrite backup: old Skill will be moved to a retained backup at ${backupPreviewPath(inspection.targetPath)} (generated at transaction time; never pruned automatically)`);
+      } else if (overwrite) {
+        output("  collision handling: fail-closed; no path will be changed without --yes; rerun with --overwrite --yes to replace the target");
+        output(`  if confirmed: old Skill would be moved to a retained backup at ${backupPreviewPath(inspection.targetPath)}`);
+      } else {
+        output("  collision handling: fail-closed; no path will be changed; explicit overwrite requires --overwrite --yes");
+      }
+    } else if (inspection.locations.some((location) => location.status === "identical")) {
+      output("  collision status: existing content is identical and can be adopted without replacement");
+    } else {
+      output("  collision status: target is absent and will be created");
+    }
+  }
+  output(confirmed
+    ? "  confirmation: --yes supplied; changes remain subject to final safety checks"
+    : "  confirmation: no --yes supplied; zero files or installation state will be changed");
   output("  intended filesystem changes:");
-  output("    reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts");
+  if (inspection?.collision && overwrite) {
+    output(`    replace the colliding target at ${inspection.targetPath}, retain a backup of the existing Skill at ${backupPreviewPath(inspection.targetPath)}, and install the selected source files`);
+  } else {
+    output("    reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts");
+  }
   output("  selected source files:");
   for (const file of files) {
-    output(`    ${file.path} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""}; adopt if identical, create if missing)`);
+    const action = inspection?.collision && overwrite ? "install into the replacement target" : "adopt if identical, create if missing";
+    output(`    ${file.path} (${file.content.byteLength} bytes${file.executable ? ", executable" : ""}; ${action})`);
   }
   output(`  possible ${scope} locations:`);
   output(`    ${canonicalPath} (canonical Host location; safe inspection determines whether this is used)`);
@@ -1298,6 +1418,59 @@ function outputInstallPreview(
     const cwd = path.resolve(projectRoot, method.cwd ?? ".");
     output(`  run external method: argv=${JSON.stringify(method.argv)} executable=${JSON.stringify(method.argv[0])} args=${JSON.stringify(method.argv.slice(1))} cwd=${JSON.stringify(cwd)}`);
   }
+}
+
+function backupPreviewPath(targetPath: string): string {
+  return path.join(path.dirname(targetPath), ".agent-depot-backup-<generated-suffix>");
+}
+
+function assertNoManagedInstallationOverlap(
+  managed: readonly ProjectSkillSelection[],
+  selection: ProjectSkillSelection,
+  inspection: ProjectSkillInstallationInspection,
+  projectRoot: string,
+  overwrite: boolean,
+): readonly string[] {
+  const protectedPaths = managed
+    .filter((candidate) => !sameSelectionIdentity(candidate, selection))
+    .flatMap((candidate) => candidate.installation?.path === undefined
+      ? []
+      : [path.resolve(projectRoot, ...candidate.installation.path.split("/"))]);
+  if (!overwrite) return Object.freeze(protectedPaths);
+  const conflicting = protectedPaths.find((candidate) => pathsOverlap(candidate, inspection.targetPath));
+  if (conflicting !== undefined) {
+    throw new CliUsageError(
+      `Cannot overwrite ${JSON.stringify(inspection.targetPath)} because it overlaps the managed installation ${JSON.stringify(conflicting)} belonging to another Source/Skill selection; no path was changed.`,
+    );
+  }
+  return Object.freeze(protectedPaths);
+}
+
+function sameSelectionIdentity(left: ProjectSkillSelection, right: ProjectSkillSelection): boolean {
+  return JSON.stringify([left.source, left.path]) === JSON.stringify([right.source, right.path]);
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  const relative = path.relative(path.resolve(left), path.resolve(right));
+  const reverse = path.relative(path.resolve(right), path.resolve(left));
+  return relative === "" || reverse === "" ||
+    (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) ||
+    (!reverse.startsWith(`..${path.sep}`) && !path.isAbsolute(reverse));
+}
+
+function rejectInstallationCollision(
+  inspection: ProjectSkillInstallationInspection,
+  overwrite: boolean,
+): void {
+  if (!inspection.collision) return;
+  const detail = `Cannot install because ${JSON.stringify(inspection.collision.path)} has a ${inspection.collision.reason} collision; no path was changed.`;
+  if (inspection.collision.reason !== "missing-file" && inspection.collision.reason !== "extra-file" && inspection.collision.reason !== "content-mismatch") {
+    throw new CliUsageError(`${detail} Unsafe targets cannot be overwritten.`);
+  }
+  if (overwrite) {
+    return;
+  }
+  throw new CliUsageError(`${detail} Explicit overwrite requires --overwrite --yes.`);
 }
 
 function formatVersionPolicy(version: VersionPolicy): string {
@@ -1343,6 +1516,9 @@ function outputInstallationResult(
     : [result.canonicalPath];
   const rendered = locations.map((location) => relativeProjectPath(projectRoot, location)).join(", ");
   output(`${result.adopted ? "Adopted" : "Installed"} Skill ${JSON.stringify(result.skillName)} at ${rendered}`);
+  if (result.backupPath !== undefined) {
+    output(`  Persistent backup retained at ${result.backupPath}`);
+  }
 }
 
 async function installOne(
@@ -1356,6 +1532,9 @@ async function installOne(
   files: readonly SkillTreeFile[],
   resolvedVersion: ResolvedVersionEvidence | undefined,
   confirmAdditionalHostExposure: boolean,
+  overwrite: boolean,
+  inspection?: ProjectSkillInstallationInspection,
+  protectedPaths: readonly string[] = [],
 ): Promise<ProjectSkillInstallationTransaction> {
   return installProjectSkillTransaction({
     selection,
@@ -1364,6 +1543,9 @@ async function installOne(
     portableV1,
     resolvedVersion,
     confirmAdditionalHostExposure,
+    overwrite,
+    ...(inspection === undefined ? {} : { inspection }),
+    protectedPaths,
   }, {
     projectRoot,
     sourceAccess,
