@@ -6,10 +6,12 @@ import { render } from "ink-testing-library";
 import type { SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
+import { waitForFrame } from "./wait-for-frame.js";
 
 const DOWN = "\u001B[B";
 const UP = "\u001B[A";
 const ESC = "\u001B";
+/** Only for "nothing changed" checks; every positive assertion waits with `waitForFrame`. */
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 const skills: readonly SkillCandidate[] = [
@@ -59,8 +61,7 @@ test("CatalogView lists name, description and source id for the requested source
       sourceId="builtin:agent-depot"
     />,
   );
-  await tick();
-  const frame = lastFrame() ?? "";
+  const frame = await waitForFrame(lastFrame, /2 of 2/);
   assert.deepEqual(requested, [["builtin:agent-depot"]]);
   assert.match(frame, /alpha\s+Does Alpha things\s+builtin:agent-depot/);
   assert.match(frame, /beta/);
@@ -73,8 +74,7 @@ test("CatalogView truncates long descriptions", async () => {
   const { lastFrame, unmount } = render(
     <CatalogView operations={operationsFor(async () => [long])} sourceId="builtin:agent-depot" />,
   );
-  await tick();
-  const frame = lastFrame() ?? "";
+  const frame = await waitForFrame(lastFrame, /x{20,}/);
   assert.ok(!frame.includes("x".repeat(100)));
   assert.match(frame, /x{20,}\.\.\./);
   unmount();
@@ -82,8 +82,7 @@ test("CatalogView truncates long descriptions", async () => {
 
 test("CatalogView shows empty, error and unsupported states", async () => {
   const empty = render(<CatalogView operations={operationsFor(async () => [])} sourceId="s" />);
-  await tick();
-  assert.match(empty.lastFrame() ?? "", /No skills/);
+  await waitForFrame(empty.lastFrame, /No skills/);
   empty.unmount();
 
   const failing = render(
@@ -94,13 +93,11 @@ test("CatalogView shows empty, error and unsupported states", async () => {
       sourceId="s"
     />,
   );
-  await tick();
-  assert.match(failing.lastFrame() ?? "", /Error: boom/);
+  await waitForFrame(failing.lastFrame, /Error: boom/);
   failing.unmount();
 
   const unsupported = render(<CatalogView operations={operationsFor()} sourceId="s" />);
-  await tick();
-  assert.match(unsupported.lastFrame() ?? "", /not supported/);
+  await waitForFrame(unsupported.lastFrame, /not supported/);
   unsupported.unmount();
 });
 
@@ -108,22 +105,19 @@ test("CatalogView navigates with j/k and arrows, clamped", async () => {
   const { lastFrame, stdin, unmount } = render(
     <CatalogView operations={operationsFor(async () => skills)} sourceId="builtin:agent-depot" />,
   );
-  await tick();
-  assert.match(selectedLine(lastFrame()) ?? "", /alpha/);
+  const selects = (name: RegExp) => waitForFrame(lastFrame, (frame) => name.test(selectedLine(frame) ?? ""));
+  await selects(/alpha/);
   stdin.write(UP);
   await tick();
-  assert.match(selectedLine(lastFrame()) ?? "", /alpha/);
+  await selects(/alpha/);
   stdin.write("j");
-  await tick();
-  assert.match(selectedLine(lastFrame()) ?? "", /beta/);
+  await selects(/beta/);
   stdin.write(DOWN);
   stdin.write(DOWN);
   stdin.write(DOWN);
-  await tick();
-  assert.match(selectedLine(lastFrame()) ?? "", /gamma/);
+  await selects(/gamma/);
   stdin.write("k");
-  await tick();
-  assert.match(selectedLine(lastFrame()) ?? "", /beta/);
+  await selects(/beta/);
   unmount();
 });
 
@@ -136,26 +130,23 @@ test("CatalogView filters case-insensitively on name and description with an n o
       onCapturingChange={(value) => capturing.push(value)}
     />,
   );
-  await tick();
+  await waitForFrame(lastFrame, /3 of 3/);
   stdin.write("/");
-  await tick();
+  await waitForFrame(lastFrame, /Filter: _/);
   assert.equal(capturing.at(-1), true);
   stdin.write("beta");
-  await tick();
-  assert.match(lastFrame() ?? "", /Filter: beta/);
-  assert.match(lastFrame() ?? "", /1 of 3/);
+  await waitForFrame(lastFrame, (frame) => /Filter: beta/.test(frame) && /1 of 3/.test(frame));
   assert.ok(!(lastFrame() ?? "").includes("alpha"));
   stdin.write("\r");
-  await tick();
+  await waitForFrame(lastFrame, (frame) => /Filter: beta(?!_)/.test(frame));
   assert.equal(capturing.at(-1), false);
   assert.match(lastFrame() ?? "", /1 of 3/);
   assert.match(lastFrame() ?? "", /beta/);
 
   stdin.write("/");
-  await tick();
+  await waitForFrame(lastFrame, /Filter: beta_/);
   stdin.write(ESC);
-  await tick();
-  assert.match(lastFrame() ?? "", /3 of 3/);
+  await waitForFrame(lastFrame, /3 of 3/);
   assert.equal(capturing.at(-1), false);
   unmount();
 });
@@ -164,16 +155,13 @@ test("CatalogView matches descriptions and shows no matches", async () => {
   const { lastFrame, stdin, unmount } = render(
     <CatalogView operations={operationsFor(async () => skills)} sourceId="s" />,
   );
-  await tick();
+  await waitForFrame(lastFrame, /3 of 3/);
   stdin.write("/");
-  await tick();
+  await waitForFrame(lastFrame, /Filter: _/);
   stdin.write("ALPHA T");
-  await tick();
-  assert.match(lastFrame() ?? "", /1 of 3/);
+  await waitForFrame(lastFrame, /1 of 3/);
   stdin.write("zzz");
-  await tick();
-  assert.match(lastFrame() ?? "", /0 of 3/);
-  assert.match(lastFrame() ?? "", /No matching skills/);
+  await waitForFrame(lastFrame, /0 of 3.*No matching skills/s);
   unmount();
 });
 
@@ -188,20 +176,19 @@ test("CatalogView toggles all sources with s", async () => {
       sourceId="builtin:agent-depot"
     />,
   );
-  await tick();
+  await waitForFrame(lastFrame, /3 of 3/);
   stdin.write("s");
-  await tick();
+  await waitForFrame(lastFrame, /all sources/);
   assert.deepEqual(requested.at(-1), ["builtin:agent-depot", "git:1234567890abcdef12345678"]);
-  assert.match(lastFrame() ?? "", /all sources/);
   stdin.write("s");
-  await tick();
+  await waitForFrame(lastFrame, (frame) => !frame.includes("all sources") && /3 of 3/.test(frame));
   assert.deepEqual(requested.at(-1), ["builtin:agent-depot"]);
   unmount();
 });
 
 test("CatalogView starts on all sources when no source is given", async () => {
   const requested: (readonly string[])[] = [];
-  const { unmount } = render(
+  const { lastFrame, unmount } = render(
     <CatalogView
       operations={operationsFor(async (ids) => {
         requested.push(ids);
@@ -209,7 +196,7 @@ test("CatalogView starts on all sources when no source is given", async () => {
       })}
     />,
   );
-  await tick();
+  await waitForFrame(lastFrame, /No skills/);
   assert.deepEqual(requested.at(-1), ["builtin:agent-depot", "git:1234567890abcdef12345678"]);
   unmount();
 });

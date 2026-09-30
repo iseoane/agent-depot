@@ -40,6 +40,7 @@ The CLI requires remembering subcommands, ids and `--yes` confirmations; a TUI m
 
 ## Progress
 - Branch: `feat/tui-sources`. Route: delegated direct (writer trigger: 2+ non-trivial files).
+- Flaky `tests/tui-catalog-view.test.tsx` fixed: fixed 20ms ticks raced Ink's throttled async render (frame still `Loading skills...` under CPU load); tests now poll `waitForFrame` (`tests/wait-for-frame.ts`). Product code unchanged.
 - Node minimum raised to >=24 (Active LTS) because Ink 7 requires Node >=22; @types/node ^24.
 
 ## Evidence
