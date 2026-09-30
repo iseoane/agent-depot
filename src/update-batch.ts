@@ -417,8 +417,6 @@ function freezeSnapshot(snapshot: SourceSkillTreeSnapshot): SourceSkillTreeSnaps
   });
 }
 
-export { applyUpdateBatch, previewSkillUpdate, type UpdateBatchApplyOptions, type UpdateBatchResult } from "./skill-update.js";
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
