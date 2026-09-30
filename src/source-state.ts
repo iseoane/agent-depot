@@ -42,6 +42,80 @@ export class SourceStateLockError extends Error {
 const LOCK_TIMEOUT_MS = 5_000;
 const LOCK_RETRY_MS = 10;
 
+function parseGitSources(items: readonly unknown[], statePath: string): GitSource[] {
+  const gitSources: GitSource[] = [];
+  const ids = new Set<string>();
+  for (const [index, item] of items.entries()) {
+    const source = parseGitSource(item, index, statePath);
+    if (ids.has(source.id)) {
+      throw new SourceStateError(statePath, `gitSources[${index}] duplicates another Source`);
+    }
+    ids.add(source.id);
+    gitSources.push(source);
+  }
+  return gitSources;
+}
+
+function parseGitSource(item: unknown, index: number, statePath: string): GitSource {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) {
+    throw new SourceStateError(statePath, `gitSources[${index}] must be an object`);
+  }
+
+  const source = item as { id?: unknown; kind?: unknown; url?: unknown };
+  const sourceKeys = Object.keys(source);
+  if (sourceKeys.some((key) => key !== "id" && key !== "kind" && key !== "url")) {
+    throw new SourceStateError(statePath, `gitSources[${index}] contains unsupported fields`);
+  }
+  if (source.kind !== "git" || !isNonEmptyString(source.id) || !isNonEmptyString(source.url)) {
+    throw new SourceStateError(statePath, `gitSources[${index}] is not a valid Git Source`);
+  }
+
+  let url: string;
+  try {
+    url = canonicalizeGitSourceUrl(source.url);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "the URL is invalid";
+    throw new SourceStateError(statePath, `gitSources[${index}] has an invalid URL (${reason})`);
+  }
+
+  const id = sourceIdForUrl(url);
+  if (source.id !== id) {
+    throw new SourceStateError(statePath, `gitSources[${index}] has an invalid identity`);
+  }
+  return Object.freeze({ id, kind: "git", url });
+}
+
+function parseUserGlobalInstallations(items: readonly unknown[], statePath: string): UserGlobalSkillInstallation[] {
+  const userGlobalInstallations: UserGlobalSkillInstallation[] = [];
+  const installationIdentities = new Set<string>();
+  for (const [index, item] of items.entries()) {
+    try {
+      const parsed = parseUserGlobalInstallation(item, statePath);
+      const identity = JSON.stringify([parsed.source, parsed.path]);
+      if (installationIdentities.has(identity)) {
+        throw new Error("the installation duplicates another user-global Skill");
+      }
+      installationIdentities.add(identity);
+      userGlobalInstallations.push(parsed);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "the installation record is invalid";
+      throw new SourceStateError(statePath, `userGlobalInstallations[${index}] is invalid (${reason})`);
+    }
+  }
+  return userGlobalInstallations;
+}
+
+function parseUserGlobalInstallation(item: unknown, statePath: string): UserGlobalSkillInstallation {
+  const parsed = parseProjectManifest({ version: 1, skills: [item] }, statePath).skills[0];
+  if (!parsed) {
+    throw new Error("the installation record is missing");
+  }
+  if (parsed.installation === undefined) {
+    throw new Error("the installation record must include an installation location");
+  }
+  return parsed;
+}
+
 function parseState(value: unknown, statePath: string): PersistedSourceState {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new SourceStateError(statePath, "the root value must be an object");
@@ -62,63 +136,8 @@ function parseState(value: unknown, statePath: string): PersistedSourceState {
     throw new SourceStateError(statePath, "userGlobalInstallations must be an array");
   }
 
-  const gitSources: GitSource[] = [];
-  const ids = new Set<string>();
-  for (const [index, item] of candidate.gitSources.entries()) {
-    if (typeof item !== "object" || item === null || Array.isArray(item)) {
-      throw new SourceStateError(statePath, `gitSources[${index}] must be an object`);
-    }
-
-    const source = item as { id?: unknown; kind?: unknown; url?: unknown };
-    const sourceKeys = Object.keys(source);
-    if (sourceKeys.some((key) => key !== "id" && key !== "kind" && key !== "url")) {
-      throw new SourceStateError(statePath, `gitSources[${index}] contains unsupported fields`);
-    }
-    if (source.kind !== "git" || !isNonEmptyString(source.id) || !isNonEmptyString(source.url)) {
-      throw new SourceStateError(statePath, `gitSources[${index}] is not a valid Git Source`);
-    }
-
-    let url: string;
-    try {
-      url = canonicalizeGitSourceUrl(source.url);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "the URL is invalid";
-      throw new SourceStateError(statePath, `gitSources[${index}] has an invalid URL (${reason})`);
-    }
-
-    const id = sourceIdForUrl(url);
-    if (source.id !== id) {
-      throw new SourceStateError(statePath, `gitSources[${index}] has an invalid identity`);
-    }
-    if (ids.has(id)) {
-      throw new SourceStateError(statePath, `gitSources[${index}] duplicates another Source`);
-    }
-    ids.add(id);
-    gitSources.push(Object.freeze({ id, kind: "git", url }));
-  }
-
-  const userGlobalInstallations: UserGlobalSkillInstallation[] = [];
-  const installationIdentities = new Set<string>();
-  for (const [index, item] of (candidate.userGlobalInstallations ?? []).entries()) {
-    try {
-      const parsed = parseProjectManifest({ version: 1, skills: [item] }, statePath).skills[0];
-      if (!parsed) {
-        throw new Error("the installation record is missing");
-      }
-      if (parsed.installation === undefined) {
-        throw new Error("the installation record must include an installation location");
-      }
-      const identity = JSON.stringify([parsed.source, parsed.path]);
-      if (installationIdentities.has(identity)) {
-        throw new Error("the installation duplicates another user-global Skill");
-      }
-      installationIdentities.add(identity);
-      userGlobalInstallations.push(parsed);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "the installation record is invalid";
-      throw new SourceStateError(statePath, `userGlobalInstallations[${index}] is invalid (${reason})`);
-    }
-  }
+  const gitSources = parseGitSources(candidate.gitSources, statePath);
+  const userGlobalInstallations = parseUserGlobalInstallations(candidate.userGlobalInstallations ?? [], statePath);
 
   return Object.freeze({
     version: 1,
