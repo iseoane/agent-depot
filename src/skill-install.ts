@@ -69,6 +69,12 @@ export async function selectInstallSource(
 ): Promise<{ source: Source; projectSource: ProjectSource; selection: ProjectSkillSelection }> {
   const source = await findSource(operations, options.sourceId);
   const projectSource = projectSourceFromSource(source, options.ref, options.version);
+  if (projectSource.kind === "builtin" && options.version.policy === "fixed" &&
+    AGENT_DEPOT_PACKAGE_VERSION !== undefined && options.version.version !== AGENT_DEPOT_PACKAGE_VERSION) {
+    throw new CliUsageError(
+      `--version fixed:${options.version.version} must equal the current Agent Depot package version ${JSON.stringify(AGENT_DEPOT_PACKAGE_VERSION)}; ${JSON.stringify(options.version.version)} cannot be reproduced by this package`,
+    );
+  }
   const selection = parseProjectManifest({
     version: 1,
     skills: [{

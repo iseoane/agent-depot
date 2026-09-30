@@ -1,4 +1,5 @@
 import {
+  builtinPinMismatch,
   parseProjectManifest,
   type ProjectManifest,
   type ProjectSkillSelection,
@@ -253,6 +254,13 @@ function assessEvidence(
     };
   }
 
+  const pinMismatch = builtinPinMismatch(
+    selection,
+    currentVersion.kind === "builtin-package" ? currentVersion.version : undefined,
+  );
+  if (pinMismatch !== undefined) {
+    return { status: "unknown", reason: `${pinMismatch.charAt(0).toUpperCase()}${pinMismatch.slice(1)}` };
+  }
   if (selection.version.policy === "fixed") {
     const currentTarget = versionValue(currentVersion);
     if (currentTarget !== selection.version.version) {

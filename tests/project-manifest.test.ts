@@ -234,16 +234,15 @@ test("validates fixed/latest policies and rejects ambiguous versions", () => {
       version: { policy: "fixed", version: AGENT_DEPOT_PACKAGE_VERSION },
     }],
   }).skills[0]?.version, { policy: "fixed", version: AGENT_DEPOT_PACKAGE_VERSION });
-  assert.throws(
-    () => parseProjectManifest({
-      version: 1,
-      skills: [{
-        ...base.skills[0],
-        version: { policy: "fixed", version: `${AGENT_DEPOT_PACKAGE_VERSION}-unavailable` },
-      }],
-    }),
-    /must equal the current Agent Depot package version.*cannot be reproduced by this package/i,
-  );
+  // A manifest pinned to another Agent Depot version stays loadable: the
+  // mismatch is handled per Skill by update check and manifest install.
+  assert.deepEqual(parseProjectManifest({
+    version: 1,
+    skills: [{
+      ...base.skills[0],
+      version: { policy: "fixed", version: `${AGENT_DEPOT_PACKAGE_VERSION}-unavailable` },
+    }],
+  }).skills[0]?.version, { policy: "fixed", version: `${AGENT_DEPOT_PACKAGE_VERSION}-unavailable` });
 });
 
 test("fails closed on unsafe Source and skill identities", () => {

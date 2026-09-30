@@ -1574,6 +1574,38 @@ test("rejects --ref for the built-in Source instead of silently ignoring it", as
   }
 });
 
+test("manifest install skips a built-in Skill pinned to another Agent Depot and installs the rest", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-manifest-pinned-"));
+  const output: string[] = [];
+  const errors: string[] = [];
+  try {
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: [
+        { source: { kind: "builtin", id: BUILT_IN_SOURCE.id }, path: "portable/old", version: { policy: "fixed", version: `${AGENT_DEPOT_PACKAGE_VERSION}-older` }, hosts: ["pi"] },
+        { source: { kind: "builtin", id: BUILT_IN_SOURCE.id }, path: "portable/demo", version: { policy: "latest" }, hosts: ["pi"] },
+      ],
+    }), "utf8");
+    const exitCode = await runCli(["install", "--scope", "project", "--manifest", "--portable-v1", "--yes"], {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: cliSourceAccess(),
+      stdout: (line) => output.push(line),
+      stderr: (line) => errors.push(line),
+    });
+
+    assert.equal(exitCode, 0, errors.join("\n"));
+    assert.ok(output.some((line) => line.includes(`Skipped portable/old: pinned to Agent Depot ${AGENT_DEPOT_PACKAGE_VERSION}-older; running ${AGENT_DEPOT_PACKAGE_VERSION}`)), output.join("\n"));
+    await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"));
+    await assert.rejects(readFile(path.join(projectRoot, ".agents", "skills", "old", "SKILL.md")), { code: "ENOENT" });
+    const manifest = JSON.parse(await readFile(path.join(projectRoot, "agent-depot.json"), "utf8")) as { skills: Array<{ path: string; installation?: unknown }> };
+    assert.equal(manifest.skills.length, 2);
+    assert.equal(manifest.skills[0]?.installation, undefined);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("rejects manifest selections with the same physical basename before confirmation", async () => {
   const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-manifest-collision-"));
   const output: string[] = [];

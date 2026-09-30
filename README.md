@@ -249,7 +249,10 @@ Sources require a fixed 40- or 64-character Git commit. For the built-in
 Source, `latest` tracks the installed Agent Depot package, while a fixed policy
 is accepted only when its value exactly equals that package's current version;
 other values fail closed because the requested package version cannot be
-reproduced. The built-in Source does not support `--ref`, and the CLI rejects it
+reproduced. A manifest written by another Agent Depot stays loadable: a built-in
+Skill pinned to a different version shows as unknown in `update check` ("pinned
+to Agent Depot X; running Y") and is skipped by `install --manifest`, while the
+other Skills keep working. The built-in Source does not support `--ref`, and the CLI rejects it
 explicitly. External `latest` may track an explicit mutable safe ref, but an
 immutable commit ref must use a fixed policy matching that commit. The
 `--portable-v1` flag requires the validated portable format rule; compatibility

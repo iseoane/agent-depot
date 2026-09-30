@@ -154,6 +154,24 @@ test("never proposes a downgrade when the running Agent Depot is older than the 
   );
 });
 
+test("reports a built-in Skill pinned to another Agent Depot version as unknown, naming both versions", async () => {
+  const running = { kind: "builtin-package" as const, version: "0.9.0" };
+  const assessment = await assessUpdateBatch([
+    selection({
+      source: BUILT_IN_SOURCE,
+      path: "demo",
+      version: { policy: "fixed", version: "0.8.0" },
+      installation: installed({ kind: "builtin-package", version: "0.8.0" }, "a".repeat(64)),
+    }),
+  ], {
+    resolveSource: async () => BUILT_IN_SOURCE,
+    sourceAccess: withSnapshot(BUILT_IN_SOURCE, "demo", { files: [file("demo/SKILL.md", "x")], resolvedVersion: running }),
+  });
+
+  assert.equal(assessment.items[0]?.status, "unknown");
+  assert.equal(assessment.items[0]?.reason, "Pinned to Agent Depot 0.8.0; running 0.9.0");
+});
+
 test("compares built-in versions as semver, so a prerelease installed before its release still updates", async () => {
   const assess = async (installedVersion: string, runningVersion: string) => (await assessUpdateBatch([
     selection({
