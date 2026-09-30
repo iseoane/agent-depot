@@ -9,8 +9,10 @@ const PRINTABLE = /^[^\p{Cc}]+$/u;
  * Ink strips the ESC of sequences it does not resolve and hands over the rest
  * (`[200~` paste markers, `[I` focus events, `[<0;10;5M` mouse reports). Splitting
  * them would replay digits and letters as key presses, so they are kept whole.
+ * Only the final bytes xterm actually emits count (CSI: arrows, Home/End, focus, mouse,
+ * Shift+Tab, F1-F4, `~`; SS3: arrows, Home/End, F1-F4), so typed text such as `Ok` is not one.
  */
-const ESCAPE_REMNANT = /^(\[|O)[\d;<:?]*[~A-Za-z]$/;
+const ESCAPE_REMNANT = /^(?:\[[\d;<:?]*[A-DFHIMOPQRSZm~]|O[A-DFHPQRS])$/;
 const PASTE_MARKERS = new Set(["[200~", "[201~"]);
 
 /**

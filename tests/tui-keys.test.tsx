@@ -54,3 +54,16 @@ test("escape sequences with their ESC do not leak single keys either", async () 
 test("text inside a bracketed paste is still delivered as keys", async () => {
   assert.deepEqual(await received(["[200~", "ab", "[201~"]).then((seen) => seen.filter((input) => input.length === 1)), ["a", "b"]);
 });
+
+test("text that only looks like a remnant is split into keys again", async () => {
+  for (const text of ["Ok", "OK", "Oa", "[a", "Oz"]) {
+    assert.deepEqual(await received([text]), [...text], text);
+  }
+});
+
+test("real terminal remnants are kept whole", async () => {
+  for (const sequence of ["[A", "[D", "[H", "[F", "[Z", "[I", "[O", "[200~", "[201~", "[1;5A", "[<0;10;5M", "[<0;10;5m", "OA", "OD", "OH", "OF", "OP", "OS"]) {
+    const seen = await received([sequence]);
+    assert.ok(!seen.some((input) => input.length === 1 && input !== ""), `${sequence} was split into ${JSON.stringify(seen)}`);
+  }
+});
