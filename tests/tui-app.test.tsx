@@ -150,3 +150,14 @@ test("App views render with the real source operations on a temporary home", asy
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test("App separates the header and tab bar from the page with a double line", async () => {
+  const { lastFrame, unmount } = render(<App operations={operations} onExit={() => undefined} />);
+  const frame = await waitForFrame(lastFrame, /builtin:agent-depot/);
+  const lines = frame.split("\n");
+  const tabs = lines.findIndex((line) => line.includes("1 Sources"));
+  const separator = lines.findIndex((line) => /^═{20,}$/.test(line.trim()));
+  const page = lines.findIndex((line) => line.includes("builtin:agent-depot"));
+  assert.ok(tabs >= 0 && separator > tabs && page > separator, `unexpected layout:\n${frame}`);
+  unmount();
+});

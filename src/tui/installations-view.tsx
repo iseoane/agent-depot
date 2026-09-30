@@ -29,6 +29,7 @@ import {
   type TreeNode,
   type VisibleRow,
 } from "./tree.js";
+import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 
 export type { CatalogFocus };
@@ -340,25 +341,25 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   });
 
   if (state.status === "loading") return <Text>Loading installations...</Text>;
-  if (state.status === "error") return <Text color="red">Error: {state.message}</Text>;
+  if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
   const ready = state.data;
   const window = computeWindow(rows.length, index, height);
 
   return (
     <Box flexDirection="column">
       {ready.global === undefined ? <Text>User-global installations are not supported by the configured operations</Text> : null}
-      {ready.projectError === undefined ? null : <Text color="red">Error: {ready.projectError}</Text>}
+      {ready.projectError === undefined ? null : <Text color={theme.error}>Error: {ready.projectError}</Text>}
       {rows.slice(window.start, window.end).map((row, offset) => {
         const position = window.start + offset;
         const leaf = !row.expandable && row.node.data.kind !== "group";
         return (
-          <Text key={row.node.id} bold={position === index || row.depth === 0}>
+          <Text key={row.node.id} {...rowStyle(position === index)} color={row.node.data.kind === "group" ? theme.group : undefined}>
             {position === index ? "> " : "  "}{"  ".repeat(row.depth)}{leaf ? "  " : ""}{describeNode(row)}
           </Text>
         );
       })}
-      {window.indicator ? <Text dimColor>{window.indicator}</Text> : null}
-      {message ? <Text color={message.kind === "error" ? "red" : "green"}>{message.text}</Text> : null}
+      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
       <ModePanel mode={mode} />
     </Box>
   );
@@ -396,18 +397,18 @@ function ModePanel({ mode }: { readonly mode: InstallationsMode }) {
       return mode.adoption.verdict.adoptable ? (
         <Box flexDirection="column">
           {mode.adoption.prepared.preview.map((line, position) => <Text key={position}>{line}</Text>)}
-          {mode.adoption.prepared.runsExternalCommand ? <Text color="yellow">This install runs an external command (see above).</Text> : null}
+          {mode.adoption.prepared.runsExternalCommand ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
           <Text>Adopt {mode.entry.name}? y/n</Text>
         </Box>
       ) : (
         <Box flexDirection="column">
-          <Text color="red">{mode.adoption.verdict.reason}</Text>
+          <Text color={theme.error}>{mode.adoption.verdict.reason}</Text>
           <Text>Enter/Esc to go back</Text>
         </Box>
       );
     case "confirm-exposure":
       return (
-        <Text color="yellow">
+        <Text color={theme.warning}>
           Adopting {mode.entry.name} adds the missing Host location and exposes it to more hosts; this needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
         </Text>
       );

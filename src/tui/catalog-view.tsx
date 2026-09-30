@@ -21,6 +21,7 @@ import {
   runUninstall,
   type InstalledSkills,
 } from "./catalog-installs.js";
+import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 import type { TuiEnvironment } from "./environment.js";
 import type { ProjectHost } from "../project-manifest.js";
@@ -420,12 +421,12 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
 
   const scope = all || sourceId === undefined ? "all sources" : sourceId;
   if (state.status === "loading") return <Text>Loading skills...</Text>;
-  if (state.status === "error") return <Text color="red">Error: {state.message}</Text>;
+  if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
   const window = computeWindow(visible.length, index, height);
 
   return (
     <Box flexDirection="column">
-      <Text dimColor>
+      <Text color={theme.muted}>
         Scope: {scope}  {visible.length} of {skills.length}
       </Text>
       {filter.editing || filter.query !== "" ? (
@@ -434,14 +435,14 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       {skills.length === 0 ? <Text>No skills</Text> : null}
       {skills.length > 0 && visible.length === 0 ? <Text>No matching skills</Text> : null}
       {visible.slice(window.start, window.end).map((skill, offset) => (
-        <Text key={`${skill.sourceId}:${skill.path}`} bold={window.start + offset === index}>
+        <Text key={`${skill.sourceId}:${skill.path}`} {...rowStyle(window.start + offset === index)}>
           {window.start + offset === index ? "> " : "  "}
           {skill.name}  {truncate(skill.description)}  {skill.sourceId}
           {installMarker(skill, installed) === "" ? "" : `  ${installMarker(skill, installed)}`}
         </Text>
       ))}
-      {window.indicator ? <Text dimColor>{window.indicator}</Text> : null}
-      {message ? <Text color={message.kind === "error" ? "red" : "green"}>{message.text}</Text> : null}
+      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
       <ActionPanel mode={action} />
     </Box>
   );
@@ -499,7 +500,7 @@ function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       );
     case "confirm-host-exposure":
       return (
-        <Text color="yellow">
+        <Text color={theme.warning}>
           Adding hosts exposes the installed {mode.skill.name} to more hosts and needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
         </Text>
       );
@@ -522,13 +523,13 @@ function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       return (
         <Box flexDirection="column">
           {mode.prepared.preview.map((line, position) => <Text key={position}>{line}</Text>)}
-          {mode.prepared.runsExternalCommand ? <Text color="yellow">This install runs an external command (see above).</Text> : null}
+          {mode.prepared.runsExternalCommand ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
           <Text>Install {mode.skill.name}? y/n</Text>
         </Box>
       );
     case "confirm-exposure":
       return (
-        <Text color="yellow">
+        <Text color={theme.warning}>
           An identical {mode.skill.name} already exists; adding the missing Host location needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
         </Text>
       );

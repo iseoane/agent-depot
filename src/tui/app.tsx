@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
@@ -7,6 +7,7 @@ import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
 import { InstallationsView } from "./installations-view.js";
 import { SourcesView } from "./sources-view.js";
+import { separatorLine, theme } from "./theme.js";
 import { UpdatesView } from "./updates-view.js";
 
 export interface AppProps {
@@ -20,6 +21,13 @@ export interface AppProps {
 
 type ViewName = "sources" | "catalog" | "installations" | "updates";
 
+const TABS: readonly (readonly [ViewName, string])[] = [
+  ["sources", "1 Sources"],
+  ["catalog", "2 Catalog"],
+  ["installations", "3 Installations"],
+  ["updates", "4 Updates"],
+];
+
 const HINTS: Record<ViewName, string> = {
   sources: "j/k move  PgUp/PgDn page  space select  a all git  Enter catalog  n add  r refresh  d remove  2 catalog  3 installations  4 updates  q quit",
   catalog: "j/k move  / filter  i install  u uninstall  s all sources  1 sources  3 installations  4 updates  q quit",
@@ -29,6 +37,7 @@ const HINTS: Record<ViewName, string> = {
 
 export function App({ operations, environment, onExit }: AppProps) {
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const [capturing, setCapturing] = useState(false);
   // Updated synchronously by the views so keys in the same burst never see a stale capturing state.
   const capturingRef = useRef(false);
@@ -58,10 +67,15 @@ export function App({ operations, environment, onExit }: AppProps) {
 
   return (
     <Box flexDirection="column">
-      <Text bold>Agent Depot</Text>
+      <Text bold color={theme.accent}>Agent Depot</Text>
       <Text>
-        {view === "sources" ? "[1 Sources]" : " 1 Sources "} {view === "catalog" ? "[2 Catalog]" : " 2 Catalog "} {view === "installations" ? "[3 Installations]" : " 3 Installations "} {view === "updates" ? "[4 Updates]" : " 4 Updates "}
+        {TABS.map(([name, label], position) => (
+          <Text key={name} color={view === name ? theme.accent : theme.inactive} bold={view === name}>
+            {position > 0 ? " " : ""}{view === name ? `[${label}]` : ` ${label} `}
+          </Text>
+        ))}
       </Text>
+      <Text color={theme.muted}>{separatorLine(stdout.columns)}</Text>
       {view === "sources" ? (
         <SourcesView
           operations={operations}
@@ -93,7 +107,7 @@ export function App({ operations, environment, onExit }: AppProps) {
           onCapturingChange={onCapturingChange}
         />
       )}
-      <Text dimColor>{capturing ? "Enter submit  Esc cancel  y/n confirm  space toggle" : HINTS[view]}</Text>
+      <Text color={theme.muted}>{capturing ? "Enter submit  Esc cancel  y/n confirm  space toggle" : HINTS[view]}</Text>
     </Box>
   );
 }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
 import type { TuiEnvironment } from "./environment.js";
+import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { BROWSE, type UpdatesMode } from "./updates-mode.js";
 import {
@@ -182,27 +183,27 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   return (
     <Box flexDirection="column">
-      <Text bold>Updates (scope: {scope})  p project  g user-global  r check again</Text>
+      <Text color={theme.accent} bold>Updates (scope: {scope})  p project  g user-global  r check again</Text>
       {state.status === "loading" ? <Text>Checking for updates...</Text> : null}
-      {state.status === "error" ? <Text color="red">Error: {state.message}</Text> : null}
+      {state.status === "error" ? <Text color={theme.error}>Error: {state.message}</Text> : null}
       {data && rows.length === 0 ? <Text>No installations</Text> : null}
       {rows.slice(window.start, window.end).map((row, offset) => {
         const position = window.start + offset;
         const box = row.item.status === "updateable" ? (checked.includes(row.item.id) ? "[x]" : "[ ]") : "   ";
         return (
           <Box key={row.item.id} flexDirection="column">
-            <Text bold={position === index}>
+            <Text {...rowStyle(position === index)}>
               {position === index ? "> " : "  "}{box} {row.path}  {row.policy}  {row.installed} {"->"} {row.available}  {row.status}
             </Text>
-            {row.item.status === "unknown" ? <Text dimColor>{"        "}{row.reason}</Text> : null}
+            {row.item.status === "unknown" ? <Text color={theme.muted}>{"        "}{row.reason}</Text> : null}
           </Box>
         );
       })}
-      {window.indicator ? <Text dimColor>{window.indicator}</Text> : null}
-      {data && rows.length > 0 ? <Text dimColor>{checked.length} selected</Text> : null}
+      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {data && rows.length > 0 ? <Text color={theme.muted}>{checked.length} selected</Text> : null}
       {message ? (
         <Box flexDirection="column">
-          {message.lines.map((line, position) => <Text key={position} color={message.kind === "error" ? "red" : "green"}>{line}</Text>)}
+          {message.lines.map((line, position) => <Text key={position} color={message.kind === "error" ? theme.error : theme.success}>{line}</Text>)}
         </Box>
       ) : null}
       <ModePanel mode={mode} />
@@ -221,7 +222,7 @@ function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
         <Box flexDirection="column">
           {mode.prepared.lines.map((line, position) => <Text key={position}>{line}</Text>)}
           {mode.prepared.failures.map(({ item, message }) => (
-            <Text key={item.id} color="red">Preview failed for {JSON.stringify(item.id)}: {message}</Text>
+            <Text key={item.id} color={theme.error}>Preview failed for {JSON.stringify(item.id)}: {message}</Text>
           ))}
           {mode.prepared.applicable.length === 0
             ? <Text>Nothing can be applied. Enter/Esc to go back</Text>
@@ -231,8 +232,8 @@ function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
     case "confirm-paths":
       return (
         <Box flexDirection="column">
-          <Text color="yellow">Confirm replacing non-canonical locations (outside .agents/skills and .claude/skills):</Text>
-          {mode.prepared.nonCanonicalPaths.map((location) => <Text key={location} color="yellow">  {JSON.stringify(location)}</Text>)}
+          <Text color={theme.warning}>Confirm replacing non-canonical locations (outside .agents/skills and .claude/skills):</Text>
+          {mode.prepared.nonCanonicalPaths.map((location) => <Text key={location} color={theme.warning}>  {JSON.stringify(location)}</Text>)}
           <Text>Replace exactly these paths? y/n</Text>
         </Box>
       );

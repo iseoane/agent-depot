@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { GitSource } from "../git-source.js";
 import type { Source, SourceOperations } from "../sources.js";
 import { initialMode, modeReducer, type Mode, type ModeEvent } from "./sources-mode.js";
+import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 
 export interface SourcesViewProps {
@@ -251,28 +252,28 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   const selectedCount = gitSources.filter((source) => marked.has(source.id)).length;
 
   if (state.status === "loading") return <Text>Loading sources...</Text>;
-  if (state.status === "error") return <Text color="red">Error: {state.message}</Text>;
+  if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
 
   const window = computeWindow(sources.length, selected, height);
 
   return (
     <Box flexDirection="column">
       {sources.length === 0 ? <Text>No sources</Text> : null}
-      {sources.length > 0 ? <Text dimColor>{"      "}ID  KIND  URL</Text> : null}
+      {sources.length > 0 ? <Text color={theme.muted}>{"      "}ID  KIND  URL</Text> : null}
       {sources.slice(window.start, window.end).map((source, offset) => {
         const index = window.start + offset;
         return (
-          <Text key={source.id} bold={index === selected}>
+          <Text key={source.id} {...rowStyle(index === selected)}>
             {index === selected ? "> " : "  "}
             {source.kind === "git" ? (marked.has(source.id) ? "[x] " : "[ ] ") : "    "}
             {source.id}  {source.kind}  {describe(source)}
           </Text>
         );
       })}
-      {window.indicator ? <Text dimColor>{window.indicator}</Text> : null}
+      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
       {selectedCount > 0 ? <Text>{selectedCount} selected</Text> : null}
       <Prompt mode={mode} />
-      {message ? <Text color={message.kind === "error" ? "red" : "green"}>{message.text}</Text> : null}
+      {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
     </Box>
   );
 }
