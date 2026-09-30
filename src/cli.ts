@@ -43,9 +43,9 @@ import {
   type UpdateBatchAssessment,
   type UpdateBatchAssessmentItem,
 } from "./update-batch.js";
+import { describeUnmanagedRemoval, removeInspectedUnmanagedSkills } from "./unmanaged-removal.js";
 import { executeHostAddition, executeHostRemoval, planHostAddition, planHostRemoval } from "./skill-hosts.js";
 import {
-  assertManagedInstallationRecordsUnchanged,
   executeSkillRemoval,
   inspectSkillRemovals,
   planSkillRemoval,
@@ -83,7 +83,6 @@ import { applyConfirmedUpdates, describeUpdatePreview, findPathConfirmationProbl
 import {
   assertNoOverlappingUserGlobalSkillRemovals,
   inspectUserGlobalSkillRemoval,
-  removeUserGlobalSkill,
   scanUserGlobalSkillInventory,
   type UserGlobalSkillInventory,
   type UserGlobalSkillRemovalInspection,
@@ -735,9 +734,7 @@ async function previewUnmanagedUninstall(
       managedInstallations: installations,
     });
     inspections.push(inspection);
-    output(`  remove exact path ${JSON.stringify(inspection.path)}`);
-    output("    WARNING: this is a permanent deletion; Agent Depot will not retain a backup");
-    output("    WARNING: recovery through Agent Depot requires a resolvable Source and is not guaranteed");
+    for (const line of describeUnmanagedRemoval(inspection)) output(line);
   }
   output("  Unmanaged Skills are never inferred from a Source and no project scope is used");
   return inspections;
@@ -779,29 +776,6 @@ interface UninstallRemovalContext {
   readonly operations: SourceOperations;
   readonly homeDirectory: string;
   readonly removalOptions: ProjectInstallationOptions;
-}
-
-async function removeUnmanagedUninstallSkills(
-  context: UninstallRemovalContext,
-  inspections: readonly UserGlobalSkillRemovalInspection[],
-  expectedManagedInstallations: readonly ProjectSkillSelection[],
-): Promise<void> {
-  const { operations, homeDirectory } = context;
-  for (const inspection of inspections) {
-    const latestManagedInstallations = await operations.listUserGlobalInstallations!();
-    assertManagedInstallationRecordsUnchanged(expectedManagedInstallations, latestManagedInstallations);
-    const latestInspection = await inspectUserGlobalSkillRemoval(inspection.path, {
-      homeDirectory,
-      managedInstallations: latestManagedInstallations,
-    });
-    assertUnmanagedInspectionUnchanged(inspection, latestInspection);
-    await removeUserGlobalSkill(inspection, {
-      homeDirectory,
-      managedInstallations: latestManagedInstallations,
-      readManagedInstallations: async () => operations.listUserGlobalInstallations!(),
-      expectedManagedInstallations,
-    });
-  }
 }
 
 function outputUninstallSummary(options: UninstallOptions, removedManagedCount: number, output: (line: string) => void): void {
@@ -868,7 +842,7 @@ async function runUninstall(
   const expectedManagedInstallations = options.skills
     ? await removeSkillsAndRecords(managedPlan, managedRechecked, operations, removalOptions, selectedInstallations)
     : selectedInstallations;
-  await removeUnmanagedUninstallSkills(context, unmanagedInspections, expectedManagedInstallations);
+  await removeInspectedUnmanagedSkills(context, unmanagedInspections, expectedManagedInstallations);
 
   if (options.data) {
     await operations.removeCatalogData!();
@@ -1407,15 +1381,6 @@ async function inspectManifestInstallations(
     inspections.push(inspection);
   }
   return Object.freeze(inspections);
-}
-
-function assertUnmanagedInspectionUnchanged(
-  expected: UserGlobalSkillRemovalInspection,
-  actual: UserGlobalSkillRemovalInspection,
-): void {
-  if (expected.name !== actual.name || expected.path !== actual.path || expected.identity !== actual.identity || expected.digest !== actual.digest) {
-    throw new Error(`The inspected unmanaged Skill changed before deletion: ${JSON.stringify(expected.path)}; no path was changed`);
-  }
 }
 
 function requireConfirmation(confirmed: boolean, message: string): void {
