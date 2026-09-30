@@ -49,3 +49,10 @@ export type ActionMode =
   | { readonly kind: "busy"; readonly label: string };
 
 export const BROWSE: ActionMode = { kind: "browse" };
+
+/** Asks the Catalog to highlight a Skill and start the same uninstall or install/host flow as pressing `u` or `i`. */
+export interface CatalogFocus {
+  readonly sourceId: string;
+  readonly path: string;
+  readonly action: "install" | "uninstall";
+}
