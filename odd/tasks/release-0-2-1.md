@@ -31,9 +31,12 @@ Ship every finding of the 0.2.1 review (2026-09-30) as a patch release of @iseoa
 - [x] B3 `src/tui/keys.ts` ESCAPE_REMNANT only matches real CSI/SS3 final bytes.
   - Evidence: RED (`Ok`/`OK`/`Oa`/`[a`/`Oz` not split) -> GREEN. Regex `^(?:\[[\d;<:?]*[A-DFHIMOPQRSZm~]|O[A-DFHPQRS])$`; real remnants still whole; pasting `Ok`/`OK` into the Source URL input and the catalog filter keeps the text. Route: inline.
 ### C — Maintainability
-- [ ] C1 remove duplicated blocks (18 groups) in `project-installation.ts` and the TUI views.
-- [ ] C2 reduce complexity: `CatalogView`, `UpdatesView`, `handleManageKey`, split `installations-view.tsx`.
-- [ ] C3 tests for the complex untested functions in `src/path-safety.ts`.
+- [x] C1 remove duplicated blocks (18 groups) in `project-installation.ts` and the TUI views.
+  - Evidence: `fallow dupes` 18 clone groups / 400 lines -> 3 groups / 37 lines. project-installation: `rollbackAndRethrow`, `recordCreatedClaudeSymlink`, `safeChildPath`, `prepareReplacementPaths`, `installedTreeSummary`, `writeRegularFile`. TUI: `mode-keys.ts` (checklist, yes/no, version input), `panel-parts.tsx` (checklist, preview, footer), `view-state.ts`, `tree-navigation.ts`. Kept on purpose: `skill-discovery.ts` 373/447 (two different directory walkers sharing only a readdir+sort prologue), `cli.ts` 474/520 (two selection resolvers with different lookup rules), `adoption-actions.ts`/`catalog-flow.ts` (same call shape with different mode transitions). `installedTreeSummary` reorders keys of the update/overwrite result objects; they are never serialized directly. Route: delegated writer.
+- [x] C2 reduce complexity: `CatalogView`, `UpdatesView`, `handleManageKey`, split `installations-view.tsx`.
+  - Evidence: cognitive CatalogView 52 -> 25 (inner arrow 46 -> gone), UpdatesView 39 -> 25 (arrow 55 -> gone), handleManageKey 40 -> 4, InstallationsView arrow 61 / handleModeKey 53 -> gone (view 20). installations-view.tsx 542 -> 152 lines (tree, browse, adoption, panel, rows modules); catalog-view.tsx 493 -> ~110. Health score (with coverage) 92 -> 93. Existing tests unchanged (519 pass).
+- [x] C3 tests for the complex untested functions in `src/path-safety.ts`.
+  - Evidence: 4 characterization tests added (traversal normalization, relative paths, symlinked leaf/dangling/ancestor chain, root, ENOTDIR); they passed immediately. Commit 8de0ecd.
 ### D — Release
 - [ ] D1 version 0.2.1, CHANGELOG entry, tag after merge, GitHub release.
 
