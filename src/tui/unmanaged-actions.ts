@@ -1,3 +1,6 @@
+import { realpath } from "node:fs/promises";
+import path from "node:path";
+
 import type { Key } from "ink";
 
 import type { ProjectSkillSelection } from "../project-manifest.js";
@@ -19,7 +22,12 @@ import { homeOf, type UnmanagedGroup, type UnmanagedLocation } from "./installat
 
 /** One location ready to be removed: a real directory or only a symbolic link. */
 export type PlannedUnmanagedRemoval =
-  | { readonly kind: "directory"; readonly inspection: UserGlobalSkillRemovalInspection }
+  | {
+      readonly kind: "directory";
+      readonly inspection: UserGlobalSkillRemovalInspection;
+      /** Links in the plan that point at this directory; it is kept when one of them cannot be removed. */
+      readonly links: readonly string[];
+    }
   | { readonly kind: "link"; readonly inspection: UserGlobalSymlinkRemovalInspection };
 
 export interface PreparedUnmanagedRemoval {
@@ -60,6 +68,26 @@ function linksFirst(locations: readonly UnmanagedLocation[]): readonly Unmanaged
   return [...locations].sort((left, right) => Number(left.linkTarget === undefined) - Number(right.linkTarget === undefined));
 }
 
+/** The canonical form of a path, or its normalized form when it cannot be resolved (a dangling target). */
+async function canonical(candidate: string): Promise<string> {
+  try {
+    return await realpath(candidate);
+  } catch {
+    return path.resolve(candidate);
+  }
+}
+
+/** The links of the group that point at `directory`, whether or not they were chosen. */
+async function linksTargeting(group: UnmanagedGroup, directory: string): Promise<readonly UnmanagedLocation[]> {
+  const wanted = await canonical(directory);
+  const found: UnmanagedLocation[] = [];
+  for (const candidate of group.locations) {
+    if (candidate.linkTarget === undefined) continue;
+    if (await canonical(path.resolve(path.dirname(candidate.path), candidate.linkTarget)) === wanted) found.push(candidate);
+  }
+  return found;
+}
+
 /** Plan step: inspects every chosen location exactly as the CLI does; changes nothing. */
 export async function prepareUnmanagedRemoval(
   operations: SourceOperations,
@@ -72,14 +100,27 @@ export async function prepareUnmanagedRemoval(
   const options = { homeDirectory: homeOf(environment), managedInstallations: installations };
   const items: PlannedUnmanagedRemoval[] = [];
   const preview = [`WARNING: agent-depot did not create these files (unmanaged skill ${group.name})`];
-  for (const location of linksFirst(locations)) {
+  // A chosen directory takes the links that point at it along, so none is left dangling.
+  const planned = new Map(locations.map((chosen) => [chosen.path, chosen]));
+  const dependents = new Map<string, readonly UnmanagedLocation[]>();
+  for (const chosen of locations) {
+    if (chosen.linkTarget !== undefined) continue;
+    const links = await linksTargeting(group, chosen.path);
+    dependents.set(chosen.path, links);
+    for (const link of links) {
+      if (planned.has(link.path)) continue;
+      planned.set(link.path, link);
+      preview.push(`also removes link ${JSON.stringify(link.path)} → ${JSON.stringify(chosen.path)} (it would dangle)`);
+    }
+  }
+  for (const location of linksFirst([...planned.values()])) {
     if (location.linkTarget !== undefined) {
       const inspection = await inspectUserGlobalSymlinkRemoval(location.path, options);
       items.push({ kind: "link", inspection });
       preview.push(...describeUnmanagedSymlinkRemoval(inspection));
     } else {
       const inspection = await inspectUserGlobalSkillRemoval(location.path, options);
-      items.push({ kind: "directory", inspection });
+      items.push({ kind: "directory", inspection, links: (dependents.get(location.path) ?? []).map((link) => link.path) });
       preview.push(...describeUnmanagedRemoval(inspection));
     }
   }
@@ -95,14 +136,23 @@ export async function runUnmanagedRemoval(
   const context = { operations, homeDirectory: homeOf(environment) };
   const lines: string[] = [];
   let failed = false;
+  const notRemoved = new Set<string>();
   for (const item of prepared.items) {
     const { path: location } = item.inspection;
+    const blocking = item.kind === "directory" ? item.links.find((link) => notRemoved.has(link)) : undefined;
+    if (blocking !== undefined) {
+      failed = true;
+      notRemoved.add(location);
+      lines.push(`Skipped ${location}: link ${blocking} could not be removed`);
+      continue;
+    }
     try {
       if (item.kind === "link") await removeInspectedUnmanagedSymlink(context, item.inspection, prepared.installations);
       else await removeInspectedUnmanagedSkill(context, item.inspection, prepared.installations);
       lines.push(`Removed ${location}`);
     } catch (error) {
       failed = true;
+      notRemoved.add(location);
       lines.push(`Failed ${location}: ${errorText(error)}`);
     }
   }

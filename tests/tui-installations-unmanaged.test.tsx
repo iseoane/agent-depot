@@ -10,6 +10,8 @@ import { defaultProjectManifestPath, ProjectManifestStore } from "../src/project
 import { createSourceOperations, type SourceOperations } from "../src/sources.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
+import type { UnmanagedGroup } from "../src/tui/installations.js";
+import { prepareUnmanagedRemoval, runUnmanagedRemoval } from "../src/tui/unmanaged-actions.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const ESC = "\u001B";
@@ -267,4 +269,58 @@ test("adoption is not available for a symlink", async (t) => {
   await waitForFrame(view.lastFrame, /Adoption is not available for symlinks/);
   view.stdin.write(ESC);
   view.unmount();
+});
+
+/** Canonical unmanaged directory in `.agents` plus a relative Claude link to it. */
+async function canonicalWithClaudeLink(f: Fixture): Promise<{ agents: string; claude: string }> {
+  const agents = await writeSkill(f.home, ".agents", "no-mistakes");
+  const claude = location(f.home, ".claude", "no-mistakes");
+  await mkdir(path.dirname(claude), { recursive: true });
+  await symlink(path.join("..", "..", ".agents", "skills", "no-mistakes"), claude, "dir");
+  return { agents, claude };
+}
+
+test("choosing only the canonical directory also removes the Claude link that would dangle", async (t) => {
+  const f = await fixture(t);
+  const { agents, claude } = await canonicalWithClaudeLink(f);
+  const view = mount(f);
+  await openUnmanaged(view, /no-mistakes \[/);
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /2 choose locations/);
+  view.stdin.write("2");
+  await waitForFrame(view.lastFrame, /\[ \] 1 .*\[ \] 2 /s);
+  view.stdin.write("1");
+  await waitForFrame(view.lastFrame, /\[x\] 1 /);
+  view.stdin.write(ENTER);
+  const preview = await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
+  assert.ok(preview.includes(`also removes link ${JSON.stringify(claude)}`), preview);
+  assert.match(preview, /would dangle/);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(0\)/);
+  assert.equal(await exists(agents), false);
+  assert.equal(await exists(claude), false);
+  view.unmount();
+});
+
+test("a directory is kept when a link that targets it could not be removed", async (t) => {
+  const f = await fixture(t);
+  const { agents, claude } = await canonicalWithClaudeLink(f);
+  const full: UnmanagedGroup = {
+    name: "no-mistakes",
+    hosts: ["claude", "pi", "codex", "opencode"],
+    locations: [
+      { path: agents, root: "agents" },
+      { path: claude, root: "claude", linkTarget: path.join("..", "..", ".agents", "skills", "no-mistakes") },
+    ],
+  };
+  const prepared = await prepareUnmanagedRemoval(f.operations, f.environment, full, [full.locations[0]!]);
+  assert.ok(prepared.preview.some((line) => line.includes("also removes link")), prepared.preview.join("\n"));
+  await rm(claude);
+  await symlink(f.dev, claude, "dir");
+  const result = await runUnmanagedRemoval(prepared, f.operations, f.environment);
+  assert.equal(result.kind, "error");
+  assert.ok(result.text.includes(`Skipped ${agents}: link ${claude} could not be removed`), result.text);
+  assert.ok((await lstat(agents)).isDirectory());
+  assert.equal(await readFile(path.join(agents, "SKILL.md"), "utf8"), SKILL_MD);
+  assert.ok((await lstat(claude)).isSymbolicLink());
 });

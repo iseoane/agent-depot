@@ -120,3 +120,25 @@ test("does not remove a link when the managed records changed after the inspecti
   );
   assert.ok((await lstat(linkPath)).isSymbolicLink());
 });
+
+test("does not remove anything when the link is swapped for a real directory after the recheck", async (t) => {
+  const { home, target } = await fixture(t);
+  const linkPath = await link(home, ".claude", "dev", target);
+  const options = { homeDirectory: home, managedInstallations: [] };
+  const inspection = await inspectUserGlobalSymlinkRemoval(linkPath, options);
+
+  await assert.rejects(
+    removeUserGlobalSymlink(inspection, {
+      ...options,
+      readManagedInstallations: async () => {
+        await rm(linkPath);
+        await mkdir(linkPath);
+        await writeFile(path.join(linkPath, "SKILL.md"), SKILL_MD);
+        return [];
+      },
+    }),
+    /must be a symbolic link/,
+  );
+  assert.ok((await lstat(linkPath)).isDirectory());
+  assert.equal(await readFile(path.join(linkPath, "SKILL.md"), "utf8"), SKILL_MD);
+});

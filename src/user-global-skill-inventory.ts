@@ -574,6 +574,9 @@ export async function removeUserGlobalSymlink(
     }
     if (!unchanged(await inspectUserGlobalSymlinkRemoval(inspection.path, { ...options, managedInstallations: latest }))) throw changed();
   }
+  // A swap for a real directory is caught by the last recheck above or refused by unlink (EISDIR/EPERM).
+  // A remaining window: the link replaced by another symbolic link between that recheck and this unlink
+  // is still removed, because unlink cannot verify identity atomically. Only a link is ever unlinked.
   await unlink(inspection.path);
 }
 
