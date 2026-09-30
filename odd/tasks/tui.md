@@ -28,6 +28,8 @@ The CLI requires remembering subcommands, ids and `--yes` confirmations; a TUI m
 - [x] T3 — Sources actions: add Git Source (URL input), refresh and remove with confirmation; built-in protected.
 - [x] T4 — Catalog view: select source(s) → discovered skills with filter.
 - [x] T5 — Hardening from independent review of main..c4eeb79 (all minor): `q` may quit mid-operation (capturing state lags via useEffect); selection tracked by index instead of source id after reload; setState after unmount without isMounted guard. Done: capture state now synchronous (ref updated with each mode/filter dispatch), highlight follows source id, mounted guard on async paths; RED 4 new tests, GREEN 35 tui tests.
+- [ ] T6 — Core+CLI: extract single user-global managed Skill removal (inspect, preview, recheck, remove files, reconcile records; adopted/modified warnings) from `src/cli.ts` into a shared module; new `agent-depot skill remove <id|path> [--yes]`. User-global only (project removal explicitly out of scope, user decision 2026-09-30).
+- [ ] T7 — TUI Catalog: installed status marker (host, scope), `i` install (host, scope, version policy, preview+confirm) and `u` uninstall user-global via T6 module (preview+confirm, warnings); no uninstall for project scope.
 
 ## Acceptance criteria
 - `agent-depot tui` opens, shows sources, and supports add/refresh/remove with confirmation.
