@@ -2646,6 +2646,64 @@ test("continues after one selected CLI update fails and reports the failed and s
   }
 });
 
+test("reports a failed update preview per Skill, applies nothing and exits 1 when the update tree is unsafe", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-preview-failed-"));
+  const output: string[] = [];
+  const oldVersion = { kind: "builtin-package" as const, version: "0.1.0" };
+  const newVersion = { kind: "builtin-package" as const, version: "0.2.0" };
+  const oldTree: readonly SkillTreeFile[] = [{ path: "portable/demo/SKILL.md", content: Buffer.from("old"), executable: false }];
+  const newTree: readonly SkillTreeFile[] = [
+    { path: "portable/demo/SKILL.md", content: Buffer.from("new"), executable: false },
+    { path: "portable/demo/../escape.txt", content: Buffer.from("escape"), executable: false },
+  ];
+  try {
+    const target = path.join(projectRoot, ".agents", "skills", "demo");
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, "SKILL.md"), "old");
+    await writeFile(path.join(projectRoot, "agent-depot.json"), JSON.stringify({
+      version: 1,
+      skills: [{
+        source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+        path: "portable/demo",
+        version: { policy: "latest" },
+        hosts: ["pi"],
+        installation: {
+          path: ".agents/skills/demo",
+          adopted: false,
+          resolvedVersion: oldVersion,
+          baseline: skillTreeBaseline(oldTree),
+        },
+      }],
+    }), "utf8");
+    // The assessment only compares snapshots; the preview validates every tree
+    // path, so an unsafe path in the new tree makes the preview (and only it) fail.
+    const dependencies = {
+      operations: fakeOperations(),
+      projectRoot,
+      sourceAccess: {
+        async readSkillTree() {
+          return newTree;
+        },
+        async readSkillTreeSnapshot() {
+          return { files: newTree, resolvedVersion: newVersion };
+        },
+      },
+      stdout: (line: string) => output.push(line),
+    };
+
+    assert.equal(await runCli(["update", "apply", "--scope", "project", "--all", "--yes"], dependencies), 1);
+    const rendered = output.join("\n");
+    const itemId = JSON.stringify(JSON.stringify([{ kind: "builtin", id: BUILT_IN_SOURCE.id }, "portable/demo"]));
+    assert.ok(
+      output.includes(`Preview failed for ${itemId}: Skill "demo" returned an unsafe or duplicate file path: "portable/demo/../escape.txt"`),
+    );
+    assert.match(rendered, /Failed Skill "portable\/demo".*unsafe or duplicate file path/);
+    assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "old");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("checks and applies user-global updates with an external method preview through the injected filesystem", async () => {
   const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-global-"));
   const adapterRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-update-global-adapter-"));
