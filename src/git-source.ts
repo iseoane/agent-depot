@@ -233,6 +233,15 @@ export class GitSourceSnapshotAccess {
     this.runner = options.runner ?? new NodeGitSnapshotCommandRunner();
   }
 
+  private async requireMirror(source: GitSource): Promise<string> {
+    const destination = cachePathForSource(this.cachePath, source);
+    if ((await pathType(destination)) !== "directory") {
+      throw new Error(`Git Source mirror is not available: ${destination}`);
+    }
+    await assertNoSymlinkPath(destination, "cache path");
+    return destination;
+  }
+
   async readSkillTree(source: GitSource, skillPath: string): Promise<readonly GitSourceSkillTreeFile[]> {
     return (await this.readSkillTreeSnapshot(source, skillPath)).files;
   }
@@ -240,11 +249,7 @@ export class GitSourceSnapshotAccess {
   /** Reads Skill bytes and the commit they came from as one immutable snapshot. */
   async readSkillTreeSnapshot(source: GitSource, skillPath: string): Promise<GitSourceSkillTreeSnapshot> {
     const relativeSkillPath = validateSkillDirectoryPath(skillPath);
-    const destination = cachePathForSource(this.cachePath, source);
-    if ((await pathType(destination)) !== "directory") {
-      throw new Error(`Git Source mirror is not available: ${destination}`);
-    }
-    await assertNoSymlinkPath(destination, "cache path");
+    const destination = await this.requireMirror(source);
 
     const commit = await this.readResolvedCommit(source);
     const tree = await this.runner.run("git", [
@@ -296,11 +301,7 @@ export class GitSourceSnapshotAccess {
 
   /** Resolves the selected ref to an immutable commit without refreshing the mirror. */
   async readResolvedCommit(source: GitSource): Promise<GitSourceResolvedVersion> {
-    const destination = cachePathForSource(this.cachePath, source);
-    if ((await pathType(destination)) !== "directory") {
-      throw new Error(`Git Source mirror is not available: ${destination}`);
-    }
-    await assertNoSymlinkPath(destination, "cache path");
+    const destination = await this.requireMirror(source);
 
     const revision = source.ref === undefined ? "HEAD" : validateGitRef(source.ref);
     const commit = (await this.runner.run("git", [
@@ -317,11 +318,7 @@ export class GitSourceSnapshotAccess {
   }
 
   async readSnapshot(source: GitSource): Promise<readonly GitSourceSnapshotFile[]> {
-    const destination = cachePathForSource(this.cachePath, source);
-    if ((await pathType(destination)) !== "directory") {
-      throw new Error(`Git Source mirror is not available: ${destination}`);
-    }
-    await assertNoSymlinkPath(destination, "cache path");
+    const destination = await this.requireMirror(source);
 
     const commit = await this.readResolvedCommit(source);
     const tree = await this.runner.run("git", ["--git-dir", destination, "ls-tree", "-r", "-z", commit]);

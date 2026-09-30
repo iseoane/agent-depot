@@ -324,7 +324,7 @@ async function preparePersistedSelection(
   };
 }
 
-function selectionWithInstallation(
+export function selectionWithInstallation(
   selection: ProjectSkillSelection,
   result: ProjectSkillInstallationResult,
   projectRoot: string,
@@ -343,7 +343,7 @@ function selectionWithInstallation(
   }).skills[0]!;
 }
 
-function relativeProjectPath(projectRoot: string, candidate: string): string {
+export function relativeProjectPath(projectRoot: string, candidate: string): string {
   const relative = path.relative(path.resolve(projectRoot), path.resolve(candidate));
   if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error(`Installed Skill location escapes the scope root: ${candidate}`);

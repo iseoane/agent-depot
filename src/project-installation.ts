@@ -444,16 +444,7 @@ export async function updateProjectSkillTransaction(
       if (state !== "open") return;
       state = "rolled-back";
       const errors: string[] = [];
-      try {
-        const current = await fileSystem.lstat(targetPath);
-        if (!replacementIdentity || !samePathIdentity(replacementIdentity, pathIdentity(current))) {
-          errors.push(`preserved concurrently replaced Skill at ${JSON.stringify(targetPath)}`);
-        } else {
-          await fileSystem.rm(targetPath);
-        }
-      } catch (error) {
-        if (!isMissing(error)) errors.push(`could not remove replacement: ${errorMessage(error)}`);
-      }
+      await removeVerifiedReplacement(targetPath, replacementIdentity, fileSystem, errors);
       if (errors.length === 0) {
         try {
           await fileSystem.rename!(backupPath, targetPath);
@@ -1113,13 +1104,13 @@ async function restoreMovedOriginal(
  */
 async function removeVerifiedReplacement(
   targetPath: string,
-  replacementIdentity: PathIdentity,
+  replacementIdentity: PathIdentity | undefined,
   fileSystem: ProjectInstallationFileSystem,
   errors: string[],
 ): Promise<void> {
   try {
     const current = await fileSystem.lstat(targetPath);
-    if (!samePathIdentity(replacementIdentity, pathIdentity(current))) {
+    if (!replacementIdentity || !samePathIdentity(replacementIdentity, pathIdentity(current))) {
       errors.push(`preserved concurrently replaced Skill at ${JSON.stringify(targetPath)}`);
     } else {
       await fileSystem.rm(targetPath);

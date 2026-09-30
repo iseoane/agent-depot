@@ -54,7 +54,7 @@ import {
   type UpdateBatchAssessment,
   type UpdateBatchAssessmentItem,
 } from "./update-batch.js";
-import { applyUpdateBatch, previewSkillUpdate } from "./skill-update.js";
+import { applyUpdateBatch, previewSkillUpdate, relativeProjectPath, selectionWithInstallation } from "./skill-update.js";
 import {
   assertNoOverlappingUserGlobalSkillRemovals,
   inspectUserGlobalSkillRemoval,
@@ -1700,35 +1700,6 @@ function rejectInstallationCollision(
 
 function formatVersionPolicy(version: VersionPolicy): string {
   return version.policy === "latest" ? "latest" : `fixed:${version.version}`;
-}
-
-function selectionWithInstallation(
-  selection: ProjectSkillSelection,
-  result: ProjectSkillInstallationResult,
-  projectRoot: string,
-): ProjectSkillSelection {
-  return parseProjectManifest({
-    version: 1,
-    skills: [{
-      ...selection,
-      installation: {
-        path: relativeProjectPath(projectRoot, result.canonicalPath),
-        adopted: result.adopted,
-        ...(result.resolvedVersion === undefined ? {} : { resolvedVersion: result.resolvedVersion }),
-        baseline: result.baseline,
-      },
-    }],
-  }).skills[0]!;
-}
-
-function relativeProjectPath(projectRoot: string, candidate: string): string {
-  const root = path.resolve(projectRoot);
-  const resolved = path.resolve(candidate);
-  const relative = path.relative(root, resolved);
-  if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error(`Installed Skill location escapes the project root: ${candidate}`);
-  }
-  return relative.split(path.sep).join("/");
 }
 
 function outputInstallationResult(

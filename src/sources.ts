@@ -380,11 +380,7 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
     },
 
     async addUserGlobalInstallation(selection: ProjectSkillSelection): Promise<void> {
-      if (selection.installation === undefined) {
-        throw new SourceSelectionError(
-          `User-global Skill ${JSON.stringify(selection.path)} must include an installation location`,
-        );
-      }
+      requireInstallationLocation(selection);
       await stateStore.update((state) => {
         const identity = JSON.stringify([selection.source, selection.path]);
         if (state.userGlobalInstallations.some((candidate) => JSON.stringify([candidate.source, candidate.path]) === identity)) {
@@ -402,11 +398,7 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
     },
 
     async updateUserGlobalInstallation(selection: ProjectSkillSelection): Promise<void> {
-      if (selection.installation === undefined) {
-        throw new SourceSelectionError(
-          `User-global Skill ${JSON.stringify(selection.path)} must include an installation location`,
-        );
-      }
+      requireInstallationLocation(selection);
       await stateStore.update((state) => {
         const identity = JSON.stringify([selection.source, selection.path]);
         const index = state.userGlobalInstallations.findIndex((candidate) =>
@@ -584,4 +576,12 @@ export function readInstallationMethodFromSkillTree(
   }
   const record = value as Record<string, unknown>;
   return Object.hasOwn(record, "method") ? record.method : value;
+}
+
+function requireInstallationLocation(selection: ProjectSkillSelection): void {
+  if (selection.installation === undefined) {
+    throw new SourceSelectionError(
+      `User-global Skill ${JSON.stringify(selection.path)} must include an installation location`,
+    );
+  }
 }
