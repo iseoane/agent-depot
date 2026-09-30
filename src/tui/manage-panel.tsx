@@ -2,7 +2,7 @@ import { Box, Text } from "ink";
 
 import type { BulkHostPlan, BulkUninstallPlan, SkippedTarget } from "./bulk-actions.js";
 import type { ManageMode } from "./manage-actions.js";
-import { ChecklistLines, PreviewConfirm, PreviewLines } from "./panel-parts.js";
+import { ChecklistLines, HostChecklist, PreviewConfirm, PreviewLines } from "./panel-parts.js";
 import { theme } from "./theme.js";
 
 const plural = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
@@ -69,7 +69,7 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
           <Text>
             {mode.kind === "hosts-add" ? "Add hosts to" : "Remove hosts from"} {mode.skill.name}. Host (space/1-{mode.choices.length} toggle, j/k move, Enter continue, Esc cancel):
           </Text>
-          <ChecklistLines choices={mode.choices} cursor={mode.cursor} isSelected={(host) => mode.selected.includes(host)} keyOf={(host) => host} label={(host) => host} />
+          <HostChecklist choices={mode.choices} cursor={mode.cursor} selected={mode.selected} />
         </Box>
       );
     case "confirm-host-add":
@@ -105,7 +105,7 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
       return (
         <Box flexDirection="column">
           <Text>Add hosts to {plural(mode.targets.length)}. Host (space/1-{mode.choices.length} toggle, j/k move, Enter continue, Esc cancel):</Text>
-          <ChecklistLines choices={mode.choices} cursor={mode.cursor} isSelected={(host) => mode.selected.includes(host)} keyOf={(host) => host} label={(host) => host} />
+          <HostChecklist choices={mode.choices} cursor={mode.cursor} selected={mode.selected} />
           <SkippedLines skipped={mode.skipped} />
         </Box>
       );

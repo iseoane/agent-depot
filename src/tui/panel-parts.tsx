@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 
+import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
 
 /** The `> [x] 1 name` rows of a checklist; the caller renders the header. */
@@ -19,6 +20,15 @@ export function ChecklistLines<T>({ choices, cursor, isSelected, keyOf, label }:
       ))}
     </>
   );
+}
+
+/** The host rows of a checklist. */
+export function HostChecklist({ choices, cursor, selected }: {
+  readonly choices: readonly ProjectHost[];
+  readonly cursor: number;
+  readonly selected: readonly ProjectHost[];
+}) {
+  return <ChecklistLines choices={choices} cursor={cursor} isSelected={(host) => selected.includes(host)} keyOf={(host) => host} label={(host) => host} />;
 }
 
 /** Preview lines; `warnFirst` colors the first one as a warning. */

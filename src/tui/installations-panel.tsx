@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { HOST_CHOICES } from "./catalog-actions.js";
 import type { InstallationsMode } from "./installations-mode.js";
 import { ManagePanel } from "./manage-panel.js";
-import { ChecklistLines, PreviewLines } from "./panel-parts.js";
+import { HostChecklist, PreviewLines } from "./panel-parts.js";
 import { theme } from "./theme.js";
 
 /** The prompt of the adoption and manage modes; browsing shows nothing. */
@@ -24,7 +24,7 @@ export function ModePanel({ mode }: { readonly mode: InstallationsMode }) {
       return (
         <Box flexDirection="column">
           <Text>Adopt {mode.entry.name} as {mode.skill.path}. Host (space/1-4 toggle, j/k move, Enter continue, Esc cancel):</Text>
-          <ChecklistLines choices={HOST_CHOICES} cursor={mode.cursor} isSelected={(host) => mode.selected.includes(host)} keyOf={(host) => host} label={(host) => host} />
+          <HostChecklist choices={HOST_CHOICES} cursor={mode.cursor} selected={mode.selected} />
         </Box>
       );
     case "version":

@@ -17,7 +17,7 @@ import {
   type UninstallPreparation,
 } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
-import { answerYesNo, hostChecklistKey } from "./mode-keys.js";
+import { answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
 import { skillOf, sourceIdOf, type InstallationRow, type UnmanagedGroup } from "./installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval, type PreparedUnmanagedRemoval } from "./unmanaged-actions.js";
 
@@ -354,11 +354,12 @@ export function handleBulkKey(context: BulkContext, mode: { readonly kind: strin
   const { operations, env } = context;
   switch (current.kind) {
     case "bulk-hosts": {
-      const outcome = hostChecklistKey(current, current.choices, input, key);
-      if (outcome.kind === "cancel") cancel(context, "Add hosts cancelled");
-      else if (outcome.kind === "update") context.setMode({ ...current, ...outcome.state });
-      else if (outcome.kind === "submit") void prepareHosts(context, current);
-      else if (outcome.kind === "empty") context.setMessage({ kind: "error", text: "Select at least one host" });
+      applyChecklistOutcome(hostChecklistKey(current, current.choices, input, key), {
+        cancel: () => cancel(context, "Add hosts cancelled"),
+        update: (state) => context.setMode({ ...current, ...state }),
+        submit: () => void prepareHosts(context, current),
+        setMessage: context.setMessage,
+      });
       return true;
     }
     case "confirm-bulk-uninstall":

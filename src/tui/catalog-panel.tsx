@@ -2,7 +2,7 @@ import { Box, Text } from "ink";
 
 import { describeSkills, HOST_CHOICES, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
 import { skillKey } from "./catalog-tree.js";
-import { ChecklistLines, PreviewLines } from "./panel-parts.js";
+import { HostChecklist, PreviewLines } from "./panel-parts.js";
 import { theme } from "./theme.js";
 
 /** The prompt of the install flow; browsing shows nothing. */
@@ -14,7 +14,7 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       return (
         <Box flexDirection="column">
           <Text>Install {describeSkills(mode.skills)}. Host (space/1-4 toggle, j/k move, Enter continue, Esc cancel):</Text>
-          <ChecklistLines choices={HOST_CHOICES} cursor={mode.cursor} isSelected={(host) => mode.selected.includes(host)} keyOf={(host) => host} label={(host) => host} />
+          <HostChecklist choices={HOST_CHOICES} cursor={mode.cursor} selected={mode.selected} />
         </Box>
       );
     case "scope":

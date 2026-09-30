@@ -7,7 +7,7 @@ import { prepareInstall, runInstall } from "./catalog-installs.js";
 import { skillKey } from "./catalog-tree.js";
 import type { TuiEnvironment } from "./environment.js";
 import { errorText, runBatch } from "./batch.js";
-import { answerYesNo, hostChecklistKey, versionInputKey } from "./mode-keys.js";
+import { answerYesNo, applyChecklistOutcome, hostChecklistKey, versionInputKey } from "./mode-keys.js";
 import type { ViewMessage } from "./view-state.js";
 
 /** What the install flow needs from the Catalog view; the view owns its state and reloading. */
@@ -69,11 +69,12 @@ async function confirmInstall(context: CatalogFlowContext, items: readonly Batch
 }
 
 function handleHostKey(context: CatalogFlowContext, mode: ModeOf<"host">, input: string, key: Key): void {
-  const outcome = hostChecklistKey(mode, HOST_CHOICES, input, key);
-  if (outcome.kind === "cancel") cancel(context);
-  else if (outcome.kind === "update") context.setAction({ ...mode, ...outcome.state });
-  else if (outcome.kind === "submit") context.setAction({ kind: "scope", skills: mode.skills, hosts: outcome.selected });
-  else if (outcome.kind === "empty") context.setMessage({ kind: "error", text: "Select at least one host" });
+  applyChecklistOutcome(hostChecklistKey(mode, HOST_CHOICES, input, key), {
+    cancel: () => cancel(context),
+    update: (state) => context.setAction({ ...mode, ...state }),
+    submit: (hosts) => context.setAction({ kind: "scope", skills: mode.skills, hosts }),
+    setMessage: context.setMessage,
+  });
 }
 
 function handleScopeKey(context: CatalogFlowContext, mode: ModeOf<"scope">, input: string, key: Key): void {

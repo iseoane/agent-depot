@@ -21,7 +21,7 @@ import {
 import type { TuiEnvironment } from "./environment.js";
 import { errorText } from "./batch.js";
 import { BULK_KINDS, handleBulkKey, type BulkMode } from "./bulk-actions.js";
-import { answerYesNo, hostChecklistKey } from "./mode-keys.js";
+import { answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
 import { handleUnmanagedKey, UNMANAGED_KINDS, type UnmanagedMode } from "./unmanaged-actions.js";
 
 /**
@@ -166,11 +166,12 @@ async function execute(context: ManageContext, label: string, action: () => Prom
 type ModeOf<K extends ManageMode["kind"]> = Extract<ManageMode, { kind: K }>;
 
 function handleHostChecklistKey(context: ManageContext, mode: ModeOf<"hosts-add" | "hosts-remove">, input: string, key: Key): void {
-  const outcome = hostChecklistKey(mode, mode.choices, input, key);
-  if (outcome.kind === "cancel") cancel(context, mode.kind === "hosts-add" ? "Install cancelled" : "Uninstall cancelled");
-  else if (outcome.kind === "update") context.setMode({ ...mode, ...outcome.state });
-  else if (outcome.kind === "submit") void startHostChange(context, mode);
-  else if (outcome.kind === "empty") context.setMessage({ kind: "error", text: "Select at least one host" });
+  applyChecklistOutcome(hostChecklistKey(mode, mode.choices, input, key), {
+    cancel: () => cancel(context, mode.kind === "hosts-add" ? "Install cancelled" : "Uninstall cancelled"),
+    update: (state) => context.setMode({ ...mode, ...state }),
+    submit: () => void startHostChange(context, mode),
+    setMessage: context.setMessage,
+  });
 }
 
 function handleRemoveScopeKey(context: ManageContext, mode: ModeOf<"remove-scope">, input: string, key: Key): void {

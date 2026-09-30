@@ -50,6 +50,22 @@ export function hostChecklistKey(
   return { kind: "ignore" };
 }
 
+/** Runs the handler for what a key did to a host checklist; an empty Enter shows the shared message. */
+export function applyChecklistOutcome(
+  outcome: ChecklistOutcome,
+  handlers: {
+    readonly cancel: () => void;
+    readonly update: (state: ChecklistState) => void;
+    readonly submit: (selected: readonly ProjectHost[]) => void;
+    readonly setMessage: (message: { readonly kind: "error"; readonly text: string }) => void;
+  },
+): void {
+  if (outcome.kind === "cancel") handlers.cancel();
+  else if (outcome.kind === "update") handlers.update(outcome.state);
+  else if (outcome.kind === "submit") handlers.submit(outcome.selected);
+  else if (outcome.kind === "empty") handlers.setMessage({ kind: "error", text: "Select at least one host" });
+}
+
 /** The y/n confirmation keys: `y` confirms, `n` or Esc declines, anything else is ignored. */
 export function answerYesNo(input: string, key: Key, onYes: () => void, onNo: () => void): void {
   if (input === "y") onYes();

@@ -7,7 +7,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { errorText } from "./batch.js";
 import { defaultAdoptionHosts, findAdoptionCandidates, prepareAdoption, type UnmanagedGroup } from "./installations.js";
 import type { InstallationsMode } from "./installations-mode.js";
-import { answerYesNo, hostChecklistKey, moveCursor, versionInputKey } from "./mode-keys.js";
+import { answerYesNo, applyChecklistOutcome, hostChecklistKey, moveCursor, versionInputKey } from "./mode-keys.js";
 import type { ViewMessage } from "./view-state.js";
 
 /** What the adoption flow needs from the hosting view; the view owns its mode state and reloading. */
@@ -100,11 +100,12 @@ function handlePickKey(context: AdoptionContext, mode: ModeOf<"pick">, input: st
 }
 
 function handleHostKey(context: AdoptionContext, mode: ModeOf<"host">, input: string, key: Key): void {
-  const outcome = hostChecklistKey(mode, HOST_CHOICES, input, key);
-  if (outcome.kind === "cancel") cancel(context);
-  else if (outcome.kind === "update") context.setMode({ ...mode, ...outcome.state });
-  else if (outcome.kind === "submit") context.setMode({ kind: "version", entry: mode.entry, skill: mode.skill, hosts: outcome.selected });
-  else if (outcome.kind === "empty") context.setMessage({ kind: "error", text: "Select at least one host" });
+  applyChecklistOutcome(hostChecklistKey(mode, HOST_CHOICES, input, key), {
+    cancel: () => cancel(context),
+    update: (state) => context.setMode({ ...mode, ...state }),
+    submit: (hosts) => context.setMode({ kind: "version", entry: mode.entry, skill: mode.skill, hosts }),
+    setMessage: context.setMessage,
+  });
 }
 
 function handleVersionKey(context: AdoptionContext, mode: ModeOf<"version">, input: string, key: Key): void {
