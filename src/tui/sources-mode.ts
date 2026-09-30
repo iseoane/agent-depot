@@ -1,19 +1,18 @@
 import type { GitSource } from "../git-source.js";
-import type { Source } from "../sources.js";
 
 /** Interaction mode of the Sources view; only `browse` lets global keys such as q act. */
 export type Mode =
   | { readonly kind: "browse" }
   | { readonly kind: "input"; readonly value: string }
   | { readonly kind: "confirm"; readonly action: "refresh"; readonly sources: readonly GitSource[] }
-  | { readonly kind: "confirm"; readonly action: "remove"; readonly source: Source }
+  | { readonly kind: "confirm"; readonly action: "remove"; readonly source: GitSource }
   | { readonly kind: "busy" };
 
 export type ModeEvent =
   | { readonly type: "input" }
   | { readonly type: "edit"; readonly value: string }
   | { readonly type: "confirm"; readonly action: "refresh"; readonly sources: readonly GitSource[] }
-  | { readonly type: "confirm"; readonly action: "remove"; readonly source: Source }
+  | { readonly type: "confirm"; readonly action: "remove"; readonly source: GitSource }
   | { readonly type: "busy" }
   | { readonly type: "done" };
 

@@ -27,11 +27,6 @@ interface Message {
   readonly text: string;
 }
 
-/** Built-in sources have no URL; show their name instead. */
-function describe(source: Source): string {
-  return source.kind === "git" ? source.url : source.name;
-}
-
 /** Refreshes each source in order; one failure is reported and does not stop the others. */
 async function refreshEach(operations: SourceOperations, targets: readonly GitSource[]): Promise<Message> {
   const lines: string[] = [];
@@ -52,7 +47,7 @@ function errorText(error: unknown): string {
 }
 
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight }: SourcesViewProps) {
-  const height = useListHeight(listHeight, 6);
+  const height = useListHeight(listHeight, 7);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
   const [selection, setSelection] = useState<{ readonly id?: string; readonly index: number }>({ index: 0 });
@@ -103,11 +98,13 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
     };
   }, [operations]);
 
-  const sources = state.status === "ready" ? state.sources : [];
+  const allSources = state.status === "ready" ? state.sources : [];
+  const builtin = allSources.find((source) => source.kind === "builtin");
+  // The built-in source is a fixed row; only Git sources are selectable and navigable.
+  const sources = allSources.filter((source): source is GitSource => source.kind === "git");
   const found = sources.findIndex((source) => source.id === selection.id);
   const selected = found >= 0 ? found : Math.min(selection.index, Math.max(sources.length - 1, 0));
   const current = sources[selected];
-  const gitSources = sources.filter((source): source is GitSource => source.kind === "git");
   const select = (index: number) => {
     const bounded = Math.min(Math.max(index, 0), Math.max(sources.length - 1, 0));
     setSelection({ id: sources[bounded]?.id, index: bounded });
@@ -141,7 +138,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
 
   const stop = (text: string) => setMessage({ kind: "error", text });
 
-  const startRemoval = async (source: Source) => {
+  const startRemoval = async (source: GitSource) => {
     if (!operations.listUserGlobalInstallations || !operations.removeGitSource) {
       stop("Removing sources is not supported by the configured operations");
       return;
@@ -152,7 +149,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       const installations = await operations.listUserGlobalInstallations();
       if (!mounted.current) return;
       const dependent = installations.some(
-        (selection) => selection.source.kind === "external" && "url" in selection.source && source.kind === "git" && selection.source.url === source.url,
+        (selection) => selection.source.kind === "external" && "url" in selection.source && selection.source.url === source.url,
       );
       if (dependent) {
         stop(`Dependent user-global Skills exist; run \`agent-depot source remove ${source.id}\` in the CLI`);
@@ -220,36 +217,29 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       typed.current = "";
       dispatch({ type: "input" });
     } else if (input === " " && current) {
-      if (current.kind === "builtin") stop("The built-in source cannot be selected for refresh");
-      else {
-        setMessage(undefined);
-        toggle([current.id]);
-      }
+      setMessage(undefined);
+      toggle([current.id]);
     } else if (input === "a") {
-      const gitIds = sources.filter((source) => source.kind === "git").map((source) => source.id);
-      if (gitIds.length === 0) stop("There are no Git sources to select");
+      if (sources.length === 0) stop("There are no Git sources to select");
       else {
         setMessage(undefined);
-        toggle(gitIds);
+        toggle(sources.map((source) => source.id));
       }
     } else if (input === "r") {
       const targets = marked.size > 0
-        ? gitSources.filter((source) => marked.has(source.id))
-        : current?.kind === "git" ? [current] : [];
+        ? sources.filter((source) => marked.has(source.id))
+        : current ? [current] : [];
       if (targets.length > 0) {
         setMessage(undefined);
         dispatch({ type: "confirm", action: "refresh", sources: targets });
-      } else if (current?.kind === "builtin") {
-        stop("The built-in source cannot be refreshed");
       }
     } else if (input === "d" && current) {
-      if (current.kind === "builtin") stop("The built-in source cannot be removed");
-      else void startRemoval(current);
+      void startRemoval(current);
     }
   });
 
   // Sources removed since they were marked no longer count.
-  const selectedCount = gitSources.filter((source) => marked.has(source.id)).length;
+  const selectedCount = sources.filter((source) => marked.has(source.id)).length;
 
   if (state.status === "loading") return <Text>Loading sources...</Text>;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
@@ -258,15 +248,16 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
 
   return (
     <Box flexDirection="column">
-      {sources.length === 0 ? <Text>No sources</Text> : null}
+      {builtin ? <Text color={theme.muted}>{"    "}{builtin.id} · included</Text> : null}
+      {sources.length === 0 ? <Text>No Git sources · n to add</Text> : null}
       {sources.length > 0 ? <Text color={theme.muted}>{"      "}ID  KIND  URL</Text> : null}
       {sources.slice(window.start, window.end).map((source, offset) => {
         const index = window.start + offset;
         return (
           <Text key={source.id} {...rowStyle(index === selected)}>
             {index === selected ? "> " : "  "}
-            {source.kind === "git" ? (marked.has(source.id) ? "[x] " : "[ ] ") : "    "}
-            {source.id}  {source.kind}  {describe(source)}
+            {marked.has(source.id) ? "[x] " : "[ ] "}
+            {source.id}  {source.kind}  {source.url}
           </Text>
         );
       })}
@@ -284,7 +275,7 @@ function Prompt({ mode }: { readonly mode: Mode }) {
   if (mode.kind === "confirm") {
     const lines = mode.action === "refresh"
       ? mode.sources.map((source) => `refresh Git Source ${source.id} from ${source.url}`)
-      : [`remove Git Source ${mode.source.id} from ${describe(mode.source)}`];
+      : [`remove Git Source ${mode.source.id} from ${mode.source.url}`];
     return <Text>{lines.join("\n")}{"\n"}[y/n]</Text>;
   }
   return null;
