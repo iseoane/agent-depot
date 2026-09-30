@@ -299,30 +299,19 @@ function parseRuntimeSelection(
   value: unknown,
 ): { readonly selection?: ProjectSkillSelection; readonly reason: string } {
   try {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    if (!isPlainRecord(value)) {
       throw new Error("the selection must be an object");
     }
-    const candidate = value as Record<string, unknown>;
+    const candidate = value;
     const source = candidate.source;
-    if (source === null || typeof source !== "object" || Array.isArray(source)) {
+    if (!isPlainRecord(source)) {
       throw new Error("the selection Source must be an object");
     }
-    const sourceRecord = source as Record<string, unknown>;
-    const projectSource = sourceRecord.kind === "builtin"
-      ? { kind: "builtin", id: sourceRecord.id }
-      : sourceRecord.kind === "external"
-        ? {
-          kind: "external",
-          ...(typeof sourceRecord.url === "string" ? { url: sourceRecord.url } : {}),
-          ...(typeof sourceRecord.path === "string" ? { path: sourceRecord.path } : {}),
-          ...(sourceRecord.ref === undefined ? {} : { ref: sourceRecord.ref }),
-        }
-        : source;
+    const projectSource = runtimeProjectSource(source);
     const version = candidate.version;
-    const validationSource = sourceRecord.kind === "external" && typeof sourceRecord.url === "string" &&
-      version !== null && typeof version === "object" && !Array.isArray(version) &&
-      (version as Record<string, unknown>).policy === "fixed" && sourceRecord.ref === undefined
-      ? { ...projectSource, ref: (version as Record<string, unknown>).version }
+    const validationSource = source.kind === "external" && typeof source.url === "string" &&
+      isPlainRecord(version) && version.policy === "fixed" && source.ref === undefined
+      ? { ...projectSource, ref: version.version }
       : projectSource;
     const parsed = parseProjectManifest({
       version: 1,
@@ -335,6 +324,25 @@ function parseRuntimeSelection(
   } catch (error) {
     return { reason: errorMessage(error) };
   }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function runtimeProjectSource(source: Record<string, unknown>): Record<string, unknown> {
+  if (source.kind === "builtin") {
+    return { kind: "builtin", id: source.id };
+  }
+  if (source.kind !== "external") {
+    return source;
+  }
+  return {
+    kind: "external",
+    ...(typeof source.url === "string" ? { url: source.url } : {}),
+    ...(typeof source.path === "string" ? { path: source.path } : {}),
+    ...(source.ref === undefined ? {} : { ref: source.ref }),
+  };
 }
 
 function malformedSelectionAssessment(
