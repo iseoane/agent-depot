@@ -1119,7 +1119,11 @@ async function runManifestInstall(context: ProjectInstallContext): Promise<void>
     }
   }
   if (installable.length === 0) {
-    return;
+    throw new CliUsageError("Nothing to install: every Skill in the manifest is pinned to another Agent Depot version");
+  }
+  const skipped = manifest.skills.length - installable.length;
+  if (skipped > 0) {
+    output(`Skipped ${skipped} of ${manifest.skills.length} Skills pinned to another Agent Depot version`);
   }
   const resolved = await resolveManifestSelections(installable, operations, sourceAccess, options.confirmed);
   if (resolved.some((item) => item.method !== undefined) && resolved.length > 1) {
