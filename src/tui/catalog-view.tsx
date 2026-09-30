@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
-import { BROWSE, HOST_CHOICES, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
+import { BROWSE, HOST_CHOICES, SCOPE_CHOICES, type ActionMode, type CatalogFocus } from "./catalog-actions.js";
 import { filterReducer, filterSkills, initialFilter, type FilterEvent, type FilterState } from "./catalog-filter.js";
 import {
   globalRecord,
@@ -36,6 +36,8 @@ export interface CatalogViewProps {
   readonly onCapturingChange?: (capturing: boolean) => void;
   /** Where installs and uninstalls happen; defaults to the real home and working directory. */
   readonly environment?: TuiEnvironment;
+  /** Highlights a Skill and starts its `u` / `i` flow once, e.g. when opened from the Installations view. */
+  readonly focus?: CatalogFocus;
 }
 
 interface Message {
@@ -56,7 +58,7 @@ function truncate(text: string): string {
   return text.length > DESCRIPTION_LIMIT ? `${text.slice(0, DESCRIPTION_LIMIT - 3)}...` : text;
 }
 
-export function CatalogView({ operations, sourceId, onCapturingChange, environment }: CatalogViewProps) {
+export function CatalogView({ operations, sourceId, onCapturingChange, environment, focus }: CatalogViewProps) {
   const [all, setAll] = useState(sourceId === undefined);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selected, setSelected] = useState(0);
@@ -66,6 +68,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   // Mirrors the typed query synchronously so keystrokes delivered in one burst are not lost to stale closures.
   const typed = useRef("");
   const [installed, setInstalled] = useState<InstalledSkills>(NO_INSTALLED);
+  const [installedLoaded, setInstalledLoaded] = useState(false);
   const [action, setActionState] = useState<ActionMode>(BROWSE);
   // Mirrors the action mode synchronously, like the filter, so later keystrokes and the shell never see stale state.
   const actionRef = useRef<ActionMode>(BROWSE);
@@ -82,7 +85,10 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
 
   const reloadInstalled = useCallback(async () => {
     const loaded = await loadInstalledSkills(operations, env);
-    if (mounted.current) setInstalled(loaded);
+    if (mounted.current) {
+      setInstalled(loaded);
+      setInstalledLoaded(true);
+    }
   }, [operations, env]);
 
   useEffect(() => {
@@ -377,15 +383,35 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       const skill = visible[index];
       if (!skill) return;
       setMessage(undefined);
-      if (input === "u") startUninstall(skill);
-      else {
-        const record = globalRecord(skill, installed);
-        const missing = record ? missingHosts(record) : [];
-        if (record && missing.length > 0) setAction({ kind: "installed-choice", skill, missing });
-        else setAction({ kind: "host", skill, cursor: 0, selected: [] });
-      }
+      startAction(skill, input === "u" ? "uninstall" : "install");
     }
   });
+
+  /** `u` / `i` on a Skill; also used to start the flow requested through `focus`. */
+  function startAction(skill: SkillCandidate, kind: CatalogFocus["action"]) {
+    if (kind === "uninstall") startUninstall(skill);
+    else {
+      const record = globalRecord(skill, installed);
+      const missing = record ? missingHosts(record) : [];
+      if (record && missing.length > 0) setAction({ kind: "installed-choice", skill, missing });
+      else setAction({ kind: "host", skill, cursor: 0, selected: [] });
+    }
+  }
+
+  // Runs the requested flow once, after both the Skills and the installation records are loaded.
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focus || focused.current || state.status !== "ready" || !installedLoaded) return;
+    focused.current = true;
+    const position = state.skills.findIndex((skill) => skill.sourceId === focus.sourceId && skill.path === focus.path);
+    const skill = state.skills[position];
+    if (!skill) {
+      setMessage({ kind: "error", text: `Skill ${focus.path} was not found in ${focus.sourceId}` });
+      return;
+    }
+    setSelected(position);
+    startAction(skill, focus.action);
+  }, [focus, state, installedLoaded]);
 
   const scope = all || sourceId === undefined ? "all sources" : sourceId;
   if (state.status === "loading") return <Text>Loading skills...</Text>;

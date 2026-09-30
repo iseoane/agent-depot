@@ -2,9 +2,12 @@ import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
+import type { CatalogFocus } from "./catalog-actions.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
+import { InstallationsView } from "./installations-view.js";
 import { SourcesView } from "./sources-view.js";
+import { UpdatesView } from "./updates-view.js";
 
 export interface AppProps {
   /** Source operations the views call directly; injectable for tests. */
@@ -15,11 +18,13 @@ export interface AppProps {
   readonly onExit?: () => void;
 }
 
-type ViewName = "sources" | "catalog";
+type ViewName = "sources" | "catalog" | "installations" | "updates";
 
 const HINTS: Record<ViewName, string> = {
-  sources: "j/k move  Enter catalog  a add  r refresh  d remove  2 catalog  q quit",
-  catalog: "j/k move  / filter  i install  u uninstall  s all sources  1 sources  q quit",
+  sources: "j/k move  Enter catalog  a add  r refresh  d remove  2 catalog  3 installations  4 updates  q quit",
+  catalog: "j/k move  / filter  i install  u uninstall  s all sources  1 sources  3 installations  4 updates  q quit",
+  installations: "j/k move  A adopt  u uninstall  i hosts  1 sources  2 catalog  4 updates  q quit",
+  updates: "j/k move  space toggle  a all  Enter preview  p project  g user-global  r check  1 sources  2 catalog  3 installations  q quit",
 };
 
 export function App({ operations, environment, onExit }: AppProps) {
@@ -33,21 +38,29 @@ export function App({ operations, environment, onExit }: AppProps) {
   }, []);
   const [view, setView] = useState<ViewName>("sources");
   const [catalogSourceId, setCatalogSourceId] = useState<string | undefined>();
+  // Set when the Installations view hands a Skill over to the Catalog flows; cleared on manual navigation.
+  const [catalogFocus, setCatalogFocus] = useState<CatalogFocus | undefined>();
+  const showView = (next: ViewName) => {
+    setCatalogFocus(undefined);
+    setView(next);
+  };
 
   useInput((input) => {
     if (capturingRef.current) return;
     if (input === "q") {
       onExit?.();
       exit();
-    } else if (input === "1") setView("sources");
-    else if (input === "2") setView("catalog");
+    } else if (input === "1") showView("sources");
+    else if (input === "2") showView("catalog");
+    else if (input === "3") showView("installations");
+    else if (input === "4") showView("updates");
   });
 
   return (
     <Box flexDirection="column">
       <Text bold>Agent Depot</Text>
       <Text>
-        {view === "sources" ? "[1 Sources]" : " 1 Sources "} {view === "catalog" ? "[2 Catalog]" : " 2 Catalog "}
+        {view === "sources" ? "[1 Sources]" : " 1 Sources "} {view === "catalog" ? "[2 Catalog]" : " 2 Catalog "} {view === "installations" ? "[3 Installations]" : " 3 Installations "} {view === "updates" ? "[4 Updates]" : " 4 Updates "}
       </Text>
       {view === "sources" ? (
         <SourcesView
@@ -58,11 +71,25 @@ export function App({ operations, environment, onExit }: AppProps) {
             setView("catalog");
           }}
         />
+      ) : view === "installations" ? (
+        <InstallationsView
+          operations={operations}
+          environment={environment}
+          onCapturingChange={onCapturingChange}
+          onOpenCatalog={(focus) => {
+            setCatalogSourceId(focus.sourceId);
+            setCatalogFocus(focus);
+            setView("catalog");
+          }}
+        />
+      ) : view === "updates" ? (
+        <UpdatesView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
       ) : (
         <CatalogView
           operations={operations}
           sourceId={catalogSourceId}
           environment={environment}
+          focus={catalogFocus}
           onCapturingChange={onCapturingChange}
         />
       )}

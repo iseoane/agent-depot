@@ -25,7 +25,6 @@ import {
   type ProjectHost,
   type ProjectManifest,
   type ProjectSkillSelection,
-  type ProjectSource,
   type VersionPolicy,
 } from "./project-manifest.js";
 import {
@@ -39,7 +38,6 @@ import {
   type ProjectSkillTreeAccess,
 } from "./project-installation.js";
 import {
-  assessUpdateBatch,
   selectUpdateBatch,
   UpdateBatchSelectionError,
   type UpdateBatchAssessment,
@@ -80,7 +78,8 @@ import {
 } from "./skill-install.js";
 import type { TuiEnvironment } from "./tui/environment.js";
 import { CliUsageError } from "./usage-error.js";
-import { applyUpdateBatch, previewSkillUpdate, relativeProjectPath, selectionWithInstallation } from "./skill-update.js";
+import { selectionWithInstallation } from "./skill-update.js";
+import { applyConfirmedUpdates, describeUpdatePreview, findPathConfirmationProblem, loadUpdates, previewUpdateCandidates } from "./update-flow.js";
 import {
   assertNoOverlappingUserGlobalSkillRemovals,
   inspectUserGlobalSkillRemoval,
@@ -894,22 +893,17 @@ async function runUpdate(
   output: (line: string) => void,
 ): Promise<number> {
   const options = parseUpdateOptions(argv);
-  const sourceAccess = dependencies.sourceAccess ?? defaultProjectSkillTreeAccess();
-  const projectRoot = options.scope === "project"
-    ? path.resolve(dependencies.projectRoot ?? process.cwd())
-    : path.resolve(dependencies.homeDirectory ?? homedir());
-  const manifestStore = options.scope === "project"
-    ? dependencies.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot))
-    : undefined;
-  const installed = manifestStore
-    ? (await manifestStore.load()).skills
-    : await requireUserGlobalInstallations(operations);
-  const resolveSource = operations.resolveProjectSource
-    ? (source: ProjectSource) => operations.resolveProjectSource!(source)
-    : resolveProjectSource;
-  const assessment = await assessUpdateBatch(installed, { sourceAccess, resolveSource });
+  const { assessment, installed, context } = await loadUpdates({
+    scope: options.scope,
+    operations,
+    ...(dependencies.homeDirectory === undefined ? {} : { homeDirectory: dependencies.homeDirectory }),
+    ...(dependencies.projectRoot === undefined ? {} : { projectRoot: dependencies.projectRoot }),
+    ...(dependencies.sourceAccess === undefined ? {} : { sourceAccess: dependencies.sourceAccess }),
+    ...(dependencies.projectManifestStore === undefined ? {} : { projectManifestStore: dependencies.projectManifestStore }),
+    ...(dependencies.installationOptions?.fileSystem === undefined ? {} : { installationFileSystem: dependencies.installationOptions.fileSystem }),
+  });
   const userGlobalInventory = options.action === "check" && options.scope === "user-global"
-    ? await scanUserGlobalSkillInventory({ homeDirectory: projectRoot, managedInstallations: installed })
+    ? await scanUserGlobalSkillInventory({ homeDirectory: context.projectRoot, managedInstallations: installed })
     : undefined;
 
   outputUpdateAssessment(assessment, options.scope, output, userGlobalInventory);
@@ -917,38 +911,29 @@ async function runUpdate(
     return 0;
   }
 
-  const installationFileSystem = dependencies.installationOptions?.fileSystem;
-  const context = {
-    projectRoot,
-    scope: options.scope,
-    sourceAccess,
-    sourceOperations: operations,
-    trackedInstallationPaths: installed.flatMap((selection) => selection.installation === undefined ? [] : [selection.installation.path]),
-    ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
-    ...(installationFileSystem === undefined ? {} : { installationFileSystem }),
-  };
   const selected = selectUpdateCandidates(assessment, options);
-  const { failures: previewFailures, nonCanonicalPaths } = await previewUpdateCandidates(selected, context, options.scope, output);
+  const { plans, failures: previewFailures, nonCanonicalPaths } = await previewUpdateCandidates(selected, context);
+  // Successes and failures are reported in candidate order, as the preview runs.
+  const failedIds = new Set(previewFailures.map(({ item }) => item.id));
+  const plansById = new Map(plans.map((plan) => [plan.item.id, plan]));
+  for (const item of selected) {
+    const plan = plansById.get(item.id);
+    if (plan !== undefined) {
+      for (const line of describeUpdatePreview(plan, options.scope, context.projectRoot)) output(line);
+    } else if (failedIds.has(item.id)) {
+      const failure = previewFailures.find((candidate) => candidate.item.id === item.id)!;
+      output(`Preview failed for ${JSON.stringify(item.id)}: ${failure.message}`);
+    }
+  }
 
   requireConfirmation(options.confirmed, "Update not confirmed; rerun with --yes after reviewing every candidate preview");
-  requireNonCanonicalPathConfirmations(nonCanonicalPaths, options.confirmedPaths);
-  const result = await applyUpdateBatch(selected, {
-    ...context,
-    // The callback is invoked independently for every candidate. In particular,
-    // a modified installation is never overwritten unless this invocation was
-    // explicitly confirmed with --yes.
-    confirm: async (plan) => ({
-      overwriteModifiedInstallation: options.confirmed,
-      externalMethod: options.confirmed,
-      ...(options.confirmed && plan.nonCanonicalPath !== undefined && options.confirmedPaths.includes(relativeProjectPath(projectRoot, plan.nonCanonicalPath))
-        ? { nonCanonicalPath: plan.nonCanonicalPath }
-        : {}),
-    }),
-  });
+  const pathProblem = findPathConfirmationProblem(nonCanonicalPaths, options.confirmedPaths);
+  if (pathProblem !== undefined) throw new CliUsageError(pathProblem);
+  const result = await applyConfirmedUpdates(selected, context, options.confirmedPaths);
 
-  for (const failure of previewFailures) {
-    if (!result.failed.some((item) => item.id === failure.id)) {
-      output(`Preview failure was not selected for application: ${JSON.stringify(failure.id)}`);
+  for (const { item } of previewFailures) {
+    if (!result.failed.some((failed) => failed.id === item.id)) {
+      output(`Preview failure was not selected for application: ${JSON.stringify(item.id)}`);
     }
   }
   for (const item of result.updated) {
@@ -973,51 +958,6 @@ function selectUpdateCandidates(
   } catch (error) {
     if (error instanceof UpdateBatchSelectionError) throw new CliUsageError(error.message);
     throw error;
-  }
-}
-
-interface UpdatePreviewOutcome {
-  readonly failures: readonly UpdateBatchAssessmentItem[];
-  /** Relative non-canonical project paths that need --confirm-path, in preview order. */
-  readonly nonCanonicalPaths: readonly string[];
-}
-
-async function previewUpdateCandidates(
-  selected: readonly UpdateBatchAssessmentItem[],
-  context: Parameters<typeof previewSkillUpdate>[1],
-  scope: UpdateOptions["scope"],
-  output: (line: string) => void,
-): Promise<UpdatePreviewOutcome> {
-  const failures: UpdateBatchAssessmentItem[] = [];
-  const nonCanonicalPaths: string[] = [];
-  for (const item of selected) {
-    try {
-      const plan = await previewSkillUpdate(item, context);
-      if (plan.nonCanonicalPath !== undefined) nonCanonicalPaths.push(relativeProjectPath(context.projectRoot, plan.nonCanonicalPath));
-      outputUpdatePreview(plan, scope, output, context.projectRoot);
-    } catch (error) {
-      failures.push(item);
-      output(`Preview failed for ${JSON.stringify(item.id)}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  return { failures, nonCanonicalPaths };
-}
-
-/**
- * `--yes` alone never confirms a repository-controlled non-canonical location:
- * every pending path needs its own exact `--confirm-path`, and a value that
- * matches no pending path is an error rather than silently ignored.
- */
-function requireNonCanonicalPathConfirmations(pending: readonly string[], confirmedPaths: readonly string[]): void {
-  const unmatched = confirmedPaths.filter((value) => !pending.includes(value));
-  if (unmatched.length > 0) {
-    const shown = pending.length === 0 ? "none" : pending.map((value) => JSON.stringify(value)).join(", ");
-    throw new CliUsageError(`--confirm-path ${unmatched.map((value) => JSON.stringify(value)).join(", ")} does not match any pending non-canonical location (pending: ${shown}); no path was changed`);
-  }
-  const missing = pending.filter((value) => !confirmedPaths.includes(value));
-  if (missing.length > 0) {
-    const flags = missing.map((value) => `--confirm-path ${value}`).join(" ");
-    throw new CliUsageError(`Non-canonical location ${missing.map((value) => JSON.stringify(value)).join(", ")} needs explicit path confirmation; --yes alone is not enough. Rerun with ${flags}; no path was changed`);
   }
 }
 
@@ -1082,13 +1022,6 @@ function normalizeConfirmedPath(value: string): string {
   return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 
-async function requireUserGlobalInstallations(operations: SourceOperations): Promise<readonly ProjectSkillSelection[]> {
-  if (!operations.listUserGlobalInstallations) {
-    throw new Error("Configured Source operations cannot inspect user-global Skill updates");
-  }
-  return operations.listUserGlobalInstallations();
-}
-
 function resolveUpdateSelectionIds(
   assessment: UpdateBatchAssessment,
   requested: readonly string[],
@@ -1135,32 +1068,6 @@ function outputUpdateAssessment(
 function outputUpdateItem(item: UpdateBatchAssessmentItem, output: (line: string) => void): void {
   const selection = item.selection as Partial<ProjectSkillSelection> | undefined;
   output(`  [${item.index}] ${item.id}${typeof selection?.path === "string" ? ` path=${selection.path}` : ""}: ${item.reason}`);
-}
-
-function outputUpdatePreview(
-  plan: Awaited<ReturnType<typeof previewSkillUpdate>>,
-  scope: "project" | "user-global",
-  output: (line: string) => void,
-  projectRoot: string,
-): void {
-  output(`Preview: update Skill ${JSON.stringify(plan.selection.path)} from ${plan.source.id} (scope: ${scope})`);
-  output(`  target: ${plan.target}`);
-  if (plan.nonCanonicalPath !== undefined) {
-    const relative = relativeProjectPath(projectRoot, plan.nonCanonicalPath);
-    output(`  WARNING: non-canonical location ${JSON.stringify(relative)} (outside .agents/skills and .claude/skills); --yes together with --confirm-path ${relative} explicitly confirms replacing this exact path`);
-  }
-  output(`  proposed changes: replace ${plan.snapshot.files.length} managed files and persist the new version/content baseline`);
-  if (plan.overwriteRequired) {
-    output("  WARNING: the installed Skill has local modifications; --yes explicitly confirms replacing them");
-  }
-  if (plan.methodPreview) {
-    output(`  external command: argv=${JSON.stringify(plan.methodPreview.argv)}`);
-    output(`  external cwd: ${JSON.stringify(plan.methodPreview.cwd)}`);
-    output(`  external target: ${JSON.stringify(plan.methodPreview.target)}`);
-    output("  declared changes:");
-    for (const change of plan.methodPreview.declaredChanges) output(`    ${change}`);
-    output(`  WARNING: ${plan.methodPreview.warning}`);
-  }
 }
 
 async function runInstall(
