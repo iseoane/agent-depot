@@ -47,7 +47,6 @@ export type UserGlobalSkillSkipReason =
   | "unsafe-root"
   | "unsafe-entry"
   | "unsafe-skill-file"
-  | "managed-canonical-alias"
   | "excluded-transient";
 
 /** An entry that was deliberately not made eligible for later removal. */
@@ -59,12 +58,23 @@ export interface UserGlobalSkillInventorySkippedEntry {
   readonly detail?: string;
 }
 
+/** A host-root symlink that Agent Depot recognises as exposing a listed canonical Skill. */
+export interface UserGlobalSkillExposure {
+  readonly name: string;
+  readonly path: string;
+  readonly root: GlobalSkillRootKind;
+  /** The canonical directory the symlink resolves to. */
+  readonly target: string;
+}
+
 export interface UserGlobalSkillInventory {
   readonly homeDirectory: string;
   readonly entries: readonly UserGlobalSkillInventoryEntry[];
   readonly managed: readonly UserGlobalSkillInventoryEntry[];
   readonly unmanaged: readonly UserGlobalSkillInventoryEntry[];
   readonly skipped: readonly UserGlobalSkillInventorySkippedEntry[];
+  /** Same-name host symlinks to a listed canonical Skill; informational, never removal candidates. */
+  readonly exposures: readonly UserGlobalSkillExposure[];
 }
 
 export interface UserGlobalSkillInventoryOptions {
@@ -110,9 +120,11 @@ export async function scanUserGlobalSkillInventory(
 
   const entries: UserGlobalSkillInventoryEntry[] = [];
   const skipped: UserGlobalSkillInventorySkippedEntry[] = [];
+  const exposures: UserGlobalSkillExposure[] = [];
+  const state: ScanState = { managedPaths, managedCanonicalPaths, entries, skipped, exposures };
   for (const root of GLOBAL_SKILL_ROOTS) {
     const rootPath = path.join(homeDirectory, ...root.relativePath);
-    await scanRoot(root, rootPath, homeDirectory, managedPaths, managedCanonicalPaths, entries, skipped);
+    await scanRoot(root, rootPath, homeDirectory, state);
   }
 
   const managed = entries.filter((entry) => entry.status === "managed");
@@ -123,21 +135,28 @@ export async function scanUserGlobalSkillInventory(
     managed: Object.freeze(managed),
     unmanaged: Object.freeze(unmanaged),
     skipped: Object.freeze(skipped),
+    exposures: Object.freeze(exposures),
   });
 }
 
 /** Short alias for callers that only need the inventory operation. */
 export const scanUserGlobalSkills = scanUserGlobalSkillInventory;
 
+interface ScanState {
+  readonly managedPaths: ReadonlySet<string>;
+  readonly managedCanonicalPaths: ReadonlySet<string>;
+  readonly entries: UserGlobalSkillInventoryEntry[];
+  readonly skipped: UserGlobalSkillInventorySkippedEntry[];
+  readonly exposures: UserGlobalSkillExposure[];
+}
+
 async function scanRoot(
   root: (typeof GLOBAL_SKILL_ROOTS)[number],
   rootPath: string,
   homeDirectory: string,
-  managedPaths: ReadonlySet<string>,
-  managedCanonicalPaths: ReadonlySet<string>,
-  entries: UserGlobalSkillInventoryEntry[],
-  skipped: UserGlobalSkillInventorySkippedEntry[],
+  state: ScanState,
 ): Promise<void> {
+  const { managedPaths, entries, skipped } = state;
   const ancestorSafety = await inspectGlobalRootAncestors(homeDirectory, rootPath);
   if (ancestorSafety === "missing") return;
   if (ancestorSafety !== undefined) {
@@ -184,7 +203,7 @@ async function scanRoot(
     }
 
     if (information.isSymbolicLink()) {
-      await classifySymlink(candidatePath, name, root.kind, homeDirectory, managedCanonicalPaths, managedPaths, skipped);
+      await classifySymlink(candidatePath, name, root.kind, homeDirectory, state);
       continue;
     }
     if (!information.isDirectory()) continue;
@@ -235,10 +254,9 @@ async function classifySymlink(
   name: string,
   root: GlobalSkillRootKind,
   homeDirectory: string,
-  managedCanonicalPaths: ReadonlySet<string>,
-  managedPaths: ReadonlySet<string>,
-  skipped: UserGlobalSkillInventorySkippedEntry[],
+  state: ScanState,
 ): Promise<void> {
+  const { managedCanonicalPaths, managedPaths, entries, skipped, exposures } = state;
   let linkTarget: string;
   try {
     linkTarget = await readlink(candidatePath);
@@ -247,23 +265,21 @@ async function classifySymlink(
     return;
   }
   const resolvedTarget = path.resolve(path.dirname(candidatePath), linkTarget);
-  const canonicalTarget = isUnderGlobalRoot(resolvedTarget, homeDirectory, ".agents")
-    ? resolvedTarget
-    : undefined;
-  const isManagedPath = managedPaths.has(pathKey(candidatePath));
-  const isManagedAlias = canonicalTarget !== undefined &&
-    (managedCanonicalPaths.has(pathKey(canonicalTarget)) || isManagedPath);
+  // Only an exact same-name link to a direct child of the canonical root can be
+  // an exposure created by Agent Depot; anything else stays reported.
+  const isSameNameCanonical = root === "claude" &&
+    isUnderGlobalRoot(resolvedTarget, homeDirectory, ".agents") &&
+    path.basename(resolvedTarget) === name &&
+    pathKey(path.dirname(resolvedTarget)) === pathKey(path.join(homeDirectory, ".agents", "skills"));
+  const isManagedAlias = isSameNameCanonical &&
+    (managedCanonicalPaths.has(pathKey(resolvedTarget)) || managedPaths.has(pathKey(candidatePath)));
+  const isListedCanonical = isSameNameCanonical &&
+    entries.some((entry) => entry.root === "agents" && pathKey(entry.path) === pathKey(resolvedTarget));
 
-  if (isManagedAlias) {
-    const targetSafety = await inspectCanonicalTarget(canonicalTarget);
+  if (isManagedAlias || isListedCanonical) {
+    const targetSafety = await inspectCanonicalTarget(resolvedTarget);
     if (targetSafety === undefined) {
-      skipped.push({
-        name,
-        path: candidatePath,
-        root,
-        reason: "managed-canonical-alias",
-        detail: `symlink targets managed canonical location ${canonicalTarget}`,
-      });
+      exposures.push({ name, path: candidatePath, root, target: resolvedTarget });
       return;
     }
     skipped.push(skip(candidatePath, root, "unsafe-entry", targetSafety, name));

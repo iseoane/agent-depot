@@ -79,12 +79,66 @@ test("deduplicates a managed Claude exposure without hiding a separate real dupl
     const inventory = await scan(home, [managedSelection(".agents/skills/demo")]);
     assert.deepEqual(inventory.managed.map((entry) => entry.name), ["demo"]);
     assert.deepEqual(inventory.unmanaged.map((entry) => entry.name), ["duplicate"]);
-    assert.deepEqual(
-      inventory.skipped.filter((entry) => entry.reason === "managed-canonical-alias").map((entry) => entry.name),
-      ["demo"],
-    );
+    assert.deepEqual(inventory.exposures.map((entry) => [entry.name, entry.path, entry.target]), [
+      ["demo", path.join(home, ".claude", "skills", "demo"), canonical],
+    ]);
+    assert.deepEqual(inventory.skipped, []);
   } finally {
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+async function linkOrSkip(t: { skip: (message: string) => void }, target: string, linkPath: string): Promise<boolean> {
+  await mkdir(path.dirname(linkPath), { recursive: true });
+  try {
+    await symlink(target, linkPath, "dir");
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+      t.skip("symbolic links are unavailable in this environment");
+      return false;
+    }
+    throw error;
+  }
+}
+
+test("treats a Claude symlink to the same-name canonical directory of a listed unmanaged Skill as an exposure", async (t) => {
+  const home = await makeHome();
+  try {
+    const canonical = await makeSkill(home, ".agents", "stray");
+    if (!(await linkOrSkip(t, "../../.agents/skills/stray", path.join(home, ".claude", "skills", "stray")))) return;
+
+    const inventory = await scan(home);
+    assert.deepEqual(inventory.unmanaged.map((entry) => entry.path), [canonical]);
+    assert.deepEqual(inventory.exposures.map((entry) => entry.name), ["stray"]);
+    assert.deepEqual(inventory.skipped, []);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("still reports Claude symlinks that are not a same-name exposure of a listed canonical Skill", async (t) => {
+  const home = await makeHome();
+  const outside = await mkdtemp(path.join(tmpdir(), "agent-depot-global-inventory-outside-"));
+  try {
+    await makeSkill(home, ".agents", "alpha");
+    await mkdir(path.join(home, ".agents", "skills", "empty-dir"), { recursive: true });
+    const claudeRoot = path.join(home, ".claude", "skills");
+    if (!(await linkOrSkip(t, "../../.agents/skills/alpha", path.join(claudeRoot, "renamed")))) return;
+    await linkOrSkip(t, "../../.agents/skills/missing", path.join(claudeRoot, "dangling"));
+    await linkOrSkip(t, "../../.agents/skills/empty-dir", path.join(claudeRoot, "empty-dir"));
+    await linkOrSkip(t, (await makeSkill(outside, ".agents", "elsewhere")), path.join(claudeRoot, "elsewhere"));
+
+    const inventory = await scan(home, [managedSelection(".agents/skills/alpha")]);
+    assert.deepEqual(inventory.exposures, []);
+    assert.deepEqual(
+      inventory.skipped.map((entry) => [entry.name, entry.reason]),
+      [["dangling", "unsafe-entry"], ["elsewhere", "unsafe-entry"], ["empty-dir", "unsafe-entry"], ["renamed", "unsafe-entry"]],
+    );
+    assert.equal(inventory.entries.some((entry) => entry.root === "claude"), false);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });
 
