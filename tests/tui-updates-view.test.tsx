@@ -282,9 +282,12 @@ test("a pasted prototype property name never changes the scope filter", async (t
   await seedProject(f, [{ name: "projonly", state: "outdated" }]);
   const { lastFrame, stdin, unmount } = mount(f);
   await waitForFrame(lastFrame, /portable\/projonly/);
+  // The pasted letters are split into keys, and its "r" starts a re-check;
+  // wait until that check has finished before changing the scope.
   press(stdin, "constructor");
   await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.match(lastFrame() ?? "", /scope: all/);
+  await waitForFrame(lastFrame, (frame) =>
+    /scope: all/.test(frame) && /checked/.test(frame) && !/Refreshing|Checking/.test(frame));
   press(stdin, "p");
   const frame = await waitForFrame(lastFrame, /scope: project/);
   assert.match(frame, /portable\/projonly/);
