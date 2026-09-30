@@ -159,15 +159,7 @@ export async function applySkillUpdate(
 ): Promise<SkillUpdateResult> {
   const plan = await previewSkillUpdate(item, options);
   const confirmation = options.confirm ? await options.confirm(plan) : options.confirmation ?? {};
-  if (plan.overwriteRequired && confirmation.overwriteModifiedInstallation !== true) {
-    throw new Error(`Skill ${JSON.stringify(item.id)} requires explicit overwrite confirmation; no path was changed`);
-  }
-  if (plan.nonCanonicalPath !== undefined && confirmation.nonCanonicalPath !== plan.nonCanonicalPath) {
-    throw new Error(`Skill ${JSON.stringify(item.id)} is installed at the non-canonical location ${JSON.stringify(plan.nonCanonicalPath)}; explicit confirmation of that exact path is required and no path was changed`);
-  }
-  if (plan.method !== undefined && confirmation.externalMethod !== true) {
-    throw new Error(`Skill ${JSON.stringify(item.id)} has an external method; explicit method confirmation is required and no command was run`);
-  }
+  assertUpdateConfirmed(item, plan, confirmation);
 
   if (plan.method !== undefined) {
     // Validate the real path before staging or replacing the managed tree. The
@@ -198,22 +190,42 @@ export async function applySkillUpdate(
     await transaction.commit();
     return Object.freeze({ item, plan, installation: transaction.result });
   } catch (error) {
-    const rollbackErrors: string[] = [];
-    try {
-      await transaction.rollback();
-    } catch (rollbackError) {
-      rollbackErrors.push(`filesystem rollback failed: ${errorMessage(rollbackError)}`);
-    }
-    try {
-      await persistedState.rollback();
-    } catch (rollbackError) {
-      rollbackErrors.push(`persisted-state rollback failed: ${errorMessage(rollbackError)}`);
-    }
-    if (rollbackErrors.length > 0) {
-      throw new Error(`${errorMessage(error)}; ${rollbackErrors.join("; ")}`);
-    }
-    throw error;
+    return rollBackUpdate(error, transaction, persistedState);
   }
+}
+
+function assertUpdateConfirmed(item: UpdateBatchAssessmentItem, plan: SkillUpdatePlan, confirmation: SkillUpdateConfirmation): void {
+  if (plan.overwriteRequired && confirmation.overwriteModifiedInstallation !== true) {
+    throw new Error(`Skill ${JSON.stringify(item.id)} requires explicit overwrite confirmation; no path was changed`);
+  }
+  if (plan.nonCanonicalPath !== undefined && confirmation.nonCanonicalPath !== plan.nonCanonicalPath) {
+    throw new Error(`Skill ${JSON.stringify(item.id)} is installed at the non-canonical location ${JSON.stringify(plan.nonCanonicalPath)}; explicit confirmation of that exact path is required and no path was changed`);
+  }
+  if (plan.method !== undefined && confirmation.externalMethod !== true) {
+    throw new Error(`Skill ${JSON.stringify(item.id)} has an external method; explicit method confirmation is required and no command was run`);
+  }
+}
+
+async function rollBackUpdate(
+  error: unknown,
+  transaction: { readonly rollback: () => Promise<void> },
+  persistedState: { readonly rollback: () => Promise<void> },
+): Promise<never> {
+  const rollbackErrors: string[] = [];
+  for (const [label, rollback] of [
+    ["filesystem", () => transaction.rollback()],
+    ["persisted-state", () => persistedState.rollback()],
+  ] as const) {
+    try {
+      await rollback();
+    } catch (rollbackError) {
+      rollbackErrors.push(`${label} rollback failed: ${errorMessage(rollbackError)}`);
+    }
+  }
+  if (rollbackErrors.length > 0) {
+    throw new Error(`${errorMessage(error)}; ${rollbackErrors.join("; ")}`);
+  }
+  throw error;
 }
 
 /** Applies selected entries independently and returns a complete per-skill summary. */
