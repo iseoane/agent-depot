@@ -284,7 +284,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   return (
     <Box flexDirection="column">
-      <Text color={theme.accent} bold>Updates (scope: {scope})  t all  p project  g user-global  r check again</Text>
+      <Text color={theme.accent} bold>Updates (scope: {scope})  t all · p project · g user-global</Text>
       {state.status === "loading" ? <Text>{state.label}</Text> : null}
       {data ? (
         <Text color={theme.muted}>checked {formatAgo(clock() - data.checkedAt)} · {describeRefresh(data)}</Text>

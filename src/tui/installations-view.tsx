@@ -121,7 +121,7 @@ const GROUP_ROW_MESSAGE: Record<"A" | "u" | "h" | "i", string> = {
   i: "Host changes are not available for group rows",
 };
 
-const LEGEND = "adopted = tracked in place, not copied by agent-depot · modified = changed on disk";
+const LEGEND = "adopted: tracked in place · modified: changed on disk";
 
 /** The Skill of an installation, as the shared manage flows expect it. */
 function skillOf(row: InstallationRow, sourceId: string): SkillCandidate {
@@ -408,6 +408,10 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
   const ready = state.data;
   const window = computeWindow(rows.length, index, height);
+  // The legend explains the markers, so it shows only while a rendered row carries one.
+  const legendNeeded = rows.slice(window.start, window.end).some(
+    (row) => row.node.data.kind === "installation" && markersOf(row.node.data.row) !== "",
+  );
 
   return (
     <Box flexDirection="column">
@@ -432,7 +436,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       })}
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
       {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
-      <Text color={theme.muted}>{LEGEND}</Text>
+      {legendNeeded ? <Text color={theme.muted}>{LEGEND}</Text> : null}
       <ModePanel mode={mode} />
     </Box>
   );

@@ -153,7 +153,22 @@ test("shows a tree of scope, then Source, then Skills with counts, source and ma
   assert.match(projectLine, /pi/);
   assert.ok(!projectLine.includes("adopted"));
   assert.ok(!projectLine.includes("modified"));
-  assert.match(projectFrame, /adopted = tracked in place, not copied by agent-depot · modified = changed on disk/);
+  assert.match(projectFrame, /adopted: tracked in place · modified: changed on disk/);
+  view.unmount();
+});
+
+test("the legend appears only while a visible row carries adopted or modified", async (t) => {
+  const f = await fixture(t);
+  await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/plain"));
+  await f.operations.addUserGlobalInstallation!(record(["pi"], true, "portable/kept"));
+  const view = mount(f);
+  const collapsed = await waitForFrame(view.lastFrame, /▸ builtin:agent-depot \(2\)/);
+  assert.ok(!collapsed.includes("tracked in place"), "no visible row carries a marker yet");
+  const expanded = await open(view, /builtin:agent-depot/);
+  assert.match(expanded, /portable\/kept.*adopted/);
+  assert.match(expanded, /adopted: tracked in place · modified: changed on disk/);
+  const closed = await step(view, LEFT);
+  assert.ok(!closed.includes("tracked in place"), "collapsing hides the rows, so the legend goes");
   view.unmount();
 });
 

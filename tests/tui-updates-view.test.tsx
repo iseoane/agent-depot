@@ -577,7 +577,8 @@ test("the footer names the scope keys and the check", async (t) => {
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /4 Updates/);
   press(stdin, "4");
-  const frame = await waitForFrame(lastFrame, /\[4 Updates\]/);
+  // While the sources refresh the view captures keys, so the footer shows the check key once it is done.
+  const frame = await waitForFrame(lastFrame, /r check again/);
   assert.match(frame, /t all/);
   assert.match(frame, /p project/);
   assert.match(frame, /g user-global/);
