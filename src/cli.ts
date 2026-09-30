@@ -96,6 +96,88 @@ const REMOVE_SOURCE_USAGE = "Usage: agent-depot source remove <id> [--skill <id|
 const MIGRATE_SOURCE_USAGE = "Usage: agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]";
 const UNINSTALL_USAGE = "Usage: agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]";
 
+interface CommandContext {
+  readonly operations: SourceOperations;
+  readonly dependencies: CliDependencies;
+  readonly output: (line: string) => void;
+}
+
+type CommandHandler = (values: readonly string[], context: CommandContext) => Promise<number>;
+type SourceSubcommandHandler = (values: readonly string[], context: CommandContext) => Promise<void>;
+
+const SOURCE_SUBCOMMANDS = new Map<string, SourceSubcommandHandler>([
+  ["list", async (values, { operations, output }) => {
+    requireArgumentCount(values, 0, "source list");
+    for (const source of await operations.listSources()) {
+      output(formatSource(source));
+    }
+  }],
+  ["add", async (values, { operations, output }) => {
+    requireArgumentCount(values, 1, "source add <url>");
+    const source = await operations.addGitSource(values[0]);
+    output(`Added Git Source: ${source.id}\t${source.url}`);
+  }],
+  ["refresh", runSourceRefresh],
+  ["remove", (values, { operations, dependencies, output }) => runSourceRemoval(values, operations, dependencies, output)],
+  ["migrate", (values, { operations, dependencies, output }) => runSourceMigration(values, operations, dependencies, output)],
+]);
+
+const COMMANDS = new Map<string, CommandHandler>([
+  ["install", async (values, { operations, dependencies, output }) => {
+    await runInstall(values, operations, dependencies, output);
+    return 0;
+  }],
+  ["update", (values, { operations, dependencies, output }) => runUpdate(values, operations, dependencies, output)],
+  ["uninstall", async (values, { operations, dependencies, output }) => {
+    await runUninstall(values, operations, dependencies, output);
+    return 0;
+  }],
+  ["discover", async (values, { operations, output }) => {
+    requireSourceIds(values);
+    const discoverSkills = operations.discoverSkills;
+    if (!discoverSkills) {
+      throw new CliUsageError("Discovery is unavailable in the configured Source operations");
+    }
+    let candidates: readonly SkillCandidate[];
+    try {
+      candidates = await discoverSkills.call(operations, values);
+    } catch (error) {
+      throw new Error(formatDiscoveryError(error));
+    }
+    for (const candidate of candidates) {
+      output(formatCandidate(candidate));
+    }
+    return 0;
+  }],
+  ["source", async (values, context) => {
+    const subcommand = SOURCE_SUBCOMMANDS.get(values[0] ?? "");
+    if (!subcommand) {
+      throw new CliUsageError(USAGE);
+    }
+    await subcommand(values.slice(1), context);
+    return 0;
+  }],
+]);
+
+async function runSourceRefresh(
+  values: readonly string[],
+  { operations, output }: CommandContext,
+): Promise<void> {
+  if (values.length < 1 || values.length > 2 || (values.length === 2 && values[1] !== "--yes")) {
+    throw new CliUsageError("Usage: agent-depot source refresh <id> [--yes]");
+  }
+  const source = await findSource(operations, values[0]);
+  if (source.kind === "builtin") {
+    throw new BuiltInSourceError();
+  }
+  output(`Preview: refresh Git Source ${source.id} from ${source.url}`);
+  if (values[1] !== "--yes") {
+    throw new CliUsageError("Refresh not confirmed; rerun with --yes to continue");
+  }
+  const refreshed = await operations.refreshSource(source.id);
+  output(`Refreshed Git Source: ${refreshed.id}\t${refreshed.url}`);
+}
+
 /** Runs the CLI application and returns a process exit code. */
 export async function runCli(argv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
   const output = dependencies.stdout ?? ((line: string) => console.log(line));
@@ -103,86 +185,11 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
   const operations = dependencies.operations ?? createSourceOperations({ homeDirectory: dependencies.homeDirectory });
 
   try {
-    if (argv[0] === "install") {
-      await runInstall(argv.slice(1), operations, dependencies, output);
-      return 0;
-    }
-
-    if (argv[0] === "update") {
-      return await runUpdate(argv.slice(1), operations, dependencies, output);
-    }
-
-    if (argv[0] === "uninstall") {
-      await runUninstall(argv.slice(1), operations, dependencies, output);
-      return 0;
-    }
-
-    if (argv[0] === "discover") {
-      const sourceIds = argv.slice(1);
-      requireSourceIds(sourceIds);
-      const discoverSkills = operations.discoverSkills;
-      if (!discoverSkills) {
-        throw new CliUsageError("Discovery is unavailable in the configured Source operations");
-      }
-
-      let candidates: readonly SkillCandidate[];
-      try {
-        candidates = await discoverSkills.call(operations, sourceIds);
-      } catch (error) {
-        throw new Error(formatDiscoveryError(error));
-      }
-      for (const candidate of candidates) {
-        output(formatCandidate(candidate));
-      }
-      return 0;
-    }
-
-    if (argv[0] !== "source") {
+    const command = COMMANDS.get(argv[0] ?? "");
+    if (!command) {
       throw new CliUsageError(USAGE);
     }
-
-    const action = argv[1];
-    const values = argv.slice(2);
-    switch (action) {
-      case "list":
-        requireArgumentCount(values, 0, "source list");
-        for (const source of await operations.listSources()) {
-          output(formatSource(source));
-        }
-        return 0;
-      case "add":
-        requireArgumentCount(values, 1, "source add <url>");
-        {
-          const source = await operations.addGitSource(values[0]);
-          output(`Added Git Source: ${source.id}\t${source.url}`);
-        }
-        return 0;
-      case "refresh":
-        if (values.length < 1 || values.length > 2 || (values.length === 2 && values[1] !== "--yes")) {
-          throw new CliUsageError("Usage: agent-depot source refresh <id> [--yes]");
-        }
-        {
-          const source = await findSource(operations, values[0]);
-          if (source.kind === "builtin") {
-            throw new BuiltInSourceError();
-          }
-          output(`Preview: refresh Git Source ${source.id} from ${source.url}`);
-          if (values[1] !== "--yes") {
-            throw new CliUsageError("Refresh not confirmed; rerun with --yes to continue");
-          }
-          const refreshed = await operations.refreshSource(source.id);
-          output(`Refreshed Git Source: ${refreshed.id}\t${refreshed.url}`);
-        }
-        return 0;
-      case "remove":
-        await runSourceRemoval(values, operations, dependencies, output);
-        return 0;
-      case "migrate":
-        await runSourceMigration(values, operations, dependencies, output);
-        return 0;
-      default:
-        throw new CliUsageError(USAGE);
-    }
+    return await command(argv.slice(1), { operations, dependencies, output });
   } catch (error) {
     errorOutput(`Error: ${error instanceof Error ? error.message : "unknown error"}`);
     return 1;

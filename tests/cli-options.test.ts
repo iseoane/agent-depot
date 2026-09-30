@@ -53,3 +53,16 @@ test("install option parsing reports precise usage errors", async () => {
     }
   }
 });
+
+test("command dispatch rejects unknown commands and subcommands with the full usage", async () => {
+  for (const argv of [[], ["bogus"], ["source"], ["source", "bogus"], ["constructor"], ["source", "constructor"]]) {
+    const message = await failure(argv);
+    assert.match(message, /^Error: Usage:\n {2}agent-depot source list\n/u, argv.join(" "));
+  }
+});
+
+test("source refresh validates its arguments before touching Sources", async () => {
+  for (const argv of [["source", "refresh"], ["source", "refresh", "a", "b"], ["source", "refresh", "a", "b", "c"]]) {
+    assert.equal(await failure(argv), "Error: Usage: agent-depot source refresh <id> [--yes]", argv.join(" "));
+  }
+});
