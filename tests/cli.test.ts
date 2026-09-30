@@ -2796,6 +2796,7 @@ test("tui command renders the TUI with the injected Source operations", async ()
   const rendered: SourceOperations[] = [];
   const code = await runCli(["tui"], {
     operations,
+    isInteractive: () => true,
     renderTui: async (received) => {
       rendered.push(received);
     },
@@ -2803,4 +2804,21 @@ test("tui command renders the TUI with the injected Source operations", async ()
 
   assert.equal(code, 0);
   assert.deepEqual(rendered, [operations]);
+});
+
+test("tui command fails with a clear error when the terminal is not interactive", async () => {
+  const errors: string[] = [];
+  let rendered = false;
+  const code = await runCli(["tui"], {
+    operations: fakeOperations(),
+    isInteractive: () => false,
+    stderr: (line) => errors.push(line),
+    renderTui: async () => {
+      rendered = true;
+    },
+  });
+
+  assert.equal(code, 1);
+  assert.deepEqual(errors, ["Error: agent-depot tui requires an interactive terminal"]);
+  assert.equal(rendered, false);
 });

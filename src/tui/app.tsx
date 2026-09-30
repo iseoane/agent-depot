@@ -1,6 +1,7 @@
 import { Box, Text, useApp, useInput } from "ink";
 
 import type { SourceOperations } from "../sources.js";
+import { SourcesView } from "./sources-view.js";
 
 export interface AppProps {
   /** Source operations the views call directly; injectable for tests. */
@@ -9,7 +10,7 @@ export interface AppProps {
   readonly onExit?: () => void;
 }
 
-export function App({ onExit }: AppProps) {
+export function App({ operations, onExit }: AppProps) {
   const { exit } = useApp();
 
   useInput((input) => {
@@ -22,7 +23,8 @@ export function App({ onExit }: AppProps) {
   return (
     <Box flexDirection="column">
       <Text bold>Agent Depot</Text>
-      <Text>Sources (coming soon)</Text>
+      <Text>Sources</Text>
+      <SourcesView operations={operations} />
       <Text dimColor>Press q to quit</Text>
     </Box>
   );

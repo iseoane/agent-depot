@@ -77,6 +77,8 @@ export interface CliDependencies {
   readonly homeDirectory?: string;
   /** Test/embedding seam for the interactive TUI; defaults to the Ink renderer. */
   readonly renderTui?: (operations: SourceOperations) => Promise<void>;
+  /** Test seam: whether stdin supports raw-mode keyboard input; defaults to the real stdin. */
+  readonly isInteractive?: () => boolean;
 }
 
 const USAGE = [
@@ -154,6 +156,10 @@ const COMMANDS = new Map<string, CommandHandler>([
     return 0;
   }],
   ["tui", async (_values, { operations, dependencies }) => {
+    const isInteractive = dependencies.isInteractive ?? (() => process.stdin.isTTY === true);
+    if (!isInteractive()) {
+      throw new Error("agent-depot tui requires an interactive terminal");
+    }
     // Loaded lazily so non-interactive commands never import Ink/React.
     const renderTui = dependencies.renderTui ?? (await import("./tui/render.js")).renderTui;
     await renderTui(operations);

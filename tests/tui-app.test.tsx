@@ -27,10 +27,14 @@ const operations: SourceOperations = {
   },
 };
 
-test("App renders the header and the Sources placeholder", () => {
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test("App renders the header and the Sources view", async () => {
   const { lastFrame, unmount } = render(<App operations={operations} onExit={() => undefined} />);
+  await tick();
   assert.match(lastFrame() ?? "", /Agent Depot/);
   assert.match(lastFrame() ?? "", /Sources/);
+  assert.match(lastFrame() ?? "", /builtin:agent-depot/);
   unmount();
 });
 

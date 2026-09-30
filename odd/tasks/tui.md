@@ -24,7 +24,7 @@ The CLI requires remembering subcommands, ids and `--yes` confirmations; a TUI m
 
 ## Tasks
 - [x] T1 — Ink scaffolding: deps, tsconfig JSX, `agent-depot tui` command launching an app shell with injectable `SourceOperations`; test renders shell.
-- [ ] T2 — Sources view: list sources (id, kind, url), keyboard navigation, empty/error states.
+- [x] T2 — Sources view: list sources (id, kind, url), keyboard navigation, empty/error states.
 - [ ] T3 — Sources actions: add Git Source (URL input), refresh and remove with confirmation; built-in protected.
 - [ ] T4 — Catalog view: select source(s) → discovered skills with filter.
 
@@ -38,6 +38,7 @@ The CLI requires remembering subcommands, ids and `--yes` confirmations; a TUI m
 
 ## Evidence
 - T1: RED = `pnpm typecheck` failed (missing `src/tui/app.js`, `renderTui` not in `CliDependencies`); GREEN = typecheck, lint, test (246 pass) all clean. Route: delegated direct writer. Added `ink`, `react`, `@types/react`, `ink-testing-library`; `src/tui/app.tsx`, `src/tui/render.tsx` (lazy-imported by `tui` command); usage test updated. Commit: see git log (`feat(tui): scaffold Ink app and tui command`).
+- T2: RED = typecheck failed (no `src/tui/sources-view.js`, `isInteractive` not in `CliDependencies`); GREEN = typecheck, lint, test (252 pass) clean; `echo q | node dist/src/cli.js tui` prints `Error: agent-depot tui requires an interactive terminal`, exit 1. Added `src/tui/sources-view.tsx`, injectable `isInteractive` guard, `tests/tui-sources-view.test.tsx`. Route: delegated direct writer.
 
 ## Next step
-T2.
+T3.
