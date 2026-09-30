@@ -7,6 +7,7 @@ import {
   type ProjectHost,
   type ProjectSkillSelection,
   type ProjectSource,
+  type ResolvedVersionEvidence,
   type VersionPolicy,
 } from "../project-manifest.js";
 import { formatVersionPolicy } from "../skill-install.js";
@@ -56,10 +57,14 @@ function sourceLabel(source: ProjectSource): string {
   return "url" in source ? `${source.url}${source.ref === undefined ? "" : `@${source.ref}`}` : source.path;
 }
 
-function installedVersion(selection: ProjectSkillSelection): string {
-  const evidence = selection.installation?.resolvedVersion;
+/** Short label of version evidence: the package version or the first commit characters. */
+export function formatVersionEvidence(evidence: ResolvedVersionEvidence | undefined): string {
   if (!evidence) return "unknown";
   return evidence.kind === "builtin-package" ? evidence.version : evidence.commit.slice(0, 7);
+}
+
+function installedVersion(selection: ProjectSkillSelection): string {
+  return formatVersionEvidence(selection.installation?.resolvedVersion);
 }
 
 async function toRow(
