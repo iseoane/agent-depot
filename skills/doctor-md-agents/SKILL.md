@@ -1,6 +1,9 @@
 ---
 name: "doctor-md-agents"
 description: "Runs only when the user asks for it by name. Grades the agent instruction files (AGENTS.md, CLAUDE.md and friends) against real local conversation history: which rules were ever applicable, which were obeyed, which the user had to correct by hand, what they cost in tokens, and which rules are missing. Never invoke it on inferred intent, on a related-sounding question about instructions or token budget, or as a step inside another workflow — only when the user names this skill."
+metadata:
+  author: "iseoane"
+  version: "1.0"
 argument-hint: "[--mode grade|restructure|both] [--scope repo|all|<path>...] [--files global|repo|both] [--days N]"
 disable-model-invocation: true
 ---
