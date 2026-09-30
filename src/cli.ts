@@ -237,8 +237,7 @@ async function runSourceRemoval(
   const selected = options.all
     ? dependent
     : resolveRemovalSelections(dependent, options.requested);
-  const homeDirectory = path.resolve(dependencies.homeDirectory ?? homedir());
-  const inspections: ProjectSkillRemovalInspection[] = [];
+  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), dependencies);
 
   output(`Preview: remove Git Source ${source.id} from ${source.url}`);
   output(`Dependent user-global Skills (${dependent.length}):`);
@@ -248,13 +247,9 @@ async function runSourceRemoval(
   }
   output("  Default: keep all dependent Skills tracked by default after Source removal");
 
+  const inspections: ProjectSkillRemovalInspection[] = [];
   for (const selection of selected) {
-    const inspection = await inspectProjectSkillRemoval(selection, {
-      projectRoot: homeDirectory,
-      sourceAccess: { readSkillTree: async () => [] },
-      installationTrust: "user-global-state",
-      ...dependencies.installationOptions,
-    });
+    const inspection = await inspectProjectSkillRemoval(selection, removalOptions);
     inspections.push(inspection);
     output(`  remove Skill ${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`);
     if (inspection.adopted) {
@@ -271,34 +266,35 @@ async function runSourceRemoval(
   // target must never result in a partially removed batch.
   const rechecked: ProjectSkillRemovalInspection[] = [];
   for (const selection of selected) {
-    rechecked.push(await inspectProjectSkillRemoval(selection, {
-      projectRoot: homeDirectory,
-      sourceAccess: { readSkillTree: async () => [] },
-      installationTrust: "user-global-state",
-      ...dependencies.installationOptions,
-    }));
+    rechecked.push(await inspectProjectSkillRemoval(selection, removalOptions));
   }
   assertNoOverlappingProjectSkillRemovalTargets(rechecked);
-  for (let index = 0; index < selected.length; index += 1) {
-    const before = inspections[index]!;
-    const after = rechecked[index]!;
-    if (before.digest !== after.digest || before.adopted !== after.adopted || before.modified !== after.modified ||
-      before.skillName !== after.skillName || before.paths.length !== after.paths.length ||
-      before.paths.some((candidate, pathIndex) => candidate !== after.paths[pathIndex])) {
+  for (const [index, selection] of selected.entries()) {
+    if (!sameRemovalInspection(inspections[index]!, rechecked[index]!)) {
       throw new Error(`The inspected Skill removal target changed before deletion; no path was removed`);
     }
-    await removeProjectSkill(selected[index]!, after, {
-      projectRoot: homeDirectory,
-      sourceAccess: { readSkillTree: async () => [] },
-      installationTrust: "user-global-state",
-      ...dependencies.installationOptions,
-    });
+    await removeProjectSkill(selection, rechecked[index]!, removalOptions);
   }
   await operations.removeGitSource(source.id, selected);
   output(`Removed Git Source: ${source.id}`);
   if (selected.length > 0) {
     output(`Removed ${selected.length} dependent user-global Skill${selected.length === 1 ? "" : "s"}; other dependent Skills remain tracked`);
   }
+}
+
+function userGlobalRemovalOptions(homeDirectory: string, dependencies: CliDependencies) {
+  return {
+    projectRoot: homeDirectory,
+    sourceAccess: { readSkillTree: async () => [] },
+    installationTrust: "user-global-state",
+    ...dependencies.installationOptions,
+  } as const;
+}
+
+function sameRemovalInspection(before: ProjectSkillRemovalInspection, after: ProjectSkillRemovalInspection): boolean {
+  return before.digest === after.digest && before.adopted === after.adopted && before.modified === after.modified &&
+    before.skillName === after.skillName && before.paths.length === after.paths.length &&
+    before.paths.every((candidate, pathIndex) => candidate === after.paths[pathIndex]);
 }
 
 function parseMigrateSourceOptions(argv: readonly string[]): MigrateSourceOptions {
