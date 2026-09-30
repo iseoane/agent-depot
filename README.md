@@ -306,3 +306,20 @@ without a shell. It creates or fetches a bare mirror, explicitly synchronizes
 all refs, and prunes deleted refs; it does not check out files, install skills,
 or choose Sources automatically. Network access is required for a confirmed
 refresh.
+
+## Static analysis
+
+[Fallow](https://docs.fallow.tools) 3.30.0 runs through `npx --yes fallow@3.30.0`
+(pinned, no dependency installed) and reads `.fallowrc.json`, which defines the
+entry points and the module-layer boundaries (`cli` -> `application` -> `core`
+-> `infrastructure`; imports may only point downward).
+
+- `pnpm audit:dead-code`: unused files, exports and dependencies, plus
+  boundary violations. Must be clean.
+- `pnpm audit:dupes`: code duplication (threshold 6%).
+- `pnpm audit:health`: complexity and CRAP scores using real coverage; fails
+  when the health score drops below 85.
+- `pnpm audit:all`: runs the three checks in order.
+- `pnpm test:coverage`: runs the tests with built-in V8 coverage
+  (`NODE_V8_COVERAGE`, source maps) into `coverage/v8`, which Fallow reads.
+  It rebuilds `dist/` with source maps; no extra dependencies are needed.
