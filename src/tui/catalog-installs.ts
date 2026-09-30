@@ -81,14 +81,9 @@ function recordsFor(records: readonly ProjectSkillSelection[], skill: SkillCandi
   return records.filter((record) => record.path === skill.path && matchesSource(record.source, skill.sourceId, sources));
 }
 
-/** Marker such as `[global: claude] [project: codex]`; empty when the Skill is not installed. */
-export function installMarker(skill: SkillCandidate, installed: InstalledSkills): string {
-  const parts: string[] = [];
-  for (const [label, records] of [["global", installed.global], ["project", installed.project]] as const) {
-    const hosts = [...new Set(recordsFor(records, skill, installed.sources).flatMap((record) => record.hosts))];
-    if (hosts.length > 0) parts.push(`[${label}: ${hosts.join(", ")}]`);
-  }
-  return parts.join(" ");
+/** Whether the Skill is installed user-global or in the project manifest (same Source and path). */
+export function isInstalled(skill: SkillCandidate, installed: InstalledSkills): boolean {
+  return [installed.global, installed.project].some((records) => recordsFor(records, skill, installed.sources).length > 0);
 }
 
 export interface InstallChoice {

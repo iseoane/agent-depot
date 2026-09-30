@@ -161,3 +161,14 @@ test("App separates the header and tab bar from the page with a double line", as
   assert.ok(tabs >= 0 && separator > tabs && page > separator, `unexpected layout:\n${frame}`);
   unmount();
 });
+
+test("App footer for the Catalog offers install only", async () => {
+  const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
+  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  stdin.write("2");
+  const frame = await waitForFrame(lastFrame, /\[2 Catalog\]/);
+  assert.match(frame, /i install/);
+  assert.match(frame, /Enter\/right expand/);
+  assert.doesNotMatch(frame, /uninstall|add hosts/);
+  unmount();
+});

@@ -4,7 +4,6 @@ import type {
   InstallScope,
   PreparedInstall,
 } from "./catalog-installs.js";
-import type { ManageMode } from "./manage-actions.js";
 
 /** Host choices in checklist order; labels use the project's host identifiers. */
 export const HOST_CHOICES: readonly ProjectHost[] = PROJECT_HOSTS;
@@ -25,8 +24,7 @@ export type ActionMode =
     }
   | { readonly kind: "confirm-install"; readonly skill: SkillCandidate; readonly prepared: PreparedInstall }
   | { readonly kind: "confirm-exposure"; readonly skill: SkillCandidate; readonly prepared: PreparedInstall }
-  /** `i` on a Skill already installed user-global: add hosts to it or install anew. */
-  | { readonly kind: "installed-choice"; readonly skill: SkillCandidate; readonly missing: readonly ProjectHost[] }
-  | ManageMode;
+  /** A step is running (refreshing, installing); keys are ignored until it ends. */
+  | { readonly kind: "busy"; readonly label: string };
 
 export const BROWSE: ActionMode = { kind: "browse" };

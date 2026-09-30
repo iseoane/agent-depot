@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { render } from "ink-testing-library";
 
-import { parseProjectManifest, ProjectManifestStore } from "../src/project-manifest.js";
+import { parseProjectManifest, ProjectManifestStore, type ProjectSkillSelection } from "../src/project-manifest.js";
 import type { SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
@@ -11,6 +11,8 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const DOWN = "\u001B[B";
+const RIGHT = "\u001B[C";
+const LEFT = "\u001B[D";
 const UP = "\u001B[A";
 const ESC = "\u001B";
 
@@ -50,6 +52,30 @@ function operationsFor(discoverSkills?: SourceOperations["discoverSkills"]): Sou
   };
 }
 
+function installedSelection(sourceId: string, skillPath: string): ProjectSkillSelection {
+  const source = sourceId === BUILT_IN_SOURCE.id
+    ? { kind: "builtin" as const, id: sourceId }
+    : { kind: "external" as const, url: "https://x/y.git" };
+  return parseProjectManifest({
+    version: 1,
+    skills: [{ source, path: skillPath, version: { policy: "latest" }, hosts: ["pi"] }],
+  }).skills[0]!;
+}
+
+/** Manifest store serving the given project installations. */
+function manifestWith(...skills: ProjectSkillSelection[]): TuiEnvironment {
+  class Store extends ProjectManifestStore {
+    constructor() {
+      super("/nonexistent/agent-depot-test/agent-depot.json");
+    }
+
+    override async load() {
+      return parseProjectManifest({ version: 1, skills });
+    }
+  }
+  return { projectManifestStore: new Store() };
+}
+
 function selectedLine(frame: string | undefined): string | undefined {
   return frame?.split("\n").find((line) => line.startsWith("> "));
 }
@@ -62,7 +88,7 @@ test("CatalogView shows a loading state", () => {
   unmount();
 });
 
-test("CatalogView lists name, description and source id for the requested source", async () => {
+test("CatalogView lists skills as a tree under their source, with the installable count on the source", async () => {
   const requested: (readonly string[])[] = [];
   const { lastFrame, unmount } = render(
     <CatalogView environment={NO_MANIFEST}
@@ -75,17 +101,52 @@ test("CatalogView lists name, description and source id for the requested source
   );
   const frame = await waitForFrame(lastFrame, /2 of 2/);
   assert.deepEqual(requested, [["builtin:agent-depot"]]);
-  assert.match(frame, /alpha\s+Does Alpha things\s+builtin:agent-depot/);
+  const lines = frame.split("\n");
+  const group = lines.findIndex((line) => /▾ builtin:agent-depot \(2\)/.test(line));
+  const alpha = lines.findIndex((line) => /alpha\s+Does Alpha things/.test(line));
+  assert.ok(group >= 0 && alpha > group, `unexpected layout:\n${frame}`);
+  assert.match(lines[alpha]!, /^\s{3,}alpha/, "skills are indented under their source");
+  assert.ok(!lines[alpha]!.includes("builtin:agent-depot"), "the source is not repeated on each skill");
   assert.match(frame, /beta/);
-  assert.match(frame, /2 of 2/);
+  unmount();
+});
+
+test("CatalogView hides installed skills (user-global or project) and sources left with none", async () => {
+  const operations: SourceOperations = {
+    ...operationsFor(async () => skills),
+    listUserGlobalInstallations: async () => [installedSelection("builtin:agent-depot", "skills/alpha")],
+  };
+  const { lastFrame, stdin, unmount } = render(
+    <CatalogView environment={manifestWith(installedSelection("builtin:agent-depot", "skills/beta"))} operations={operations} sourceId="s" />,
+  );
+  const frame = await waitForFrame(lastFrame, /1 of 1/);
+  assert.ok(!frame.includes("alpha") && !frame.includes("beta"), "installed skills are not listed");
+  assert.ok(!frame.includes("builtin:agent-depot"), "a source with no installable skills is hidden");
+  assert.match(frame, /git:1234567890abcdef12345678 \(1\)/);
+  stdin.write(DOWN);
+  stdin.write(RIGHT);
+  await waitForFrame(lastFrame, /gamma/);
+  unmount();
+});
+
+test("CatalogView says so when every skill is installed", async () => {
+  const operations: SourceOperations = {
+    ...operationsFor(async () => skills.slice(0, 1)),
+    listUserGlobalInstallations: async () => [installedSelection("builtin:agent-depot", "skills/alpha")],
+  };
+  const { lastFrame, unmount } = render(<CatalogView environment={NO_MANIFEST} operations={operations} sourceId="s" />);
+  const frame = await waitForFrame(lastFrame, /All skills are installed/);
+  assert.ok(!frame.includes("alpha"));
   unmount();
 });
 
 test("CatalogView truncates long descriptions", async () => {
   const long = { ...skills[0], description: "x".repeat(200) };
-  const { lastFrame, unmount } = render(
+  const { lastFrame, stdin, unmount } = render(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => [long])} sourceId="builtin:agent-depot" />,
   );
+  await waitForFrame(lastFrame, /1 of 1/);
+  stdin.write(RIGHT);
   const frame = await waitForFrame(lastFrame, /x{20,}/);
   assert.ok(!frame.includes("x".repeat(100)));
   assert.match(frame, /x{20,}\.\.\./);
@@ -113,26 +174,35 @@ test("CatalogView shows empty, error and unsupported states", async () => {
   unsupported.unmount();
 });
 
-test("CatalogView navigates with j/k and arrows, clamped", async () => {
+test("CatalogView navigates the tree with j/k and arrows, clamped, and expands or collapses sources", async () => {
   const { lastFrame, stdin, unmount } = render(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} sourceId="builtin:agent-depot" />,
   );
   const selects = (name: RegExp) => waitForFrame(lastFrame, (frame) => name.test(selectedLine(frame) ?? ""));
-  await selects(/alpha/);
-  // Up at the top is clamped: if it moved the selection, "j" would land back on alpha instead of beta.
+  await selects(/builtin:agent-depot/);
+  // Up at the top is clamped: if it moved the selection, "j" would land back on the source instead of alpha.
   stdin.write(UP);
   stdin.write("j");
+  await selects(/alpha/);
+  stdin.write(DOWN);
   await selects(/beta/);
   stdin.write(DOWN);
-  stdin.write(DOWN);
-  stdin.write(DOWN);
+  await selects(/git:1234567890abcdef12345678/);
+  assert.ok(!(lastFrame() ?? "").includes("gamma"), "the second source starts collapsed");
+  stdin.write(RIGHT);
+  await waitForFrame(lastFrame, /gamma/);
+  stdin.write("j");
   await selects(/gamma/);
-  stdin.write("k");
-  await selects(/beta/);
+  stdin.write(LEFT);
+  await selects(/git:1234567890abcdef12345678/);
+  stdin.write(LEFT);
+  await waitForFrame(lastFrame, (frame) => !frame.includes("gamma"));
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /gamma/);
   unmount();
 });
 
-test("CatalogView filters case-insensitively on name and description with an n of m count", async () => {
+test("CatalogView filters leaves case-insensitively, keeps their sources and shows an n of m count", async () => {
   const capturing: boolean[] = [];
   const { lastFrame, stdin, unmount } = render(
     <CatalogView environment={NO_MANIFEST}
@@ -145,17 +215,18 @@ test("CatalogView filters case-insensitively on name and description with an n o
   stdin.write("/");
   await waitForFrame(lastFrame, /Filter: _/);
   assert.equal(capturing.at(-1), true);
-  stdin.write("beta");
-  await waitForFrame(lastFrame, (frame) => /Filter: beta/.test(frame) && /1 of 3/.test(frame));
-  assert.ok(!(lastFrame() ?? "").includes("alpha"));
+  stdin.write("gamma");
+  const filtered = await waitForFrame(lastFrame, (frame) => /Filter: gamma/.test(frame) && /1 of 3/.test(frame));
+  assert.match(filtered, /git:1234567890abcdef12345678 \(1\)/, "the parent of a match stays visible and opens");
+  assert.match(filtered, /gamma/);
+  assert.ok(!filtered.includes("alpha") && !filtered.includes("builtin:agent-depot"));
   stdin.write("\r");
-  await waitForFrame(lastFrame, (frame) => /Filter: beta(?!_)/.test(frame));
+  await waitForFrame(lastFrame, (frame) => /Filter: gamma(?!_)/.test(frame));
   assert.equal(capturing.at(-1), false);
   assert.match(lastFrame() ?? "", /1 of 3/);
-  assert.match(lastFrame() ?? "", /beta/);
 
   stdin.write("/");
-  await waitForFrame(lastFrame, /Filter: beta_/);
+  await waitForFrame(lastFrame, /Filter: gamma_/);
   stdin.write(ESC);
   await waitForFrame(lastFrame, /3 of 3/);
   assert.equal(capturing.at(-1), false);
@@ -246,7 +317,7 @@ test("CatalogView calls discoverSkills with its receiver", async () => {
   unmount();
 });
 
-test("CatalogView windows a long list around the highlight and pages with PgUp/PgDn", async () => {
+test("CatalogView windows a long tree around the highlight and pages with PgUp/PgDn", async () => {
   const many: readonly SkillCandidate[] = Array.from({ length: 40 }, (_, n) => ({
     sourceId: "builtin:agent-depot",
     path: `skills/s${String(n).padStart(2, "0")}`,
@@ -256,14 +327,13 @@ test("CatalogView windows a long list around the highlight and pages with PgUp/P
   const { lastFrame, stdin, unmount } = render(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => many)} sourceId="builtin:agent-depot" listHeight={6} />,
   );
-  const top = await waitForFrame(lastFrame, /1–6 of 40/);
-  assert.match(selectedLine(top) ?? "", /skill00/);
+  const top = await waitForFrame(lastFrame, /1–6 of 41/);
+  assert.match(selectedLine(top) ?? "", /builtin:agent-depot/);
   assert.ok(!top.includes("skill06"));
   stdin.write("\u001B[6~");
-  const paged = await waitForFrame(lastFrame, (frame) => /skill06/.test(selectedLine(frame) ?? ""));
-  assert.match(paged, /\d+–\d+ of 40/);
-  assert.equal(paged.split("\n").filter((line) => /skill\d\d/.test(line)).length, 6);
+  const paged = await waitForFrame(lastFrame, (frame) => /skill05/.test(selectedLine(frame) ?? ""));
+  assert.match(paged, /\d+–\d+ of 41/);
   stdin.write("\u001B[5~");
-  await waitForFrame(lastFrame, (frame) => /skill00/.test(selectedLine(frame) ?? ""));
+  await waitForFrame(lastFrame, (frame) => /builtin:agent-depot/.test(selectedLine(frame) ?? ""));
   unmount();
 });
