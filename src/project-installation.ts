@@ -6,6 +6,7 @@ import path from "node:path";
 import type { ProjectHost, ProjectSkillSelection } from "./project-manifest.js";
 import { compareSkillTrees, readExistingSkillTree } from "./skill-adoption.js";
 import type { SkillTreeComparisonReason, SkillTreeFileSystem } from "./skill-adoption.js";
+import { pathsOverlap } from "./path-safety.js";
 import { parseSkillFrontmatter, skillTreeBaseline } from "./skill-discovery.js";
 import type { SkillTreeFile, SourceSkillTreeSnapshot } from "./skill-discovery.js";
 import type { ResolvedVersionEvidence, SkillInstallationBaseline } from "./project-manifest.js";
@@ -922,14 +923,6 @@ function assertNoOverlappingOverwritePaths(targetPath: string, backupPath: strin
       );
     }
   }
-}
-
-function pathsOverlap(left: string, right: string): boolean {
-  const relative = path.relative(left, right);
-  const reverse = path.relative(right, left);
-  return relative === "" || reverse === "" ||
-    (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) ||
-    (!reverse.startsWith(`..${path.sep}`) && !path.isAbsolute(reverse));
 }
 
 async function assertOverwriteInspectionUnchanged(

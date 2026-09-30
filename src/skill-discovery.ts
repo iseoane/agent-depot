@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
+import { assertNoSymlinkPath } from "./path-safety.js";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -295,13 +296,13 @@ async function readSelectedSkillDirectory(
   if (rootKind !== "directory") {
     throw new Error(`Built-in Source root is not a directory: ${root}`);
   }
-  await assertNoSymlinkPath(root);
+  await assertNoSymlinkPath(root, "Selected Skill path");
 
   const selectedDirectory = path.join(root, ...selectedPath.split("/"));
   if ((await safePathKind(selectedDirectory)) !== "directory") {
     throw new Error(`Selected Skill directory is not available: ${selectedPath}`);
   }
-  await assertNoSymlinkPath(selectedDirectory);
+  await assertNoSymlinkPath(selectedDirectory, "Selected Skill path");
 
   const files: SkillTreeFile[] = [];
   let totalBytes = 0;
@@ -353,7 +354,7 @@ async function walkSelectedSkillDirectory(
   assertFileCount: () => void,
   observeFile: (relativePath: string) => void,
 ): Promise<void> {
-  await assertNoSymlinkPath(absoluteDirectory);
+  await assertNoSymlinkPath(absoluteDirectory, "Selected Skill path");
   const entries = await readdir(absoluteDirectory, { withFileTypes: true });
   entries.sort((left, right) => left.name.localeCompare(right.name));
   for (const entry of entries) {
@@ -389,7 +390,7 @@ async function walkSelectedSkillDirectory(
     }
 
     assertFileCount();
-    await assertNoSymlinkPath(absolutePath);
+    await assertNoSymlinkPath(absolutePath, "Selected Skill path");
     const information = await lstat(absolutePath);
     if (!information.isFile()) {
       throw new Error(`Selected Skill tree entry changed while reading: ${relativePath}`);
@@ -401,26 +402,6 @@ async function walkSelectedSkillDirectory(
     assertTotalBytes(byteLength);
     observeFile(relativePath);
     files.push({ path: relativePath, content, executable: (information.mode & 0o111) !== 0 });
-  }
-}
-
-async function assertNoSymlinkPath(candidate: string): Promise<void> {
-  const absolute = path.resolve(candidate);
-  const root = path.parse(absolute).root;
-  let current = root;
-  const segments = path.relative(root, absolute).split(path.sep).filter(Boolean);
-  for (const segment of segments) {
-    current = path.join(current, segment);
-    try {
-      if ((await lstat(current)).isSymbolicLink()) {
-        throw new Error(`Selected Skill path contains a symbolic link: ${current}`);
-      }
-    } catch (error) {
-      if (isMissing(error)) {
-        return;
-      }
-      throw error;
-    }
   }
 }
 
@@ -489,10 +470,6 @@ async function safePathKind(candidate: string): Promise<"directory" | "file" | "
     }
     throw error;
   }
-}
-
-function isMissing(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 function normalizeSourcePath(candidate: string): string | undefined {

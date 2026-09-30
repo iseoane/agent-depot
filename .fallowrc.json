@@ -45,6 +45,7 @@
         "name": "infrastructure",
         "patterns": [
           "src/git-source.ts",
+          "src/path-safety.ts",
           "src/process-runner.ts",
           "src/version.ts"
         ]

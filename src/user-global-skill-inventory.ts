@@ -4,6 +4,7 @@ import type { Stats } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { pathsOverlap } from "./path-safety.js";
 import { readExistingSkillTree } from "./skill-adoption.js";
 import { parseSkillFrontmatter, skillTreeBaseline } from "./skill-discovery.js";
 import type { ProjectSkillSelection } from "./project-manifest.js";
@@ -407,7 +408,7 @@ export async function inspectUserGlobalSkillRemoval(
   const fileSystem = options.fileSystem ?? nodeFileSystem;
   await assertRealGlobalAncestors(homeDirectory, path.dirname(targetPath), fileSystem);
   const managedPaths = managedProtectionPaths(homeDirectory, options.managedInstallations);
-  const managedPath = managedPaths.find((protectedPath) => pathsOverlap(targetPath, protectedPath));
+  const managedPath = managedPaths.find((protectedPath) => pathsOverlap(pathKey(targetPath), pathKey(protectedPath)));
   if (managedPath !== undefined) {
     throw new Error(`Cannot remove ${JSON.stringify(targetPath)} because it is managed or aliases a managed installation at ${JSON.stringify(managedPath)}; no path was changed`);
   }
@@ -441,7 +442,7 @@ export function assertNoOverlappingUserGlobalSkillRemovals(
       const right = inspections[rightIndex]!;
       const leftAliases = globalPathAliases(left.path);
       const rightAliases = globalPathAliases(right.path);
-      if (leftAliases.some((candidate) => rightAliases.some((other) => pathsOverlap(candidate, other)))) {
+      if (leftAliases.some((candidate) => rightAliases.some((other) => pathsOverlap(pathKey(candidate), pathKey(other))))) {
         throw new Error(`Cannot remove selected unmanaged Skills because their paths or canonical/Claude aliases overlap: ${JSON.stringify(left.path)} and ${JSON.stringify(right.path)}; no path was changed`);
       }
     }
@@ -599,16 +600,6 @@ function isGlobalLocation(candidatePath: string, rootName: ".agents" | ".claude"
 
 function fileIdentity(information: Stats): string {
   return `${information.dev}:${information.ino}`;
-}
-
-function pathsOverlap(left: string, right: string): boolean {
-  const normalizedLeft = pathKey(left);
-  const normalizedRight = pathKey(right);
-  const relative = path.relative(normalizedLeft, normalizedRight);
-  const reverse = path.relative(normalizedRight, normalizedLeft);
-  return relative === "" || reverse === "" ||
-    (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) ||
-    (!reverse.startsWith(`..${path.sep}`) && !path.isAbsolute(reverse));
 }
 
 function skip(

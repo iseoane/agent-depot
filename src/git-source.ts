@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, rename, rm, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { assertNoSymlinkPath } from "./path-safety.js";
 import { runProcess, type ProcessRunResult } from "./process-runner.js";
 
 export interface GitSource {
@@ -139,9 +140,9 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
 
     const destination = cachePathForValidatedSource(this.cachePath, source);
     try {
-      await assertNoSymlinkPath(this.cachePath);
+      await assertNoSymlinkPath(this.cachePath, "cache path");
       await mkdir(this.cachePath, { recursive: true });
-      await assertNoSymlinkPath(this.cachePath);
+      await assertNoSymlinkPath(this.cachePath, "cache path");
 
       const release = await acquireSourceLock(`${destination}.lock`);
       try {
@@ -167,7 +168,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
       throw new Error("the Source cache path is not a directory");
     }
     if (existing === "directory") {
-      await assertNoSymlinkPath(destination);
+      await assertNoSymlinkPath(destination, "cache path");
       // The explicit mirror refspec synchronizes branches, tags, and other
       // refs from the registered URL while --prune removes deleted refs.
       await this.runner.run("git", [
@@ -185,7 +186,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
     const temporaryDestination = `${destination}.${process.pid}.${randomUUID()}.tmp`;
     try {
       await this.runner.run("git", ["clone", "--mirror", source.url, temporaryDestination]);
-      await assertNoSymlinkPath(temporaryDestination);
+      await assertNoSymlinkPath(temporaryDestination, "cache path");
       if ((await pathType(temporaryDestination)) !== "directory") {
         throw new Error("Git clone did not create a directory mirror");
       }
@@ -243,7 +244,7 @@ export class GitSourceSnapshotAccess {
     if ((await pathType(destination)) !== "directory") {
       throw new Error(`Git Source mirror is not available: ${destination}`);
     }
-    await assertNoSymlinkPath(destination);
+    await assertNoSymlinkPath(destination, "cache path");
 
     const commit = await this.readResolvedCommit(source);
     const tree = await this.runner.run("git", [
@@ -299,7 +300,7 @@ export class GitSourceSnapshotAccess {
     if ((await pathType(destination)) !== "directory") {
       throw new Error(`Git Source mirror is not available: ${destination}`);
     }
-    await assertNoSymlinkPath(destination);
+    await assertNoSymlinkPath(destination, "cache path");
 
     const revision = source.ref === undefined ? "HEAD" : validateGitRef(source.ref);
     const commit = (await this.runner.run("git", [
@@ -320,7 +321,7 @@ export class GitSourceSnapshotAccess {
     if ((await pathType(destination)) !== "directory") {
       throw new Error(`Git Source mirror is not available: ${destination}`);
     }
-    await assertNoSymlinkPath(destination);
+    await assertNoSymlinkPath(destination, "cache path");
 
     const commit = await this.readResolvedCommit(source);
     const tree = await this.runner.run("git", ["--git-dir", destination, "ls-tree", "-r", "-z", commit]);
@@ -398,26 +399,6 @@ async function pathType(candidate: string): Promise<PathKind> {
       return "missing";
     }
     throw error;
-  }
-}
-
-async function assertNoSymlinkPath(candidate: string): Promise<void> {
-  const absolute = path.resolve(candidate);
-  const root = path.parse(absolute).root;
-  let current = root;
-  const segments = path.relative(root, absolute).split(path.sep).filter(Boolean);
-  for (const segment of segments) {
-    current = path.join(current, segment);
-    try {
-      if ((await lstat(current)).isSymbolicLink()) {
-        throw new Error(`cache path contains a symbolic link: ${current}`);
-      }
-    } catch (error) {
-      if (isMissing(error)) {
-        return;
-      }
-      throw error;
-    }
   }
 }
 

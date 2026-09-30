@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { pathsOverlap } from "./path-safety.js";
 import { createSourceContentAccess, skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "./skill-discovery.js";
 import {
   BuiltInSourceError,
@@ -623,7 +624,7 @@ function assertNoManagedUnmanagedOverlap(
 ): void {
   for (const managedInspection of managed) {
     for (const unmanagedInspection of unmanaged) {
-      if (managedInspection.paths.some((managedPath) => pathsOverlap(managedPath, unmanagedInspection.path))) {
+      if (managedInspection.paths.some((managedPath) => pathsOverlap(path.resolve(managedPath), path.resolve(unmanagedInspection.path)))) {
         throw new Error(message(unmanagedInspection.path));
       }
     }
@@ -1649,7 +1650,7 @@ function assertNoManagedInstallationOverlap(
       ? []
       : [path.resolve(projectRoot, ...candidate.installation.path.split("/"))]);
   if (!overwrite) return Object.freeze(protectedPaths);
-  const conflicting = protectedPaths.find((candidate) => pathsOverlap(candidate, inspection.targetPath));
+  const conflicting = protectedPaths.find((candidate) => pathsOverlap(path.resolve(candidate), path.resolve(inspection.targetPath)));
   if (conflicting !== undefined) {
     throw new CliUsageError(
       `Cannot overwrite ${JSON.stringify(inspection.targetPath)} because it overlaps the managed installation ${JSON.stringify(conflicting)} belonging to another Source/Skill selection; no path was changed.`,
@@ -1680,14 +1681,6 @@ function assertUnmanagedInspectionUnchanged(
   if (expected.name !== actual.name || expected.path !== actual.path || expected.identity !== actual.identity || expected.digest !== actual.digest) {
     throw new Error(`The inspected unmanaged Skill changed before deletion: ${JSON.stringify(expected.path)}; no path was changed`);
   }
-}
-
-function pathsOverlap(left: string, right: string): boolean {
-  const relative = path.relative(path.resolve(left), path.resolve(right));
-  const reverse = path.relative(path.resolve(right), path.resolve(left));
-  return relative === "" || reverse === "" ||
-    (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) ||
-    (!reverse.startsWith(`..${path.sep}`) && !path.isAbsolute(reverse));
 }
 
 function rejectInstallationCollision(
