@@ -1047,6 +1047,95 @@ async function assertReplacementMatchesPreview(
   }
 }
 
+interface OverwriteRollbackContext {
+  readonly request: ProjectSkillInstallationRequest;
+  readonly files: readonly ValidatedTreeFile[];
+  readonly inspection: ProjectSkillInstallationInspection;
+  readonly targetPath: string;
+  readonly stagePath: string;
+  readonly backupPath: string;
+  readonly fileSystem: ProjectInstallationFileSystem;
+}
+
+interface OverwriteProgress {
+  stageCreated: boolean;
+  moved: boolean;
+  replacementInstalled: boolean;
+  replacementIdentity: PathIdentity | undefined;
+  readonly exposureCreated: CreatedPath[];
+  readonly exposureUncertain: Set<string>;
+}
+
+async function collectError(errors: string[], action: () => Promise<void>): Promise<void> {
+  try {
+    await action();
+  } catch (error) {
+    errors.push(errorMessage(error));
+  }
+}
+
+async function restoreOverwrite(context: OverwriteRollbackContext, progress: OverwriteProgress): Promise<string[]> {
+  const { stagePath, fileSystem } = context;
+  const errors: string[] = [];
+  errors.push(...await rollbackCreatedPaths(progress.exposureCreated, progress.exposureUncertain, fileSystem));
+  if (progress.stageCreated) {
+    await fileSystem.rm(stagePath).catch((error: unknown) => errors.push(`could not remove staging tree: ${errorMessage(error)}`));
+  }
+  if (progress.moved) {
+    await restoreMovedOriginal(context, progress, errors);
+  }
+  return errors;
+}
+
+async function restoreMovedOriginal(
+  context: OverwriteRollbackContext,
+  progress: OverwriteProgress,
+  errors: string[],
+): Promise<void> {
+  const { request, files, inspection, targetPath, backupPath, fileSystem } = context;
+  const { replacementIdentity } = progress;
+  if (replacementIdentity !== undefined) {
+    await collectError(errors, () => assertReplacementMatchesPreview(targetPath, request, files, replacementIdentity, fileSystem));
+  } else if (progress.replacementInstalled) {
+    errors.push(`preserved replacement at ${JSON.stringify(targetPath)} because its identity could not be verified`);
+  }
+  if (errors.length === 0 && replacementIdentity !== undefined) {
+    await collectError(errors, () => assertBackupMatchesInspection(backupPath, request, targetLocation(inspection), fileSystem));
+  }
+  if (errors.length === 0 && replacementIdentity !== undefined) {
+    await removeVerifiedReplacement(targetPath, replacementIdentity, fileSystem, errors);
+  }
+  if (errors.length === 0) {
+    await fileSystem.rename!(backupPath, targetPath).catch((error: unknown) => {
+      errors.push(`could not restore original Skill: ${errorMessage(error)}`);
+    });
+  }
+}
+
+/**
+ * Recheck ownership immediately before the destructive remove. Portable
+ * filesystem APIs do not provide a cross-process compare-and-swap, so a
+ * writer can still race after this check; any observed identity/content
+ * drift is nevertheless preserved and fails closed.
+ */
+async function removeVerifiedReplacement(
+  targetPath: string,
+  replacementIdentity: PathIdentity,
+  fileSystem: ProjectInstallationFileSystem,
+  errors: string[],
+): Promise<void> {
+  try {
+    const current = await fileSystem.lstat(targetPath);
+    if (!samePathIdentity(replacementIdentity, pathIdentity(current))) {
+      errors.push(`preserved concurrently replaced Skill at ${JSON.stringify(targetPath)}`);
+    } else {
+      await fileSystem.rm(targetPath);
+    }
+  } catch (error) {
+    if (!isMissing(error)) errors.push(`could not remove replacement: ${errorMessage(error)}`);
+  }
+}
+
 async function overwriteProjectSkillTransaction(
   request: ProjectSkillInstallationRequest,
   options: ProjectInstallationOptions,
@@ -1068,79 +1157,38 @@ async function overwriteProjectSkillTransaction(
   await assertMissing(stagePath, fileSystem, stagePath);
   await assertMissing(backupPath, fileSystem, backupPath);
 
-  let stageCreated = false;
-  let moved = false;
-  let replacementInstalled = false;
-  let replacementIdentity: PathIdentity | undefined;
-  const exposureCreated: CreatedPath[] = [];
-  const exposureUncertain = new Set<string>();
-
-  const restore = async (): Promise<string[]> => {
-    const errors: string[] = [];
-    errors.push(...await rollbackCreatedPaths(exposureCreated, exposureUncertain, fileSystem));
-    if (stageCreated) {
-      await fileSystem.rm(stagePath).catch((error: unknown) => errors.push(`could not remove staging tree: ${errorMessage(error)}`));
-    }
-    if (moved) {
-      if (replacementIdentity !== undefined) {
-        try {
-          await assertReplacementMatchesPreview(targetPath, request, files, replacementIdentity, fileSystem);
-        } catch (error) {
-          errors.push(errorMessage(error));
-        }
-      } else if (replacementInstalled) {
-        errors.push(`preserved replacement at ${JSON.stringify(targetPath)} because its identity could not be verified`);
-      }
-      if (errors.length === 0 && replacementIdentity !== undefined) {
-        try {
-          await assertBackupMatchesInspection(backupPath, request, targetLocation(inspection), fileSystem);
-        } catch (error) {
-          errors.push(errorMessage(error));
-        }
-      }
-      if (errors.length === 0 && replacementIdentity !== undefined) {
-        // Recheck ownership immediately before the destructive remove. Portable
-        // filesystem APIs do not provide a cross-process compare-and-swap, so a
-        // writer can still race after this check; any observed identity/content
-        // drift is nevertheless preserved and fails closed.
-        try {
-          const current = await fileSystem.lstat(targetPath);
-          if (!samePathIdentity(replacementIdentity, pathIdentity(current))) {
-            errors.push(`preserved concurrently replaced Skill at ${JSON.stringify(targetPath)}`);
-          } else {
-            await fileSystem.rm(targetPath);
-          }
-        } catch (error) {
-          if (!isMissing(error)) errors.push(`could not remove replacement: ${errorMessage(error)}`);
-        }
-      }
-      if (errors.length === 0) {
-        await fileSystem.rename!(backupPath, targetPath).catch((error: unknown) => {
-          errors.push(`could not restore original Skill: ${errorMessage(error)}`);
-        });
-      }
-    }
-    return errors;
+  const progress: OverwriteProgress = {
+    stageCreated: false,
+    moved: false,
+    replacementInstalled: false,
+    replacementIdentity: undefined,
+    exposureCreated: [],
+    exposureUncertain: new Set<string>(),
   };
+  const { exposureCreated, exposureUncertain } = progress;
+  const restore = (): Promise<string[]> => restoreOverwrite(
+    { request, files, inspection, targetPath, stagePath, backupPath, fileSystem },
+    progress,
+  );
 
   try {
     await fileSystem.mkdir(stagePath);
-    stageCreated = true;
+    progress.stageCreated = true;
     await writeStagedTree(stagePath, files, fileSystem);
     // Revalidate after all potentially slow staging work and immediately before
     // moving the user's original tree. The preview bytes are immutable and no
     // external installation method has run at this point.
     await assertOverwriteInspectionUnchanged(request, options, inspection);
     await fileSystem.rename(targetPath, backupPath);
-    moved = true;
+    progress.moved = true;
     // Rename preserves the original tree as a recovery boundary. Verify both
     // its native directory identity and its complete content receipt before the
     // staged tree is exposed at the installation path.
     await assertBackupMatchesInspection(backupPath, request, targetLocation(inspection), fileSystem);
     await fileSystem.rename(stagePath, targetPath);
-    stageCreated = false;
-    replacementInstalled = true;
-    replacementIdentity = pathIdentity(await fileSystem.lstat(targetPath));
+    progress.stageCreated = false;
+    progress.replacementInstalled = true;
+    progress.replacementIdentity = pathIdentity(await fileSystem.lstat(targetPath));
 
     const claudeLocation = inspection.locations.find((location) => location.path === inspection.claudePath);
     if (targetPath === inspection.canonicalPath && hosts.includes("claude") && claudeLocation?.status === "missing") {
