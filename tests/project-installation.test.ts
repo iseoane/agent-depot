@@ -1071,3 +1071,107 @@ test("does not add missing Claude exposure during adoption", async () => {
     await rm(projectRoot, { recursive: true, force: true });
   }
 });
+
+async function writeDemoTree(root: string): Promise<void> {
+  for (const file of tree) {
+    const destination = path.join(root, ...file.path.slice("portable/demo/".length).split("/"));
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, Buffer.from(file.content));
+  }
+}
+
+function adoptionFileSystem(overrides: Partial<ProjectInstallationFileSystem> = {}): ProjectInstallationFileSystem {
+  return {
+    lstat,
+    mkdir: async (candidate: string) => { await mkdir(candidate); },
+    writeFile: async (candidate: string, content: Uint8Array) => { await writeFile(candidate, content, { flag: "wx" }); },
+    chmod: async (candidate: string, mode: number) => { await chmod(candidate, mode); },
+    symlink,
+    readlink,
+    rm: async (candidate: string) => { await rm(candidate, { recursive: true, force: true }); },
+    rmdir,
+    rename,
+    readdir: async (candidate: string) => readdir(candidate),
+    readFile: async (candidate: string) => readFile(candidate),
+    ...overrides,
+  };
+}
+
+async function adoptionScenario(
+  prepare: (projectRoot: string, canonicalPath: string, claudePath: string) => Promise<void>,
+  options: { hosts?: ProjectSkillSelection["hosts"]; confirm?: boolean; fileSystem?: ProjectInstallationFileSystem } = {},
+): Promise<{ error: Error | undefined; projectRoot: string }> {
+  const projectRoot = await makeProject();
+  try {
+    await prepare(projectRoot, path.join(projectRoot, ".agents", "skills", "demo"), path.join(projectRoot, ".claude", "skills", "demo"));
+    try {
+      await installProjectSkill({
+        selection: { ...selection, hosts: options.hosts ?? ["pi"] },
+        source,
+        portableV1: true,
+        ...(options.confirm === true ? { confirmAdditionalHostExposure: true } : {}),
+      }, { projectRoot, sourceAccess: accessFor(), fileSystem: options.fileSystem ?? adoptionFileSystem() });
+      return { error: undefined, projectRoot };
+    } catch (error) {
+      return { error: error as Error, projectRoot };
+    }
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+}
+
+test("adoption refuses an existing Skill with different content", async () => {
+  const { error } = await adoptionScenario(async (_root, canonicalPath) => {
+    await writeDemoTree(canonicalPath);
+    await writeFile(path.join(canonicalPath, "SKILL.md"), "locally edited");
+  });
+  assert.match(error?.message ?? "", /already exists at .* with different content \(.*\); explicit confirmation would be required to overwrite it.*No path was changed\.$/u);
+});
+
+test("adoption refuses an existing Skill path that is not a directory", async () => {
+  const { error } = await adoptionScenario(async (_root, canonicalPath) => {
+    await mkdir(path.dirname(canonicalPath), { recursive: true });
+    await writeFile(canonicalPath, "not a directory");
+  });
+  assert.match(error?.message ?? "", /the existing Skill path .* is not a directory; explicit confirmation would be required.*No path was changed\.$/u);
+});
+
+test("adoption reports an uninspectable existing Skill and a missing reader adapter", async () => {
+  const unreadable = await adoptionScenario(async (_root, canonicalPath) => {
+    await writeDemoTree(canonicalPath);
+  }, { fileSystem: adoptionFileSystem({ readFile: async () => { throw new Error("boom"); } }) });
+  assert.match(unreadable.error?.message ?? "", /Cannot safely inspect existing Skill at .*: .*boom.* No path was changed\.$/u);
+
+  const noReaders = await adoptionScenario(async (_root, canonicalPath) => {
+    await writeDemoTree(canonicalPath);
+  }, { fileSystem: adoptionFileSystem({ readdir: undefined, readFile: undefined }) });
+  assert.match(noReaders.error?.message ?? "", /Cannot safely inspect existing Skill at .*directory reading is unavailable; retry with the standard filesystem adapter\./u);
+
+  const noFileReader = await adoptionScenario(async (_root, canonicalPath) => {
+    await writeDemoTree(canonicalPath);
+  }, { fileSystem: adoptionFileSystem({ readFile: undefined }) });
+  assert.match(noFileReader.error?.message ?? "", /file reading is unavailable; retry with the standard filesystem adapter\./u);
+});
+
+test("adoption never moves or copies a Claude-only Skill to another Host location", async () => {
+  const withoutConfirmation = await adoptionScenario(async (_root, _canonical, claudePath) => {
+    await writeDemoTree(claudePath);
+  });
+  assert.match(withoutConfirmation.error?.message ?? "", /adding the missing another Host location requires explicit confirmation.*Re-run with --confirm-additional-host and --yes\.$/u);
+
+  const withConfirmation = await adoptionScenario(async (_root, _canonical, claudePath) => {
+    await writeDemoTree(claudePath);
+  }, { confirm: true });
+  assert.match(withConfirmation.error?.message ?? "", /would require moving or copying it; this operation does not move or duplicate adopted Skills, so no path was changed\.$/u);
+});
+
+test("adoption reports a failing additional Claude symlink", async () => {
+  const { error } = await adoptionScenario(async (_root, canonicalPath) => {
+    await writeDemoTree(canonicalPath);
+  }, {
+    hosts: ["pi", "claude"],
+    confirm: true,
+    fileSystem: adoptionFileSystem({ symlink: async () => { throw new Error("denied"); } }),
+  });
+  assert.match(error?.message ?? "", /Cannot create the additional Claude Skill symlink at .*: denied\. No existing path was changed\.$/u);
+});

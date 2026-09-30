@@ -1187,6 +1187,75 @@ interface ExistingProjectSkillAdoption {
   readonly paths: readonly string[];
 }
 
+function adoptionTreeAccess(fileSystem: ProjectInstallationFileSystem): SkillTreeFileSystem {
+  const unavailable = (what: string): ProjectInstallationError => new ProjectInstallationError(
+    "adoption-unavailable",
+    `Cannot inspect an existing project Skill because ${what} reading is unavailable; retry with the standard filesystem adapter.`,
+  );
+  return {
+    lstat: fileSystem.lstat,
+    readdir: async (candidate) => {
+      if (!fileSystem.readdir) throw unavailable("directory");
+      return fileSystem.readdir(candidate);
+    },
+    readFile: async (candidate) => {
+      if (!fileSystem.readFile) throw unavailable("file");
+      return fileSystem.readFile(candidate);
+    },
+  };
+}
+
+async function assertExistingSkillMatches(
+  candidate: string,
+  sourceSkillPath: string,
+  expectedTree: readonly SkillTreeFile[],
+  treeAccess: SkillTreeFileSystem,
+): Promise<void> {
+  let actualTree: readonly SkillTreeFile[];
+  try {
+    actualTree = await readExistingSkillTree(candidate, sourceSkillPath, treeAccess);
+  } catch (error) {
+    throw new ProjectInstallationError(
+      "unsafe-target",
+      `Cannot safely inspect existing Skill at ${JSON.stringify(candidate)}: ${errorMessage(error)}. No path was changed.`,
+    );
+  }
+  const comparison = compareSkillTrees(expectedTree, actualTree);
+  if (!comparison.identical) {
+    throw new ProjectInstallationError(
+      "adoption-conflict",
+      `Cannot adopt because an existing Skill already exists at ${JSON.stringify(candidate)} with different content (${comparison.reason}); explicit confirmation would be required to overwrite it, but this safe install flow has no overwrite operation. No path was changed.`,
+    );
+  }
+}
+
+async function createAdditionalClaudeExposure(
+  projectRoot: string,
+  canonicalPath: string,
+  claudePath: string,
+  fileSystem: ProjectInstallationFileSystem,
+  createdPaths: CreatedPath[],
+  uncertainCreates: Set<string>,
+): Promise<void> {
+  await ensureDirectoryTree(projectRoot, [".claude", "skills"], createdPaths, uncertainCreates, fileSystem);
+  await assertMissing(claudePath, fileSystem, claudePath);
+  uncertainCreates.add(claudePath);
+  try {
+    await fileSystem.symlink(path.relative(path.dirname(claudePath), canonicalPath), claudePath, "dir");
+  } catch (error) {
+    throw new ProjectInstallationError(
+      "claude-symlink-failed",
+      `Cannot create the additional Claude Skill symlink at ${JSON.stringify(claudePath)}: ${errorMessage(error)}. No existing path was changed.`,
+    );
+  }
+  const information = await fileSystem.lstat(claudePath);
+  if (!information.isSymbolicLink()) {
+    throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${claudePath}`);
+  }
+  createdPaths.push({ path: claudePath, kind: "symlink", identity: pathIdentity(information) });
+  uncertainCreates.delete(claudePath);
+}
+
 async function adoptExistingProjectSkill(
   projectRoot: string,
   skillName: string,
@@ -1198,37 +1267,13 @@ async function adoptExistingProjectSkill(
   createdPaths: CreatedPath[],
   uncertainCreates: Set<string>,
 ): Promise<ExistingProjectSkillAdoption | undefined> {
-  const candidatePaths = [
-    path.join(projectRoot, ".agents", "skills", skillName),
-    path.join(projectRoot, ".claude", "skills", skillName),
-  ];
-  const canonicalPath = candidatePaths[0]!;
-  const claudePath = candidatePaths[1]!;
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
+  const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
   const existingPaths: string[] = [];
   const expectedTree = expectedFiles.map((file) => file.source);
-  const treeAccess: SkillTreeFileSystem = {
-    lstat: fileSystem.lstat,
-    readdir: async (candidate) => {
-      if (!fileSystem.readdir) {
-        throw new ProjectInstallationError(
-          "adoption-unavailable",
-          "Cannot inspect an existing project Skill because directory reading is unavailable; retry with the standard filesystem adapter.",
-        );
-      }
-      return fileSystem.readdir(candidate);
-    },
-    readFile: async (candidate) => {
-      if (!fileSystem.readFile) {
-        throw new ProjectInstallationError(
-          "adoption-unavailable",
-          "Cannot inspect an existing project Skill because file reading is unavailable; retry with the standard filesystem adapter.",
-        );
-      }
-      return fileSystem.readFile(candidate);
-    },
-  };
+  const treeAccess = adoptionTreeAccess(fileSystem);
 
-  for (const candidate of candidatePaths) {
+  for (const candidate of [canonicalPath, claudePath]) {
     let information: Stats;
     try {
       information = await fileSystem.lstat(candidate);
@@ -1244,42 +1289,22 @@ async function adoptExistingProjectSkill(
         );
       }
       await assertClaudeSymlinkTargetsCanonical(candidate, canonicalPath, existingPaths, fileSystem);
-      existingPaths.push(candidate);
-      continue;
-    }
-    if (!information.isDirectory()) {
+    } else if (!information.isDirectory()) {
       throw new ProjectInstallationError(
         "adoption-conflict",
         `Cannot adopt because the existing Skill path ${JSON.stringify(candidate)} is not a directory; explicit confirmation would be required to overwrite it, but this safe install flow has no overwrite operation. No path was changed.`,
       );
-    }
-
-    let actualTree: readonly SkillTreeFile[];
-    try {
-      actualTree = await readExistingSkillTree(candidate, sourceSkillPath, treeAccess);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new ProjectInstallationError(
-        "unsafe-target",
-        `Cannot safely inspect existing Skill at ${JSON.stringify(candidate)}: ${reason}. No path was changed.`,
-      );
-    }
-    const comparison = compareSkillTrees(expectedTree, actualTree);
-    if (!comparison.identical) {
-      throw new ProjectInstallationError(
-        "adoption-conflict",
-        `Cannot adopt because an existing Skill already exists at ${JSON.stringify(candidate)} with different content (${comparison.reason}); explicit confirmation would be required to overwrite it, but this safe install flow has no overwrite operation. No path was changed.`,
-      );
+    } else {
+      await assertExistingSkillMatches(candidate, sourceSkillPath, expectedTree, treeAccess);
     }
     existingPaths.push(candidate);
   }
 
   if (existingPaths.length === 0) return undefined;
 
-  const requiresCanonical = hosts.some((host) => host !== "claude");
-  const requiresClaude = hosts.includes("claude");
-  const missingClaude = requiresClaude && !existingPaths.includes(claudePath);
-  if ((requiresCanonical && !existingPaths.includes(canonicalPath)) || missingClaude) {
+  const missingClaude = hosts.includes("claude") && !existingPaths.includes(claudePath);
+  const missingCanonical = hosts.some((host) => host !== "claude") && !existingPaths.includes(canonicalPath);
+  if (missingCanonical || missingClaude) {
     if (!confirmAdditionalHostExposure) {
       const missing = missingClaude ? "Claude exposure" : "another Host location";
       throw new ProjectInstallationError(
@@ -1295,31 +1320,12 @@ async function adoptExistingProjectSkill(
         "this operation does not move or duplicate adopted Skills, so no path was changed.",
       );
     }
-    await ensureDirectoryTree(projectRoot, [".claude", "skills"], createdPaths, uncertainCreates, fileSystem);
-    await assertMissing(claudePath, fileSystem, claudePath);
-    const linkTarget = path.relative(path.dirname(claudePath), canonicalPath);
-    uncertainCreates.add(claudePath);
-    try {
-      await fileSystem.symlink(linkTarget, claudePath, "dir");
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new ProjectInstallationError(
-        "claude-symlink-failed",
-        `Cannot create the additional Claude Skill symlink at ${JSON.stringify(claudePath)}: ${reason}. No existing path was changed.`,
-      );
-    }
-    const information = await fileSystem.lstat(claudePath);
-    if (!information.isSymbolicLink()) {
-      throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${claudePath}`);
-    }
-    createdPaths.push({ path: claudePath, kind: "symlink", identity: pathIdentity(information) });
-    uncertainCreates.delete(claudePath);
+    await createAdditionalClaudeExposure(projectRoot, canonicalPath, claudePath, fileSystem, createdPaths, uncertainCreates);
     existingPaths.push(claudePath);
   }
 
-  const adoptedCanonicalPath = existingPaths.includes(canonicalPath) ? canonicalPath : claudePath;
   return Object.freeze({
-    canonicalPath: adoptedCanonicalPath,
+    canonicalPath: existingPaths.includes(canonicalPath) ? canonicalPath : claudePath,
     paths: Object.freeze(existingPaths),
   });
 }
