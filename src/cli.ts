@@ -244,6 +244,7 @@ async function runSourceRemoval(
     const inspection = await inspectProjectSkillRemoval(selection, {
       projectRoot: homeDirectory,
       sourceAccess: { readSkillTree: async () => [] },
+      installationTrust: "user-global-state",
       ...dependencies.installationOptions,
     });
     inspections.push(inspection);
@@ -265,6 +266,7 @@ async function runSourceRemoval(
     rechecked.push(await inspectProjectSkillRemoval(selection, {
       projectRoot: homeDirectory,
       sourceAccess: { readSkillTree: async () => [] },
+      installationTrust: "user-global-state",
       ...dependencies.installationOptions,
     }));
   }
@@ -280,6 +282,7 @@ async function runSourceRemoval(
     await removeProjectSkill(selected[index]!, after, {
       projectRoot: homeDirectory,
       sourceAccess: { readSkillTree: async () => [] },
+      installationTrust: "user-global-state",
       ...dependencies.installationOptions,
     });
   }
@@ -713,6 +716,7 @@ async function runUninstall(
   const removalOptions: ProjectInstallationOptions = {
     projectRoot: homeDirectory,
     sourceAccess: { readSkillTree: async () => [] },
+    installationTrust: "user-global-state",
     ...dependencies.installationOptions,
   };
   const context: UninstallRemovalContext = { operations, homeDirectory, removalOptions };
@@ -784,6 +788,7 @@ async function runUpdate(
   const installed = options.scope === "project"
     ? (await manifestStore!.load()).skills
     : await requireUserGlobalInstallations(operations);
+  const trackedInstallationPaths = installed.flatMap((selection) => selection.installation === undefined ? [] : [selection.installation.path]);
   const resolveSource = operations.resolveProjectSource
     ? (source: ProjectSource) => operations.resolveProjectSource!(source)
     : resolveProjectSource;
@@ -817,6 +822,7 @@ async function runUpdate(
         scope: options.scope,
         sourceAccess,
         sourceOperations: operations,
+        trackedInstallationPaths,
         ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
         ...(installationFileSystem === undefined ? {} : { installationFileSystem }),
       }), options.scope, output);
@@ -833,14 +839,16 @@ async function runUpdate(
     scope: options.scope,
     sourceAccess,
     sourceOperations: operations,
+    trackedInstallationPaths,
     ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
     ...(installationFileSystem === undefined ? {} : { installationFileSystem }),
     // The callback is invoked independently for every candidate. In particular,
     // a modified installation is never overwritten unless this invocation was
     // explicitly confirmed with --yes.
-    confirm: async () => ({
+    confirm: async (plan) => ({
       overwriteModifiedInstallation: options.confirmed,
       externalMethod: options.confirmed,
+      ...(options.confirmed && plan.nonCanonicalPath !== undefined ? { nonCanonicalPath: plan.nonCanonicalPath } : {}),
     }),
   });
 
@@ -968,6 +976,9 @@ function outputUpdatePreview(
 ): void {
   output(`Preview: update Skill ${JSON.stringify(plan.selection.path)} from ${plan.source.id} (scope: ${scope})`);
   output(`  target: ${plan.target}`);
+  if (plan.nonCanonicalPath !== undefined) {
+    output(`  WARNING: non-canonical location ${JSON.stringify(plan.nonCanonicalPath)} (outside .agents/skills and .claude/skills); --yes explicitly confirms replacing this exact path`);
+  }
   output(`  proposed changes: replace ${plan.snapshot.files.length} managed files and persist the new version/content baseline`);
   if (plan.overwriteRequired) {
     output("  WARNING: the installed Skill has local modifications; --yes explicitly confirms replacing them");

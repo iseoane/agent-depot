@@ -6,7 +6,7 @@ import path from "node:path";
 import type { ProjectHost, ProjectSkillSelection } from "./project-manifest.js";
 import { compareSkillTrees, readExistingSkillTree } from "./skill-adoption.js";
 import type { SkillTreeComparisonReason, SkillTreeFileSystem } from "./skill-adoption.js";
-import { skillTreeBaseline } from "./skill-discovery.js";
+import { parseSkillFrontmatter, skillTreeBaseline } from "./skill-discovery.js";
 import type { SkillTreeFile, SourceSkillTreeSnapshot } from "./skill-discovery.js";
 import type { ResolvedVersionEvidence, SkillInstallationBaseline } from "./project-manifest.js";
 import type { Source } from "./sources.js";
@@ -68,6 +68,16 @@ export interface ProjectInstallationOptions {
   readonly projectRoot: string;
   readonly sourceAccess: ProjectSkillTreeAccess;
   readonly fileSystem?: ProjectInstallationFileSystem;
+  /**
+   * Where tracked installation paths come from. Project manifests are
+   * repository-controlled (default); the user-global state file is written only
+   * by Agent Depot and is trusted.
+   */
+  readonly installationTrust?: "project-manifest" | "user-global-state";
+  /** Relative installation paths of the other tracked installations in this scope. */
+  readonly otherInstallationPaths?: readonly string[];
+  /** Absolute non-canonical path the user explicitly confirmed for this mutation. */
+  readonly confirmedNonCanonicalPath?: string;
 }
 
 export type ProjectSkillInstallationCollisionReason =
@@ -145,6 +155,8 @@ export interface ProjectSkillUpdateInspection {
   readonly actualBaseline: SkillInstallationBaseline;
   readonly recordedBaseline?: SkillInstallationBaseline;
   readonly requiresOverwriteConfirmation: boolean;
+  /** Set when the tracked path is outside the canonical layout and needs explicit confirmation. */
+  readonly nonCanonicalPath?: string;
 }
 
 /** Read-only receipt for removing one user-global Skill installation. */
@@ -156,6 +168,8 @@ export interface ProjectSkillRemovalInspection {
   readonly adopted: boolean;
   /** True when the content differs from its recorded baseline or no baseline exists. */
   readonly modified: boolean;
+  /** Set when the tracked path is outside the canonical layout and needs explicit confirmation. */
+  readonly nonCanonicalPath?: string;
 }
 
 /** Refuses a removal batch whose selected filesystem targets overlap. */
@@ -198,6 +212,7 @@ export async function inspectProjectSkillRemoval(
   await assertNoSymlinkComponents(projectRoot, fileSystem);
   await assertDirectory(projectRoot, fileSystem, "user-global root");
   await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, targetPath), fileSystem);
+  const nonCanonicalPath = await classifyTrackedInstallation(projectRoot, selection.installation.path, skillName, options, fileSystem);
 
   let targetInformation: Stats;
   try {
@@ -256,6 +271,7 @@ export async function inspectProjectSkillRemoval(
     digest: actualBaseline.digest,
     adopted: selection.installation.adopted,
     modified,
+    ...(nonCanonicalPath === undefined ? {} : { nonCanonicalPath }),
   });
 }
 
@@ -272,9 +288,11 @@ export async function removeProjectSkill(
     current.paths.some((candidate, index) => candidate !== inspection.paths[index]) ||
     current.digest !== inspection.digest ||
     current.adopted !== inspection.adopted ||
-    current.modified !== inspection.modified) {
+    current.modified !== inspection.modified ||
+    current.nonCanonicalPath !== inspection.nonCanonicalPath) {
     throw new ProjectInstallationError("removal-changed", "The inspected Skill removal target, digest, adoption, or modification state changed; no path was removed");
   }
+  assertNonCanonicalConfirmed(current.nonCanonicalPath, options);
   const fileSystem = options.fileSystem ?? nodeFileSystem;
   for (const candidate of [...current.paths].reverse()) {
     await fileSystem.rm(candidate);
@@ -297,6 +315,8 @@ export async function inspectProjectSkillUpdate(
   await assertNoSymlinkComponents(projectRoot, fileSystem);
   await assertDirectory(projectRoot, fileSystem, "project root");
   await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, targetPath), fileSystem);
+  const nonCanonicalPath = await classifyTrackedInstallation(
+    projectRoot, selection.installation.path, skillNameFromSelection(selection), options, fileSystem);
   const information = await fileSystem.lstat(targetPath);
   assertRealDirectory(targetPath, information);
   const actualTree = await readExistingSkillTree(targetPath, selection.path, {
@@ -310,6 +330,7 @@ export async function inspectProjectSkillUpdate(
     ...(selection.installation.baseline === undefined ? {} : { recordedBaseline: selection.installation.baseline }),
     requiresOverwriteConfirmation: selection.installation.baseline === undefined ||
       actualBaseline.digest !== selection.installation.baseline.digest,
+    ...(nonCanonicalPath === undefined ? {} : { nonCanonicalPath }),
   });
 }
 
@@ -340,6 +361,10 @@ export async function updateProjectSkillTransaction(
   await assertNoSymlinkComponents(projectRoot, fileSystem);
   await assertDirectory(projectRoot, fileSystem, "project root");
   await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, targetPath), fileSystem);
+  assertNonCanonicalConfirmed(
+    await classifyTrackedInstallation(projectRoot, request.selection.installation.path, skillName, options, fileSystem),
+    options,
+  );
   const targetInformation = await fileSystem.lstat(targetPath).catch((error: unknown) => {
     if (isMissing(error)) {
       throw new ProjectInstallationError("missing-installation", `The tracked Skill installation does not exist: ${targetPath}`);
@@ -1681,16 +1706,84 @@ function resolveInstallationPath(projectRoot: string, installationPath: string):
   if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new ProjectInstallationError("unsafe-target", `Tracked Skill installation escapes the project root: ${installationPath}`);
   }
-  // A manifest is repository-controlled input: only the managed Skill layout
-  // (<root>/.agents|.claude/skills/<name>) may ever be replaced or deleted.
+  return candidate;
+}
+
+function isCanonicalInstallation(relative: string): boolean {
   const segments = relative.split(path.sep);
-  if (segments.length !== 3 || !MANAGED_SKILL_ROOTS.has(segments[0]!) || segments[1] !== "skills" || !isSafeSegment(segments[2]!)) {
+  return segments.length === 3 && MANAGED_SKILL_ROOTS.has(segments[0]!) && segments[1] === "skills" &&
+    isSafeSegment(segments[2]!);
+}
+
+/**
+ * A project manifest is repository-controlled input, so only the canonical
+ * layout (<root>/.agents|.claude/skills/<name>) is trusted as a replace/delete
+ * target. An adopted Skill elsewhere is accepted only after strict validation
+ * and is reported so the caller can require explicit confirmation of that path.
+ * User-global records come from Agent Depot's own state file and stay trusted.
+ * Returns the absolute non-canonical path, or undefined for a trusted path.
+ */
+async function classifyTrackedInstallation(
+  projectRoot: string,
+  installationPath: string,
+  skillName: string,
+  options: ProjectInstallationOptions,
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<string | undefined> {
+  const targetPath = resolveInstallationPath(projectRoot, installationPath);
+  const relative = path.relative(projectRoot, targetPath);
+  if (options.installationTrust === "user-global-state" || isCanonicalInstallation(relative)) {
+    return undefined;
+  }
+  const reject = (reason: string): never => {
     throw new ProjectInstallationError(
       "unsafe-target",
-      `Tracked Skill installation is not an immediate child of .agents/skills or .claude/skills: ${installationPath}`,
+      `Tracked Skill installation ${JSON.stringify(installationPath)} is outside .agents/skills and .claude/skills and ${reason}; no path was changed`,
+    );
+  };
+  const segments = relative.split(path.sep);
+  if (!isSafeRelativePath(installationPath)) reject("is not a safe relative path");
+  if (segments.some((segment) => segment.toLowerCase() === ".git")) reject("is inside .git");
+  if (segments[segments.length - 1] !== skillName) reject(`does not end in the Skill name ${JSON.stringify(skillName)}`);
+  for (const other of options.otherInstallationPaths ?? []) {
+    const inside = path.relative(targetPath, path.resolve(projectRoot, ...other.split("/")));
+    if (inside !== "" && inside !== ".." && !inside.startsWith(`..${path.sep}`) && !path.isAbsolute(inside)) {
+      reject(`contains another tracked installation (${JSON.stringify(other)})`);
+    }
+  }
+  let current = projectRoot;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    const information = await fileSystem.lstat(current).catch((error: unknown) => {
+      if (isMissing(error)) {
+        throw new ProjectInstallationError("missing-installation", `The tracked Skill installation does not exist: ${targetPath}; no path was changed`);
+      }
+      throw error;
+    });
+    if (information.isSymbolicLink() || !information.isDirectory()) reject(`has a component that is not a real directory: ${current}`);
+  }
+  if (!fileSystem.readFile) {
+    throw new ProjectInstallationError("update-unavailable", "Validating a non-canonical Skill installation requires filesystem read support");
+  }
+  const skillFile = path.join(targetPath, "SKILL.md");
+  const skillInformation = await fileSystem.lstat(skillFile).catch((error: unknown) => {
+    if (isMissing(error)) return undefined;
+    throw error;
+  });
+  const declared = skillInformation?.isFile() === true
+    ? parseSkillFrontmatter(Buffer.from(await fileSystem.readFile(skillFile)).toString("utf8"))?.name
+    : undefined;
+  if (declared !== skillName) reject(`does not contain a SKILL.md whose name is ${JSON.stringify(skillName)}`);
+  return targetPath;
+}
+
+function assertNonCanonicalConfirmed(nonCanonicalPath: string | undefined, options: ProjectInstallationOptions): void {
+  if (nonCanonicalPath !== undefined && options.confirmedNonCanonicalPath !== nonCanonicalPath) {
+    throw new ProjectInstallationError(
+      "non-canonical-confirmation-required",
+      `The tracked Skill is installed at the non-canonical location ${JSON.stringify(nonCanonicalPath)}; explicit confirmation of that exact path is required and no path was changed`,
     );
   }
-  return candidate;
 }
 
 function relativeSegments(root: string, candidate: string): readonly string[] {

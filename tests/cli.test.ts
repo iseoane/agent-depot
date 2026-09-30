@@ -681,7 +681,7 @@ test("refuses overlapping selected removal targets before deleting any Skill", a
       homeDirectory,
       stderr: (line) => errors.push(line),
     }), 1);
-    assert.match(errors[0] ?? "", /overlap|immediate child of \.agents\/skills/u);
+    assert.match(errors[0] ?? "", /overlap/u);
     assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), true);
     assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "shared", "SKILL.md"), "utf8"), "one");
     assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "shared", "nested", "SKILL.md"), "utf8"), "two");

@@ -39,6 +39,8 @@ export interface SkillUpdateConfirmation {
   readonly overwriteModifiedInstallation?: boolean;
   /** Confirms running the previewed external command. */
   readonly externalMethod?: boolean;
+  /** Confirms changing the exact non-canonical project location shown in the preview. */
+  readonly nonCanonicalPath?: string;
 }
 
 export interface SkillUpdateApplicationOptions {
@@ -48,6 +50,8 @@ export interface SkillUpdateApplicationOptions {
   readonly sourceOperations?: Pick<SourceOperations, "readInstallationMethod" | "executeInstallationMethod" | "updateUserGlobalInstallation" | "listUserGlobalInstallations">;
   readonly projectManifestStore?: ProjectManifestStore;
   readonly installationFileSystem?: ProjectInstallationFileSystem;
+  /** Relative installation paths of every tracked installation in this scope. */
+  readonly trackedInstallationPaths?: readonly string[];
   readonly confirmation?: SkillUpdateConfirmation;
   /** Called after a method preview is produced and before the command runs. */
   readonly confirm?: (plan: SkillUpdatePlan) => SkillUpdateConfirmation | Promise<SkillUpdateConfirmation>;
@@ -63,6 +67,8 @@ export interface SkillUpdatePlan {
   readonly snapshot: SourceSkillTreeSnapshot;
   readonly target: string;
   readonly overwriteRequired: boolean;
+  /** Absolute non-canonical project location that needs explicit confirmation before any change. */
+  readonly nonCanonicalPath?: string;
   readonly method?: SourceInstallationMethod;
   readonly methodPreview?: UserMethodPreview;
 }
@@ -136,6 +142,7 @@ export async function previewSkillUpdate(
     snapshot,
     target,
     overwriteRequired: inspection.requiresOverwriteConfirmation,
+    ...(inspection.nonCanonicalPath === undefined ? {} : { nonCanonicalPath: inspection.nonCanonicalPath }),
     ...(method === undefined ? {} : { method }),
     ...(methodPreview === undefined ? {} : { methodPreview }),
   });
@@ -155,6 +162,9 @@ export async function applySkillUpdate(
   if (plan.overwriteRequired && confirmation.overwriteModifiedInstallation !== true) {
     throw new Error(`Skill ${JSON.stringify(item.id)} requires explicit overwrite confirmation; no path was changed`);
   }
+  if (plan.nonCanonicalPath !== undefined && confirmation.nonCanonicalPath !== plan.nonCanonicalPath) {
+    throw new Error(`Skill ${JSON.stringify(item.id)} is installed at the non-canonical location ${JSON.stringify(plan.nonCanonicalPath)}; explicit confirmation of that exact path is required and no path was changed`);
+  }
   if (plan.method !== undefined && confirmation.externalMethod !== true) {
     throw new Error(`Skill ${JSON.stringify(item.id)} has an external method; explicit method confirmation is required and no command was run`);
   }
@@ -172,7 +182,7 @@ export async function applySkillUpdate(
     previewTree: (immutableSnapshots.get(plan) ?? freezeSnapshot(plan.snapshot)).files,
     resolvedVersion: plan.snapshot.resolvedVersion ?? plan.selection.installation?.resolvedVersion,
     confirmOverwrite: confirmation.overwriteModifiedInstallation === true,
-  }, projectInstallationOptions(options));
+  }, projectInstallationOptions(options, confirmation.nonCanonicalPath));
 
   try {
     if (plan.method !== undefined) {
@@ -237,10 +247,13 @@ export async function applyUpdateBatch(
 /** Alias for embedders that prefer an imperative per-Skill operation name. */
 export const updateSkill = applySkillUpdate;
 
-function projectInstallationOptions(options: SkillUpdateApplicationOptions): ProjectInstallationOptions {
+function projectInstallationOptions(options: SkillUpdateApplicationOptions, confirmedNonCanonicalPath?: string): ProjectInstallationOptions {
   return {
     projectRoot: options.projectRoot,
     sourceAccess: options.sourceAccess,
+    installationTrust: options.scope === "user-global" ? "user-global-state" : "project-manifest",
+    ...(options.trackedInstallationPaths === undefined ? {} : { otherInstallationPaths: options.trackedInstallationPaths }),
+    ...(confirmedNonCanonicalPath === undefined ? {} : { confirmedNonCanonicalPath }),
     ...(options.installationFileSystem === undefined ? {} : { fileSystem: options.installationFileSystem }),
   };
 }
