@@ -30,7 +30,7 @@ export interface UpdatesKeyContext {
   apply(prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[]): void;
 }
 
-const SCOPE_KEYS: Record<string, UpdateScopeFilter> = { t: "all", p: "project", g: "user-global" };
+const SCOPE_KEYS: ReadonlyMap<string, UpdateScopeFilter> = new Map([["t", "all"], ["p", "project"], ["g", "user-global"]]);
 
 /** Moves the cursor with the arrows, j/k and paging; returns whether the key was one of them. */
 function moveCursorKey(context: UpdatesKeyContext, snapshot: UpdatesSnapshot, input: string, key: Key): boolean {
@@ -73,7 +73,7 @@ function foldKey(context: UpdatesKeyContext, snapshot: UpdatesSnapshot, key: Key
 function handleBrowseKey(context: UpdatesKeyContext, input: string, key: Key): void {
   const snapshot = context.latest();
   if (moveCursorKey(context, snapshot, input, key) || selectKey(context, snapshot, input)) return;
-  const scope = SCOPE_KEYS[input];
+  const scope = SCOPE_KEYS.get(input);
   if (scope !== undefined) context.changeScope(scope);
   else if (input === "r") context.recheck();
   else foldKey(context, snapshot, key);

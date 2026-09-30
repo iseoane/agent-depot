@@ -277,6 +277,20 @@ test("the scope filter defaults to all and t, p and g switch it without checking
   unmount();
 });
 
+test("a pasted prototype property name never changes the scope filter", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "projonly", state: "outdated" }]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /portable\/projonly/);
+  press(stdin, "constructor");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.match(lastFrame() ?? "", /scope: all/);
+  press(stdin, "p");
+  const frame = await waitForFrame(lastFrame, /scope: project/);
+  assert.match(frame, /portable\/projonly/);
+  unmount();
+});
+
 test("changing the scope filter drops selected items so nothing hidden is applied", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "projonly", state: "outdated" }]);
