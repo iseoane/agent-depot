@@ -1,6 +1,7 @@
 import type { Key } from "ink";
 
 import { PROJECT_HOSTS, type ProjectHost, type ProjectSkillSelection } from "../project-manifest.js";
+import { assertManagedInstallationRecordsUnchanged } from "../skill-removal.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
 import { errorText, runBatch } from "./batch.js";
@@ -122,6 +123,21 @@ async function listRecords(operations: SourceOperations) {
   return operations.listUserGlobalInstallations ? operations.listUserGlobalInstallations() : [];
 }
 
+/**
+ * Drift check before an item: the records must be exactly what the previous items were expected to leave.
+ * The baseline only ever advances by the change an item made, so an outside change is never absorbed.
+ */
+async function assertNoDrift(operations: SourceOperations, expected: readonly ProjectSkillSelection[]): Promise<void> {
+  const actual = await listRecords(operations);
+  try {
+    assertManagedInstallationRecordsUnchanged(expected, actual);
+  } catch {
+    throw new Error("The installation records changed outside this batch since the previous item; this item was left untouched");
+  }
+}
+
+const sameRecord = (left: ProjectSkillSelection, right: ProjectSkillSelection) => JSON.stringify(left) === JSON.stringify(right);
+
 /** Plan step of a bulk uninstall: prepares each marked leaf with its shared plan, or records why it is skipped. */
 export async function prepareBulkUninstall(
   context: Pick<BulkContext, "operations" | "env" | "installed">,
@@ -176,18 +192,19 @@ function resultOf<T extends { readonly id: string }>(
   };
 }
 
-/** Execute step: each item is rechecked and applied on its own against the records as they are now. */
+/** Execute step: each item is rechecked and applied on its own against the records the previous items were expected to leave. */
 export async function runBulkUninstall(plan: BulkUninstallPlan, operations: SourceOperations, env: TuiEnvironment): Promise<BulkResult> {
   let expected = plan.installations;
   const outcomes = await runBatch(plan.items, async (item) => {
+    await assertNoDrift(operations, expected);
     if (item.kind === "unmanaged") {
       const result = await runUnmanagedRemoval({ ...item.prepared, installations: expected }, operations, env);
       if (result.kind === "error") throw new Error(result.text);
       return result.text;
     }
     await runUninstall({ ...item.prepared, installations: expected }, operations, env);
-    // A removed record moves the baseline the next item is rechecked against.
-    expected = await listRecords(operations);
+    // Only the record this item removed moves the baseline the next item is checked against.
+    expected = expected.filter((record) => !item.prepared.plan.selections.some((removed) => sameRecord(removed, record)));
     return `Removed ${item.label}`;
   }, (item, error) => (item.kind === "unmanaged" ? errorText(error) : `Failed ${item.label}: ${errorText(error)}`));
   return resultOf(outcomes, plan.skipped);
@@ -248,8 +265,11 @@ export async function prepareBulkHostAddition(
 export async function runBulkHostAddition(plan: BulkHostPlan, operations: SourceOperations, env: TuiEnvironment): Promise<BulkResult> {
   let expected = plan.installations;
   const outcomes = await runBatch(plan.items, async (item) => {
+    await assertNoDrift(operations, expected);
     const line = await runHostAddition({ ...item.prepared, installations: expected }, operations, env);
-    expected = await listRecords(operations);
+    // Only the record this item updated moves the baseline the next item is checked against.
+    const { selection, updated } = item.prepared.plan;
+    expected = expected.map((record) => (sameRecord(record, selection) ? updated : record));
     return line;
   }, (item, error) => `Failed ${item.label}: ${errorText(error)}`);
   return resultOf(outcomes, plan.skipped);
