@@ -410,12 +410,7 @@ export async function addProjectSkillHosts(
       await createAdditionalClaudeExposure(path.resolve(options.projectRoot), current.canonicalPath, current.claudePath, fileSystem, createdPaths, uncertainCreates);
     }
   } catch (error) {
-    const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
-    if (cleanupErrors.length > 0) {
-      const original = error instanceof Error ? error.message : String(error);
-      throw new ProjectInstallationError("rollback-failed", `${original} Rollback was incomplete: ${cleanupErrors.join("; ")}`);
-    }
-    throw error;
+    return rollbackAndRethrow(error, createdPaths, uncertainCreates, fileSystem);
   }
   return { rollback: createCreatedPathsRollback(createdPaths, uncertainCreates, fileSystem) };
 }
@@ -516,10 +511,7 @@ export async function updateProjectSkillTransaction(
   }
 
   const files = await readAndValidateTree({ ...request, previewTree: request.previewTree, portableV1: true }, skillName, options.sourceAccess);
-  const parent = path.dirname(targetPath);
-  await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, parent), fileSystem);
-  const stagePath = path.join(parent, `.agent-depot-update-${randomUUID()}`);
-  const backupPath = path.join(parent, `.agent-depot-backup-${randomUUID()}`);
+  const { stagePath, backupPath } = await prepareReplacementPaths(projectRoot, targetPath, "update", fileSystem);
   let staged = false;
   let moved = false;
   let replacementIdentity: PathIdentity | undefined;
@@ -551,11 +543,9 @@ export async function updateProjectSkillTransaction(
     skillName,
     canonicalPath: targetPath,
     hosts: Object.freeze([...request.selection.hosts]),
-    files: Object.freeze(files.map((file) => file.relativePath)),
     adopted: request.selection.installation.adopted,
     adoptedPaths: Object.freeze([targetPath]),
-    baseline: skillTreeBaseline(files.map((file) => file.source)),
-    ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
+    ...installedTreeSummary(request, files),
   });
   let state: "open" | "rolled-back" | "committed" = "open";
   return Object.freeze({
@@ -879,15 +869,7 @@ export async function installProjectSkillTransaction(
       rollback: createCreatedPathsRollback(createdPaths, uncertainCreates, fileSystem),
     });
   } catch (error) {
-    const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
-    if (cleanupErrors.length > 0) {
-      const original = error instanceof Error ? error.message : String(error);
-      throw new ProjectInstallationError(
-        "rollback-failed",
-        `${original} Rollback was incomplete: ${cleanupErrors.join("; ")}`,
-      );
-    }
-    throw error;
+    return rollbackAndRethrow(error, createdPaths, uncertainCreates, fileSystem);
   }
 }
 
@@ -901,6 +883,15 @@ interface InstallationResultParts {
   readonly baseline: ProjectSkillInstallationResult["baseline"];
   /** Present only when an existing identical installation was adopted. */
   readonly adoptedPaths: readonly string[] | undefined;
+}
+
+/** The result fields describing the installed tree, shared by the update and overwrite results. */
+function installedTreeSummary(request: ProjectSkillInstallationRequest, files: readonly ValidatedTreeFile[]) {
+  return {
+    files: Object.freeze(files.map((file) => file.relativePath)),
+    baseline: skillTreeBaseline(files.map((file) => file.source)),
+    ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
+  };
 }
 
 function buildInstallationResult(parts: InstallationResultParts): ProjectSkillInstallationResult {
@@ -974,6 +965,15 @@ async function createClaudeSkillSymlink(
       "No duplicate managed copy was created; the canonical installation was rolled back.",
     );
   }
+  await recordCreatedClaudeSymlink(claudePath, createdPaths, uncertainCreates, fileSystem);
+}
+
+async function recordCreatedClaudeSymlink(
+  claudePath: string,
+  createdPaths: CreatedPath[],
+  uncertainCreates: Set<string>,
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<void> {
   const information = await fileSystem.lstat(claudePath);
   if (!information.isSymbolicLink()) {
     throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${claudePath}`);
@@ -1254,10 +1254,7 @@ async function overwriteProjectSkillTransaction(
   }
   const targetPath = inspection.targetPath;
   const projectRoot = path.resolve(options.projectRoot);
-  const parent = path.dirname(targetPath);
-  await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, parent), fileSystem);
-  const stagePath = path.join(parent, `.agent-depot-overwrite-${randomUUID()}`);
-  const backupPath = path.join(parent, `.agent-depot-backup-${randomUUID()}`);
+  const { stagePath, backupPath } = await prepareReplacementPaths(projectRoot, targetPath, "overwrite", fileSystem);
   assertNoOverlappingOverwritePaths(targetPath, backupPath, request.protectedPaths ?? []);
   await assertMissing(stagePath, fileSystem, stagePath);
   await assertMissing(backupPath, fileSystem, backupPath);
@@ -1322,11 +1319,9 @@ async function overwriteProjectSkillTransaction(
     ...(hosts.includes("claude") ? { claudePath: inspection.claudePath } : {}),
     backupPath,
     hosts: Object.freeze([...hosts]),
-    files: Object.freeze(files.map((file) => file.relativePath)),
     adopted: false,
     adoptedPaths: Object.freeze([]),
-    baseline: skillTreeBaseline(files.map((file) => file.source)),
-    ...(request.resolvedVersion === undefined ? {} : { resolvedVersion: request.resolvedVersion }),
+    ...installedTreeSummary(request, files),
   });
   let state: "open" | "rolled-back" = "open";
   return Object.freeze({
@@ -1413,12 +1408,7 @@ async function createAdditionalClaudeExposure(
       `Cannot create the additional Claude Skill symlink at ${JSON.stringify(claudePath)}: ${errorMessage(error)}. No existing path was changed.`,
     );
   }
-  const information = await fileSystem.lstat(claudePath);
-  if (!information.isSymbolicLink()) {
-    throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${claudePath}`);
-  }
-  createdPaths.push({ path: claudePath, kind: "symlink", identity: pathIdentity(information) });
-  uncertainCreates.delete(claudePath);
+  await recordCreatedClaudeSymlink(claudePath, createdPaths, uncertainCreates, fileSystem);
 }
 
 function assertAdditionalExposureAllowed(
@@ -1689,6 +1679,13 @@ interface CreatedPath {
   readonly identity: PathIdentity;
 }
 
+function safeChildPath(parent: string, segment: string): string {
+  if (!isSafeSegment(segment)) {
+    throw new ProjectInstallationError("unsafe-target", `Unsafe project installation path segment: ${segment}`);
+  }
+  return path.join(parent, segment);
+}
+
 async function ensureDirectoryTree(
   root: string,
   segments: readonly string[],
@@ -1698,10 +1695,7 @@ async function ensureDirectoryTree(
 ): Promise<string> {
   let current = root;
   for (const segment of segments) {
-    if (!isSafeSegment(segment)) {
-      throw new ProjectInstallationError("unsafe-target", `Unsafe project installation path segment: ${segment}`);
-    }
-    current = path.join(current, segment);
+    current = safeChildPath(current, segment);
     try {
       const information = await fileSystem.lstat(current);
       assertRealDirectory(current, information);
@@ -1759,6 +1753,21 @@ async function assertMissing(
   );
 }
 
+/** Verifies the target's ancestors and names the sibling stage and backup paths of an in-place replacement. */
+async function prepareReplacementPaths(
+  projectRoot: string,
+  targetPath: string,
+  operation: "update" | "overwrite",
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<{ readonly stagePath: string; readonly backupPath: string }> {
+  const parent = path.dirname(targetPath);
+  await assertNoSymlinkAncestors(projectRoot, relativeSegments(projectRoot, parent), fileSystem);
+  return {
+    stagePath: path.join(parent, `.agent-depot-${operation}-${randomUUID()}`),
+    backupPath: path.join(parent, `.agent-depot-backup-${randomUUID()}`),
+  };
+}
+
 async function assertNoSymlinkAncestors(
   root: string,
   segments: readonly string[],
@@ -1766,10 +1775,7 @@ async function assertNoSymlinkAncestors(
 ): Promise<void> {
   let current = root;
   for (const segment of segments) {
-    if (!isSafeSegment(segment)) {
-      throw new ProjectInstallationError("unsafe-target", `Unsafe project installation path segment: ${segment}`);
-    }
-    current = path.join(current, segment);
+    current = safeChildPath(current, segment);
     try {
       const information = await fileSystem.lstat(current);
       if (information.isSymbolicLink()) {
@@ -1782,6 +1788,21 @@ async function assertNoSymlinkAncestors(
       throw error;
     }
   }
+}
+
+/** Rolls back what a failed install created, then rethrows the original error (or a rollback-failed error naming both). */
+async function rollbackAndRethrow(
+  error: unknown,
+  createdPaths: readonly CreatedPath[],
+  uncertainCreates: ReadonlySet<string>,
+  fileSystem: ProjectInstallationFileSystem,
+): Promise<never> {
+  const cleanupErrors = await rollbackCreatedPaths(createdPaths, uncertainCreates, fileSystem);
+  if (cleanupErrors.length > 0) {
+    const original = error instanceof Error ? error.message : String(error);
+    throw new ProjectInstallationError("rollback-failed", `${original} Rollback was incomplete: ${cleanupErrors.join("; ")}`);
+  }
+  throw error;
 }
 
 async function rollbackCreatedPaths(
