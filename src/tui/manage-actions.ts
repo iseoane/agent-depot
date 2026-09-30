@@ -21,8 +21,8 @@ import type { TuiEnvironment } from "./environment.js";
 
 /**
  * Interaction modes for managing an installed user-global Skill (uninstall and
- * host changes). Used by the Installations view; the flow,
- * previews and confirmations exist once; anything but `browse` captures keys.
+ * host changes), run from the Installations view. Anything but `browse`
+ * captures keys.
  */
 export type ManageMode =
   /** `u` on an installation with several hosts: remove all of them or choose. */

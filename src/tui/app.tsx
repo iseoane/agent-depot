@@ -31,7 +31,7 @@ const HINTS: Record<ViewName, string> = {
   sources: "j/k move  PgUp/PgDn page  space select  a all git  Enter catalog  n add  r refresh  d remove  2 catalog  3 installations  4 updates  q quit",
   catalog: "j/k move  PgUp/PgDn page  Enter/right expand  left collapse  / filter  i install  s all sources  1 sources  3 installations  4 updates  q quit",
   installations: "j/k move  PgUp/PgDn page  Enter/right expand  left collapse  A adopt  u uninstall  h add hosts  1 sources  2 catalog  4 updates  q quit",
-  updates: "j/k move  space toggle  a all  Enter preview  p project  g user-global  r check  1 sources  2 catalog  3 installations  q quit",
+  updates: "j/k move  space toggle  a all  Enter preview/expand  t all  p project  g user-global  r check again  1 sources  2 catalog  3 installations  q quit",
 };
 
 export function App({ operations, environment, onExit }: AppProps) {

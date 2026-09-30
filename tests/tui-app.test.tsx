@@ -142,7 +142,7 @@ test("App views render with the real source operations on a temporary home", asy
     for (const [key, header] of views) {
       stdin.write(key);
       // Wait until the view finished loading (or failed), then require that it did not fail.
-      const frame = await waitForFrame(lastFrame, (candidate) => header.test(candidate) && !/Loading|Checking/.test(candidate));
+      const frame = await waitForFrame(lastFrame, (candidate) => header.test(candidate) && !/Loading|Checking|Refreshing/.test(candidate));
       assert.doesNotMatch(frame, /Cannot read properties|TypeError|Error:/);
     }
     unmount();
