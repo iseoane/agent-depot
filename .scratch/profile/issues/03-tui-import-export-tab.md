@@ -4,8 +4,19 @@
 
 **Blocked by:** 01, 02.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Export and import reuse the existing checklist, preview panel and y/n confirmation.
-- [ ] Sources, Catalog, Installations and Updates are unchanged; view keys 1–4 keep their meaning and 5 opens the new tab.
-- [ ] Errors from the core are shown without crashing the TUI.
+- [x] Export and import reuse the existing checklist, preview panel and y/n confirmation.
+- [x] Sources, Catalog, Installations and Updates are unchanged; view keys 1–4 keep their meaning and 5 opens the new tab.
+- [x] Errors from the core are shown without crashing the TUI.
+
+## Implementation evidence
+
+- Public App/ProfileView tests use isolated temporary homes; export refusal, import conflicts,
+  unapproved recipes, method argv, unregistered Sources, newer versions and windowing covered.
+- Review base: d577a98c543ce352831309d6e2e7d76203165beb. Local Standards and Spec review
+  (parallel sub-agents unavailable): no unresolved findings. Shared export file creation
+  avoids frontend safety drift; subset previews recompute Source warnings.
+- Rollback boundary: fifth tab, ProfileView, profile TUI tests and README additions;
+  shared export helpers can be reverted with their CLI callers, independently of existing tabs.
+- Verification: pnpm typecheck, pnpm lint, pnpm test, pnpm test:e2e.

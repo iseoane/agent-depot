@@ -1,9 +1,10 @@
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppOperations } from "./app-flow.js";
 import { loadAppOwnedSkillFilter } from "./app-owned-skills.js";
 import { sourceIdForUrl } from "./git-source.js";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "./project-manifest.js";
-import { parseProfile, PROFILE_FORMAT, type Profile } from "./profile.js";
+import { parseProfile, PROFILE_FORMAT, serializeProfile, type Profile } from "./profile.js";
 import type { SourceOperations } from "./sources.js";
 import { scanUserGlobalSkillInventory } from "./user-global-skill-inventory.js";
 
@@ -98,18 +99,32 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
       preview.push(`Excluded unmanaged Skill ${name}: not tracked`);
     }
   }
-  for (const skill of skills) {
-    const identity = skill.source;
-    if (identity.kind === "external" && "url" in identity &&
-      !portableSources.some(source => source.url === identity.url)) {
-      preview.push(`WARNING: Skill ${skill.path} references Source ${identity.url} not included in profile`);
-    }
-  }
   const profile = parseProfile({ format: PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
     sources: portableSources, skills, apps: recipes });
-  preview.unshift("Preview: export portable user-global profile",
+  return { profile, preview: profileExportPreview(profile, preview) };
+}
+
+/** Shared preview for a frontend-selected subset of a validated export. */
+export function profileExportPreview(profile: Profile, exclusions: readonly string[] = []): readonly string[] {
+  const warnings = profile.skills.flatMap(skill => {
+    const identity = skill.source;
+    if (identity.kind === "external" && "url" in identity && !profile.sources.some(source => source.url === identity.url)) {
+      return [`WARNING: Skill ${skill.path} references Source ${identity.url} not included in profile`];
+    }
+    return [];
+  });
+  return ["Preview: export portable user-global profile",
     ...profile.sources.map(source => `Source ${sourceIdForUrl(source.url)} ${source.url} (included: ${source.included})`),
     ...profile.skills.map(skill => `Skill ${skill.path} [${skill.hosts.join(", ")}] (${skill.version.policy})`),
-    ...profile.apps.map(recipe => `App recipe ${recipe.name} (${recipe.platform ?? "all platforms"}; no approval)`));
-  return { profile, preview };
+    ...profile.apps.map(recipe => `App recipe ${recipe.name} (${recipe.platform ?? "all platforms"}; no approval)`),
+    ...exclusions, ...warnings];
+}
+
+/** Exclusively create an export artifact; never replace a file or follow a symlink. */
+export async function writeProfileExport(file: string, profile: Profile): Promise<void> {
+  try { await writeFile(file, serializeProfile(profile), { encoding: "utf8", flag: "wx" }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`${file} already exists; choose another path`);
+    throw error;
+  }
 }

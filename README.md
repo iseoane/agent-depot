@@ -380,7 +380,7 @@ agent-depot tui
 The TUI is an [Ink](https://github.com/vadimdemedes/ink) (React for terminals)
 front end over the same operations as the CLI. It needs Node.js >= 24 and an
 interactive terminal; otherwise `tui` fails with an error. Switch views with
-`1`-`4`, quit with `q` (not while a prompt is open). Every list scrolls when it is
+`1`-`5`, quit with `q` (not while a prompt is open). Every list scrolls when it is
 taller than the terminal. `j`/`k` or the arrow keys move.
 
 | View | Purpose |
@@ -389,6 +389,7 @@ taller than the terminal. `j`/`k` or the arrow keys move.
 | 2 Catalog | Skills that can be installed: those not installed yet, as Source, then Skills. |
 | 3 Installations | What is on disk: managed installations (user-global and project) and unmanaged user-global skills. |
 | 4 Updates | Managed skills with a newer version available, for user-global and project scope. |
+| 5 Import/Export | Transfer portable user-global Source choices, Skill selections and App recipes. |
 
 Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 
@@ -398,6 +399,8 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marks (or the highlighted skill), `/` filter, `s` toggle one Source or all (when opened from a Source) |
 | Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill, `space` marks a leaf and `a` marks all visible leaves: with marks, `u` and `h` act on all of them with one combined preview and one confirmation (project installations are skipped with a reason) |
 | Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot assess" line |
+
+| Import/Export | `e` export, `i` import; enter a file path, `space` toggle choices, `a` toggle all, `Enter` preview, `y` apply; `j`/`k` scroll previews and results |
 
 Safety model:
 
@@ -646,4 +649,7 @@ so omitting their Source block does not force registration; the preview names
 unregistered Sources that will be fetched without registering. Existing Source
 rows explain when discovery inclusion differs but is not imported.
 
-The fifth Import/Export TUI tab remains planned in ticket 03.
+The **5 Import/Export** TUI tab offers grouped checklists and the same shared-core
+previews as the CLI. Exclusions and conflicts cannot be selected. Export creates
+a new file only; import adds missing choices without replacing existing ones.
+Imported recipes remain unapproved and Apps are never installed by import.

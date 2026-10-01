@@ -1,6 +1,6 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import type { AppOperations } from "./app-flow.js";
-import { buildProfileExport, type ProfileFilters } from "./profile-export.js";
+import { buildProfileExport, writeProfileExport, type ProfileFilters } from "./profile-export.js";
 import { applyProfileImport, buildProfileImport, type ProfileImportEnvironment } from "./profile-import.js";
 import { serializeProfile } from "./profile.js";
 import type { SourceOperations } from "./sources.js";
@@ -18,15 +18,7 @@ export async function runProfileExport(values: readonly string[], operations: So
   const content = serializeProfile(plan.profile);
   if (out === undefined) output(content.trimEnd());
   else {
-    // An export is a new artifact, not permission to replace an existing file or follow a symlink.
-    try {
-      await writeFile(out, content, { encoding: "utf8", flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        throw new Error(`${out} already exists; choose another path`);
-      }
-      throw error;
-    }
+    await writeProfileExport(out, plan.profile);
     diagnostic(`Exported profile to ${out}`);
   }
   return 0;
