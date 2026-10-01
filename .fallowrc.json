@@ -41,7 +41,17 @@
           "src/skill-install.ts",
           "src/skill-removal.ts",
           "src/unmanaged-removal.ts",
-          "src/update-flow.ts"
+          "src/update-flow.ts",
+          "src/app-cli.ts",
+          "src/app-flow.ts",
+          "src/app-latest.ts",
+          "src/app-owned-skills.ts",
+          "src/app-recipes.ts",
+          "src/profile-cli.ts",
+          "src/profile-export.ts",
+          "src/profile-import.ts",
+          "src/app-schema.ts",
+          "src/profile.ts"
         ]
       },
       {
@@ -50,7 +60,8 @@
           "src/sources.ts",
           "src/source-state.ts",
           "src/skill-discovery.ts",
-          "src/project-manifest.ts"
+          "src/project-manifest.ts",
+          "src/app-version.ts"
         ]
       },
       {
@@ -60,7 +71,8 @@
           "src/path-safety.ts",
           "src/process-runner.ts",
           "src/version.ts",
-          "src/usage-error.ts"
+          "src/usage-error.ts",
+          "src/atomic-file.ts"
         ]
       },
       {
