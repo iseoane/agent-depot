@@ -6,6 +6,8 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { profileSandbox, seedProfileSandbox } from "../profile-e2e-fixture.js";
+
 import { fakeAppFixture } from "../fake-app-fixture.js";
 
 import pty from "@homebridge/node-pty-prebuilt-multiarch";
@@ -207,4 +209,55 @@ test("the TUI approves and installs an App, then offers its update", { timeout: 
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally { session.kill(); }
+});
+
+
+test("the Profile tab exports choices and imports them into a fresh HOME", { timeout: 120_000, skip: process.platform !== "linux" }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "depot-profile-tui-"));
+  const sessions: TuiSession[] = [];
+  try {
+    const repo = path.join(root, "repo");
+    const a = await profileSandbox(path.join(root, "a"), repo);
+    const b = await profileSandbox(path.join(root, "b"), repo);
+    await seedProfileSandbox(a, repo);
+    const file = path.join(root, "profile.json");
+    const exporting = new TuiSession(a.env);
+    sessions.push(exporting);
+    await exporting.waitFor(/add · r refresh/u);
+    await exporting.send("5", /e export · i import/u);
+    const checklist = await exporting.send("e", /Enter preview/u);
+    assert.match(checklist, /Sources: https:\/\/example.test\/profile\/source.git/u);
+    assert.match(checklist, /Skills: skills\/alpha/u);
+    assert.match(checklist, /Apps: fixture-app \(windows\)/u);
+    await exporting.send("\r", /Profile path:/u);
+    await exporting.send(file, /profile.json/u);
+    await exporting.send("\r", /Apply Profile\? \(y\/n\)/u);
+    await assert.rejects(readFile(file), { code: "ENOENT" });
+    await exporting.send("y", /Exported profile to/u);
+    const profile = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(profile.skills.length, 2);
+    exporting.press("q");
+    assert.equal(await exporting.exitCode(), 0);
+
+    const importing = new TuiSession(b.env);
+    sessions.push(importing);
+    await importing.waitFor(/add · r refresh/u);
+    await importing.send("5", /e export · i import/u);
+    await importing.send("i", /Profile path:/u);
+    await importing.send(file, /profile.json/u);
+    const plan = await importing.send("\r", /Enter preview/u);
+    assert.match(plan, /add: Source/u);
+    assert.match(plan, /add: Skill skills\/alpha/u);
+    assert.match(plan, /App recipe fixture-app \(windows/u);
+    await importing.send("\r", /Apply Profile\? \(y\/n\)/u);
+    await assert.rejects(readFile(path.join(b.home, ".agents/skills/alpha/SKILL.md")), { code: "ENOENT" });
+    await importing.send("y", /added: App recipe fixture-app \(windows/u);
+    importing.press("q");
+    assert.equal(await importing.exitCode(), 0);
+    assert.deepEqual(JSON.parse(b.cli("export").stdout), profile);
+    assert.match(b.ok("app", "list"), /needs approval/u);
+  } finally {
+    for (const session of sessions) session.kill();
+    await rm(root, { recursive: true, force: true });
+  }
 });

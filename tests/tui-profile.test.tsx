@@ -63,7 +63,7 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
 
 test("import warns on newer producers, skips conflicts and adds recipes unapproved without commands", async t => {
   const f = await fixture(t);
-  await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
+  await writeFile(path.join(f.directory, "demo.json"), JSON.stringify({ ...recipe, install: { manual: "Keep existing install" } }));
   const file = path.join(f.home, "in.json");
   await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "99.0.0",
     sources: [], skills: [], apps: [recipe, { ...recipe, name: "second" }] }));
@@ -73,7 +73,7 @@ test("import warns on newer producers, skips conflicts and adds recipes unapprov
   await waitForFrame(f.view.lastFrame, frame => frame.includes(file));
   f.view.stdin.write("\r");
   const checklist = await waitForFrame(f.view.lastFrame, /add: App recipe second/);
-  assert.match(checklist, /conflict: App recipe demo[\s\S]*not selectable/);
+  assert.match(checklist, /conflict: App recipe demo[\s\S]*not\s+selectable/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /newer than running/);
   f.view.stdin.write("y");
