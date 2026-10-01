@@ -37,3 +37,17 @@ Rollback boundary: remove the Sources recipe hook and its view/environment
 wiring, shared preview formatter export and core directory exposure, together
 with the ticket tests and recipe-management documentation. Existing App
 lifecycle operations and Catalog installation behavior remain unchanged.
+
+Review corrections: recipes and Git Sources now share a windowed row budget,
+with indicators and page navigation. Sources uses explicit command-free
+`approvalStatus`, and Tab clears transient section messages. The guide documents
+n/Esc closure; n also cancels delegated Host/scope/version selections without
+changing Catalog behavior or fixed-version text input. Hook formatting, comments,
+App naming and memo dependencies match the requested review nits.
+
+Verification after corrections: `pnpm typecheck`, `pnpm lint`, `pnpm test`
+(659 passed), `pnpm test:e2e` (3 passed), and the focused Sources suite
+(53 passed, including 19 recipe/core integration tests). Added coverage includes
+20 Git Sources plus 20 recipes sharing six rows, runner/fetch-free listing,
+unmanaged Skill detection, key/highlight isolation, invalid-recipe Enter,
+message clearing, and n/Esc cancellation at all four install stages.

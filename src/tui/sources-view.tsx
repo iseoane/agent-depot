@@ -59,8 +59,7 @@ function errorText(error: unknown): string {
 }
 
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment }: SourcesViewProps) {
-  const recipes = useSourcesRecipes(operations, environment, onCapturingChange);
-  const height = useListHeight(listHeight, 7);
+  const height = useListHeight(listHeight, 9);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
   // Selection and marks are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
@@ -129,6 +128,9 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   const sourcesRef = useRef<readonly GitSource[]>(sources);
   sourcesRef.current = sources;
   const selected = resolveIndex(sources, selection);
+  const recipes = useSourcesRecipes({
+    operations, environment, onCapturingChange, height, gitCount: sources.length,
+  });
   const select = (index: number) => {
     const listed = sourcesRef.current;
     const bounded = Math.min(Math.max(index, 0), Math.max(listed.length - 1, 0));
@@ -226,7 +228,10 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       return;
     }
 
-    if (recipes.handleKey(input, key)) return;
+    if (recipes.handleKey(input, key)) {
+      if (key.tab) setMessage(undefined);
+      return;
+    }
 
     const listed = sourcesRef.current;
     const at = resolveIndex(listed, selectionRef.current);
@@ -236,9 +241,9 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
     } else if (key.upArrow || input === "k") {
       select(at - 1);
     } else if (key.pageDown) {
-      select(at + pageStep(height));
+      select(at + pageStep(recipes.gitHeight));
     } else if (key.pageUp) {
-      select(at - pageStep(height));
+      select(at - pageStep(recipes.gitHeight));
     } else if (key.return && highlighted) {
       onOpenCatalog?.(highlighted);
     } else if (input === "n") {
@@ -273,7 +278,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   if (state.status === "loading") return <Text>Loading sources...</Text>;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
 
-  const window = computeWindow(sources.length, selected, height);
+  const window = computeWindow(sources.length, selected, recipes.gitHeight);
 
   return (
     <Box flexDirection="column">
