@@ -6,6 +6,8 @@ export interface ProcessRunOptions {
   readonly captureStdout?: boolean;
   /** With captureStdout, kill the process once stdout exceeds this many bytes. */
   readonly maxOutputBytes?: number;
+  /** Cap stderr and kill the process if it exceeds this many bytes; otherwise uncapped. */
+  readonly maxStderrBytes?: number;
 }
 
 export interface ProcessRunResult {
@@ -31,6 +33,7 @@ export function runProcess(
     const stdout: Buffer[] = [];
     let stdoutBytes = 0;
     let stderr = "";
+    let stderrBytes = 0;
     let outputTooLarge = false;
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutBytes += chunk.length;
@@ -43,7 +46,15 @@ export function runProcess(
     });
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
+      const bytes = Buffer.from(chunk);
+      const remaining = options.maxStderrBytes === undefined
+        ? bytes.length : Math.max(0, options.maxStderrBytes - stderrBytes);
+      stderrBytes += bytes.length;
+      stderr += bytes.subarray(0, remaining).toString("utf8");
+      if (options.maxStderrBytes !== undefined && stderrBytes > options.maxStderrBytes) {
+        outputTooLarge = true;
+        child.kill();
+      }
     });
     child.on("error", reject);
     child.on("close", (code, signal) => {

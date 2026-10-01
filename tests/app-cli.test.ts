@@ -218,3 +218,109 @@ test("CLI preview explicitly flags Windows executables on WSL", async () => {
     });
   }
 });
+
+test("CLI install previews before confirmation and manual completion checks without rerunning", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-lifecycle-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  try {
+    await writeFile(path.join(directory, "example.json"), JSON.stringify({
+      name: "example", install: { argv: ["example", "install"], manual: "install yourself" },
+      update: { manual: "update" }, uninstall: { manual: "remove yourself" },
+      version: { argv: ["example", "--version"], pattern: "(1\\.2\\.3)" },
+    }));
+    const calls: string[][] = [];
+    let installed = true;
+    const apps = createAppOperations({ recipesDirectory: directory, homeDirectory: home, isWsl: false,
+      resolveExecutable: async () => "/usr/bin/example",
+      runner: async (_command, args, options) => {
+        calls.push([...args]);
+        assert.equal(options?.cwd, home);
+        if (args[0] === "install") throw Object.assign(new Error("cannot spawn"), { code: "ENOENT" });
+        return { code: installed ? 0 : 1, signal: null, stdout: Buffer.from("1.2.3"),
+          stderr: "", outputTooLarge: false };
+      },
+    });
+    const lines: string[] = [];
+    const deps = { appOperations: apps, stdout: (line: string) => lines.push(line),
+      stderr: (line: string) => lines.push(line) };
+    assert.equal(await runCli(["app", "install", "example", "--yes"], deps), 1);
+    assert.deepEqual(calls, []);
+    await apps.approve((await apps.load())[0]!);
+    assert.equal(await runCli(["app", "install", "example"], deps), 1);
+    assert.deepEqual(calls, []);
+    assert.ok(lines.some(line => line.includes('["example","install"]') && line.includes("/usr/bin/example")));
+    assert.ok(lines.some(line => line.includes(home) && line.includes(process.platform)));
+    assert.equal(await runCli(["app", "install", "example", "--yes"], deps), 1);
+    assert.ok(lines.some(line => line.includes("install yourself")));
+    assert.ok(lines.some(line => line.includes("--manual-done")));
+    assert.deepEqual(calls, [["install"]]);
+    assert.equal(await runCli(["app", "install", "example", "--manual-done", "--yes"], deps), 0);
+    assert.deepEqual(calls, [["install"], ["--version"]]);
+    assert.equal((await apps.trackedApps()).length, 1);
+    assert.equal(await runCli(["app", "uninstall", "example", "--yes"], deps), 1);
+    assert.equal(await runCli(["app", "uninstall", "example", "--manual-done", "--yes"], deps), 1);
+    assert.equal((await apps.trackedApps()).length, 1);
+    installed = false;
+    assert.equal(await runCli(["app", "uninstall", "example", "--manual-done", "--yes"], deps), 0);
+    assert.deepEqual(await apps.trackedApps(), []);
+    installed = true;
+    await runCli(["app", "install", "example", "--manual-done", "--yes"], deps);
+    const beforeForget = calls.length;
+    assert.equal(await runCli(["app", "uninstall", "example", "--forget"], deps), 1);
+    assert.equal((await apps.trackedApps()).length, 1);
+    assert.equal(await runCli(["app", "uninstall", "example", "--forget", "--yes"], deps), 0);
+    assert.equal(calls.length, beforeForget);
+    assert.deepEqual(await apps.trackedApps(), []);
+    for (const args of [
+      ["install", "example", "--forget", "--yes"], ["install", "example", "--unknown"],
+      ["install", "example", "--yes", "--yes"], ["uninstall", "example", "--forget", "--manual-done", "--yes"],
+      ["install"], ["install", "example", "extra"],
+    ]) assert.equal(await runCli(["app", ...args], deps), 1);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("forget tolerates corrupt records and argv-only recipes reject manual completion", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-records-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  const file = path.join(directory, "example.json");
+  try {
+    await writeFile(file, JSON.stringify({ name: "example",
+      install: { argv: ["example", "install"] }, update: { manual: "update" }, uninstall: { manual: "remove" },
+      version: { argv: ["example", "--version"], pattern: "(1\\.2\\.3)" } }));
+    const apps = createAppOperations({ recipesDirectory: directory, homeDirectory: home,
+      resolveExecutable: async () => "/usr/bin/example", runner: async () => ({
+        code: 0, signal: null, stdout: Buffer.from("1.2.3"), stderr: "", outputTooLarge: false,
+      }) });
+    await apps.approve((await apps.load())[0]!);
+    const lines: string[] = [];
+    const deps = { appOperations: apps, stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) };
+    assert.equal(await runCli(["app", "install", "example", "--manual-done", "--yes"], deps), 1);
+    assert.ok(lines.some(line => line.includes("No manual step declared")));
+    assert.equal(await runCli(["app", "install", "example", "--yes"], deps), 0);
+    await writeFile(path.join(home, "app-installations", "broken.json"), "{broken");
+    // Even a corrupt selected record may be explicitly forgotten.
+    await writeFile((await apps.previewForget("example")).file, "{broken");
+    assert.equal(await runCli(["app", "uninstall", "example", "--forget"], deps), 1);
+    assert.equal(await runCli(["app", "uninstall", "example", "--forget", "--yes"], deps), 0);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("manual rerun hints quote shell metacharacters in App names", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-quote-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  const name = "example $HOME 'quoted'";
+  try {
+    await writeFile(path.join(directory, "recipe.json"), JSON.stringify({ name,
+      install: { manual: "install yourself" }, update: { manual: "update" }, uninstall: { manual: "remove" },
+      version: { argv: ["example", "--version"], pattern: "(v1)" } }));
+    const apps = createAppOperations({ recipesDirectory: directory });
+    await apps.approve((await apps.load())[0]!);
+    const lines: string[] = [];
+    await runCli(["app", "install", name, "--yes"], { appOperations: apps, stdout: line => lines.push(line) });
+    const quoted = process.platform === "win32" ? "'example $HOME ''quoted'''" : "'example $HOME '\\''quoted'\\'''";
+    assert.ok(lines.some(line => line.includes(`app install ${quoted} --manual-done --yes`)));
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

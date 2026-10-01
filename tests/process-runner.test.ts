@@ -33,3 +33,27 @@ test("kills the process and flags output above the byte limit", async () => {
 test("rejects when the command cannot be spawned", async () => {
   await assert.rejects(runProcess("definitely-not-a-real-command-xyz", []), /ENOENT/);
 });
+
+test("caps stderr as well as stdout and closes stdin for non-interactive commands", async () => {
+  const oversized = await runProcess(node, ["-e", "process.stderr.write('x'.repeat(100000));setTimeout(()=>{},5000)"], {
+    maxStderrBytes: 32,
+  });
+  assert.equal(oversized.outputTooLarge, true);
+  assert.ok(Buffer.byteLength(oversized.stderr) <= 32);
+  const input = await runProcess(node, ["-e", "process.stdin.on('end',()=>process.stdout.write('eof'));process.stdin.resume()"], {
+    captureStdout: true,
+  });
+  assert.equal(input.stdout.toString(), "eof");
+});
+
+test("a stdout-only byte limit permits large stderr warnings", async () => {
+  const result = await runProcess(node, ["-e", "process.stdout.write('ok');process.stderr.write('w'.repeat(100000))"], {
+    captureStdout: true,
+    maxOutputBytes: 128,
+  });
+  assert.equal(result.code, 0);
+  assert.equal(result.signal, null);
+  assert.equal(result.outputTooLarge, false);
+  assert.equal(result.stdout.toString(), "ok");
+  assert.equal(result.stderr.length, 100000);
+});

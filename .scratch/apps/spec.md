@@ -182,7 +182,7 @@ This is a built-in skill in `builtin:agent-depot`, installed through the normal 
 1. **Resolved:** User-edited recipes live in `apps/` beside `sources.json` in the existing per-environment state directory, not a new config root.
 2. Whether a bare `npm` resolves to a launchable executable on Windows with `shell: false`. If it does not, the `argv` + `manual` form covers it.
 3. Exact CLI grammar, and whether `update apply` selects Apps by name, by index, or both.
-4. Whether `teardown` runs automatically before `uninstall` when the user confirms it, or stays a separate action.
+4. **Resolved:** `teardown` stays separate; uninstall never implicitly executes another step.
 5. **Resolved:** One-time approval uses the canonical file path and exact content hash, with private atomic receipts in sibling `app-approvals/`. CLI approval is only `app approve <name> --yes`; `app validate` never approves. Changed bytes require renewed approval; restoring approved bytes restores approval.
 6. **Resolved:** WSL manages Linux only. Windows PATH hits are skipped in favor of Linux candidates; there is no cross-environment view or Windows execution.
 
@@ -202,3 +202,10 @@ These notes come from the four candidate apps reviewed during exploration on 202
   - It writes skill copies into the Host skill roots, which is the motivation for `skills`.
   - Licensed under PolyForm Noncommercial.
 - **Archify:** a plain `SKILL.md` directory, already covered by the skill flow. It is not an App.
+
+### Ticket 03 lifecycle decisions
+
+- Installed-App records use sibling `app-installations/`, one atomic JSON record per hashed App name containing name, canonical recipe file and verified installed version. Independent App writes do not read-modify-write a shared file; existing `sources.json` remains unchanged.
+- CLI follows the existing non-interactive preview/rerun convention. `--yes` confirms execution only; `--manual-done --yes` explicitly attests completed manual work and checks version without rerunning argv. `app uninstall <name> --forget --yes` explicitly drops tracking without executing the recipe.
+- Open Question 4 resolved: teardown remains a separate action, never implicitly executed by uninstall. Each lifecycle step requires its own preview/confirmation.
+- Manual completion rechecks approval, but permits executable resolution to change as a consequence of installation/removal. Automated execution requires the previewed executable to remain unchanged.

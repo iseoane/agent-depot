@@ -20,4 +20,10 @@ Recipes live in `apps/` beside environment-local `sources.json`; private atomic 
 - Agent Depot tracks App identity and installed version, not filesystem provenance or rollback of App-created artifacts. A successful version check does not prove Host wiring is correct.
 - Declared owned-skill names/globs only exclude skills from unmanaged adoption/removal; they do not verify those paths.
 - CLI and TUI use shared core flows, and Apps join existing Installations and Updates views. Project-scoped Apps and per-project steps remain out of scope.
-- Update-selection CLI grammar and teardown-before-uninstall behavior remain open in `.scratch/apps/spec.md`; recipe placement, approval and WSL environment boundaries are resolved.
+- Update-selection CLI grammar remains open; teardown-before-uninstall is resolved below. Other open questions are in `.scratch/apps/spec.md`; recipe placement, approval and WSL environment boundaries are resolved.
+
+## Lifecycle implementation decisions (ticket 03)
+
+Installed-App records live in sibling `app-installations/`, keyed by hashed App name and published using the existing atomic-file adapter. This keeps App state separate from the strict Source/Skill state schema and avoids shared read-modify-write updates. Records contain identity, canonical recipe path and verified installed version only.
+
+Uninstall never implicitly runs Host teardown: teardown remains separately previewed and confirmed. The non-interactive CLI uses `--manual-done --yes` to attest manual completion, and `uninstall --forget --yes` to explicitly drop tracking without running commands.

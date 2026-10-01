@@ -502,5 +502,36 @@ capture group. Commands run from the user's home directory. An unsuccessful or
 unresolvable version check means not installed. The schema describes structure;
 `app validate` additionally enforces argv safety and regex semantics.
 
-This initial recipe flow does not execute lifecycle steps or latest-version
-lookups; those integrations are separate work.
+### Install and uninstall
+
+```sh
+agent-depot app install example          # preview only; exits non-zero until confirmed
+agent-depot app install example --yes
+agent-depot app uninstall example --yes
+```
+
+Each step previews its argv/manual text, resolved executable, home working
+directory and environment. Manual fallback occurs only when a process cannot
+launch, never after a non-zero exit (reported with stdout/stderr). Run the shown
+manual instructions yourself, then attest completion without rerunning argv:
+
+```sh
+agent-depot app install example --manual-done --yes
+agent-depot app uninstall example --manual-done --yes
+```
+
+`--yes` alone does not attest manual completion. Install records a version only
+when the version check succeeds. Uninstall retains tracking while version still
+succeeds; `agent-depot app uninstall example --forget --yes` explicitly removes
+tracking without running any recipe command, even if the recipe is gone.
+Atomic per-App records live in sibling `app-installations/`. Uninstall does not
+implicitly run Host teardown. Latest-version lookups, updates and Host steps
+remain separate work.
+
+
+App lifecycle commands are non-interactive: stdin is ignored (EOF), as in the
+existing Skill command runner, and there is no execution timeout. Recipes must
+use non-interactive flags; installers requiring a terminal belong in `manual`
+steps. EOF lets stdin-based prompts fail rather than wait for input, but a
+process ignoring EOF can still hang; cancel it manually. Captured App stdout
+and stderr are each capped at 1 MiB; failures show only their last 4 KiB.

@@ -88,7 +88,7 @@ The version command alone determines installed state. Recheck after manual steps
 
 Agent Depot records App identity and installed version, but does not track, snapshot, or verify App-written artifacts or edit Host configuration on an App's behalf. Recipe-owned skill names/globs filter unmanaged adoption/removal without verifying paths. Do not clone App repositories, ship built-in recipes, accept Source-declared recipes, or rewrite user recipes. See [ADR 0007](docs/adr/0007-delegate-app-lifecycle-to-user-recipes.md).
 
-Recipes live in an environment-local per-user `apps/` directory beside `sources.json`. Private atomic approval receipts live in sibling `app-approvals/`, keyed on canonical recipe path and exact content hash; CLI approval is only `app approve <name> --yes`, not `app validate`. WSL manages Linux only and skips Windows drive PATH candidates. Whether installed-App records use the existing state file or a sibling remains open. Project-scoped Apps and per-project steps are excluded. Update-selection CLI grammar and whether uninstall offers teardown remain open in `.scratch/apps/spec.md`.
+Recipes live in an environment-local per-user `apps/` directory beside `sources.json`. Private atomic approval receipts live in sibling `app-approvals/`, keyed on canonical recipe path and exact content hash; CLI approval is only `app approve <name> --yes`, not `app validate`. WSL manages Linux only and skips Windows drive PATH candidates. Installed-App records use atomic per-App JSON files in sibling `app-installations/`. Project-scoped Apps and per-project steps are excluded. Uninstall does not implicitly run teardown; update-selection CLI grammar remains open in `.scratch/apps/spec.md`.
 
 ## Testing seam
 
@@ -115,3 +115,11 @@ V1 explicitly rejects:
 5. The exact Windows symlink creation mechanics and required runtime validation remain implementation/check prerequisites. The resolved failure behavior is to stop the target operation with actionable guidance when symlink creation fails, including on Windows, without creating a duplicate managed copy. How should adoption compare content and guide resolution of same-name conflicts?
 6. How is version availability detected for skills, including built-in skills and sources without reliable version metadata?
 7. What CLI grammar, prompts, exit statuses, and user-facing error format should the operations expose?
+
+
+App lifecycle commands are non-interactive: stdin is ignored (EOF), as in the
+existing Skill command runner, and there is no execution timeout. Recipes must
+use non-interactive flags; installers requiring a terminal belong in `manual`
+steps. EOF lets stdin-based prompts fail rather than wait for input, but a
+process ignoring EOF can still hang; cancel it manually. Captured App stdout
+and stderr are each capped at 1 MiB; failures show only their last 4 KiB.
