@@ -246,23 +246,42 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     installations, createHash("sha256").update(name).digest("hex") + ".json",
   );
 
-  async function trackedApps(): Promise<TrackedApp[]> {
+  async function trackedApps(
+    reportWarning: (warning: string) => void = warning => process.emitWarning(warning),
+  ): Promise<TrackedApp[]> {
     let files: string[];
     try { files = await readdir(installations); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
     }
-    return Promise.all(files.filter(file => file.endsWith(".json")).sort().map(async file => {
-      const record: unknown = JSON.parse(await readFile(path.join(installations, file), "utf8"));
-      if (!record || typeof record !== "object"
-        || !("name" in record) || typeof record.name !== "string"
-        || !("recipeFile" in record) || typeof record.recipeFile !== "string"
-        || !("installedVersion" in record) || typeof record.installedVersion !== "string") {
-        throw new Error(`Invalid App installation record: ${file}`);
+    const records: TrackedApp[] = [];
+    for (const file of files.filter(file => file.endsWith(".json")).sort()) {
+      try {
+        const record: unknown = JSON.parse(await readFile(path.join(installations, file), "utf8"));
+        if (!record || typeof record !== "object"
+          || !("name" in record) || typeof record.name !== "string" || !record.name
+          || !("recipeFile" in record) || typeof record.recipeFile !== "string" || !record.recipeFile
+          || !("installedVersion" in record) || typeof record.installedVersion !== "string" || !record.installedVersion
+          || path.basename(installationPath(record.name)) !== file) {
+          throw new Error("invalid record fields or identity");
+        }
+        records.push({ name: record.name, recipeFile: record.recipeFile, installedVersion: record.installedVersion });
+      } catch (error) {
+        reportWarning(`Skipping App installation record ${file}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      return { name: record.name, recipeFile: record.recipeFile, installedVersion: record.installedVersion };
-    }));
+    }
+    return records;
+  }
+
+  async function previewForget(name: string): Promise<{ name: string; file: string }> {
+    const file = installationPath(name);
+    try { await access(file); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("No tracked App found");
+      throw error;
+    }
+    return { name, file };
   }
 
   async function planLifecycle(entry: AppEntry, action: AppLifecyclePlan["action"]): Promise<AppLifecyclePlan> {
@@ -290,7 +309,8 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     const inspection = await inspect(plan.entry);
     const name = plan.entry.recipe!.name;
     if (plan.action === "install" && inspection.status === "installed") {
-      await mkdir(installations, { recursive: true });
+      await mkdir(installations, { recursive: true, mode: 0o700 });
+      await chmod(installations, 0o700);
       await writeFileAtomically(installationPath(name), JSON.stringify({
         name, recipeFile: plan.entry.canonicalFile, installedVersion: inspection.installedVersion,
       }), { mode: 0o600 });
@@ -350,7 +370,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  return { load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, trackedApps, forgetApp };
+  return { load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, trackedApps, previewForget, forgetApp };
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;

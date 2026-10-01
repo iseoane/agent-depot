@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, chmod, stat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createAppOperations } from "../src/app-flow.js";
@@ -180,5 +180,40 @@ test("oversized output and signals fail with bounded diagnostics and no tracking
     assert.deepEqual(await f.apps.trackedApps(), []);
     oversized = false;
     assert.match((await f.apps.executeLifecycle(plan, true)).reason!, /SIGTERM/u);
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+
+test("App records repair directory permissions and hash traversal-like identities", async () => {
+  const f = await fixture(async () => result(), { ...recipe, name: "../../other/app" });
+  try {
+    const directory = path.join(f.home, "app-installations");
+    await mkdir(directory);
+    await chmod(directory, 0o755);
+    await f.apps.executeLifecycle(await f.apps.planLifecycle(f.entry, "install"), true);
+    const files = await readdir(directory);
+    assert.equal(files.length, 1);
+    assert.match(files[0]!, /^[a-f0-9]{64}\.json$/u);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(directory)).mode & 0o777, 0o700);
+      assert.equal((await stat(path.join(directory, files[0]!))).mode & 0o777, 0o600);
+    }
+    assert.equal((await f.apps.trackedApps())[0]!.name, "../../other/app");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("corrupt records are skipped with warnings and do not block explicit forget", async () => {
+  const f = await fixture(async () => result());
+  try {
+    await f.apps.executeLifecycle(await f.apps.planLifecycle(f.entry, "install"), true);
+    const directory = path.join(f.home, "app-installations");
+    await writeFile(path.join(directory, "broken.json"), "{broken");
+    const warnings: string[] = [];
+    assert.equal((await f.apps.trackedApps(warning => warnings.push(warning))).length, 1);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /broken.json/u);
+    assert.match((await f.apps.previewForget("example")).file, /app-installations/u);
+    await f.apps.forgetApp("example", true);
+    assert.deepEqual(await f.apps.trackedApps(() => {}), []);
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });

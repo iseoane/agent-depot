@@ -21,3 +21,11 @@
 - Runtime boundary: CLI seam tests invoke `runCli` with real temporary recipe/state directories and injected executable resolver/runner; no external App is installed.
 - Rollback boundaries: core unit removes lifecycle operations/records without changing Source/Skill state; CLI unit removes lifecycle routing/help/docs without removing recipe approval/listing.
 - Final verification: `pnpm typecheck` passed; `pnpm lint` passed; `pnpm test` passed all 551 tests (0 failures/skips). CLI help regression suite: 70 passed. The first full run exposed the outdated exact-help expectation; it was updated and all checks rerun successfully.
+
+### Review corrections
+
+Applied all feedback from `t03-review.md`: private record directory with permission repair, spawn-code-only fallback, bounded stderr/diagnostics and explicit output-limit errors, warning-and-skip corrupt record listing, direct per-App forget preview, explicit plan-field comparisons, shell-safe rerun hints and clearer manual-step usage. Existing stdin-ignored/no-timeout policy is documented rather than changed.
+
+Regression coverage includes realistic launch errors versus unexpected rejections, oversized output, signal exits, private directory/file modes, traversal-like App identities, corrupt records (including explicit forget of a corrupt selected record), argv-only manual completion rejection and shell quoting. Existing CLI tests cover duplicate/unknown flags, incompatible forget flags, selection arity and unconfirmed forget.
+
+Verification after corrections: `pnpm typecheck` and `pnpm lint` passed; `pnpm test` passed 558 tests with 0 failures/skips. Focused lifecycle (11), App CLI (8) and process runner (5) tests passed. Diff whitespace check passed.

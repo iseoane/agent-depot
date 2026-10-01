@@ -8,7 +8,7 @@ export async function runAppCommand(
   output: (line: string) => void,
 ): Promise<number> {
   const [command, ...args] = values;
-  const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|uninstall <name> [--yes] [--manual-done]; app uninstall <name> --forget [--yes]";
+  const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|uninstall <name> [--yes] [--manual-done]; app uninstall <name> --forget [--yes] (--manual-done requires a declared manual step)";
   if (command === "schema" && args.length === 0) {
     output(JSON.stringify(APP_RECIPE_SCHEMA, null, 2));
     return 0;
@@ -85,14 +85,17 @@ async function runLifecycle(
   const confirmed = flags.includes("--yes");
   const done = flags.includes("--manual-done");
   const forget = flags.includes("--forget");
-  if (names.length !== 1 || new Set(flags).size !== flags.length
-    || flags.some(flag => !["--yes", "--manual-done", "--forget"].includes(flag))
-    || (forget && (action !== "uninstall" || done))) throw new CliUsageError(usage);
+  const invalidSelection = names.length !== 1;
+  const duplicateFlags = new Set(flags).size !== flags.length;
+  const unknownFlag = flags.some(flag => !["--yes", "--manual-done", "--forget"].includes(flag));
+  const incompatibleForget = forget && (action !== "uninstall" || done);
+  if (invalidSelection || duplicateFlags || unknownFlag || incompatibleForget) {
+    throw new CliUsageError(usage);
+  }
   const name = names[0]!;
   if (forget) {
-    const record = (await apps.trackedApps()).find(app => app.name === name);
-    if (!record) throw new Error("No tracked App found");
-    output(`Forget App tracking only: ${name} (${record.recipeFile}); no recipe commands will run`);
+    const record = await apps.previewForget(name);
+    output(`Forget App tracking only: ${name} (${record.file}); no recipe commands will run`);
     await apps.forgetApp(name, confirmed);
     output(`${name}: untracked`);
     return 0;
@@ -109,7 +112,11 @@ async function runLifecycle(
   if (result.reason) output(result.reason);
   if (result.status === "manual required") {
     output(`Manual (never executed): ${result.manual}`);
-    output(`After completing it, run app ${action} ${JSON.stringify(name)} --manual-done --yes to check version.`);
+    const quotedName = process.platform === "win32"
+      ? "'" + name.replaceAll("'", "''") + "'"
+      : "'" + name.replaceAll("'", "'\\''") + "'";
+    const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
+    output(`After completing it, run app ${action} ${quotedName} --manual-done --yes to check version (${shell}).`);
   }
   return result.status === "installed" || result.status === "untracked" ? 0 : 1;
 }

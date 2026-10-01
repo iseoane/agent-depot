@@ -279,3 +279,48 @@ test("CLI install previews before confirmation and manual completion checks with
     ]) assert.equal(await runCli(["app", ...args], deps), 1);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
+
+test("forget tolerates corrupt records and argv-only recipes reject manual completion", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-records-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  const file = path.join(directory, "example.json");
+  try {
+    await writeFile(file, JSON.stringify({ name: "example",
+      install: { argv: ["example", "install"] }, update: { manual: "update" }, uninstall: { manual: "remove" },
+      version: { argv: ["example", "--version"], pattern: "(1\\.2\\.3)" } }));
+    const apps = createAppOperations({ recipesDirectory: directory, homeDirectory: home,
+      resolveExecutable: async () => "/usr/bin/example", runner: async () => ({
+        code: 0, signal: null, stdout: Buffer.from("1.2.3"), stderr: "", outputTooLarge: false,
+      }) });
+    await apps.approve((await apps.load())[0]!);
+    const lines: string[] = [];
+    const deps = { appOperations: apps, stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) };
+    assert.equal(await runCli(["app", "install", "example", "--manual-done", "--yes"], deps), 1);
+    assert.ok(lines.some(line => line.includes("No manual step declared")));
+    assert.equal(await runCli(["app", "install", "example", "--yes"], deps), 0);
+    await writeFile(path.join(home, "app-installations", "broken.json"), "{broken");
+    // Even a corrupt selected record may be explicitly forgotten.
+    await writeFile((await apps.previewForget("example")).file, "{broken");
+    assert.equal(await runCli(["app", "uninstall", "example", "--forget"], deps), 1);
+    assert.equal(await runCli(["app", "uninstall", "example", "--forget", "--yes"], deps), 0);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("manual rerun hints quote shell metacharacters in App names", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-quote-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  const name = "example $HOME 'quoted'";
+  try {
+    await writeFile(path.join(directory, "recipe.json"), JSON.stringify({ name,
+      install: { manual: "install yourself" }, update: { manual: "update" }, uninstall: { manual: "remove" },
+      version: { argv: ["example", "--version"], pattern: "(v1)" } }));
+    const apps = createAppOperations({ recipesDirectory: directory });
+    await apps.approve((await apps.load())[0]!);
+    const lines: string[] = [];
+    await runCli(["app", "install", name, "--yes"], { appOperations: apps, stdout: line => lines.push(line) });
+    const quoted = process.platform === "win32" ? "'example $HOME ''quoted'''" : "'example $HOME '\\''quoted'\\'''";
+    assert.ok(lines.some(line => line.includes(`app install ${quoted} --manual-done --yes`)));
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
