@@ -16,7 +16,7 @@ export async function runAppCommand(
   }
   if (command === "list" && args.length === 0) {
     for (const entry of await apps.load()) {
-      if (entry.applicable || entry.error) await show(entry);
+      if (entry.applicable || entry.error) await show(entry, true);
     }
     return 0;
   }
@@ -63,12 +63,16 @@ export async function runAppCommand(
   }
   return failed ? 1 : 0;
 
-  async function show(entry: AppEntry) {
+  async function show(entry: AppEntry, includeLatest = false) {
     const result = await apps.inspect(entry);
     const columns = [
       entry.recipe?.name ?? entry.file, result.status,
       result.installedVersion ?? "unknown", result.executable ?? "unresolved",
     ];
+    if (includeLatest) {
+      const update = await apps.checkUpdate(entry);
+      columns.push(`latest: ${update.latestVersion ?? "unknown"}`, update.status);
+    }
     if (result.reason) columns.push(result.reason);
     output(columns.join("\t"));
   }

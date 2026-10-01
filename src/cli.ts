@@ -122,7 +122,7 @@ const USAGE = [
   "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot update check --scope <project|user-global>",
-  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>...) [--yes] [--confirm-path <relative-path>...]",
+  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>... | --app <name>...) [--yes] [--confirm-path <relative-path>...]",
   "  agent-depot skill remove <id|path>... [--yes]",
   "  agent-depot skill remove <id|path> --host <host>... [--yes]",
   "  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]",
@@ -130,7 +130,7 @@ const USAGE = [
   "  agent-depot app schema|list",
   "  agent-depot app validate <file>...",
   "  agent-depot app approve <name> [--yes]",
-  "  agent-depot app install|uninstall <name> [--yes] [--manual-done]",
+  "  agent-depot app install|update|uninstall <name> [--yes] [--manual-done]",
   "  agent-depot app uninstall <name> --forget [--yes]",
   "  agent-depot tui",
   "  agent-depot --version",
@@ -885,6 +885,7 @@ interface UpdateOptions {
   readonly scope: "project" | "user-global";
   readonly all: boolean;
   readonly requested: readonly string[];
+  readonly requestedApps: readonly string[];
   readonly confirmed: boolean;
   /** Exact relative non-canonical project paths the user confirmed with --confirm-path. */
   readonly confirmedPaths: readonly string[];
@@ -897,7 +898,9 @@ async function runUpdate(
   output: (line: string) => void,
 ): Promise<number> {
   const options = parseUpdateOptions(argv);
-  const { assessment, installed, context } = await loadUpdates({
+  const apps = dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory });
+  const { assessment, installed, context, appUpdates } = await loadUpdates({
+    apps,
     scope: options.scope,
     operations,
     ...(dependencies.homeDirectory === undefined ? {} : { homeDirectory: dependencies.homeDirectory }),
@@ -911,8 +914,33 @@ async function runUpdate(
     : undefined;
 
   outputUpdateAssessment(assessment, options.scope, output, userGlobalInventory);
+  for (const item of appUpdates) {
+    output(`App ${item.entry.recipe?.name ?? item.entry.file}: ${item.status}; installed ${item.installedVersion ?? "unknown"}; latest ${item.latestVersion ?? "unknown"}`);
+  }
   if (options.action === "check") {
     return 0;
+  }
+  const selectedApps = options.all ? appUpdates.filter(item => item.status === "update available")
+    : options.requestedApps.map(name => {
+      const matches = appUpdates.filter(item => item.entry.recipe?.name === name);
+      if (matches.length !== 1 || matches[0]!.status !== "update available") {
+        throw new CliUsageError(`App ${JSON.stringify(name)} is unknown or not updateable`);
+      }
+      return matches[0]!;
+    });
+  const appPlans = [];
+  let appFailed = 0;
+  for (const item of selectedApps) {
+    try {
+      const plan = await apps.planLifecycle(item.entry, "update");
+      output(`Preview: update App ${item.entry.recipe!.name}: ${JSON.stringify(plan.argv ?? [])}; executable ${plan.executable ?? "unresolved"}; cwd ${plan.cwd}; environment ${plan.environment}`);
+      if (plan.warning) output(plan.warning);
+      if (plan.manual) output(`Manual (never executed): ${plan.manual}`);
+      appPlans.push(plan);
+    } catch (error) {
+      appFailed++;
+      output(`App ${item.entry.recipe!.name}: preview failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   const selected = selectUpdateCandidates(assessment, options);
@@ -946,14 +974,33 @@ async function runUpdate(
   for (const item of result.failed) {
     output(`Failed Skill ${JSON.stringify(item.selection.path)} (${item.id}): ${item.error ?? "unknown error"}`);
   }
-  output(`Update summary: ${result.updated.length} updated, ${result.failed.length} failed`);
-  return result.failed.length === 0 ? 0 : 1;
+  let appUpdated = 0;
+  for (const plan of appPlans) {
+    try {
+      const outcome = await apps.executeLifecycle(plan, true);
+      output(`App ${plan.entry.recipe!.name}: ${outcome.status}${outcome.reason ? `: ${outcome.reason}` : ""}`);
+      if (outcome.status === "installed") appUpdated++;
+      else {
+        appFailed++;
+        if (outcome.manual) {
+          output(`Manual (never executed): ${outcome.manual}`);
+          output(`After completing it, use app update ${JSON.stringify(plan.entry.recipe!.name)} --manual-done --yes to check version.`);
+        }
+      }
+    } catch (error) {
+      appFailed++;
+      output(`App ${plan.entry.recipe!.name}: failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  output(`Update summary: ${result.updated.length + appUpdated} updated, ${result.failed.length + appFailed} failed`);
+  return result.failed.length + appFailed === 0 ? 0 : 1;
 }
 
 function selectUpdateCandidates(
   assessment: Parameters<typeof selectUpdateBatch>[0],
   options: UpdateOptions,
 ): readonly UpdateBatchAssessmentItem[] {
+  if (!options.all && !options.requested.length) return [];
   const requested = options.all
     ? "all" as const
     : resolveUpdateSelectionIds(assessment, options.requested);
@@ -975,6 +1022,7 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
   let all = false;
   let confirmed = false;
   const requested: string[] = [];
+  const requestedApps: string[] = [];
   const confirmedPaths: string[] = [];
   for (let index = 1; index < argv.length; index += 1) {
     switch (argv[index]) {
@@ -986,6 +1034,9 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
         break;
       case "--all":
         all = true;
+        break;
+      case "--app":
+        requestedApps.push(requireOptionValue(argv, ++index, "--app"));
         break;
       case "--skill":
         requested.push(requireOptionValue(argv, ++index, "--skill"));
@@ -1001,12 +1052,14 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
   if (scope !== "project" && scope !== "user-global") {
     throw new CliUsageError("Update scope must be explicit: use --scope project or --scope user-global");
   }
-  if (action === "check" && (all || requested.length > 0 || confirmed || confirmedPaths.length > 0)) {
+  if (action === "check" && (all || requested.length > 0 || requestedApps.length > 0 || confirmed || confirmedPaths.length > 0)) {
     throw new CliUsageError("update check only accepts --scope; use update apply to select and apply updates");
   }
-  if (action === "apply" && (all === (requested.length > 0))) {
-    throw new CliUsageError("update apply requires exactly one selection mode: --all or one or more --skill values");
+  if (action === "apply" && (all === (requested.length + requestedApps.length > 0))) {
+    throw new CliUsageError("update apply requires exactly one selection mode: --all or one or more --skill/--app values");
   }
+  if (requestedApps.length && scope !== "user-global") throw new CliUsageError("Apps are user-global only");
+  if (new Set(requestedApps).size !== requestedApps.length) throw new CliUsageError("Duplicate App selection");
   if (scope === "user-global" && confirmedPaths.length > 0) {
     throw new CliUsageError("--confirm-path only applies to --scope project");
   }
@@ -1015,6 +1068,7 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
     scope: scope as "project" | "user-global",
     all,
     requested: Object.freeze(requested),
+    requestedApps: Object.freeze(requestedApps),
     confirmed,
     confirmedPaths: Object.freeze(confirmedPaths),
   };

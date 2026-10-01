@@ -1,3 +1,4 @@
+import { type AppOperations } from "./app-flow.js";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -31,6 +32,7 @@ export type UpdateScope = "project" | "user-global";
 
 /** Where an update check reads installations from; defaults mirror the CLI (real home and cwd). */
 export interface UpdateScopeInput {
+  readonly apps?: AppOperations;
   readonly scope: UpdateScope;
   readonly operations: SourceOperations;
   readonly homeDirectory?: string;
@@ -42,6 +44,7 @@ export interface UpdateScopeInput {
 
 export interface LoadedUpdates {
   readonly assessment: UpdateBatchAssessment;
+  readonly appUpdates: readonly Awaited<ReturnType<AppOperations["checkUpdate"]>>[];
   /** Installations of the scope, as assessed. */
   readonly installed: readonly ProjectSkillSelection[];
   /** Shared options for preview and apply; the assessment snapshots are never reread. */
@@ -83,7 +86,10 @@ export async function loadUpdates(input: UpdateScopeInput): Promise<LoadedUpdate
     ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
     ...(input.installationFileSystem === undefined ? {} : { installationFileSystem: input.installationFileSystem }),
   };
-  return { assessment, installed, context };
+  const appUpdates = input.scope === "user-global" && input.apps
+    ? await Promise.all((await input.apps.load()).filter(entry => entry.applicable || entry.error).map(entry => input.apps!.checkUpdate(entry)))
+    : [];
+  return { assessment, installed, context, appUpdates };
 }
 
 async function requireUserGlobalInstallations(operations: SourceOperations): Promise<readonly ProjectSkillSelection[]> {

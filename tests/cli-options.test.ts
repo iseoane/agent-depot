@@ -80,5 +80,5 @@ test("update option parsing handles --confirm-path", async () => {
 });
 
 test("usage text documents update apply --confirm-path", async () => {
-  assert.match(await failure(["bogus"]), /agent-depot update apply --scope <project\|user-global> \(--all \| --skill <id\|path>\.\.\.\) \[--yes\] \[--confirm-path <relative-path>\.\.\.\]/u);
+  assert.match(await failure(["bogus"]), /agent-depot update apply --scope <project\|user-global> \(--all \| --skill <id\|path>\.\.\. \| --app <name>\.\.\.\) \[--yes\] \[--confirm-path <relative-path>\.\.\.\]/u);
 });

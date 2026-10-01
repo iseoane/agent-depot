@@ -502,11 +502,12 @@ capture group. Commands run from the user's home directory. An unsuccessful or
 unresolvable version check means not installed. The schema describes structure;
 `app validate` additionally enforces argv safety and regex semantics.
 
-### Install and uninstall
+### Install, update and uninstall
 
 ```sh
 agent-depot app install example          # preview only; exits non-zero until confirmed
 agent-depot app install example --yes
+agent-depot app update example --yes
 agent-depot app uninstall example --yes
 agent-depot app setup example --host pi --host codex --yes
 agent-depot app teardown example --host pi --yes
@@ -527,8 +528,26 @@ when the version check succeeds. Uninstall retains tracking while version still
 succeeds; `agent-depot app uninstall example --forget --yes` explicitly removes
 tracking without running any recipe command, even if the recipe is gone.
 Atomic per-App records live in sibling `app-installations/`. Uninstall does not
-implicitly run Host teardown. Latest-version lookups, updates and Host steps
-remain separate work.
+implicitly run Host teardown.
+
+`app list` and `update check --scope user-global` resolve latest versions from
+GitHub Releases, npm, or approved `latest.argv`. Missing or failed lookups are
+unknown, never offered as updates. Public HTTP requests send no credentials,
+reject redirects, cap responses at 1 MiB and time out after five seconds.
+
+```sh
+agent-depot update apply --scope user-global --all --yes
+agent-depot update apply --scope user-global --skill 0 --app example --yes
+agent-depot app update example --manual-done --yes
+```
+
+`--all` includes Apps and Skills; repeat `--app <name>` to select Apps alongside
+Skills. Apps are user-global only. Every selected step is previewed before the
+batch confirmation; independent failures do not stop the remaining updates.
+Manual batch outcomes are completed separately using `app update --manual-done`.
+Updates record the version confirmed by the recipe's version command, not the
+registry response. Version identity ignores a leading `v` before a digit and
+does not infer semantic version ordering.
 
 
 App lifecycle commands are non-interactive: stdin is ignored (EOF), as in the
