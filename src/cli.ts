@@ -130,6 +130,8 @@ const USAGE = [
   "  agent-depot app schema|list",
   "  agent-depot app validate <file>...",
   "  agent-depot app approve <name> [--yes]",
+  "  agent-depot app install|uninstall <name> [--yes] [--manual-done]",
+  "  agent-depot app uninstall <name> --forget [--yes]",
   "  agent-depot tui",
   "  agent-depot --version",
 ].join("\n");

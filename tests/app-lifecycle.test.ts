@@ -138,3 +138,18 @@ test("manual installation can make a previously missing executable available", a
     assert.equal((await apps.completeManual(plan, true)).status, "installed");
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
+
+test("automated uninstall untracks only after version fails; missing command without manual fails", async () => {
+  let installed = true;
+  const f = await fixture(async (_command, args) => {
+    if (args[0] === "remove") installed = false;
+    return result(installed ? "1.2.3" : "", args[0] === "--version" && !installed ? 1 : 0);
+  }, { ...recipe, uninstall: { argv: ["example", "remove"] } });
+  try {
+    await f.apps.executeLifecycle(await f.apps.planLifecycle(f.entry, "install"), true);
+    assert.equal((await f.apps.executeLifecycle(await f.apps.planLifecycle(f.entry, "uninstall"), true)).status, "untracked");
+    assert.deepEqual(await f.apps.trackedApps(), []);
+    const missing = createAppOperations({ ...f.environment, resolveExecutable: async () => undefined });
+    assert.equal((await missing.executeLifecycle(await missing.planLifecycle(f.entry, "uninstall"), true)).status, "failed");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});

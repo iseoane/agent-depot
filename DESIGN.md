@@ -88,7 +88,7 @@ The version command alone determines installed state. Recheck after manual steps
 
 Agent Depot records App identity and installed version, but does not track, snapshot, or verify App-written artifacts or edit Host configuration on an App's behalf. Recipe-owned skill names/globs filter unmanaged adoption/removal without verifying paths. Do not clone App repositories, ship built-in recipes, accept Source-declared recipes, or rewrite user recipes. See [ADR 0007](docs/adr/0007-delegate-app-lifecycle-to-user-recipes.md).
 
-Recipes live in an environment-local per-user `apps/` directory beside `sources.json`. Private atomic approval receipts live in sibling `app-approvals/`, keyed on canonical recipe path and exact content hash; CLI approval is only `app approve <name> --yes`, not `app validate`. WSL manages Linux only and skips Windows drive PATH candidates. Whether installed-App records use the existing state file or a sibling remains open. Project-scoped Apps and per-project steps are excluded. Update-selection CLI grammar and whether uninstall offers teardown remain open in `.scratch/apps/spec.md`.
+Recipes live in an environment-local per-user `apps/` directory beside `sources.json`. Private atomic approval receipts live in sibling `app-approvals/`, keyed on canonical recipe path and exact content hash; CLI approval is only `app approve <name> --yes`, not `app validate`. WSL manages Linux only and skips Windows drive PATH candidates. Installed-App records use atomic per-App JSON files in sibling `app-installations/`. Project-scoped Apps and per-project steps are excluded. Uninstall does not implicitly run teardown; update-selection CLI grammar remains open in `.scratch/apps/spec.md`.
 
 ## Testing seam
 
