@@ -36,9 +36,9 @@ const matchesScope = (row: UpdateRow, filter: UpdateScopeFilter): boolean => fil
 /** The rows the list shows for a scope filter and fold state, and the cursor positions they make up. */
 export function viewOf(data: UpdatesData | undefined, scope: UpdateScopeFilter, showUnknown: boolean) {
   const shown = (data?.rows ?? []).filter((row) => matchesScope(row, scope));
-  const updatable = shown.filter((row) => row.item.status === "updateable");
-  const unknown = shown.filter((row) => row.item.status === "unknown");
-  const upToDate = shown.filter((row) => row.item.status === "current").length;
+  const updatable = shown.filter((row) => row.status === "update available");
+  const unknown = shown.filter((row) => row.status === "cannot assess");
+  const upToDate = shown.filter((row) => row.status === "up to date").length;
   const entries: readonly Entry[] = [
     ...updatable.map((row): Entry => ({ kind: "update", row })),
     ...(unknown.length > 0 ? [{ kind: "summary" } as const] : []),

@@ -4,7 +4,17 @@
 
 **Blocked by:** 05, 06.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Apps whose version cannot be checked appear in the folded "cannot be checked" row.
-- [ ] A mixed selection of skills and Apps applies both kinds, and failures are summarised per item.
+- [x] Apps whose version cannot be checked appear in the folded "cannot be checked" row.
+- [x] A mixed selection of skills and Apps applies both kinds, and failures are summarised per item.
+
+## Verification
+
+- TDD tracer: App row/preview test failed with “No installations” before implementation.
+- Focused public TUI harness: 44 Updates tests passed before the final spawn-fallback slice.
+- Final verification: `pnpm typecheck`, `pnpm lint`, `pnpm test` — 618 passed, 0 failed.
+- Direct two-axis review against `3f63691`: no outstanding Standards or Spec findings.
+  Parallel sub-agent review unavailable in this harness.
+- Rollback boundary: `src/tui/updates*`, accompanying Updates tests, and ticket/spec notes.
+  Shared App/Skill core operations remain unchanged.

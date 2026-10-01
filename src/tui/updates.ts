@@ -1,3 +1,4 @@
+import { createAppOperations, type AppOperations, type AppUpdateCheck, type AppLifecyclePlan } from "../app-flow.js";
 import { formatVersionPolicy } from "../skill-install.js";
 import type { SourceOperations } from "../sources.js";
 import type { UpdateBatchAssessmentItem } from "../update-batch.js";
@@ -24,7 +25,8 @@ export type UpdateScopeFilter = "all" | UpdateScope;
 export const UPDATE_SCOPES: readonly UpdateScope[] = ["project", "user-global"];
 
 /** One installed Skill as the Updates view shows it. */
-export interface UpdateRow {
+interface SkillUpdateRow {
+  readonly kind?: "skill";
   /** Unique across scopes: the same Skill can be installed in both. */
   readonly key: string;
   readonly scope: UpdateScope;
@@ -36,6 +38,20 @@ export interface UpdateRow {
   readonly status: "update available" | "up to date" | "cannot assess";
   readonly reason: string;
 }
+
+export interface AppUpdateRow {
+  readonly kind: "app";
+  readonly key: string;
+  readonly scope: "user-global";
+  readonly check: AppUpdateCheck;
+  readonly path: string;
+  readonly policy: string;
+  readonly installed: string;
+  readonly available: string;
+  readonly status: SkillUpdateRow["status"];
+  readonly reason: string;
+}
+export type UpdateRow = SkillUpdateRow | AppUpdateRow;
 
 /** The assessment of one scope, or why it could not be read. */
 export interface ScopeResult {
@@ -72,6 +88,7 @@ export interface UpdatesData {
   readonly refresh: RefreshReport;
   /** Milliseconds since the epoch when the assessment finished. */
   readonly checkedAt: number;
+  readonly apps?: AppOperations;
 }
 
 export type UpdatesPhase = "refreshing" | "checking";
@@ -149,6 +166,7 @@ export async function loadUpdateRows(
   environment: TuiEnvironment,
   options: LoadUpdatesOptions,
 ): Promise<UpdatesData> {
+  const apps = createAppOperations({ homeDirectory: environment.homeDirectory, ...environment.appEnvironment });
   let refresh: RefreshReport = { attempted: false, refreshed: [], failed: [], unreadable: [] };
   if (options.refresh) {
     options.onPhase?.("refreshing");
@@ -164,12 +182,12 @@ export async function loadUpdateRows(
   options.onPhase?.("checking");
   const results = await Promise.all(UPDATE_SCOPES.map(async (scope): Promise<ScopeResult> => {
     try {
-      return { scope, loaded: await loadUpdates(scopeInput(operations, environment, scope)) };
+      return { scope, loaded: await loadUpdates({ ...scopeInput(operations, environment, scope), apps }) };
     } catch (error) {
       return { scope, error: errorText(error) };
     }
   }));
-  const rows = results.flatMap(({ scope, loaded }) =>
+  const rows: UpdateRow[] = results.flatMap(({ scope, loaded }) =>
     (loaded?.assessment.items ?? []).map((item): UpdateRow => ({
       key: `${scope}:${item.id}`,
       scope,
@@ -181,7 +199,14 @@ export async function loadUpdateRows(
       status: STATUS_LABEL[item.status],
       reason: item.reason,
     })));
-  return { results, rows, refresh, checkedAt: (options.now ?? Date.now)() };
+  for (const check of results.flatMap(result => result.loaded?.appUpdates ?? [])) {
+    rows.push({ kind: "app", key: `app:${check.entry.file}`, scope: "user-global", check,
+      path: `App: ${check.entry.recipe?.name ?? check.entry.file}`, policy: "latest",
+      installed: check.installedVersion ?? "?", available: check.latestVersion ?? "?",
+      status: check.status === "update available" ? "update available" : check.status === "current" ? "up to date" : "cannot assess",
+      reason: check.reason ?? check.inspection.reason ?? check.inspection.status });
+  }
+  return { results, rows, refresh, apps, checkedAt: (options.now ?? Date.now)() };
 }
 
 /** `just now`, `42s ago`, `5 min ago`, `2 h ago`. */
@@ -208,10 +233,13 @@ export interface PreparedUpdateGroup {
 
 export interface PreparedUpdates {
   readonly groups: readonly PreparedUpdateGroup[];
+  readonly apps?: AppOperations;
+  readonly appPlans: readonly AppLifecyclePlan[];
+  readonly appFailures: readonly string[];
   /** The exact `update apply` preview of every candidate whose preview succeeded. */
   readonly lines: readonly string[];
   /** Items whose preview succeeded, across scopes; only these are applied. */
-  readonly applicable: readonly UpdateBatchAssessmentItem[];
+  readonly applicable: readonly (UpdateBatchAssessmentItem | AppLifecyclePlan)[];
   readonly failures: readonly UpdatePreviewFailure[];
   /** Non-canonical locations, per scope, that need their own explicit confirmation. */
   readonly nonCanonicalPaths: readonly ScopedPath[];
@@ -223,10 +251,12 @@ export async function prepareUpdates(
   selected: readonly UpdateRow[],
 ): Promise<PreparedUpdates> {
   const groups: PreparedUpdateGroup[] = [];
+  const appPlans: AppLifecyclePlan[] = [];
+  const appFailures: string[] = [];
   const lines: string[] = [];
   const failures: UpdatePreviewFailure[] = [];
   for (const { scope, loaded } of data.results) {
-    const items = selected.filter((row) => row.scope === scope).map((row) => row.item);
+    const items = selected.filter((row): row is SkillUpdateRow => row.kind !== "app" && row.scope === scope).map((row) => row.item);
     if (!loaded || items.length === 0) continue;
     const { context } = loaded;
     const outcome = await previewUpdateCandidates(items, context);
@@ -240,10 +270,21 @@ export async function prepareUpdates(
       overwriteShown: new Set(outcome.plans.filter((plan) => plan.overwriteRequired).map((plan) => plan.item.id)),
     });
   }
+  for (const row of selected) {
+    if (row.kind !== "app" || !data.apps) continue;
+    try {
+      const plan = await data.apps.planLifecycle(row.check.entry, "update", undefined, row.check);
+      appPlans.push(plan);
+      lines.push(`Environment: ${plan.environment}`, row.path,
+        ...(plan.argv ? [`argv: ${JSON.stringify(plan.argv)}`, `Executable: ${plan.executable ?? "unavailable"}`] : []),
+        ...(plan.manual ? [`Manual: ${plan.manual}`] : []), `Working directory: ${plan.cwd}`,
+        ...(plan.warning ? [plan.warning] : []));
+    } catch (error) { appFailures.push(`Failed ${row.path}: preview failed: ${errorText(error)}`); }
+  }
   return {
-    groups,
+    groups, apps: data.apps, appPlans, appFailures,
     lines,
-    applicable: groups.flatMap((group) => group.applicable),
+    applicable: [...groups.flatMap((group) => group.applicable), ...appPlans],
     failures,
     nonCanonicalPaths: groups.flatMap((group) => group.nonCanonicalPaths.map((location) => ({ scope: group.scope, path: location }))),
   };
@@ -260,7 +301,7 @@ export interface UpdateOutcome {
  * only when the caller passes it (with its scope) after the separate confirmation.
  * A Skill that became locally modified after the preview fails instead of being overwritten.
  */
-export async function runUpdates(prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[]): Promise<UpdateOutcome> {
+export async function runUpdates(prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[], confirmManual?: (plan: AppLifecyclePlan) => Promise<boolean>): Promise<UpdateOutcome> {
   const updated: string[] = [];
   const failedLines: string[] = [];
   for (const group of prepared.groups) {
@@ -275,6 +316,19 @@ export async function runUpdates(prepared: PreparedUpdates, confirmedPaths: read
     updated.push(...result.updated.map((item) => `Updated ${item.selection.path}`));
     failedLines.push(...result.failed.map((item) => `Failed ${item.selection.path}: ${item.error ?? "unknown error"}`));
   }
+  for (const plan of prepared.appPlans) {
+    const name = `App: ${plan.entry.recipe!.name}`;
+    try {
+      let result = await prepared.apps!.executeLifecycle(plan, true);
+      if (result.status === "manual required") {
+        if (!await confirmManual?.(plan)) { failedLines.push(`Cancelled ${name}`); continue; }
+        result = await prepared.apps!.completeManual(plan, true);
+      }
+      if (result.status === "failed") failedLines.push(`Failed ${name}: ${result.reason}`);
+      else updated.push(`Updated ${name}: installed ${result.previousVersion} -> ${result.installedVersion} (latest ${result.latestVersion ?? "unknown"})`);
+    } catch (error) { failedLines.push(`Failed ${name}: ${errorText(error)}`); }
+  }
+  failedLines.push(...prepared.appFailures);
   const previewFailed = prepared.failures.map(
     ({ item, message }) => `Failed ${item.selection.path}: preview failed: ${message}`,
   );

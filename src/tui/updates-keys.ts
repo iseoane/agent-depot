@@ -93,6 +93,15 @@ function handlePreviewKey(context: UpdatesKeyContext, mode: Extract<UpdatesMode,
 /** Handles a key in the current Updates mode; `busy` ignores keys. */
 export function handleUpdatesKey(context: UpdatesKeyContext, mode: UpdatesMode, input: string, key: Key): void {
   switch (mode.kind) {
+    case "manual":
+      answerYesNo(input, key, () => {
+        context.setMode({ kind: "busy", label: "Checking App version..." });
+        mode.answer(true);
+      }, () => {
+        context.setMode({ kind: "busy", label: "Continuing updates..." });
+        mode.answer(false);
+      });
+      return;
     case "browse":
       handleBrowseKey(context, input, key);
       return;

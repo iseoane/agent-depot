@@ -77,6 +77,16 @@ export function UpdatesFooter({ indicator, upToDate, updatableCount, checkedCoun
 /** The prompt of the preview and confirmation modes; browsing and the check itself show nothing. */
 export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
   switch (mode.kind) {
+    case "manual":
+      return (
+        <Box flexDirection="column">
+          <Text>App: {mode.plan.entry.recipe!.name}</Text>
+          <Text>Environment: {mode.plan.environment}</Text>
+          <Text>Working directory: {mode.plan.cwd}</Text>
+          <Text>Manual: {mode.plan.manual}</Text>
+          <Text>Manual step done, check now? y/n</Text>
+        </Box>
+      );
     case "browse":
       return null;
     case "busy":
@@ -85,6 +95,7 @@ export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
       return (
         <Box flexDirection="column">
           <PreviewLines lines={mode.prepared.lines} />
+          <PreviewLines lines={mode.prepared.appFailures} />
           {mode.prepared.failures.map(({ item, message }) => (
             <Text key={item.id} color={theme.error}>Preview failed for {JSON.stringify(item.id)}: {message}</Text>
           ))}

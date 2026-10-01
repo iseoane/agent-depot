@@ -70,7 +70,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
     setMode({ kind: "busy", label: "Preparing preview..." });
     try {
       const prepared = await prepareUpdates(current, selected);
-      if (mounted.current) setMode({ kind: "preview", selected: selected.map((row) => row.item), prepared });
+      if (mounted.current) setMode({ kind: "preview", prepared });
     } catch (error) {
       if (!mounted.current) return;
       setMessage({ kind: "error", lines: [errorText(error)] });
@@ -82,7 +82,10 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
     setMode({ kind: "busy", label: "Applying updates..." });
     let result: UpdatesMessage;
     try {
-      const outcome = await runUpdates(prepared, confirmedPaths);
+      const outcome = await runUpdates(prepared, confirmedPaths, plan => new Promise<boolean>(answer => {
+        if (!mounted.current) { answer(false); return; }
+        setMode({ kind: "manual", plan, answer });
+      }));
       result = { kind: outcome.failed === 0 ? "ok" : "error", lines: outcome.lines };
     } catch (error) {
       result = { kind: "error", lines: [errorText(error)] };
