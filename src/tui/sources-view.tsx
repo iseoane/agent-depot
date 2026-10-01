@@ -7,9 +7,12 @@ import { initialMode, modeReducer, type Mode, type ModeEvent } from "./sources-m
 import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
+import type { TuiEnvironment } from "./environment.js";
+import { useSourcesRecipes } from "./sources-recipes.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
+  readonly environment?: TuiEnvironment;
   /** Reports whether the view is capturing keys (input, confirmation or busy), so the shell can suspend global keys. */
   readonly onCapturingChange?: (capturing: boolean) => void;
   /** Invoked when the user presses Enter on the highlighted source. */
@@ -55,8 +58,8 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight }: SourcesViewProps) {
-  const height = useListHeight(listHeight, 7);
+export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment }: SourcesViewProps) {
+  const height = useListHeight(listHeight, 9);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
   // Selection and marks are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
@@ -125,6 +128,9 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   const sourcesRef = useRef<readonly GitSource[]>(sources);
   sourcesRef.current = sources;
   const selected = resolveIndex(sources, selection);
+  const recipes = useSourcesRecipes({
+    operations, environment, onCapturingChange, height, gitCount: sources.length,
+  });
   const select = (index: number) => {
     const listed = sourcesRef.current;
     const bounded = Math.min(Math.max(index, 0), Math.max(listed.length - 1, 0));
@@ -222,6 +228,11 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       return;
     }
 
+    if (recipes.handleKey(input, key)) {
+      if (key.tab) setMessage(undefined);
+      return;
+    }
+
     const listed = sourcesRef.current;
     const at = resolveIndex(listed, selectionRef.current);
     const highlighted = listed[at];
@@ -230,9 +241,9 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
     } else if (key.upArrow || input === "k") {
       select(at - 1);
     } else if (key.pageDown) {
-      select(at + pageStep(height));
+      select(at + pageStep(recipes.gitHeight));
     } else if (key.pageUp) {
-      select(at - pageStep(height));
+      select(at - pageStep(recipes.gitHeight));
     } else if (key.return && highlighted) {
       onOpenCatalog?.(highlighted);
     } else if (input === "n") {
@@ -267,7 +278,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   if (state.status === "loading") return <Text>Loading sources...</Text>;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
 
-  const window = computeWindow(sources.length, selected, height);
+  const window = computeWindow(sources.length, selected, recipes.gitHeight);
 
   return (
     <Box flexDirection="column">
@@ -277,8 +288,8 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       {sources.slice(window.start, window.end).map((source, offset) => {
         const index = window.start + offset;
         return (
-          <Text key={source.id} {...rowStyle(index === selected)}>
-            {index === selected ? "> " : "  "}
+          <Text key={source.id} {...rowStyle(!recipes.focused && index === selected)}>
+            {!recipes.focused && index === selected ? "> " : "  "}
             {marked.has(source.id) ? "[x] " : "[ ] "}
             {source.id}  {source.kind}  {source.url}
           </Text>
@@ -286,6 +297,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       })}
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
       {selectedCount > 0 ? <Text>{selectedCount} selected</Text> : null}
+      {recipes.panel}
       <Prompt mode={mode} />
       {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
     </Box>

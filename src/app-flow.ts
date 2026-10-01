@@ -21,6 +21,11 @@ export interface AppEntry {
   readonly applicable: boolean;
 }
 
+export interface AppApprovalStatus {
+  readonly status: "approved" | "invalid" | "not applicable here" | "needs approval";
+  readonly reason?: string;
+}
+
 export interface AppInspection {
   readonly status: "invalid" | "not applicable here" | "needs approval" | "installed" | "not installed";
   readonly installedVersion?: string;
@@ -218,7 +223,8 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     await writeFileAtomically(receiptPath(entry), JSON.stringify({ hash: entry.hash }), { mode: 0o600 });
   }
 
-  async function approvalProblem(entry: AppEntry): Promise<AppInspection | undefined> {
+  /** Reads recipe identity and approval receipts only; never resolves or runs commands. */
+  async function approvalStatus(entry: AppEntry): Promise<AppApprovalStatus> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
     const [current] = await load([entry.file]);
@@ -230,11 +236,17 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    if (!approved) {
+    return { status: approved ? "approved" : "needs approval" };
+  }
+
+  async function approvalProblem(entry: AppEntry): Promise<AppInspection | undefined> {
+    const approval = await approvalStatus(entry);
+    if (approval.status === "approved") return undefined;
+    if (approval.status === "needs approval") {
       const { executable } = await resolve(entry.recipe!.version.argv[0]);
-      return { status: "needs approval", executable };
+      return { status: approval.status, reason: approval.reason, executable };
     }
-    return undefined;
+    return { status: approval.status, reason: approval.reason };
   }
 
   /** A supplied cache checks recipe approval without running version; omit it for a live check. */
@@ -500,7 +512,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  return { checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
+  return { directory, approvalStatus, checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;

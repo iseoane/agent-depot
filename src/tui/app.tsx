@@ -33,7 +33,7 @@ const TABS: readonly (readonly [ViewName, string])[] = [
 function hintsOf(view: ViewName, catalogFocusedOnSource: boolean): string {
   switch (view) {
     case "sources":
-      return "j/k move · space mark · a all · Enter catalog · n add · r refresh · d remove · q quit";
+      return "Tab section · j/k move · space mark · a all · Enter catalog · n add · r refresh · d remove · q quit";
     case "catalog":
       return `j/k move · Enter expand · space mark · a all · i install · / filter${catalogFocusedOnSource ? " · s all sources" : ""} · q quit`;
     case "installations":
@@ -82,6 +82,7 @@ export function App({ operations, environment, onExit }: AppProps) {
       {view === "sources" ? (
         <SourcesView
           operations={operations}
+          environment={environment}
           onCapturingChange={onCapturingChange}
           onOpenCatalog={(source) => {
             setCatalogSourceId(source.id);
