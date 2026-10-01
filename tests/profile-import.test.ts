@@ -53,13 +53,13 @@ test("confirmed import installs recorded Hosts and methods, writes unapproved re
   assert.deepEqual(await apps.load(), []);
   const output: string[] = [];
   const results = await applyProfileImport(plan, operations, apps, true, line => output.push(line), { homeDirectory: home });
-  assert.deepEqual(results.map(result => result.status), ["added", "added", "failed", "added", "skipped"]);
+  assert.deepEqual(results.map(result => result.status), ["added", "added", "failed", "added", "added"]);
   const installed = await operations.listUserGlobalInstallations!();
   assert.deepEqual(installed.map(skill => skill.hosts), [["pi"]]);
   assert.deepEqual(installed[0]!.version, { policy: "latest" });
   assert.match(output.join("\n"), /Preview: reconcile Skill/);
   const entries = await apps.load();
-  assert.equal(entries.length, 1);
+  assert.equal(entries.length, 2);
   for (const entry of entries) assert.notEqual((await apps.approvalStatus(entry)).status, "approved");
   assert.deepEqual((await buildProfileImport(input, operations, apps)).items.map(item => item.status),
     ["same", "same", "add", "conflict", "conflict"]);
@@ -179,7 +179,7 @@ test("reimported recipes cannot inherit approval from a previously deleted impor
   assert.equal((await apps.approvalStatus(current!)).status, "needs approval");
 });
 
-test("same-name destination recipes block import across platforms without breaking existing Apps", async t => {
+test("platform-less incoming recipes conflict with same-name platform-specific destinations without breaking existing Apps", async t => {
   const { home, operations, apps } = await fixture(t);
   await mkdir(apps.directory);
   const file = path.join(apps.directory, "foo-linux.json");
@@ -285,4 +285,71 @@ test("later blocks recheck destination recipes created by a confirmed Skill meth
   assert.match(result[1]!.detail!, /late\.json.*Created during Skill method/);
   assert.equal((await apps.load()).length, 1);
   assert.equal(await readFile(path.join(apps.directory, "late.json"), "utf8"), JSON.stringify(created));
+});
+
+test("same-name destination recipes allow disjoint platforms and remain usable on Linux", async t => {
+  const { home, operations, apps } = await fixture(t);
+  await mkdir(apps.directory);
+  const existing = path.join(apps.directory, "foo-linux.json");
+  const content = JSON.stringify({ ...recipe, name: "foo", platform: "linux" });
+  await writeFile(existing, content);
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [{ ...recipe, name: "foo", platform: "windows" }] });
+  const plan = await buildProfileImport(input, operations, apps);
+  assert.equal(plan.items[0]!.status, "add");
+  assert.deepEqual((await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home })).map(result => result.status), ["added"]);
+  const linuxApps = createAppOperations({ recipesDirectory: apps.directory, platform: "linux" });
+  const entries = await linuxApps.load();
+  assert.equal(entries.length, 2);
+  assert.ok(entries.every(entry => entry.error === undefined));
+  assert.deepEqual(entries.filter(entry => entry.applicable).map(entry => entry.recipe!.platform), ["linux"]);
+  assert.equal(await readFile(existing, "utf8"), content);
+});
+
+test("profile import adds both same-name Linux and Darwin recipes", async t => {
+  const { home, operations, apps } = await fixture(t);
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [
+    { ...recipe, name: "foo", platform: "linux" }, { ...recipe, name: "foo", platform: "darwin" },
+  ] });
+  const plan = await buildProfileImport(input, operations, apps);
+  assert.deepEqual(plan.items.map(item => item.status), ["add", "add"]);
+  assert.deepEqual((await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home })).map(result => result.status), ["added", "added"]);
+  const entries = await createAppOperations({ recipesDirectory: apps.directory, platform: "linux" }).load();
+  assert.equal(entries.length, 2);
+  assert.ok(entries.every(entry => entry.error === undefined));
+});
+
+test("invalid recipe JSON reserves only its overlapping name and platform", async t => {
+  const { operations, apps } = await fixture(t);
+  await mkdir(apps.directory);
+  await writeFile(path.join(apps.directory, "invalid-foo.json"), JSON.stringify({ name: "foo", platform: "linux" }));
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [
+    { ...recipe, name: "foo", platform: "linux" }, { ...recipe, name: "foo", platform: "windows" },
+  ] });
+  assert.deepEqual((await buildProfileImport(input, operations, apps)).items.map(item => item.status), ["conflict", "add"]);
+});
+
+test("unknown-name recipe warnings include raw JSON read or parse failure details", async t => {
+  const { operations, apps } = await fixture(t);
+  await mkdir(apps.directory);
+  await writeFile(path.join(apps.directory, "broken.json"), "{broken JSON");
+  await mkdir(path.join(apps.directory, "unreadable.json"));
+  const plan = await buildProfileImport({ ...profile, sources: [], skills: [], apps: [] }, operations, apps);
+  assert.match(plan.preview.join("\n"), /WARNING:.*broken\.json.*raw JSON read\/parse failed: .+; name unknown/);
+  assert.match(plan.preview.join("\n"), /WARNING:.*unreadable\.json.*raw JSON read\/parse failed: .*EISDIR/);
+});
+
+test("registered Source URL spelling does not produce an unregistered-fetch warning", async t => {
+  const { operations, apps } = await fixture(t);
+  await operations.addGitSource("https://example.test/shared.git");
+  // The public core also accepts embedders retaining the originally supplied URL spelling.
+  const originalSpelling = { ...operations, listSources: async () => (await operations.listSources()).map(source =>
+    source.kind === "git" ? { ...source, url: "HTTPS://EXAMPLE.TEST/shared.git///" } : source) };
+  const input = parseProfile({ ...profile, sources: [], apps: [], skills: [{ ...selection,
+    source: { kind: "external", url: "https://example.test/shared.git/" } }] });
+  const plan = await buildProfileImport(input, originalSpelling, apps);
+  assert.doesNotMatch(plan.preview.join("\n"), /will be fetched but not registered/);
+  const fresh = await fixture(t);
+  const registering = await buildProfileImport({ ...input, sources: [{ url: "HTTPS://EXAMPLE.TEST/shared.git///", included: true }] }, fresh.operations, fresh.apps);
+  assert.equal(registering.items[0]!.status, "add");
+  assert.doesNotMatch(registering.preview.join("\n"), /will be fetched but not registered/);
 });

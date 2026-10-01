@@ -73,8 +73,8 @@ export async function runProfileImport(values: readonly string[], operations: So
   catch (error) { throw new Error(`${file}: invalid JSON (${error instanceof Error ? error.message : String(error)})`); }
   const plan = await buildProfileImport(input, operations, apps, filters);
   for (const line of plan.preview) output(line);
-  const results = await applyProfileImport(plan, operations, apps, confirmed, output, environment);
   if (!confirmed) { output("Import not confirmed; rerun with --yes. Nothing was written."); return 0; }
+  const results = await applyProfileImport(plan, operations, apps, confirmed, output, environment);
   for (const result of results) output(`${result.status}: ${result.item.label}${result.detail ? `; ${result.detail}` : ""}`);
   return results.some(result => result.status === "failed") ? 1 : 0;
 }

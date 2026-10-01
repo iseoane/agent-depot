@@ -632,10 +632,12 @@ install preview still appears before execution. Each failure is reported indepen
 continue; any failed item makes the command exit non-zero.
 
 Recipes, including those for other platforms, arrive **unapproved** in `apps/`.
-Any destination recipe with the same App name blocks import, even across platforms
-or when invalid JSON recipe content still declares that name. Unknown-name files
-are reported without blocking unrelated Apps. A profile cannot contain same-name
-recipes whose platform applicability overlaps. Import never installs Apps or runs
+A same-name destination recipe blocks import only when its platform overlaps the
+incoming recipe: equal platforms overlap, and a missing platform overlaps every
+platform. Disjoint platform recipes can both be added. Invalid recipe JSON uses
+its raw name and platform for the same check; unknown-name files are reported
+with read/parse details without blocking unrelated Apps. A profile cannot contain
+same-name recipes whose platform applicability overlaps. Import never installs Apps or runs
 recipe commands. Review and approve applicable
 recipes with `agent-depot app approve <name> --yes` before using their lifecycle
 commands. Source discovery inclusion remains a transient frontend choice, not a

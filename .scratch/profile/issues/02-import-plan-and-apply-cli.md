@@ -31,7 +31,7 @@ Rollback boundary: remove the Profile import module/tests, import command/help,
 shared filter/parser extraction and this README section; export behavior and
 existing installation operations remain unchanged.
 
-Review correction — App name safety: destination recipe names are reserved across
+Review correction — App name safety (superseded by review 2 below): destination recipe names are reserved across
 platforms, including invalid recipes whose JSON still gives a name; unknown-name
 files produce warnings. Incoming overlapping applicability is rejected. Existing
 file paths and per-key changes appear in conflicts. Imported user-owned recipe
@@ -75,3 +75,24 @@ Reviewed Standards and Spec separately in-process; no unresolved findings.
 Rollback boundary for this work unit: block-local recheck extraction, CLI JSON
 error context/single-gate changes and associated regression tests; the two blocker
 fixes remain independently committed.
+
+Final review 2 — platform overlap corrects the earlier name-only rule. Same-name
+recipes conflict only for equal platforms or when either platform is absent.
+Linux/Windows and Linux/Darwin recipes both import; invalid destination recipe
+JSON supplies raw name/platform for this check. Incoming overlapping pairs remain
+rejected by parseProfile. The preview and README describe disjoint-platform
+coexistence, not a first-recipe-only restriction.
+
+- [x] Destination Linux + incoming Windows adds without breaking Linux App loading.
+- [x] Destination Linux + incoming platform-less recipe conflicts without writes.
+- [x] Incoming same-name Linux + Darwin recipes are both added.
+- [x] Invalid recipe JSON follows the same platform overlap rule.
+- [x] Registered and candidate Source URL comparisons canonicalize both sides.
+- [x] Unconfirmed CLI returns before apply; core retains its defensive confirmation guard.
+- [x] Unknown-name file warnings include raw read/parse error details.
+
+Verification: `pnpm typecheck`, `pnpm lint`, `pnpm test` — 699/699 passed;
+focused import suite 18/18. Platform and canonical URL regressions failed before
+their fixes. Standards/Spec checked against `a3a0c43`; no unresolved findings.
+Rollback boundary: platform-aware destination collisions, canonical URL preview
+checks, warning context and CLI early-return correction plus their tests/docs.

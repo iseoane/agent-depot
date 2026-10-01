@@ -56,7 +56,9 @@ async function loadImportRecipes(apps: AppOperations) {
   const entries = await apps.load();
   return Promise.all(entries.map(async entry => {
     let content: object | undefined = entry.recipe;
+    let error = entry.error;
     let name = entry.recipe?.name;
+    let platform: unknown = entry.recipe?.platform;
     if (!content) {
       try {
         const raw: unknown = JSON.parse(await readFile(entry.file, "utf8"));
@@ -64,10 +66,14 @@ async function loadImportRecipes(apps: AppOperations) {
           content = raw;
           const rawName = (raw as { name?: unknown }).name;
           if (typeof rawName === "string") name = rawName;
+          platform = (raw as { platform?: unknown }).platform;
         }
-      } catch { /* Unknown names warn but cannot block unrelated Apps. */ }
+      } catch (cause) {
+        const reason = cause instanceof Error ? cause.message : String(cause);
+        error = `${entry.error && entry.error !== reason ? `${entry.error}; ` : ""}raw JSON read/parse failed: ${reason}`;
+      }
     }
-    return { file: entry.file, name, content, error: entry.error };
+    return { file: entry.file, name, platform, content, error };
   }));
 }
 
@@ -81,10 +87,11 @@ function classifySkill(value: Profile["skills"][number], skills: readonly Projec
   return { block: "skills", value, label: `Skill ${value.path}`, ...comparison(existing && skillChoices(existing), skillChoices(value)) };
 }
 function classifyRecipe(value: Profile["apps"][number], recipes: Awaited<ReturnType<typeof loadImportRecipes>>): ProfileImportItem {
-  const existing = recipes.filter(entry => entry.name === value.name);
+  const existing = recipes.filter(entry => entry.name === value.name &&
+    (entry.platform === undefined || value.platform === undefined || entry.platform === value.platform));
   return { block: "apps", value, label: `App recipe ${value.name} (${value.platform ?? "all platforms"}; unapproved; Apps are not installed)`,
     status: existing.length ? "conflict" : "add",
-    ...(existing.length ? { difference: existing.map(entry => `${entry.file}: name ${JSON.stringify(value.name)} already present; ${
+    ...(existing.length ? { difference: existing.map(entry => `${entry.file}: name ${JSON.stringify(value.name)} already present with overlapping platforms; ${
       fieldDifferences(entry.content ?? {}, value).join("; ") || "content identical"}`).join("; ") } : {}) };
 }
 
@@ -132,8 +139,8 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
       }
       const source = skill.source;
       if (source.kind === "external" && "url" in source &&
-        !sources.some(registered => registered.kind === "git" && registered.url === source.url) &&
-        !items.some(candidate => candidate.block === "sources" && candidate.value.url === source.url && candidate.status === "add")) {
+        !sources.some(registered => registered.kind === "git" && canonicalizeGitSourceUrl(registered.url) === canonicalizeGitSourceUrl(source.url)) &&
+        !items.some(candidate => candidate.block === "sources" && canonicalizeGitSourceUrl(candidate.value.url) === canonicalizeGitSourceUrl(source.url) && candidate.status === "add")) {
         lines.push(`  Source ${source.url} will be fetched but not registered`);
       }
     }
@@ -143,7 +150,8 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   if (AGENT_DEPOT_PACKAGE_VERSION && (compareAppVersions(profile.agentDepotVersion, AGENT_DEPOT_PACKAGE_VERSION) ?? 0) > 0) {
     preview.push(`WARNING: profile Agent Depot ${profile.agentDepotVersion} is newer than running ${AGENT_DEPOT_PACKAGE_VERSION}`);
   }
-  preview.push("Existing choices are never replaced. Source inclusion is a transient discovery choice.");
+  preview.push("Existing choices are never replaced. Source inclusion is a transient discovery choice.",
+    "Same-name App recipes conflict only when platforms overlap; disjoint platform recipes can both be added.");
   return { items, preview };
 }
 
