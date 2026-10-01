@@ -39,7 +39,7 @@ const claude = (home: string) => path.join(home, ".claude", "skills", "demo");
 const exists = (candidate: string) => lstat(candidate).then(() => true, () => false);
 
 /** A user-global `demo` installation (files and record) under a temp home; the fake manifest store keeps cwd untouched. */
-async function fixture(t: TestContext, hosts: readonly ProjectHost[]): Promise<Fixture> {
+async function fixture(t: TestContext, hosts: readonly ProjectHost[], withApps = false): Promise<Fixture> {
   const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-manage-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-manage-project-"));
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-manage-state-"));
@@ -68,8 +68,20 @@ async function fixture(t: TestContext, hosts: readonly ProjectHost[]): Promise<F
       },
     }],
   }).skills[0]!);
+  const recipesDirectory = path.join(state, "apps");
+  if (withApps) {
+    await mkdir(recipesDirectory);
+    await writeFile(path.join(recipesDirectory, "app.json"), JSON.stringify({
+      name: "sample-app", install: { argv: ["sample-app", "install"] },
+      update: { argv: ["sample-app", "update"] }, uninstall: { argv: ["sample-app", "uninstall"] },
+      version: { argv: ["sample-app", "version"], pattern: "(.*)" },
+    }));
+  }
   const manifestStore = new ProjectManifestStore(defaultProjectManifestPath(project));
-  return { operations, home, manifestStore, environment: { homeDirectory: home, projectRoot: project, projectManifestStore: manifestStore } };
+  return { operations, home, manifestStore, environment: { homeDirectory: home, projectRoot: project, projectManifestStore: manifestStore,
+    appEnvironment: { recipesDirectory, resolveExecutable: async () => "/usr/bin/sample-app",
+      runner: async () => { throw new Error("Skill actions must not run App commands"); } },
+  } };
 }
 
 type View = ReturnType<typeof render>;
@@ -232,3 +244,19 @@ test("u and h ignore group rows and project installations stay read-only", async
   assert.deepEqual(await hostsOf(f.operations), ["pi"]);
   view.unmount();
 });
+
+
+for (const input of ["i", "u", "h"]) {
+  test(`Skill ${input} keeps its existing flow when the Apps group is present`, async t => {
+    const f = await fixture(t, ["pi"], true);
+    const view = mount(f);
+    t.after(() => view.unmount());
+    await revealSkill(view);
+    assert.match(view.lastFrame()!, /Apps \(user-global\) \(1\)/);
+    view.stdin.write(input);
+    await waitForFrame(view.lastFrame, input === "u" ? /Uninstall demo\? y\/n/ : /Add hosts to demo/);
+    view.stdin.write(ESC);
+    await waitForFrame(view.lastFrame, /cancelled/);
+    assert.deepEqual(await hostsOf(f.operations), ["pi"]);
+  });
+}

@@ -30,3 +30,25 @@
   guarded against reload generations during review.
 - Rollback boundary: revert this ticket's App TUI wiring, cached-inspection
   option, tests and spec decisions together; existing Skill flows remain intact.
+
+## Comments
+
+### Review corrections
+
+- Isolated App tracking, recipe-directory and inspection loading failures on the
+  Apps group, leaving Skill rows usable; load uses the view's AppOperations.
+- Enter approves only needs-approval rows. Other states report their reason or
+  already-approved status; platform-inapplicable recipes remain excluded.
+- Lazy-check rejection is generation-guarded and retryable. Marked Apps show a
+  dedicated footer hint; mixed App/Skill actions remain explicitly rejected.
+- Added coverage for cancellation, bulk skipping/continuation, absent Host steps,
+  adoption rejection and unchanged Skill i/u/h flows alongside Apps.
+- Startup tests approve/install before rendering; approval-drift tests await the
+  initial recipe frame before changing its bytes.
+- App mode narrowing uses a type guard; result severity uses a failure count;
+  names use safe fallbacks and exported handlers/panels have documentation.
+- TUI forgetting remains deferred to the existing CLI, recorded in the spec.
+- Verification: `pnpm typecheck`, `pnpm lint`, and `git diff --check` passed.
+  Focused App/Skill-management Ink tests passed 36/36; `pnpm test` passed 612/612.
+- Rollback boundary: the review-correction commits restore the original ticket 06
+  behavior without affecting the underlying App core lifecycle operations.

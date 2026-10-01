@@ -255,3 +255,5 @@ fresh confirmed preview.
   remaining marked Apps. Uninstall does not implicitly teardown.
 - Ticket 06 covers Installations only; Updates and owned-Skill inventory filtering
   remain with their respective tickets.
+- TUI “forget” is deferred: use CLI `app uninstall <name> --forget --yes`
+  when version cannot confirm removal. No implicit forgetting occurs in the TUI.

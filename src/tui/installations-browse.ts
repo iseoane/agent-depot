@@ -110,7 +110,14 @@ function actOnRow(context: BrowseContext, snapshot: TreeSnapshot<NodeData>, row:
   if (item.kind === "unmanaged") actOnUnmanaged(context, item.group, input, key);
   else if (item.kind === "app") {
     if (input === "A") context.setMessage({ kind: "error", text: "Adoption applies to unmanaged Skills, not Apps" });
-    else context.startApps([item.row.entry], key.return ? "approve" : input);
+    else if (key.return && item.row.inspection.status !== "needs approval") {
+      const { entry, inspection } = item.row;
+      const approved = inspection.status === "installed" || inspection.status === "not installed";
+      context.setMessage({
+        kind: approved ? "ok" : "error",
+        text: approved ? `${entry.recipe?.name ?? entry.file} is already approved` : inspection.reason ?? inspection.status,
+      });
+    } else context.startApps([item.row.entry], key.return ? "approve" : input);
   }
   else if (item.kind === "installation") actOnInstallation(context, data, item, input, key);
 }

@@ -20,6 +20,7 @@ async function fixture(
   t: TestContext,
   failure?: "spawn" | "exit",
   beforeRender?: (setup: FixtureSetup) => Promise<void>,
+  resolveExecutable: AppEnvironment["resolveExecutable"] = async () => "/usr/bin/demo",
 ) {
   const home = await mkdtemp(path.join(tmpdir(), "tui-apps-"));
   const recipesDirectory = path.join(home, "state", "apps");
@@ -32,7 +33,7 @@ async function fixture(
   let installed = false;
   const commands: string[] = [];
   const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory,
-    resolveExecutable: async () => "/usr/bin/demo",
+    resolveExecutable,
     fetch: async () => { throw new Error("Latest must not run in Installations"); },
     runner: async (_exe, args) => {
       commands.push(args.join(" "));
@@ -170,6 +171,7 @@ test("approved Apps stay cached at startup and version checks are lazy on focus"
 
 test("approval detects changed content and allows reviewing the fresh recipe", async t => {
   const { view, apps } = await fixture(t);
+  await waitForFrame(view.lastFrame, frame => frame.includes("needs approval"));
   const [entry] = await apps.load();
   const recipe = { ...entry!.recipe!, install: { argv: ["missing", "install"], manual: "install demo yourself" } };
   await writeFile(entry!.file, JSON.stringify(recipe));
@@ -230,5 +232,189 @@ test("an unreadable App tracking directory does not hide Skill rows", async t =>
     await writeFile(path.join(home, "state", "app-installations"), "not a directory");
   });
   await waitForFrame(view.lastFrame, frame => frame.includes("sample") && frame.includes("Apps (user-global)") && frame.includes("ENOTDIR"));
+  assert.equal(commands.length, 0);
+});
+
+for (const status of ["approved", "invalid"] as const) {
+  test(`Enter on an ${status} App reports its state without an approval preview`, async t => {
+    const { view, commands } = await fixture(t, undefined, async ({ apps }) => {
+      const [entry] = await apps.load();
+      if (status === "approved") await apps.approve(entry!);
+      else await writeFile(entry!.file, "{}");
+    });
+    await waitForFrame(view.lastFrame, frame => frame.includes("Apps (user-global)"));
+    await selectDemo(view);
+    view.stdin.write("\r");
+    await waitForFrame(view.lastFrame, frame => status === "approved"
+      ? frame.includes("demo is already approved")
+      : frame.split("\n").some(line => line === "name: expected non-empty text"));
+    assert.ok(!view.lastFrame()!.includes("Approve"));
+    assert.ok(!commands.includes("install"));
+  });
+}
+
+async function approveDemo({ apps }: FixtureSetup) {
+  const [entry] = await apps.load();
+  await apps.approve(entry!);
+}
+
+test("a failed lazy check can be retried by focusing the App again", async t => {
+  let attempts = 0;
+  const { view, commands } = await fixture(t, undefined, approveDemo, async () => {
+    if (++attempts === 1) throw new Error("temporary resolution failure");
+    return "/usr/bin/demo";
+  });
+  await waitForFrame(view.lastFrame, frame => frame.includes("Apps (user-global)"));
+  await selectDemo(view);
+  await waitForFrame(view.lastFrame, frame => frame.includes("temporary resolution failure"));
+  view.stdin.write("k");
+  await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("> ") && line.includes("Apps (user-global)")));
+  view.stdin.write("j");
+  await waitForFrame(view.lastFrame, frame => frame.includes("demo") && commands.includes("version"));
+  assert.equal(attempts, 2);
+});
+
+test("a rejected lazy check from before a reload cannot overwrite the current footer", async t => {
+  let rejectOld!: (error: Error) => void;
+  let attempts = 0;
+  const oldResolution = new Promise<string>((_resolve, reject) => { rejectOld = reject; });
+  const { view } = await fixture(t, undefined, approveDemo, async () => ++attempts === 1 ? oldResolution : "/usr/bin/demo");
+  await waitForFrame(view.lastFrame, frame => frame.includes("Apps (user-global)"));
+  await selectDemo(view);
+  await waitForFrame(view.lastFrame, () => attempts === 1);
+  view.stdin.write("i");
+  await waitForFrame(view.lastFrame, frame => frame.includes("install demo? y/n"));
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => frame.includes("demo: cancelled") && attempts >= 3);
+  rejectOld(new Error("stale resolution failure"));
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.ok(view.lastFrame()!.includes("demo: cancelled"));
+  assert.ok(!view.lastFrame()!.includes("stale resolution failure"));
+});
+
+test("App marks remain visible and take precedence over an unmarked Skill cursor", async t => {
+  const { view, commands } = await fixture(t, undefined, async setup => {
+    await writeSkill(setup.home);
+    await approveDemo(setup);
+  });
+  await waitForFrame(view.lastFrame, frame => frame.includes("sample") && frame.includes("Apps (user-global)"));
+  view.stdin.write("jjjj");
+  await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("> ") && line.includes("Apps (user-global)")));
+  view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, frame => frame.includes("demo"));
+  view.stdin.write("j");
+  await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("> ") && line.includes("demo")) && commands.includes("version"));
+  view.stdin.write(" ");
+  await waitForFrame(view.lastFrame, frame => frame.includes("1 Apps marked"));
+  view.stdin.write("kk");
+  await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("> ") && line.includes("sample")));
+  view.stdin.write("i");
+  await waitForFrame(view.lastFrame, frame => frame.includes("install demo? y/n"));
+  assert.ok(view.lastFrame()!.includes("1 Apps marked"));
+  assert.ok(!commands.includes("install"));
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => frame.includes("demo: cancelled"));
+});
+
+for (const input of ["i", "u", "h"]) {
+  test(`mixed App and Skill marks reject ${input} without running commands`, async t => {
+    const { view, commands } = await fixture(t, undefined, async ({ home }) => writeSkill(home));
+    await waitForFrame(view.lastFrame, frame => frame.includes("sample") && frame.includes("Apps (user-global)"));
+    view.stdin.write("jjjj");
+    await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("> ") && line.includes("Apps (user-global)")));
+    view.stdin.write("\r");
+    await waitForFrame(view.lastFrame, frame => frame.includes("demo"));
+    view.stdin.write("a");
+    await waitForFrame(view.lastFrame, frame => frame.includes("2 selected"));
+    view.stdin.write(input);
+    await waitForFrame(view.lastFrame, frame => frame.includes("Select Apps or Skills separately for bulk actions"));
+    assert.equal(commands.length, 0);
+  });
+}
+
+test("Esc cancels the App Host checklist and a lifecycle confirmation without execution", async t => {
+  const { view, commands } = await fixture(t, undefined, approveDemo);
+  await waitForFrame(view.lastFrame, frame => frame.includes("Apps (user-global)"));
+  await selectDemo(view);
+  view.stdin.write("h");
+  await waitForFrame(view.lastFrame, frame => frame.includes("checked = setup"));
+  view.stdin.write("\u001B");
+  await waitForFrame(view.lastFrame, frame => frame.includes("App action cancelled"));
+  assert.ok(!view.lastFrame()!.includes("checked = setup"));
+  view.stdin.write("i");
+  await waitForFrame(view.lastFrame, frame => frame.includes("install demo? y/n"));
+  view.stdin.write("\u001B");
+  await waitForFrame(view.lastFrame, frame => frame.includes("demo: cancelled"));
+  assert.ok(!commands.includes("install"));
+  assert.ok(!commands.includes("setup"));
+});
+
+test("n midway through marked Apps skips a step and continues the batch", async t => {
+  const { view, apps } = await fixture(t, undefined, async setup => {
+    const [entry] = await setup.apps.load();
+    await writeFile(path.join(setup.home, "state", "apps", "other.json"), JSON.stringify({ ...entry!.recipe, name: "other" }));
+    for (const current of await setup.apps.load()) await setup.apps.approve(current);
+  });
+  await waitForFrame(view.lastFrame, frame => frame.includes("Apps (user-global) (2)"));
+  view.stdin.write("a");
+  await waitForFrame(view.lastFrame, frame => frame.includes("2 selected"));
+  view.stdin.write("i");
+  await waitForFrame(view.lastFrame, frame => frame.includes("install demo? y/n"));
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => frame.includes("install other? y/n"));
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, frame => frame.includes("demo: cancelled") && frame.includes("other: installed"));
+  assert.deepEqual((await apps.trackedApps()).map(app => app.name), ["other"]);
+});
+
+test("h on an App without Host steps reports the missing declarations", async t => {
+  const { view, commands } = await fixture(t, undefined, async ({ apps }) => {
+    const [entry] = await apps.load();
+    await writeFile(entry!.file, JSON.stringify({ ...entry!.recipe, setup: undefined, teardown: undefined }));
+  });
+  await waitForFrame(view.lastFrame, frame => frame.includes("Apps (user-global)"));
+  await selectDemo(view);
+  view.stdin.write("h");
+  await waitForFrame(view.lastFrame, frame => frame.includes("No declared Host steps"));
+  assert.equal(commands.length, 0);
+});
+
+test("A on an App explains that adoption applies to unmanaged Skills", async t => {
+  const { view, commands } = await fixture(t);
+  await waitForFrame(view.lastFrame, frame => frame.includes("Apps (user-global)"));
+  await selectDemo(view);
+  view.stdin.write("A");
+  await waitForFrame(view.lastFrame, frame => frame.includes("Adoption applies to unmanaged Skills, not Apps"));
+  assert.equal(commands.length, 0);
+});
+
+for (const failure of ["recipes", "inspection"]) {
+  test(`an App ${failure} loading failure stays confined to the Apps group`, async t => {
+    const { view } = await fixture(t, undefined, async ({ home, appEnvironment }) => {
+      await writeSkill(home);
+      if (failure === "recipes") {
+        await rm(appEnvironment.recipesDirectory!, { recursive: true });
+        await writeFile(appEnvironment.recipesDirectory!, "not a directory");
+      }
+    }, async () => {
+      if (failure === "inspection") throw new Error("approval resolution unavailable");
+      return "/usr/bin/demo";
+    });
+    await waitForFrame(view.lastFrame, frame => frame.includes("sample") && frame.includes("Apps (user-global) (0)")
+      && frame.includes(failure === "recipes" ? "ENOTDIR" : "approval resolution unavailable"));
+  });
+}
+
+test("recipes for another platform have no approvable App row", async t => {
+  const { view, commands } = await fixture(t, undefined, async ({ apps }) => {
+    const [entry] = await apps.load();
+    await writeFile(entry!.file, JSON.stringify({
+      ...entry!.recipe, platform: process.platform === "win32" ? "linux" : "windows",
+    }));
+  });
+  await waitForFrame(view.lastFrame, frame => frame.includes("Managed (project)"));
+  view.stdin.write("\r");
+  assert.ok(!view.lastFrame()!.includes("demo"));
+  assert.ok(!view.lastFrame()!.includes("Approve"));
   assert.equal(commands.length, 0);
 });
