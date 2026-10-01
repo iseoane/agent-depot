@@ -30,3 +30,11 @@ unresolved findings. The review simplified the nested Skill installation branch.
 Rollback boundary: remove the Profile import module/tests, import command/help,
 shared filter/parser extraction and this README section; export behavior and
 existing installation operations remain unchanged.
+
+Review correction — App name safety: destination recipe names are reserved across
+platforms, including invalid recipes whose JSON still gives a name; unknown-name
+files produce warnings. Incoming overlapping applicability is rejected. Existing
+file paths and per-key changes appear in conflicts. Imported user-owned recipe
+JSON uses ordinary umask-governed file permissions, like Source JSON rather than
+private approval receipts. Focused import tests: 9/9; profile tests: 22/22.
+Rollback boundary: these recipe-name guards, field diagnostics and their tests.

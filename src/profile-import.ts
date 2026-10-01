@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { link, mkdir, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { AppOperations } from "./app-flow.js";
@@ -40,10 +40,35 @@ function skillChoices(skill: ProjectSkillSelection) {
 function recipeIdentity(recipe: Profile["apps"][number]): string {
   return canonical([recipe.name, recipe.platform]);
 }
-function comparison(existing: unknown, incoming: unknown) {
+function fieldDifferences(existing: object, incoming: object): string[] {
+  const left = new Map(Object.entries(existing)), right = new Map(Object.entries(incoming));
+  return [...new Set([...left.keys(), ...right.keys()])].sort().flatMap(key =>
+    canonical(left.get(key)) === canonical(right.get(key)) ? []
+      : [`${key}: existing ${canonical(left.get(key))} -> incoming ${canonical(right.get(key))}`]);
+}
+function comparison(existing: object | undefined, incoming: object) {
   if (existing === undefined) return { status: "add" as const };
-  if (canonical(existing) === canonical(incoming)) return { status: "same" as const };
-  return { status: "conflict" as const, difference: `existing ${canonical(existing)} -> incoming ${canonical(incoming)}` };
+  const differences = fieldDifferences(existing, incoming);
+  return differences.length ? { status: "conflict" as const, difference: differences.join("; ") } : { status: "same" as const };
+}
+
+async function loadImportRecipes(apps: AppOperations) {
+  const entries = await apps.load();
+  return Promise.all(entries.map(async entry => {
+    let content: object | undefined = entry.recipe;
+    let name = entry.recipe?.name;
+    if (!content) {
+      try {
+        const raw: unknown = JSON.parse(await readFile(entry.file, "utf8"));
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          content = raw;
+          const rawName = (raw as { name?: unknown }).name;
+          if (typeof rawName === "string") name = rawName;
+        }
+      } catch { /* Unknown names warn but cannot block unrelated Apps. */ }
+    }
+    return { file: entry.file, name, content, error: entry.error };
+  }));
 }
 
 /** Read-only classification. Inclusion is a transient frontend choice, not persisted Source state. */
@@ -53,7 +78,7 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   if (!operations.listUserGlobalInstallations) throw new Error("Profile import requires user-global installation listing");
   const sources = await operations.listSources();
   const skills = await operations.listUserGlobalInstallations();
-  const recipes = await apps.load();
+  const recipes = await loadImportRecipes(apps);
   const items: ProfileImportItem[] = [];
   for (const value of selectProfileItems(profile.sources, filters.sources, filters.noSources,
     source => [source.url, sourceIdForUrl(source.url)], "sources")) {
@@ -67,13 +92,15 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
       ...comparison(existing && skillChoices(existing), skillChoices(value)) });
   }
   for (const value of selectProfileItems(profile.apps, filters.apps, filters.noApps, recipe => [recipe.name], "apps")) {
-    const existing = recipes.filter(entry => entry.recipe && recipeIdentity(entry.recipe) === recipeIdentity(value));
-    const existingContent = existing.length > 1 ? existing.map(entry => entry.recipe) : existing[0]?.recipe;
+    const existing = recipes.filter(entry => entry.name === value.name);
     items.push({ block: "apps", value, label: `App recipe ${value.name} (${value.platform ?? "all platforms"}; unapproved; Apps are not installed)`,
-      ...comparison(existingContent, value) });
+      status: existing.length ? "conflict" : "add",
+      ...(existing.length ? { difference: existing.map(entry => `${entry.file}: name ${JSON.stringify(value.name)} already present; ${
+        fieldDifferences(entry.content ?? {}, value).join("; ") || "content identical"}`).join("; ") } : {}) });
   }
   const preview = ["Preview: import portable user-global profile", ...items.map(item =>
     `${item.status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`)];
+  preview.push(...recipes.filter(entry => entry.error).map(entry => `WARNING: ${entry.file}: ${entry.error}${entry.name === undefined ? "; name unknown; unrelated names are not blocked" : ""}`));
   if (AGENT_DEPOT_PACKAGE_VERSION && (compareAppVersions(profile.agentDepotVersion, AGENT_DEPOT_PACKAGE_VERSION) ?? 0) > 0) {
     preview.push(`WARNING: profile Agent Depot ${profile.agentDepotVersion} is newer than running ${AGENT_DEPOT_PACKAGE_VERSION}`);
   }
@@ -98,7 +125,7 @@ async function writeRecipe(directory: string, recipe: Profile["apps"][number]): 
   const destination = path.join(directory, filename);
   const temporary = path.join(directory, `.${randomUUID()}.tmp`);
   try {
-    await writeFile(temporary, `${JSON.stringify(recipe, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    await writeFile(temporary, `${JSON.stringify(recipe, null, 2)}\n`, { flag: "wx" });
     await link(temporary, destination);
   } finally {
     await unlink(temporary).catch(error => { if (error.code !== "ENOENT") throw error; });

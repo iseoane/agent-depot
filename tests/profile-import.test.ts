@@ -35,7 +35,7 @@ test("import plan classifies identical choices and shows conflicts without writi
   await mkdir(apps.directory);
   await writeFile(path.join(apps.directory, "existing.json"), JSON.stringify(recipe));
   const plan = await buildProfileImport(profile, operations, apps);
-  assert.deepEqual(plan.items.map(item => item.status), ["same", "conflict", "same"]);
+  assert.deepEqual(plan.items.map(item => item.status), ["same", "conflict", "conflict"]);
   assert.match(plan.preview.join("\n"), /hosts.*claude.*pi/);
   assert.match(plan.preview.join("\n"), /WARNING.*newer/);
   assert.equal((await operations.listUserGlobalInstallations!())[0]!.hosts[0], "claude");
@@ -53,16 +53,16 @@ test("confirmed import installs recorded Hosts and methods, writes unapproved re
   assert.deepEqual(await apps.load(), []);
   const output: string[] = [];
   const results = await applyProfileImport(plan, operations, apps, true, line => output.push(line), { homeDirectory: home });
-  assert.deepEqual(results.map(result => result.status), ["added", "added", "failed", "added", "added"]);
+  assert.deepEqual(results.map(result => result.status), ["added", "added", "failed", "added", "skipped"]);
   const installed = await operations.listUserGlobalInstallations!();
   assert.deepEqual(installed.map(skill => skill.hosts), [["pi"]]);
   assert.deepEqual(installed[0]!.version, { policy: "latest" });
   assert.match(output.join("\n"), /Preview: reconcile Skill/);
   const entries = await apps.load();
-  assert.equal(entries.length, 2);
+  assert.equal(entries.length, 1);
   for (const entry of entries) assert.notEqual((await apps.approvalStatus(entry)).status, "approved");
   assert.deepEqual((await buildProfileImport(input, operations, apps)).items.map(item => item.status),
-    ["same", "same", "add", "same", "same"]);
+    ["same", "same", "add", "conflict", "conflict"]);
 });
 
 test("CLI import requires confirmation, supports export filters, and rejects malformed profiles before writes", async t => {
@@ -175,4 +175,38 @@ test("reimported recipes cannot inherit approval from a previously deleted impor
   await applyProfileImport(await buildProfileImport(input, operations, apps), operations, apps, true, () => {}, { homeDirectory: home });
   const [current] = await apps.load();
   assert.equal((await apps.approvalStatus(current!)).status, "needs approval");
+});
+
+test("same-name destination recipes block import across platforms without breaking existing Apps", async t => {
+  const { home, operations, apps } = await fixture(t);
+  await mkdir(apps.directory);
+  const file = path.join(apps.directory, "foo-linux.json");
+  const content = JSON.stringify({ ...recipe, name: "foo", platform: "linux" });
+  await writeFile(file, content);
+  const incoming = parseProfile({ ...profile, sources: [], skills: [], apps: [{ ...recipe, name: "foo", platform: undefined }] });
+  const plan = await buildProfileImport(incoming, operations, apps);
+  assert.equal(plan.items[0]!.status, "conflict");
+  assert.match(plan.items[0]!.difference!, /foo-linux\.json.*platform.*linux.*(?:undefined|null|all platforms)/);
+  assert.deepEqual((await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home })).map(result => result.status), ["skipped"]);
+  assert.equal(await readFile(file, "utf8"), content);
+  const entries = await apps.load();
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0]!.error, undefined);
+});
+
+test("invalid destination recipes reserve known names while unknown names warn without blocking", async t => {
+  const { home, operations, apps } = await fixture(t);
+  await mkdir(apps.directory);
+  const named = path.join(apps.directory, "invalid-foo.json"), unknown = path.join(apps.directory, "unknown.json");
+  await writeFile(named, JSON.stringify({ name: "foo", install: { manual: "Incomplete" } }));
+  await writeFile(unknown, "{ broken JSON");
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [{ ...recipe, name: "foo" }, { ...recipe, name: "bar" }] });
+  const plan = await buildProfileImport(input, operations, apps);
+  assert.deepEqual(plan.items.map(item => [item.block === "apps" ? item.value.name : "", item.status]),
+    [["bar", "add"], ["foo", "conflict"]]);
+  assert.match(plan.preview.join("\n"), /invalid-foo\.json/);
+  assert.match(plan.preview.join("\n"), /WARNING:.*unknown\.json.*name unknown/);
+  const result = await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home });
+  assert.deepEqual(result.map(item => item.status), ["added", "skipped"]);
+  assert.equal(await readFile(unknown, "utf8"), "{ broken JSON");
 });

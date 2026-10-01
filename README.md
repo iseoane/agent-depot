@@ -630,7 +630,11 @@ before execution. Each failure is reported independently and remaining items
 continue; any failed item makes the command exit non-zero.
 
 Recipes, including those for other platforms, arrive **unapproved** in `apps/`.
-Import never installs Apps or runs recipe commands. Review and approve applicable
+Any destination recipe with the same App name blocks import, even across platforms
+or when invalid JSON recipe content still declares that name. Unknown-name files
+are reported without blocking unrelated Apps. A profile cannot contain same-name
+recipes whose platform applicability overlaps. Import never installs Apps or runs
+recipe commands. Review and approve applicable
 recipes with `agent-depot app approve <name> --yes` before using their lifecycle
 commands. Source discovery inclusion remains a transient frontend choice, not a
 persisted change to an existing Source. Skills carry their own Source identity,
