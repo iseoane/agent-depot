@@ -216,7 +216,10 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       setMode("browse");
       return;
     }
-    const next = moveCursor(cursorRef.current, rows.length, input, key);
+    // Export diagnostics follow the checklist, but never own its cursor.
+    // Import same/conflict rows still draw a cursor so their differences can be reviewed.
+    const checklistLength = rows.filter(row => row.block !== "excluded").length;
+    const next = moveCursor(cursorRef.current, checklistLength, input, key);
     if (next !== undefined) cursorTo(Math.max(0, next));
     else if (input === " " && rows[cursorRef.current]?.selectable) {
       select(toggleChoice(rows, selectedRef.current, rows[cursorRef.current]!));

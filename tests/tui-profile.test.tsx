@@ -85,6 +85,29 @@ test("import warns on newer producers, skips conflicts and adds recipes unapprov
   assert.notEqual(await apps.approvalStatus(entry), "approved");
 });
 
+for (const [label, content, reason] of [
+  ["malformed JSON", "{", /Expected|Unexpected|JSON/],
+  ["invalid profile", JSON.stringify({ format: "agent-depot-profile/v9" }), /profile.format/],
+  ["schema-invalid profile", JSON.stringify({
+    format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [{ url: "https://example.com/skills.git", included: "yes" }], skills: [], apps: [],
+  }), /sources\[0\].included/],
+] as const) {
+  test(`import reports ${label} without writing or losing navigation`, async t => {
+    const f = await fixture(t);
+    const file = path.join(f.home, "invalid.json");
+    await writeFile(file, content);
+    const result = await importFile(f.view, file);
+    assert.match(result, /^Error: /m);
+    assert.doesNotMatch(result, /Apply Profile|add: /);
+    assert.match(result, reason);
+    assert.deepEqual(await createAppOperations(f.environment.appEnvironment).load(), []);
+    assert.equal((await f.operations.listSources()).length, 1);
+    f.view.stdin.write("1");
+    await waitForFrame(f.view.lastFrame, /\[1 Sources\]/);
+  });
+}
+
 test("invalid import errors remain usable and long export lists are windowed", async t => {
   const f = await fixture(t);
   f.view.stdin.write("i");
@@ -314,23 +337,6 @@ test("import can deselect every addition and confirm an empty plan without addin
   assert.deepEqual(await createAppOperations(f.environment.appEnvironment).load(), []);
 });
 
-for (const [label, content, reason] of [
-  ["invalid JSON", "{", /Expected|Unexpected|JSON/],
-  ["invalid profile", JSON.stringify({ format: "agent-depot-profile/v9" }), /profile.format/],
-] as const) {
-  test(`import reports ${label} without writing or losing navigation`, async t => {
-    const f = await fixture(t);
-    const file = path.join(f.home, "invalid.json");
-    await writeFile(file, content);
-    const result = await importFile(f.view, file);
-    assert.match(result, /Error:/);
-    assert.match(result, reason);
-    assert.deepEqual(await createAppOperations(f.environment.appEnvironment).load(), []);
-    assert.equal((await f.operations.listSources()).length, 1);
-    f.view.stdin.write("1");
-    await waitForFrame(f.view.lastFrame, /\[1 Sources\]/);
-  });
-}
 
 test("busy import ignores view, quit, cancel, toggle and action keys until the runner finishes", async t => {
   let release = () => {};
@@ -373,4 +379,29 @@ test("busy import ignores view, quit, cancel, toggle and action keys until the r
   assert.match(results, /failed: Skill demo[\s\S]*intentional clone failure/);
   assert.equal((await createAppOperations(f.environment.appEnvironment).load()).length, 1);
   assert.equal(f.exits(), 0);
+});
+
+test("export navigation stays on visible choices instead of entering excluded rows", async t => {
+  const f = await fixture(t);
+  for (const name of ["first", "second"]) {
+    await writeFile(path.join(f.directory, `${name}.json`), JSON.stringify({ ...recipe, name }));
+  }
+  f.view.stdin.write("e");
+  const initial = await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
+  assert.match(initial, /Excluded built-in Source/);
+  f.view.stdin.write("j");
+  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: second/);
+  // At the last choice, repeated down keys must leave space toggling that choice.
+  f.view.stdin.write("jjj ");
+  const last = await waitForFrame(f.view.lastFrame, /> \[ \].*Apps: second/);
+  assert.match(last, /\[x\].*Apps: first/);
+  f.view.stdin.write("k");
+  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
+  f.view.stdin.write("\u001b[B");
+  await waitForFrame(f.view.lastFrame, /> \[ \].*Apps: second/);
+  f.view.stdin.write("\u001b[B");
+  f.view.stdin.write(" ");
+  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: second/);
+  f.view.stdin.write("\u001b[A");
+  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
 });
