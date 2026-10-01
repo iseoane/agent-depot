@@ -1,6 +1,6 @@
 # Resource Manager
 
-This context defines the product language for discovering, installing, and updating reusable skills across supported coding-agent hosts.
+This context defines the product language for discovering, installing, and updating reusable skills across supported coding-agent hosts and user-global Apps.
 
 ## Language
 
@@ -17,15 +17,19 @@ The user's collection of available sources and selected or installed managed ski
 _Avoid_: Registry (unless referring to an external registry)
 
 **Managed resource**:
-An item selected for installation and ongoing tracking. V1 manages only portable directory-based skills; CLI applications, agent definitions, plugins/extensions, and MCP servers are deferred categories.
+An item selected for installation and ongoing tracking. V1 manages portable directory-based skills and user-global Apps; agent definitions, plugins/extensions, and MCP servers remain deferred as independently managed categories.
 _Avoid_: Package (unless it specifically means an npm package)
 
 **Resource category**:
-A classification of a managed resource. Skill is the only confirmed V1 category; CLI application, agent definition, plugin/extension, and MCP server are deferred categories for future scope decisions.
+A classification of a managed resource. Skill and App are confirmed V1 categories; agent definition, plugin/extension, and MCP server remain deferred categories for future scope decisions.
 
-**CLI application**:
-A future resource concept for an executable or command-line tool managed independently of a coding-agent host. It is not part of V1.
-_Avoid_: Host resource (for a CLI application)
+**App**:
+A user-global application whose install, update, uninstall, and optional per-Host setup and teardown are delegated to a user-declared App recipe. An App owns any artifacts it creates, including skills or Host configuration; Agent Depot tracks its installed version, not those artifacts.
+_Avoid_: CLI application, Host resource (for an App)
+
+**App recipe**:
+A user-owned declaration of an App's lifecycle commands and version signals, optionally specific to a platform. It is not a Source resource or a built-in recipe.
+_Avoid_: Installation method (for the whole App recipe)
 
 **Skill**:
 A reusable, primarily instruction-based capability distributed as a portable directory containing `SKILL.md` with required `name` and `description` metadata, and optionally supporting files such as references, scripts, and assets.

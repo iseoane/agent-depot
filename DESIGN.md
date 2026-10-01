@@ -4,9 +4,9 @@
 
 ## Architecture
 
-Agent Depot is one TypeScript/Node.js package, with pnpm preferred and npm-compatible package metadata. The CLI is the first interface. A future TUI must call the same terminal-independent application operations rather than implement a second workflow. V1 supports Linux and Windows.
+Agent Depot is one TypeScript/Node.js package, with pnpm preferred and npm-compatible package metadata. The CLI and existing TUI call the same terminal-independent application operations rather than implement separate workflows. V1 supports Linux and Windows.
 
-V1 manages only portable directory-based skills as the confirmed resource type. Each managed skill is a portable directory containing `SKILL.md` with required `name` and `description` metadata, optionally with supporting files. Pi-only standalone Markdown skill files are not managed. CLI applications, agent definitions, plugins/extensions, and MCP servers are deferred and not committed to V1.
+V1 manages portable directory-based skills and user-global Apps as confirmed resource types. Each managed skill is a portable directory containing `SKILL.md` with required `name` and `description` metadata, optionally with supporting files. Pi-only standalone Markdown skill files are not managed. Agent definitions, plugins/extensions, and MCP servers remain deferred as independently managed categories.
 
 For new skill installations, the canonical target is `.agents/skills` in project scope and `~/.agents/skills` in user-global scope, regardless of whether Claude Code is the only selected host. Claude Code does not document `.agents/skills` as a discovery location, so a Claude-selected installation creates a symlink entry under `.claude/skills` or `~/.claude/skills` that points to the canonical skill directory. This intentionally may expose a Claude-only selection to Pi, Codex, or OpenCode through their shared discovery convention. A matching pre-existing skill is adopted in place without replacing or moving it, even when it is at a noncanonical location; the actual location is tracked. If later host exposure needs another location, require explicit confirmation before moving the skill or creating an additional link or copy. The exact Windows symlink mechanics and runtime validation remain implementation/check prerequisites. If symlink creation fails, including on Windows, stop that target operation with actionable guidance and do not create a duplicate managed copy; preserve the canonical contents and existing conflict protections.
 
@@ -49,7 +49,7 @@ External Sources ────────────┤
                                              v
                                installed state and update batch
 
-CLI (and future TUI) ───────> the same application operations
+CLI and TUI ───────> the same application operations
 ```
 
 The built-in first-party collection is available as a selectable Source without external registration. Agent Depot does not preconfigure external Sources. The built-in catalog is read-only through the app and package-owned. In V1, each built-in skill version is the Agent Depot package version. Package releases expose newer built-in content; users can select, install, and update its Skills, and Agent Depot changes installed copies only through the normal skill update batch.
@@ -76,7 +76,19 @@ For new installations, the canonical shared skill path is the installation sourc
 
 Agent Depot prefers the applicable upstream skill installation/update method. A user-provided fallback method may be stored with the skill in the project manifest or global state. V1 permits one portable command per method, represented as an executable plus an argument list. Commands are invoked without a shell, contain no secrets, and have no per-OS variants; they must work on both Linux and Windows.
 
-Before any external command runs, Agent Depot renders the executable and arguments, the intended host/scope/skill changes, and requests explicit confirmation. Uninstallation also requires confirmation.
+Before any external skill command runs, Agent Depot renders the executable and arguments, the intended host/scope/skill changes, and requests explicit confirmation. Uninstallation also requires confirmation.
+
+## App recipes and ownership
+
+Apps use user-owned JSON recipes, separate from Source discovery and project skill manifests. Recipes select platform-specific lifecycle steps and version signals; parsing, step execution, and version/latest lookup are explicit modules behind the injectable command runner, not a generic plugin framework. App write flows share core plans/previews/results between CLI and TUI, following [ADR 0006](docs/adr/0006-shared-core-module-per-write-flow.md). Extend existing Installations and Updates flows without new tabs, top-level modes, or screens; Sources and Catalog are unchanged.
+
+Recipe content must be approved before any recipe command runs; changed content invalidates approval. Approval previews every argv. Lifecycle steps still require per-step previews and confirmation. Approved version/latest commands can run without per-run prompts. Reuse user-method argv validation, without shells or credentials, but run App steps from the user's home rather than the project root. Show resolved executable paths and reject Windows executables under `/mnt/<drive>/` on WSL. Display manual text without executing it; fallback to manual only on spawn failure, never on a non-zero exit.
+
+The version command alone determines installed state. Recheck after manual steps: install/update require a successful version check, and uninstall retains tracking until that check fails or the user explicitly forgets the App. An unknown latest version is not an available update. App updates join the existing batch with per-App failure reporting and continuation.
+
+Agent Depot records App identity and installed version, but does not track, snapshot, or verify App-written artifacts or edit Host configuration on an App's behalf. Recipe-owned skill names/globs filter unmanaged adoption/removal without verifying paths. Do not clone App repositories, ship built-in recipes, accept Source-declared recipes, or rewrite user recipes. See [ADR 0007](docs/adr/0007-delegate-app-lifecycle-to-user-recipes.md).
+
+Recipes live in an environment-local per-user `apps/` directory; config-versus-state placement and whether installed-App records use the existing state file or a sibling remain open. Project-scoped Apps and per-project steps are excluded. Exact CLI grammar, approval mechanism details, and whether uninstall offers teardown remain open in `.scratch/apps/spec.md`.
 
 ## Testing seam
 
@@ -89,8 +101,10 @@ V1 explicitly rejects:
 - a monorepo or multiple packages;
 - a database; JSON files are sufficient for the project manifest and per-user state;
 - a generalized plugin framework; supported skill logic stays explicit;
-- CLI applications, agent definitions, plugins/extensions, and MCP servers as managed V1 categories;
-- per-OS command variants; commands are one portable executable-plus-args definition.
+- agent definitions, plugins/extensions, and MCP servers as independently managed V1 categories;
+- built-in or Source-declared App recipes, cloning App repositories, tracking App-written artifacts, and editing Host configuration on an App's behalf;
+- project-scoped Apps, per-project App steps, and executing manual shell strings;
+- per-OS skill-method command variants; skill methods are one portable executable-plus-args definition. App recipes may be platform-specific.
 
 ## Open technical questions
 
