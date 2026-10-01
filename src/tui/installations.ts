@@ -94,6 +94,7 @@ export interface AppRow {
 export interface InstallationsData {
   readonly apps?: readonly AppRow[];
   readonly appsError?: string;
+  readonly unmanagedWarnings?: readonly string[];
   /** Undefined when the configured operations cannot read user-global state. */
   readonly global?: readonly InstallationRow[];
   readonly project: readonly InstallationRow[];
@@ -190,11 +191,17 @@ export async function loadInstallations(
   };
   const project = await Promise.all(projectRecords.map((record) => toRow("project", record, projectOptions)));
 
+  const unmanagedWarnings: string[] = [];
   const unmanaged = globalRecords
-    ? groupUnmanaged(await scanUserGlobalSkillInventory({ homeDirectory: home, managedInstallations: globalRecords }))
+    ? groupUnmanaged(await scanUserGlobalSkillInventory({
+        homeDirectory: home,
+        managedInstallations: globalRecords,
+        appEnvironment: environment.appEnvironment,
+        reportWarning: warning => unmanagedWarnings.push(warning),
+      }))
     : [];
   const sources = await operations.listSources().catch(() => []);
-  return { global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps, ...(appsError === undefined ? {} : { appsError }) };
+  return { unmanagedWarnings, global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps, ...(appsError === undefined ? {} : { appsError }) };
 }
 
 /** Source id of an installation's Source, when that Source is still registered. */

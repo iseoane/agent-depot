@@ -1,3 +1,4 @@
+import type { AppOwnedSkillOptions } from "./app-owned-skills.js";
 import type { ProjectSkillSelection } from "./project-manifest.js";
 import { assertManagedInstallationRecordsUnchanged } from "./skill-removal.js";
 import type { SourceOperations } from "./sources.js";
@@ -26,7 +27,7 @@ export function describeUnmanagedSymlinkRemoval(inspection: UserGlobalSymlinkRem
   ];
 }
 
-export interface UnmanagedRemovalContext {
+export interface UnmanagedRemovalContext extends AppOwnedSkillOptions {
   readonly operations: SourceOperations;
   readonly homeDirectory: string;
 }
@@ -41,11 +42,13 @@ export async function removeInspectedUnmanagedSkill(
   const latestManagedInstallations = await operations.listUserGlobalInstallations!();
   assertManagedInstallationRecordsUnchanged(expectedManagedInstallations, latestManagedInstallations);
   const latestInspection = await inspectUserGlobalSkillRemoval(inspection.path, {
+    ...context,
     homeDirectory,
     managedInstallations: latestManagedInstallations,
   });
   assertUnmanagedInspectionUnchanged(inspection, latestInspection);
   await removeUserGlobalSkill(inspection, {
+    ...context,
     homeDirectory,
     managedInstallations: latestManagedInstallations,
     readManagedInstallations: async () => operations.listUserGlobalInstallations!(),
@@ -63,6 +66,7 @@ export async function removeInspectedUnmanagedSymlink(
   const latestManagedInstallations = await operations.listUserGlobalInstallations!();
   assertManagedInstallationRecordsUnchanged(expectedManagedInstallations, latestManagedInstallations);
   await removeUserGlobalSymlink(inspection, {
+    ...context,
     homeDirectory,
     managedInstallations: latestManagedInstallations,
     readManagedInstallations: async () => operations.listUserGlobalInstallations!(),

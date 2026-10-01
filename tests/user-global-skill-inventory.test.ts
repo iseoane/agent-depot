@@ -407,3 +407,78 @@ test("reports a symlinked global root as unsafe and does not scan through it", a
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+test("app declarations exclude directories and links before inspecting their content, without approval", async () => {
+  const home = await makeHome();
+  try {
+    const apps = path.join(home, ".local", "state", "agent-depot", "apps");
+    await mkdir(apps, { recursive: true });
+    await writeFile(path.join(apps, "app.json"), JSON.stringify({
+      name: "owner", install: { manual: "install" }, update: { manual: "update" },
+      uninstall: { manual: "remove" }, version: { argv: ["owner", "--version"], pattern: "(.*)" },
+      skills: ["owned-*", "exact"],
+    }));
+    await makeSkill(home, ".agents", "owned-demo", "invalid content");
+    await makeSkill(home, ".claude", "exact");
+    await makeSkill(home, ".agents", "other");
+    const inventory = await scan(home);
+    assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["other"]);
+    assert.deepEqual(inventory.skipped, []);
+    await assert.rejects(inspectUserGlobalSkillRemoval(path.join(home, ".claude", "skills", "exact"), {
+      homeDirectory: home, managedInstallations: [],
+    }), /App-owned/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("ownership matches whole names case-sensitively with only star special and only applicable recipes", async () => {
+  const home = await makeHome();
+  try {
+    const apps = path.join(home, "apps");
+    await mkdir(apps);
+    const base = {
+      name: "owner", install: { manual: "install" }, update: { manual: "update" },
+      uninstall: { manual: "remove" }, version: { argv: ["owner"], pattern: "(.*)" },
+    };
+    await writeFile(path.join(apps, "app.json"), JSON.stringify({ ...base, skills: ["owned-*", "a?b", "[ab]", "dot.name", "end*"] }));
+    await writeFile(path.join(apps, "foreign.json"), JSON.stringify({ ...base, name: "foreign", platform: "windows", skills: ["other"] }));
+    for (const name of ["owned-", "owned-demo", "Owned-demo", "xowned-demo", "a?b", "acb", "[ab]", "a", "dot.name", "dotXname", "end", "ending", "other", "dot.name\n"]) {
+      await makeSkill(home, ".agents", name);
+    }
+    const inventory = await scanUserGlobalSkillInventory({ homeDirectory: home, appEnvironment: { recipesDirectory: apps, platform: "linux", runner: async () => { throw new Error("must not execute"); } } });
+    assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["Owned-demo", "a", "acb", "dot.name\n", "dotXname", "other", "xowned-demo"]);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("invalid recipes warn by file without disabling valid ownership exclusions", async () => {
+  const home = await makeHome();
+  try {
+    const apps = path.join(home, "apps");
+    await mkdir(apps);
+    await makeSkill(home, ".agents", "owned-demo");
+    await makeSkill(home, ".agents", "ordinary");
+    await writeFile(path.join(apps, "valid.json"), JSON.stringify({
+      name: "valid", install: { manual: "install" }, update: { manual: "update" },
+      uninstall: { manual: "remove" }, version: { argv: ["valid"], pattern: "(.*)" }, skills: ["owned-*"],
+    }));
+    for (const content of ["{", JSON.stringify({ name: "owner", install: { manual: "install" }, update: { manual: "update" }, uninstall: { manual: "remove" }, version: { argv: ["owner"], pattern: "(.*)" }, skills: ["owned/*"] })]) {
+      await writeFile(path.join(apps, "app.json"), content);
+      const warnings: string[] = [];
+      const inventory = await scanUserGlobalSkillInventory({ homeDirectory: home, appEnvironment: { recipesDirectory: apps }, reportWarning: warning => warnings.push(warning) });
+      assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["ordinary"]);
+      assert.equal(warnings.length, 1);
+      assert.ok(warnings[0]?.includes(path.join(apps, "app.json")));
+    }
+    await rm(apps, { recursive: true });
+    await writeFile(apps, "not a directory");
+    const warnings: string[] = [];
+    assert.equal((await scanUserGlobalSkillInventory({ homeDirectory: home, appEnvironment: { recipesDirectory: apps }, reportWarning: warning => warnings.push(warning) })).unmanaged.length, 2);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0] ?? "", /exclusions unavailable; no exclusions applied/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

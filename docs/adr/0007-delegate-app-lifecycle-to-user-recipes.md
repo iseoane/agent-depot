@@ -70,3 +70,28 @@ and malformed-response reasons remain visible in checks and listings.
 Batch planning reuses the already-loaded App update check, bound to the same
 canonical recipe path and content hash, rather than fetching latest again.
 Approval and executable rechecks still run before execution.
+
+### Ticket 08 owned-Skill declarations
+
+Applicable valid recipes exclude declared Skill directory/link names from unmanaged
+inventory, adoption and removal, even when unapproved or not installed. Reading
+JSON runs no command; approval gates execution, not declarative ownership. Managed
+installation records remain authoritative and are not hidden by this filter.
+
+Matching is case-sensitive against the entire immediate directory/link name,
+not `SKILL.md` metadata or a path. Only `*` is special: zero or more characters
+within a name. Repeated stars behave like one star; `?`, brackets and regex
+metacharacters are literal. Empty/whitespace-only patterns, `/`, `\`, NUL and
+star-only patterns (including repeated stars) are rejected by recipe parsing and
+the JSON Schema; the matcher retains a defensive validation check. No path existence,
+content, link target or App provenance is verified for an excluded entry.
+
+The shared core filter is used by CLI/TUI inventory and write guards; write
+execution reloads declarations to protect against recipes added after preview.
+Missing recipe directories mean no exclusions. An invalid recipe (including an
+invalid pattern or duplicate applicable name) is skipped with a warning naming
+its file; other valid applicable recipes still exclude their owned Skills.
+Defensively rejected matcher patterns are skipped individually with a file-named
+warning. Only a failure to load the recipe directory disables all exclusions;
+Skill listing remains usable. Ownership labels
+are deferred rather than inspecting or inventing App artifact records.

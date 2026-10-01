@@ -4,6 +4,7 @@ import type { Stats } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { assertSkillNotAppOwned, loadAppOwnedSkillFilter, type AppOwnedSkillOptions } from "./app-owned-skills.js";
 import { pathsOverlap } from "./path-safety.js";
 import { readExistingSkillTree } from "./skill-adoption.js";
 import { parseSkillFrontmatter, skillTreeBaseline } from "./skill-discovery.js";
@@ -93,7 +94,7 @@ export interface UserGlobalSkillInventory {
   readonly symlinks: readonly UserGlobalSkillInventorySymlink[];
 }
 
-export interface UserGlobalSkillInventoryOptions {
+export interface UserGlobalSkillInventoryOptions extends AppOwnedSkillOptions {
   /** Home directory to inspect; defaults to the current user's home directory. */
   readonly homeDirectory?: string;
   /** Validated user-global selections loaded from Source state. */
@@ -138,7 +139,8 @@ export async function scanUserGlobalSkillInventory(
   const skipped: UserGlobalSkillInventorySkippedEntry[] = [];
   const exposures: UserGlobalSkillExposure[] = [];
   const symlinks: UserGlobalSkillInventorySymlink[] = [];
-  const state: ScanState = { managedPaths, managedCanonicalPaths, entries, skipped, exposures, symlinks };
+  const isAppOwned = await loadAppOwnedSkillFilter({ ...options, homeDirectory });
+  const state: ScanState = { isAppOwned, managedPaths, managedCanonicalPaths, entries, skipped, exposures, symlinks };
   for (const root of GLOBAL_SKILL_ROOTS) {
     const rootPath = path.join(homeDirectory, ...root.relativePath);
     await scanRoot(root, rootPath, homeDirectory, state);
@@ -161,6 +163,7 @@ export async function scanUserGlobalSkillInventory(
 export const scanUserGlobalSkills = scanUserGlobalSkillInventory;
 
 interface ScanState {
+  readonly isAppOwned: (name: string) => boolean;
   readonly managedPaths: ReadonlySet<string>;
   readonly managedCanonicalPaths: ReadonlySet<string>;
   readonly entries: UserGlobalSkillInventoryEntry[];
@@ -223,6 +226,7 @@ async function scanRootEntry(
   state: ScanState,
 ): Promise<void> {
   const { managedPaths, entries, skipped } = state;
+  if (!managedPaths.has(pathKey(candidatePath)) && state.isAppOwned(name)) return;
   if (isTransientName(name)) {
     skipped.push({ name, path: candidatePath, root: root.kind, reason: "excluded-transient" });
     return;
@@ -404,7 +408,7 @@ export interface UserGlobalSkillRemovalInspection {
   readonly digest: string;
 }
 
-export interface UserGlobalSkillRemovalOptions {
+export interface UserGlobalSkillRemovalOptions extends AppOwnedSkillOptions {
   readonly homeDirectory: string;
   readonly managedInstallations: readonly ProjectSkillSelection[];
   readonly fileSystem?: UserGlobalSkillFileSystem;
@@ -424,6 +428,7 @@ export async function inspectUserGlobalSkillRemoval(
 ): Promise<UserGlobalSkillRemovalInspection> {
   const homeDirectory = path.resolve(options.homeDirectory);
   const targetPath = validateExplicitGlobalPath(candidatePath, homeDirectory);
+  await assertSkillNotAppOwned(path.basename(candidatePath), options);
   const fileSystem = options.fileSystem ?? nodeFileSystem;
   await assertRealGlobalAncestors(homeDirectory, path.dirname(targetPath), fileSystem);
   const managedPaths = managedProtectionPaths(homeDirectory, options.managedInstallations);
@@ -538,6 +543,7 @@ export async function inspectUserGlobalSymlinkRemoval(
 ): Promise<UserGlobalSymlinkRemovalInspection> {
   const homeDirectory = path.resolve(options.homeDirectory);
   const linkPath = validateExplicitGlobalPath(candidatePath, homeDirectory);
+  await assertSkillNotAppOwned(path.basename(candidatePath), options);
   const fileSystem = options.fileSystem ?? nodeFileSystem;
   await assertRealGlobalAncestors(homeDirectory, path.dirname(linkPath), fileSystem);
   const managedPath = managedProtectionPaths(homeDirectory, options.managedInstallations)
