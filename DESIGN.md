@@ -123,3 +123,20 @@ use non-interactive flags; installers requiring a terminal belong in `manual`
 steps. EOF lets stdin-based prompts fail rather than wait for input, but a
 process ignoring EOF can still hang; cancel it manually. Captured App stdout
 and stderr are each capped at 1 MiB; failures show only their last 4 KiB.
+
+## Portable user-global Profiles
+
+A Profile captures Git Sources and discovery inclusion, user-global managed Skill
+selections with recorded Hosts/version policies/methods, and full App recipes.
+`agent-depot export [--out <file>]` exports strict `agent-depot-profile/v1` JSON;
+block exclusions and repeated Source/Skill/App filters select independently.
+Local paths, credentials, unmanaged/App-owned Skills, project selections,
+installation evidence, caches, approvals and installed-App state do not travel.
+Core parsing reuses portable manifest and App recipe validation.
+
+Add-only import and the fifth **5 Import/Export** TUI tab are approved follow-up
+work: conflicts are skipped, existing choices never change, recipes arrive
+unapproved and Apps are never installed by import. This tab is the explicit
+exception to the existing no-new-tabs direction; App lifecycle stays in existing
+views. See [ADR 0008](docs/adr/0008-portable-user-global-profiles.md) and
+[the Profile spec](.scratch/profile/spec.md).

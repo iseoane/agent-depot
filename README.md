@@ -577,3 +577,35 @@ are previewed before execution; each Host gets an outcome and failures do not st
 remaining Hosts. For manual completion, rerun the selected Host with
 `--manual-done --yes`. This checks the App version, not Host wiring. Host actions
 never change installed-App tracking.
+
+## Export a user-global Profile
+
+Export portable choices to another machine or keep them in git:
+
+```sh
+agent-depot export > profile.json
+agent-depot export --out profile.json
+agent-depot export --no-apps --source <source-id> --skill doctor-md-agents
+agent-depot export --no-sources --no-skills --app my-tool --app another-tool
+```
+
+Everything portable is selected by default. `--no-sources`, `--no-skills` and
+`--no-apps` exclude blocks; repeatable `--source <id|url>`, `--skill <path|name>`
+and `--app <name>` restrict each block independently. Unknown selections and
+combining a block's inclusion filter with its `--no-*` flag are errors.
+
+Stdout contains JSON only; stderr shows the preview and exclusion reasons.
+`--out` requires a new file (existing files and symlinks are not replaced).
+Profiles contain canonical Git URLs with discovery inclusion, recorded Skill
+version policies/Hosts/user methods, and complete App recipes, including recipes
+for other platforms. Source inclusion defaults to true because discovery choices
+are not persisted today. Export neither refreshes Sources nor runs App commands.
+
+Local paths and obvious credentials are not portable. Nonportable/invalid items
+are excluded with reasons, as are unmanaged/App-owned and project Skills,
+installation locations/evidence, approval receipts, installed-App state and
+pending updates. Free-text recipe portability checks are conservative; review
+profiles before sharing them—arbitrary secrets cannot be detected automatically.
+
+Import and the fifth Import/Export TUI tab are planned in subsequent tickets;
+this release implements the profile format and CLI export only.

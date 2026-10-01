@@ -8,6 +8,8 @@ import path from "node:path";
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck } from "./app-flow.js";
 import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
 
+import { EXPORT_USAGE, runProfileExport } from "./profile-cli.js";
+
 import { pathsOverlap } from "./path-safety.js";
 import { skillTreeBaseline, type SkillCandidate } from "./skill-discovery.js";
 import {
@@ -114,6 +116,7 @@ export interface CliDependencies {
 const USAGE = [
   "Usage:",
   "  agent-depot source list",
+  `  ${EXPORT_USAGE}`,
   "  agent-depot source add <url>",
   "  agent-depot source refresh <id> [--yes]",
   "  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]",
@@ -171,6 +174,9 @@ const SOURCE_SUBCOMMANDS = new Map<string, SourceSubcommandHandler>([
 ]);
 
 const COMMANDS = new Map<string, CommandHandler>([
+  ["export", (values, { operations, dependencies, output }) => runProfileExport(values, operations,
+    dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }),
+    output, dependencies.stderr ?? (line => console.error(line)))],
   ["app", (values, { dependencies, output }) => runAppCommand(values, dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output)],
   ["install", async (values, { operations, dependencies, output }) => {
     await runInstall(values, operations, dependencies, output);

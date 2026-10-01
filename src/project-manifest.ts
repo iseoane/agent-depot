@@ -262,6 +262,11 @@ function isShellInterpreter(executable: string): boolean {
   ]).has(normalized);
 }
 
+/** Shared conservative credential check for portable declarations, including recipe free text. */
+export function containsCredentialArgument(value: string): boolean {
+  return CREDENTIAL_FLAG.test(value) || containsObviousCredential(value);
+}
+
 function containsObviousCredential(value: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*=.+$/u.test(value) ||
     /(?:^|[=:])[A-Za-z_][A-Za-z0-9_]*=.+/u.test(value) ||

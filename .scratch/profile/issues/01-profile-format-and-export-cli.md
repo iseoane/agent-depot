@@ -4,9 +4,26 @@
 
 **Blocked by:** None.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] The profile contains Git Sources, user-global Skill selections (Source identity, path, version policy, Hosts, methods) and App recipe contents, and nothing machine-specific.
-- [ ] Local-path Sources, the built-in Source, unmanaged and App-owned Skills, approvals and installed state are excluded; the preview says why.
-- [ ] The parser rejects unknown versions, unknown fields, local paths and invalid recipes with field paths.
-- [ ] Export round-trips: parsing an exported profile yields the same content.
+- [x] The profile contains Git Sources, user-global Skill selections (Source identity, path, version policy, Hosts, methods) and App recipe contents, and nothing machine-specific.
+- [x] Local-path Sources, the built-in Source, unmanaged and App-owned Skills, approvals and installed state are excluded; the preview says why.
+- [x] The parser rejects unknown versions, unknown fields, local paths and invalid recipes with field paths.
+- [x] Export round-trips: parsing an exported profile yields the same content.
+
+## Implementation evidence
+
+- Core format/parser/serializer: `src/profile.ts`; read-only export plan:
+  `src/profile-export.ts`; CLI filters/output: `src/profile-cli.ts`.
+- Tests use public core and CLI seams with temporary state/recipe directories.
+  TDD red runs covered the missing format/core, CLI dispatch, portability and
+  credential/identity checks; `pnpm test:single tests/profile.test.ts`: 8 passed.
+- `pnpm test:single tests/cli.test.ts`: 70 passed; version/help suite: 8 passed.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`: passed (667 tests).
+- Built CLI runtime harness: isolated HOME/XDG state, `node dist/src/cli.js export`,
+  parsed stdout as an empty v1 profile and observed exclusion preview on stderr.
+- ADR 0008 records the portable boundary, add-only import, machine-local approvals
+  and approved fifth tab. Import/TUI/E2E remain tickets 02–04.
+- Rollback boundary: remove the profile modules/tests and export CLI dispatch/help,
+  shared credential helper, ADR 0008 and associated profile docs; no existing
+  persistence schemas or installations were changed.
