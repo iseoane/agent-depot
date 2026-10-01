@@ -933,7 +933,7 @@ async function runUpdate(
   let appFailed = 0;
   for (const item of selectedApps) {
     try {
-      const plan = await apps.planLifecycle(item.entry, "update");
+      const plan = await apps.planLifecycle(item.entry, "update", undefined, item);
       output(`Preview: update App ${item.entry.recipe!.name}: ${JSON.stringify(plan.argv ?? [])}; executable ${plan.executable ?? "unresolved"}; cwd ${plan.cwd}; environment ${plan.environment}`);
       if (plan.warning) output(plan.warning);
       if (plan.manual) output(`Manual (never executed): ${plan.manual}`);

@@ -548,11 +548,13 @@ batch confirmation; independent failures do not stop the remaining updates.
 Manual batch outcomes are completed separately using `app update --manual-done`.
 Updates record the version confirmed by the recipe's version command, not the
 registry response. Updates require a changed version; unchanged versions fail
-without rewriting installed tracking. Successful results show
+without rewriting installed tracking. Leading `v` and SemVer build-metadata-only
+changes count as unchanged, just as in availability checks. Successful results show
 `installed <old> -> <new> (latest <latest>)`, even when new differs from latest.
 A confirmed manual update preview/fallback saves private version evidence in
 sibling `app-pending-updates/`, so a later `--manual-done` invocation can compare
-against the pre-update version.
+against the pre-update version. An attested manual completion consumes this
+evidence even on failure; get a fresh confirmed preview before retrying.
 
 Strict SemVer comparison ignores a leading `v`, orders prereleases and does not
 offer a downgrade when installed is at or ahead of latest. Non-SemVer versions

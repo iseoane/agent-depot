@@ -42,15 +42,18 @@ Uninstall never implicitly runs Host teardown: teardown remains separately previ
 
 Update plans carry the pre-update installed version and the selected latest version
 (or unknown). Automated and manual updates succeed only when the post-update
-`version` differs from the pre-update version. An unchanged version fails with
+`version` differs from the pre-update version. Equality uses the same leading-`v`
+normalization as availability checks and strict SemVer equality (ignoring build
+metadata) when both versions parse. An unchanged version fails with
 `version unchanged (<old>); expected <latest>` and leaves installed tracking
 unchanged. A changed version may differ from latest; report
 `installed <old> -> <new> (latest <latest>)` and record the verified new version.
 
 Confirmed manual fallbacks persist the pre-update version and latest in private,
 atomic sibling `app-pending-updates/` records, bound to canonical recipe path and
-content hash. `--manual-done` uses this baseline across CLI invocations; successful
-updates remove it. This is version evidence, not tracking App-written artifacts.
+content hash. `--manual-done` uses this baseline across CLI invocations. An
+attested manual-completion attempt consumes the baseline even on failure; retry
+requires a fresh confirmed preview. Successful automated updates also remove it. This is version evidence, not tracking App-written artifacts.
 
 
 ### Ticket 05 review: public registry lookup
@@ -62,3 +65,8 @@ and sends the package-version User-Agent, GitHub media type and API version.
 `/releases/latest` excludes drafts and prereleases. No redirects are followed,
 including same-origin ones; redirect, rate-limit, HTTP-status, timeout, oversize
 and malformed-response reasons remain visible in checks and listings.
+
+
+Batch planning reuses the already-loaded App update check, bound to the same
+canonical recipe path and content hash, rather than fetching latest again.
+Approval and executable rechecks still run before execution.

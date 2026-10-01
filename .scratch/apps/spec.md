@@ -230,3 +230,10 @@ verify changes across processes. App checks are concurrent and isolated per App;
 one failing check does not hide Skill reports. App updates execute after Skills;
 project `--all` skips Apps. Registry identities are validated, metadata requests
 are anonymous and redirect-free, and unknown results carry actionable reasons.
+
+
+Final review: update verification and availability share normalized version
+identity (leading `v` and SemVer build metadata do not count as a change). Batch
+plans reuse the loaded check without a second latest lookup. Attested manual
+completion consumes saved pending evidence even on failure; retries require a
+fresh confirmed preview.

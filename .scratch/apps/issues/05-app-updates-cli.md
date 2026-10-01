@@ -55,3 +55,12 @@ shared Source/Skill runners. Runtime coverage includes mixed Skill/App CLI
 updates, unchanged-version failure summaries, manual completion across process
 boundaries, malformed App state beside a real built-in Skill, and concurrent
 listing through the injectable HTTP boundary.
+
+
+### Final re-review corrections
+
+Normalized-equivalent versions now fail both automated and manual updates; batch
+plans reuse the loaded check instead of fetching latest twice; attested manual
+completion clears pending evidence even on failure. Tests were observed failing
+before each fix. One fix work unit includes code, tests and docs. Final checks:
+`pnpm typecheck`, `pnpm lint`, and `pnpm test` (584/584) pass.

@@ -240,9 +240,14 @@ test("manual update verifies its saved baseline across CLI invocations and repor
     assert.equal(await runCli(["app", "update", "example", "--manual-done", "--yes"], deps()), 1);
     assert.ok(lines.some(line => line.includes("version unchanged (1.0.0); expected 2.0.0")));
     version = "1.9.0";
+    // A failed attestation consumes the pending baseline; a new process cannot reuse it.
+    assert.equal(await runCli(["app", "update", "example", "--manual-done", "--yes"], deps()), 1);
+    assert.deepEqual(await apps.trackedApps(), []);
+    assert.equal(await runCli(["app", "update", "example", "--yes"], deps()), 1);
+    version = "1.9.1";
     assert.equal(await runCli(["app", "update", "example", "--manual-done", "--yes"], deps()), 0);
-    assert.ok(lines.some(line => line.includes("installed 1.0.0 -> 1.9.0 (latest 2.0.0)")));
-    assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.9.0");
+    assert.ok(lines.some(line => line.includes("installed 1.9.0 -> 1.9.1 (latest 2.0.0)")));
+    assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.9.1");
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
 
@@ -371,4 +376,55 @@ test("app list starts independent latest lookups concurrently and keeps recipe o
     assert.ok(lines[0]?.startsWith("example\t"));
     assert.ok(lines[1]?.startsWith("second\t"));
   } finally { release(); await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("equivalent normalized versions fail automated and manual updates", async () => {
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
+  try {
+    await writeFile(f.entry.file, JSON.stringify({ ...f.entry.recipe,
+      version: { argv: ["example", "version"], pattern: "(\\S+)" },
+      update: { argv: ["example", "update"], manual: "update yourself" },
+    }));
+    let version = "";
+    let next = "";
+    const apps = createAppOperations({ ...f.environment, runner: async (_exe, args) => {
+      if (args[0] === "update") version = next;
+      return { code: 0, signal: null, stdout: Buffer.from(version), stderr: "", outputTooLarge: false };
+    } });
+    const [entry] = await apps.load();
+    await apps.approve(entry!);
+    for (const [before, after] of [["v1.0.0", "1.0.0"], ["1.0.0+old", "v1.0.0+new"], ["v2024", "2024"]]) {
+      version = before!; next = after!;
+      const plan = await apps.planLifecycle(entry!, "update");
+      const automated = await apps.executeLifecycle(plan, true);
+      assert.equal(automated.status, "failed", `${before} -> ${after}`);
+      assert.equal(automated.reason, `version unchanged (${before}); expected 2.0.0`);
+      version = before!;
+      const manualPlan = await apps.planLifecycle(entry!, "update");
+      version = after!;
+      assert.equal((await apps.completeManual(manualPlan, true)).status, "failed");
+      assert.deepEqual(await apps.trackedApps(), []);
+    }
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("batch planning reuses the loaded latest check instead of fetching twice", async () => {
+  let requests = 0;
+  const f = await fixture({ npm: "example" }, async () => {
+    requests++;
+    return new Response(JSON.stringify({ "dist-tags": { latest: requests === 1 ? "2.0.0" : "3.0.0" } }));
+  });
+  try {
+    const { runCli } = await import("../src/cli.js");
+    const { createSourceOperations } = await import("../src/sources.js");
+    await f.apps.approve(f.entry);
+    const lines: string[] = [];
+    assert.equal(await runCli(["update", "apply", "--scope", "user-global", "--all", "--yes"], {
+      appOperations: f.apps, homeDirectory: f.home,
+      operations: createSourceOperations({ statePath: path.join(f.home, "sources.json") }),
+      stdout: line => lines.push(line), stderr: line => lines.push(line),
+    }), 0);
+    assert.equal(requests, 1);
+    assert.ok(lines.some(line => line.includes("installed 1.0.0 -> 2.0.0 (latest 2.0.0)")));
+  } finally { await rm(f.home, { recursive: true, force: true }); }
 });

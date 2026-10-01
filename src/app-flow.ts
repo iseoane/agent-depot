@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 
-import { compareAppVersions } from "./app-version.js";
+import { compareAppVersions, sameAppVersion } from "./app-version.js";
 import { fetchAppLatest } from "./app-latest.js";
 import { writeFileAtomically } from "./atomic-file.js";
 import { parseAppRecipe, type AppRecipe, type AppStep } from "./app-recipes.js";
@@ -291,11 +291,10 @@ export function createAppOperations(environment: AppEnvironment = {}) {
         }
       } catch { reason = "latest lookup failed"; }
     }
-    const normalize = (version: string) => version.replace(/^v(?=\d)/u, "");
     const comparison = latestVersion && inspection.installedVersion
       ? compareAppVersions(inspection.installedVersion, latestVersion) : undefined;
     const status = !latestVersion || !inspection.installedVersion ? "unknown" as const
-      : (comparison !== undefined ? comparison >= 0 : normalize(latestVersion) === normalize(inspection.installedVersion)) ? "current" as const
+      : (comparison !== undefined ? comparison >= 0 : sameAppVersion(latestVersion, inspection.installedVersion)) ? "current" as const
       : "update available" as const;
     return { entry, inspection, installedVersion: inspection.installedVersion, status, latestVersion,
       reason: status === "unknown" ? reason : undefined };
@@ -355,10 +354,15 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       cwd: home, environment: isWsl ? "linux (WSL)" : platform });
   }
 
-  async function planLifecycle(entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost): Promise<AppLifecyclePlan> {
+  async function planLifecycle(
+    entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost, loadedUpdate?: AppUpdateCheck,
+  ): Promise<AppLifecyclePlan> {
     const plan = await planStep(entry, action, host);
     if (action !== "update") return plan;
-    const update = await checkUpdate(entry);
+    if (loadedUpdate && (loadedUpdate.entry.canonicalFile !== entry.canonicalFile || loadedUpdate.entry.hash !== entry.hash)) {
+      throw new Error("Update check belongs to a different recipe; check again");
+    }
+    const update = loadedUpdate ?? await checkUpdate(entry);
     if (!update.installedVersion) throw new Error("Update requires a successful installed version check");
     return Object.freeze({ ...plan, previousVersion: update.installedVersion, latestVersion: update.latestVersion });
   }
@@ -387,7 +391,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     const inspection = await inspect(plan.entry);
     const name = plan.entry.recipe!.name;
     if ((plan.action === "install" || plan.action === "update") && inspection.status === "installed") {
-      if (plan.action === "update" && (!plan.previousVersion || inspection.installedVersion === plan.previousVersion)) {
+      if (plan.action === "update" && (!plan.previousVersion || sameAppVersion(inspection.installedVersion!, plan.previousVersion))) {
         return { status: "failed", reason: `version unchanged (${plan.previousVersion ?? "unknown"}); expected ${plan.latestVersion ?? "unknown"}` };
       }
       await mkdir(installations, { recursive: true, mode: 0o700 });
@@ -395,9 +399,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       await writeFileAtomically(installationPath(name), JSON.stringify({
         name, recipeFile: plan.entry.canonicalFile, installedVersion: inspection.installedVersion,
       }), { mode: 0o600 });
-      if (plan.action === "update") await unlink(pendingUpdatePath(name)).catch((error: unknown) => {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      });
+      if (plan.action === "update") await clearPendingUpdate(name);
       return { status: "installed", previousVersion: plan.previousVersion,
         installedVersion: inspection.installedVersion, latestVersion: plan.latestVersion };
     }
@@ -437,6 +439,12 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   const pendingUpdates = path.join(path.dirname(directory), "app-pending-updates");
   const pendingUpdatePath = (name: string) => path.join(pendingUpdates, path.basename(installationPath(name)));
 
+  async function clearPendingUpdate(name: string): Promise<void> {
+    await unlink(pendingUpdatePath(name)).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    });
+  }
+
   async function manualFallback(plan: AppLifecyclePlan, reason = "Executable unavailable"): Promise<AppLifecycleResult> {
     if (plan.action === "update" && plan.manual) {
       await mkdir(pendingUpdates, { recursive: true, mode: 0o700 });
@@ -452,24 +460,29 @@ export function createAppOperations(environment: AppEnvironment = {}) {
 
   async function completeManual(plan: AppLifecyclePlan, done: boolean): Promise<AppLifecycleResult> {
     if (!done) throw new Error("Manual step completion not confirmed");
-    // Installation/removal may legitimately change PATH resolution during manual work.
-    const approval = await approvalProblem(plan.entry);
-    if (approval) throw new Error(approval.reason ?? approval.status);
-    if (!plan.manual) throw new Error("No manual step declared");
-    if (plan.action === "update") {
-      try {
-        const pending = JSON.parse(await readFile(pendingUpdatePath(plan.entry.recipe!.name), "utf8"));
-        if (pending.recipeFile !== plan.entry.canonicalFile || pending.hash !== plan.entry.hash
-          || typeof pending.previousVersion !== "string" || !pending.previousVersion
-          || (pending.latestVersion !== undefined && typeof pending.latestVersion !== "string")) {
-          throw new Error("Manual update baseline changed; preview the update again");
+    try {
+      // Installation/removal may legitimately change PATH resolution during manual work.
+      const approval = await approvalProblem(plan.entry);
+      if (approval) throw new Error(approval.reason ?? approval.status);
+      if (!plan.manual) throw new Error("No manual step declared");
+      if (plan.action === "update") {
+        try {
+          const pending = JSON.parse(await readFile(pendingUpdatePath(plan.entry.recipe!.name), "utf8"));
+          if (pending.recipeFile !== plan.entry.canonicalFile || pending.hash !== plan.entry.hash
+            || typeof pending.previousVersion !== "string" || !pending.previousVersion
+            || (pending.latestVersion !== undefined && typeof pending.latestVersion !== "string")) {
+            throw new Error("Manual update baseline changed; preview the update again");
+          }
+          plan = { ...plan, previousVersion: pending.previousVersion, latestVersion: pending.latestVersion };
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
-        plan = { ...plan, previousVersion: pending.previousVersion, latestVersion: pending.latestVersion };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
+      return await recordOutcome(plan, true);
+    } finally {
+      // Attesting completion consumes the baseline even when verification fails.
+      if (plan.action === "update") await clearPendingUpdate(plan.entry.recipe!.name);
     }
-    return recordOutcome(plan, true);
   }
 
   async function forgetApp(name: string, confirmed: boolean): Promise<void> {
