@@ -75,6 +75,11 @@ agent-depot uninstall --cli
 agent-depot uninstall --skills --yes
 agent-depot uninstall --unmanaged-skill <exact-global-path> --yes
 agent-depot uninstall --data --yes
+agent-depot app list
+agent-depot app approve <name> --yes
+agent-depot app install <name> --yes
+agent-depot export --out profile.json
+agent-depot import profile.json --yes
 agent-depot tui
 agent-depot --version
 ```
@@ -459,8 +464,11 @@ node dist/src/cli.js --version
 
 [Fallow](https://docs.fallow.tools) 3.30.0 runs through `npx --yes fallow@3.30.0`
 (pinned, no dependency installed) and reads `.fallowrc.json`, which defines the
-entry points and the module-layer boundaries (`cli` -> `application` -> `core`
--> `infrastructure`; imports may only point downward).
+entry points and the module-layer boundaries (`cli` -> `tui` -> `application`
+-> `core` -> `infrastructure`; imports may only point downward, and `cli` may
+also use the lower layers directly). `scripts/**` forms an isolated `tooling`
+zone. Every source file must belong to a zone; App and Profile modules sit in
+`application`, except `atomic-file.ts` in `infrastructure`.
 
 - `pnpm audit:dead-code`: unused files, exports and dependencies, plus
   boundary violations. Must be clean.
