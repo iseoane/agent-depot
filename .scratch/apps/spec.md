@@ -181,7 +181,7 @@ This is a built-in skill in `builtin:agent-depot`, installed through the normal 
 
 1. **Resolved:** User-edited recipes live in `apps/` beside `sources.json` in the existing per-environment state directory, not a new config root.
 2. Whether a bare `npm` resolves to a launchable executable on Windows with `shell: false`. If it does not, the `argv` + `manual` form covers it.
-3. Exact CLI grammar, and whether `update apply` selects Apps by name, by index, or both.
+3. **Resolved:** User-global `update apply` selects Apps by repeatable `--app <name>` alongside existing Skill selections; `--all` includes both.
 4. **Resolved:** `teardown` stays separate; uninstall never implicitly executes another step.
 5. **Resolved:** One-time approval uses the canonical file path and exact content hash, with private atomic receipts in sibling `app-approvals/`. CLI approval is only `app approve <name> --yes`; `app validate` never approves. Changed bytes require renewed approval; restoring approved bytes restores approval.
 6. **Resolved:** WSL manages Linux only. Windows PATH hits are skipped in favor of Linux candidates; there is no cross-environment view or Windows execution.

@@ -64,13 +64,13 @@ export async function runAppCommand(
   return failed ? 1 : 0;
 
   async function show(entry: AppEntry, includeLatest = false) {
-    const result = await apps.inspect(entry);
+    const update = includeLatest ? await apps.checkUpdate(entry) : undefined;
+    const result = update?.inspection ?? await apps.inspect(entry);
     const columns = [
       entry.recipe?.name ?? entry.file, result.status,
       result.installedVersion ?? "unknown", result.executable ?? "unresolved",
     ];
-    if (includeLatest) {
-      const update = await apps.checkUpdate(entry);
+    if (update) {
       columns.push(`latest: ${update.latestVersion ?? "unknown"}`, update.status);
     }
     if (result.reason) columns.push(result.reason);
@@ -149,12 +149,18 @@ async function runLifecycle(
     if (result.reason) output(result.reason);
     if (result.status === "manual required") {
       output(`Manual (never executed): ${result.manual}`);
-      const quotedName = process.platform === "win32"
-        ? "'" + name.replaceAll("'", "''") + "'"
-        : "'" + name.replaceAll("'", "'\\''") + "'";
-      const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
-      output(`After completing it, run app ${action} ${quotedName}${plan.host ? ` --host ${plan.host}` : ""} --manual-done --yes to check version (${shell}).`);
+      output(describeManualCompletion(plan));
     }
     return result.status === "installed" || result.status === "untracked" || result.status === "completed" ? 0 : 1;
   }
+}
+
+/** Copyable completion command for the platform's documented shell. */
+export function describeManualCompletion(plan: AppLifecyclePlan): string {
+  const name = plan.entry.recipe!.name;
+  const quotedName = process.platform === "win32"
+    ? "'" + name.replaceAll("'", "''") + "'"
+    : "'" + name.replaceAll("'", "'\\''") + "'";
+  const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
+  return `After completing it, run app ${plan.action} ${quotedName}${plan.host ? ` --host ${plan.host}` : ""} --manual-done --yes to check version (${shell}).`;
 }

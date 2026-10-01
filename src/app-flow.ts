@@ -249,31 +249,31 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     const inspection = await inspect(entry);
     let latestVersion: string | undefined;
     if (inspection.status === "installed" && entry.recipe?.latest) {
-      const latest = entry.recipe.latest;
-      if ("argv" in latest) {
-        const approval = await checkApproval(entry);
-        if (!approval) {
-          const { executable, blocked } = await resolve(latest.argv[0]);
-          if (executable && !blocked) {
-            try {
+      try {
+        const latest = entry.recipe.latest;
+        if ("argv" in latest) {
+          const approval = await checkApproval(entry);
+          if (!approval) {
+            const { executable, blocked } = await resolve(latest.argv[0]);
+            if (executable && !blocked) {
               const result = await runner(executable, latest.argv.slice(1), {
                 cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
               });
               if (result.code === 0 && !result.signal && !result.outputTooLarge) {
                 latestVersion = new RegExp(latest.pattern).exec(result.stdout.toString("utf8"))?.[1];
               }
-            } catch { /* Unknown latest version is not an available update. */ }
+            }
           }
+        } else {
+          latestVersion = await fetchAppLatest(latest, environment.fetch ?? globalThis.fetch);
         }
-      } else {
-        latestVersion = await fetchAppLatest(latest, environment.fetch ?? globalThis.fetch);
-      }
+      } catch { /* Lookup failures remain unknown and do not abort the batch. */ }
     }
     const normalize = (version: string) => version.replace(/^v(?=\d)/u, "");
     const status = !latestVersion || !inspection.installedVersion ? "unknown" as const
       : normalize(latestVersion) === normalize(inspection.installedVersion) ? "current" as const
       : "update available" as const;
-    return { entry, ...inspection, status, latestVersion };
+    return { entry, ...inspection, inspection, status, latestVersion };
   }
   const installations = path.join(path.dirname(directory), "app-installations");
   const installationPath = (name: string) => path.join(

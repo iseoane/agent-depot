@@ -174,3 +174,34 @@ test("one existing batch selects a real built-in Skill and an App together", asy
     assert.equal((await f.apps.trackedApps())[0]?.installedVersion, "2.0.0");
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
+
+test("manual batch completion guidance safely quotes shell-active App names", async () => {
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  try {
+    const { runCli } = await import("../src/cli.js");
+    const { createSourceOperations } = await import("../src/sources.js");
+    const name = "example$(unexpected)";
+    await writeFile(f.entry.file, JSON.stringify({ ...f.entry.recipe, name, update: { manual: "update yourself" } }));
+    const [entry] = await f.apps.load();
+    await f.apps.approve(entry!);
+    const lines: string[] = [];
+    assert.equal(await runCli(["update", "apply", "--scope", "user-global", "--all", "--yes"], {
+      appOperations: f.apps, homeDirectory: f.home,
+      operations: createSourceOperations({ statePath: path.join(f.home, "sources.json") }),
+      stdout: line => lines.push(line), stderr: line => lines.push(line),
+    }), 1);
+    assert.ok(lines.some(line => line.includes("app update 'example$(unexpected)' --manual-done --yes")));
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("a failed latest executable lookup remains unknown rather than aborting the check", async () => {
+  const f = await fixture({ argv: ["latest-tool"], pattern: "(2.0.0)" }, async () => { throw new Error("no network"); });
+  try {
+    await f.apps.approve(f.entry);
+    const apps = createAppOperations({ ...f.environment, resolveExecutable: async name => {
+      if (name === "latest-tool") throw new Error("PATH unavailable");
+      return "/bin/example";
+    } });
+    assert.equal((await apps.checkUpdate(f.entry)).status, "unknown");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});

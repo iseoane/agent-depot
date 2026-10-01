@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { createAppOperations, type AppOperations } from "./app-flow.js";
-import { runAppCommand } from "./app-cli.js";
+import { describeManualCompletion, runAppCommand } from "./app-cli.js";
 
 import { pathsOverlap } from "./path-safety.js";
 import { skillTreeBaseline, type SkillCandidate } from "./skill-discovery.js";
@@ -984,7 +984,7 @@ async function runUpdate(
         appFailed++;
         if (outcome.manual) {
           output(`Manual (never executed): ${outcome.manual}`);
-          output(`After completing it, use app update ${JSON.stringify(plan.entry.recipe!.name)} --manual-done --yes to check version.`);
+          output(describeManualCompletion(plan));
         }
       }
     } catch (error) {
