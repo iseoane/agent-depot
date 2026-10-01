@@ -43,7 +43,8 @@ export interface AppContext {
   readonly manage: ManageContext;
 }
 
-const appName = (entry: AppEntry) => entry.recipe?.name ?? entry.file;
+/** Recipe name, falling back to the file identity for invalid recipes. */
+export const appName = (entry: AppEntry) => entry.recipe?.name ?? entry.file;
 
 function stepLines(step: {
   readonly argv?: readonly string[];

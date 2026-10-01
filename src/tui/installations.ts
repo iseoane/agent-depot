@@ -20,6 +20,7 @@ import {
   type UserGlobalSkillInventoryEntry,
 } from "../user-global-skill-inventory.js";
 import type { Source, SourceOperations } from "../sources.js";
+import { errorText } from "./batch.js";
 import { prepareInstall, type PreparedInstall } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
 
@@ -163,7 +164,7 @@ export async function loadInstallations(
       }),
     })));
   } catch (error) {
-    appsError = error instanceof Error ? error.message : String(error);
+    appsError = errorText(error);
   }
   const globalRecords = operations.listUserGlobalInstallations
     ? await operations.listUserGlobalInstallations()

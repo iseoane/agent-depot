@@ -2,6 +2,7 @@ import type { Key } from "ink";
 
 import type { AppEntry } from "../app-flow.js";
 
+import { appName } from "./app-actions.js";
 import { startBulkHostAddition, startBulkUninstall, type BulkTarget } from "./bulk-actions.js";
 import { skillOf, sourceIdOf, type InstallationsData, type UnmanagedGroup } from "./installations.js";
 import { leavesOf, targetOf, type InstallationNode, type NodeData } from "./installations-tree.js";
@@ -115,7 +116,7 @@ function actOnRow(context: BrowseContext, snapshot: TreeSnapshot<NodeData>, row:
       const approved = inspection.status === "installed" || inspection.status === "not installed";
       context.setMessage({
         kind: approved ? "ok" : "error",
-        text: approved ? `${entry.recipe?.name ?? entry.file} is already approved` : inspection.reason ?? inspection.status,
+        text: approved ? `${appName(entry)} is already approved` : inspection.reason ?? inspection.status,
       });
     } else context.startApps([item.row.entry], key.return ? "approve" : input);
   }
