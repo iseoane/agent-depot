@@ -8,7 +8,7 @@ import { canonicalizeGitSourceUrl, sourceIdForUrl } from "./git-source.js";
 import { selectProfileItems, type ProfileFilters } from "./profile-export.js";
 import { parseProfile, PROFILE_FORMAT, type Profile } from "./profile.js";
 import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "./project-manifest.js";
-import { defaultProjectSkillTreeAccess, executeSingleInstall, outputSingleInstallPreview, planSingleInstall,
+import { defaultProjectSkillTreeAccess, executeSingleInstall, formatVersionPolicy, outputSingleInstallPreview, planSingleInstall,
   type InstallEnvironment } from "./skill-install.js";
 import { resolveProjectSource, type SourceOperations } from "./sources.js";
 
@@ -83,7 +83,8 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   for (const value of selectProfileItems(profile.sources, filters.sources, filters.noSources,
     source => [source.url, sourceIdForUrl(source.url)], "sources")) {
     const exists = sources.some(source => source.kind === "git" && canonicalizeGitSourceUrl(source.url) === value.url);
-    items.push({ block: "sources", value, label: `Source ${value.url} (included: ${value.included})`, status: exists ? "same" : "add" });
+    items.push({ block: "sources", value, label: `Source ${value.url} (included: ${value.included})`, status: exists ? "same" : "add",
+      ...(exists && !value.included ? { difference: "included: existing true -> incoming false (discovery inclusion is not imported)" } : {}) });
   }
   for (const value of selectProfileItems(profile.skills, filters.skills, filters.noSkills,
     skill => [skill.path, path.posix.basename(skill.path)], "skills")) {
@@ -98,8 +99,26 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
       ...(existing.length ? { difference: existing.map(entry => `${entry.file}: name ${JSON.stringify(value.name)} already present; ${
         fieldDifferences(entry.content ?? {}, value).join("; ") || "content identical"}`).join("; ") } : {}) });
   }
-  const preview = ["Preview: import portable user-global profile", ...items.map(item =>
-    `${item.status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`)];
+  const preview = ["Preview: import portable user-global profile", ...items.flatMap(item => {
+    const status = item.block === "sources" && item.status === "same" && !item.value.included
+      ? "same (discovery inclusion is not imported)" : item.status;
+    const lines = [`${status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`];
+    if (item.block === "skills" && item.status === "add") {
+      const skill = item.value;
+      lines.push(`  Source ${canonical(skill.source)}`,
+        `  hosts: ${skill.hosts.join(",")}; version policy: ${formatVersionPolicy(skill.version)}`);
+      for (const [action, method] of Object.entries(skill.methods ?? {})) {
+        lines.push(`  ${action}: argv=${JSON.stringify(method.argv)} (user-provided method from the profile, runs only after --yes)`);
+      }
+      const source = skill.source;
+      if (source.kind === "external" && "url" in source &&
+        !sources.some(registered => registered.kind === "git" && registered.url === source.url) &&
+        !items.some(candidate => candidate.block === "sources" && candidate.value.url === source.url && candidate.status === "add")) {
+        lines.push(`  Source ${source.url} will be fetched but not registered`);
+      }
+    }
+    return lines;
+  })];
   preview.push(...recipes.filter(entry => entry.error).map(entry => `WARNING: ${entry.file}: ${entry.error}${entry.name === undefined ? "; name unknown; unrelated names are not blocked" : ""}`));
   if (AGENT_DEPOT_PACKAGE_VERSION && (compareAppVersions(profile.agentDepotVersion, AGENT_DEPOT_PACKAGE_VERSION) ?? 0) > 0) {
     preview.push(`WARNING: profile Agent Depot ${profile.agentDepotVersion} is newer than running ${AGENT_DEPOT_PACKAGE_VERSION}`);

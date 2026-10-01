@@ -38,3 +38,13 @@ file paths and per-key changes appear in conflicts. Imported user-owned recipe
 JSON uses ordinary umask-governed file permissions, like Source JSON rather than
 private approval receipts. Focused import tests: 9/9; profile tests: 22/22.
 Rollback boundary: these recipe-name guards, field diagnostics and their tests.
+
+Review correction — unconfirmed method disclosure: add-Skill previews now show
+Source identity, Hosts, version policy and all profile method argv before --yes,
+with an explicit user-provided-only-after-confirmation label. Unregistered
+Sources excluded from registration are named as fetched-but-not-registered.
+Source inclusion differences remain same/skipped and explicitly say they are not
+imported; Skill conflicts show only differing fields. Regression seams include
+read-only CLI preview and built CLI fetching a pinned local Git fixture without
+registering its Source. Rollback boundary: declaration-preview diagnostics and
+their tests/README guidance, without changing installation execution.

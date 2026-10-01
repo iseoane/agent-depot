@@ -126,7 +126,7 @@ test("import rechecks additions and never overwrites conflicting destination rec
   assert.match(replan.items[2]!.difference!, /Keep my install.*Install tool/);
 });
 
-test("built CLI imports a pinned Git Skill from a local fixture repository without network access", async t => {
+test("built CLI fetches an unregistered pinned Git Source without registering it or using the network", async t => {
   const { home } = await fixture(t);
   const repo = path.join(home, "repo");
   const sourceUrl = "https://example.test/fixture.git";
@@ -152,12 +152,14 @@ test("built CLI imports a pinned Git Skill from a local fixture repository witho
     version: { policy: "fixed", version: commit }, hosts: ["pi", "claude"] }] });
   const file = path.join(home, "portable.json");
   await writeFile(file, JSON.stringify(input));
-  const result = spawnSync(process.execPath, [path.resolve("dist/src/cli.js"), "import", file, "--yes"],
+  const result = spawnSync(process.execPath, [path.resolve("dist/src/cli.js"), "import", file, "--no-sources", "--yes"],
     { cwd: home, env, encoding: "utf8" });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Source https:\/\/example\.test\/fixture\.git will be fetched but not registered/);
   assert.match(result.stdout, /scope: user-global; hosts: pi,claude; version policy: fixed:/);
   assert.match(await readFile(path.join(home, ".agents", "skills", "pinned", "SKILL.md"), "utf8"), /PINNED/);
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "agent-depot", "sources.json") });
+  assert.equal((await operations.listSources()).length, 1);
   const installed = await operations.listUserGlobalInstallations!();
   assert.deepEqual(installed[0]!.hosts, ["pi", "claude"]);
   assert.deepEqual(installed[0]!.version, { policy: "fixed", version: commit });
@@ -209,4 +211,47 @@ test("invalid destination recipes reserve known names while unknown names warn w
   const result = await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home });
   assert.deepEqual(result.map(item => item.status), ["added", "skipped"]);
   assert.equal(await readFile(unknown, "utf8"), "{ broken JSON");
+});
+
+test("unconfirmed CLI preview discloses Skill identity and every user method without fetching or writing", async t => {
+  const { home, operations, apps } = await fixture(t);
+  const methods = { install: { kind: "command", argv: ["tool", "install", "argument with spaces"] },
+    update: { kind: "command", argv: ["tool", "update", "--flag"] } };
+  const source = { kind: "external", url: "https://example.test/unregistered.git", ref: "a".repeat(40) };
+  const input = parseProfile({ ...profile, sources: [], apps: [], skills: [{ ...selection, source,
+    hosts: ["pi", "claude"], version: { policy: "fixed", version: "a".repeat(40) }, methods }] });
+  const file = path.join(home, "preview.json");
+  await writeFile(file, JSON.stringify(input));
+  const output: string[] = [];
+  assert.equal(await runCli(["import", file], { homeDirectory: home, operations, appOperations: apps,
+    stdout: line => output.push(line), stderr: line => assert.fail(line) }), 0);
+  const preview = output.join("\n");
+  assert.match(preview, /Source.*a{40}.*unregistered\.git/);
+  assert.match(preview, /hosts: pi,claude; version policy: fixed:a{40}/);
+  for (const method of Object.values(methods)) assert.ok(preview.includes(JSON.stringify(method.argv)));
+  assert.match(preview, /user-provided method from the profile, runs only after --yes/);
+  assert.match(preview, /Source https:\/\/example\.test\/unregistered\.git will be fetched but not registered/);
+  assert.equal((await operations.listSources()).length, 1);
+  assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+  await assert.rejects(readFile(path.join(home, "sources.json")), { code: "ENOENT" });
+  await assert.rejects(readFile(path.join(home, ".agents", "skills", "doctor-md-agents", "SKILL.md")), { code: "ENOENT" });
+  assert.deepEqual(await apps.load(), []);
+});
+
+test("conflicts show only differing keys and existing Sources explain ignored discovery inclusion", async t => {
+  const { operations, apps } = await fixture(t);
+  await operations.addGitSource(profile.sources[0]!.url);
+  await operations.addUserGlobalInstallation!({ ...parseProfile({ ...profile, skills: [{ ...selection,
+    hosts: ["claude"], methods: { update: { kind: "command", argv: ["tool", "old"] } } }] }).skills[0]!,
+    installation: { path: ".agents/skills/doctor-md-agents", adopted: false } });
+  const input = parseProfile({ ...profile, apps: [], skills: [{ ...selection,
+    version: { policy: "fixed", version: "0.3.0" }, methods: { update: { kind: "command", argv: ["tool", "new"] } } }] });
+  const plan = await buildProfileImport(input, operations, apps);
+  assert.match(plan.preview.join("\n"), /same \(discovery inclusion is not imported\): Source/);
+  assert.match(plan.items[0]!.difference!, /included: existing true -> incoming false/);
+  const difference = plan.items[1]!.difference!;
+  assert.match(difference, /hosts: existing \["claude"\] -> incoming \["pi"\]/);
+  assert.match(difference, /version: existing .*latest.* -> incoming .*fixed/);
+  assert.match(difference, /methods: existing .*old.* -> incoming .*new/);
+  assert.doesNotMatch(difference, /source:|path:|installation:/);
 });

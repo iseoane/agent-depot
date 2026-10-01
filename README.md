@@ -625,8 +625,10 @@ A profile produced by a newer Agent Depot version gives a warning, not an error.
 
 Confirmed additions run in order: Source registration, user-global Skills through
 normal refreshed install previews and safety checks, then App recipes. Recorded
-Hosts, version policies and user methods are retained; method argv is previewed
-before execution. Each failure is reported independently and remaining items
+Hosts, version policies and user methods are retained. Even without `--yes`,
+each add-Skill preview shows its Source, Hosts, version policy and full argv for
+every user-provided method, marked as running only after confirmation. The normal
+install preview still appears before execution. Each failure is reported independently and remaining items
 continue; any failed item makes the command exit non-zero.
 
 Recipes, including those for other platforms, arrive **unapproved** in `apps/`.
@@ -638,6 +640,8 @@ recipe commands. Review and approve applicable
 recipes with `agent-depot app approve <name> --yes` before using their lifecycle
 commands. Source discovery inclusion remains a transient frontend choice, not a
 persisted change to an existing Source. Skills carry their own Source identity,
-so omitting their Source block does not force registration.
+so omitting their Source block does not force registration; the preview names
+unregistered Sources that will be fetched without registering. Existing Source
+rows explain when discovery inclusion differs but is not imported.
 
 The fifth Import/Export TUI tab remains planned in ticket 03.
