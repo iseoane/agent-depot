@@ -42,7 +42,7 @@ export function buildTree(data: InstallationsData): readonly InstallationNode[] 
   });
   roots.push({
     id: "scope:unmanaged",
-    data: { kind: "group", label: `Unmanaged (user-global) (${data.unmanaged.length})` },
+    data: { kind: "group", label: `Unmanaged (user-global) (${data.unmanaged.length})${data.unmanagedWarnings?.length ? ` — ${data.unmanagedWarnings.join("; ")}` : ""}` },
     children: data.unmanaged.map((group): InstallationNode => ({ id: `unmanaged:${group.name}`, data: { kind: "unmanaged", group } })),
   });
   if (data.apps?.length || data.appsError) roots.push({

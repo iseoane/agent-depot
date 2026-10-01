@@ -325,3 +325,32 @@ test("a directory is kept when a link that targets it could not be removed", asy
   assert.equal(await readFile(path.join(agents, "SKILL.md"), "utf8"), SKILL_MD);
   assert.ok((await lstat(claude)).isSymbolicLink());
 });
+
+test("App declarations hide owned directories and links from the Unmanaged group", async t => {
+  const f = await fixture(t);
+  const apps = path.join(f.home, "apps");
+  await mkdir(apps);
+  await writeFile(path.join(apps, "owner.json"), JSON.stringify({
+    name: "owner", install: { manual: "install" }, update: { manual: "update" },
+    uninstall: { manual: "remove" }, version: { argv: ["owner"], pattern: "(.*)" }, skills: ["owned-*"],
+  }));
+  await writeSkill(f.home, ".agents", "owned-directory");
+  await linkSkill(f, "owned-link", [".claude"]);
+  await writeSkill(f.home, ".agents", "ordinary");
+  const view = render(<InstallationsView operations={f.operations} environment={{ ...f.environment, appEnvironment: { recipesDirectory: apps } }} />);
+  const frame = await openUnmanaged(view, /ordinary \[/);
+  assert.match(frame, /Unmanaged \(user-global\) \(1\)/);
+  assert.doesNotMatch(frame, /owned-directory|owned-link/);
+  view.unmount();
+});
+
+test("recipe loading failure keeps the Unmanaged group usable and shows a warning", async t => {
+  const f = await fixture(t);
+  const apps = path.join(f.home, "apps");
+  await writeFile(apps, "not a directory");
+  await writeSkill(f.home, ".agents", "ordinary");
+  const view = render(<InstallationsView operations={f.operations} environment={{ ...f.environment, appEnvironment: { recipesDirectory: apps } }} />);
+  const frame = await openUnmanaged(view, /ordinary \[/);
+  assert.match(frame, /WARNING: App-owned Skill exclusions unavailable/);
+  view.unmount();
+});

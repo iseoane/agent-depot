@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { assertSkillNotAppOwned, type AppOwnedSkillOptions } from "./app-owned-skills.js";
+
 import { pathsOverlap } from "./path-safety.js";
 import {
   inspectProjectSkillInstallation,
@@ -52,7 +54,7 @@ export interface InstallOptionsSubset {
 }
 
 /** The part of the CLI dependencies the install flow needs. */
-export interface InstallEnvironment {
+export interface InstallEnvironment extends AppOwnedSkillOptions {
   readonly installationOptions?: Omit<ProjectInstallationOptions, "projectRoot" | "sourceAccess">;
 }
 
@@ -504,6 +506,7 @@ export async function planSingleInstall(
   const { resolvedSource, resolved, installationInspection } = await resolveInstallInspection(
     selection, source, projectSource, context.root, request, context.operations, context.environment, context.sourceAccess,
   );
+  await assertInstallNotAppOwned(request, context, installationInspection);
   return { request, context, selection, source, resolvedSource, resolved, inspection: installationInspection };
 }
 
@@ -523,6 +526,7 @@ export async function executeSingleInstall(
   output: (line: string) => void,
 ): Promise<void> {
   const { request, context, selection, resolvedSource, resolved, inspection } = plan;
+  await assertInstallNotAppOwned(request, context, inspection);
   const protectedPaths = assertNoManagedInstallationOverlap(context.existing, selection, inspection, context.root, request.overwrite);
   rejectInstallationCollision(inspection, request.overwrite);
   const transaction = await installOne(
@@ -574,4 +578,14 @@ export function needsAdditionalHostExposure(
   const missingClaude = hosts.includes("claude") && !identical.includes(inspection.claudePath);
   const missingCanonical = hosts.some((host) => host !== "claude") && !identical.includes(inspection.canonicalPath);
   return missingClaude || missingCanonical;
+}
+
+async function assertInstallNotAppOwned(
+  request: SingleInstallRequest, context: SingleInstallContext, inspection: ProjectSkillInstallationInspection,
+): Promise<void> {
+  if (request.scope !== "user-global") return;
+  for (const location of inspection.locations) {
+    if (location.status === "missing") continue;
+    await assertSkillNotAppOwned(path.basename(location.path), { ...context.environment, homeDirectory: context.root });
+  }
 }

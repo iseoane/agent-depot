@@ -98,7 +98,7 @@ export async function prepareUnmanagedRemoval(
 ): Promise<PreparedUnmanagedRemoval> {
   if (!operations.listUserGlobalInstallations) throw new Error("Uninstall is not supported by the configured operations");
   const installations = await operations.listUserGlobalInstallations();
-  const options = { homeDirectory: homeOf(environment), managedInstallations: installations };
+  const options = { homeDirectory: homeOf(environment), appEnvironment: environment.appEnvironment, managedInstallations: installations };
   const items: PlannedUnmanagedRemoval[] = [];
   const preview = [`WARNING: agent-depot did not create these files (unmanaged skill ${group.name})`];
   // A chosen directory takes the links that point at it along, so none is left dangling.
@@ -134,7 +134,7 @@ export async function runUnmanagedRemoval(
   operations: SourceOperations,
   environment: TuiEnvironment,
 ): Promise<Message> {
-  const context = { operations, homeDirectory: homeOf(environment) };
+  const context = { operations, homeDirectory: homeOf(environment), appEnvironment: environment.appEnvironment };
   const lines: string[] = [];
   let failed = false;
   const notRemoved = new Set<string>();

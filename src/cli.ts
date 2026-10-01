@@ -927,7 +927,7 @@ async function runUpdate(
   if (loaded) {
     const { assessment, installed, context } = loaded;
     const userGlobalInventory = options.action === "check" && options.scope === "user-global"
-      ? await scanUserGlobalSkillInventory({ homeDirectory: context.projectRoot, managedInstallations: installed })
+      ? await scanUserGlobalSkillInventory({ homeDirectory: context.projectRoot, managedInstallations: installed, reportWarning: output })
       : undefined;
 
     outputUpdateAssessment(assessment, options.scope, output, userGlobalInventory);
