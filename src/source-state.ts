@@ -1,9 +1,9 @@
-import { mkdir, readFile, rename, rmdir, unlink, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rmdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 
+import { writeFileAtomically } from "./atomic-file.js";
 import { canonicalizeGitSourceUrl, sourceIdForUrl, type GitSource } from "./git-source.js";
 import { parseProjectManifest, type ProjectSkillSelection } from "./project-manifest.js";
 
@@ -246,27 +246,7 @@ export class SourceStateStore {
     const normalized = parseState(state, this.path);
     await mkdir(path.dirname(this.path), { recursive: true });
     const contents = `${JSON.stringify(normalized, null, 2)}\n`;
-    const temporaryPath = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-
-    try {
-      await writeFile(temporaryPath, contents, { encoding: "utf8", flag: "wx" });
-      try {
-        await rename(temporaryPath, this.path);
-      } catch (error) {
-        if (!isWindowsReplaceError(error)) {
-          throw error;
-        }
-        // Windows may not replace an existing file with rename. The lock makes
-        // this fallback safe from concurrent read-modify-write operations.
-        await writeFile(this.path, contents, "utf8");
-      }
-    } finally {
-      await unlink(temporaryPath).catch((error: unknown) => {
-        if (!isMissingFile(error)) {
-          throw error;
-        }
-      });
-    }
+    await writeFileAtomically(this.path, contents, { allowLockedReplaceFallback: true });
   }
 
   private async acquireLock(): Promise<() => Promise<void>> {
@@ -303,9 +283,4 @@ function isMissingFile(error: unknown): boolean {
 
 function isAlreadyExists(error: unknown): boolean {
   return errorCode(error) === "EEXIST";
-}
-
-function isWindowsReplaceError(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === "EEXIST" || code === "EPERM" || code === "ENOTEMPTY";
 }
