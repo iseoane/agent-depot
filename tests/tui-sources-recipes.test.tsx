@@ -29,7 +29,14 @@ async function fixture(t: TestContext) {
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") });
   t.after(() => rm(home, { recursive: true, force: true }));
   const mount = (listHeight?: number, onOpenCatalog?: SourcesViewProps["onOpenCatalog"]) => {
-    const view = render(<SourcesView onOpenCatalog={onOpenCatalog} listHeight={listHeight} operations={operations} environment={{ homeDirectory: home, projectRoot: home, appEnvironment }} />);
+    const view = render(
+      <SourcesView
+        onOpenCatalog={onOpenCatalog}
+        listHeight={listHeight}
+        operations={operations}
+        environment={{ homeDirectory: home, projectRoot: home, appEnvironment }}
+      />,
+    );
     t.after(() => view.unmount());
     return view;
   };
@@ -153,7 +160,6 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   assert.deepEqual(f.commands, []);
 });
 
-
 test("recipe guide captures global number and quit keys in the shell", async t => {
   const f = await fixture(t);
   let exited = false;
@@ -190,7 +196,6 @@ test("core approval status is explicit and reads no executables, commands or lat
   await writeFile(f.file, JSON.stringify({ ...recipe, platform: process.platform === "win32" ? "linux" : "windows" }));
   assert.equal((await apps.approvalStatus((await apps.load())[0]!)).status, "not applicable here");
 });
-
 
 test("Git Sources and recipes share a bounded list budget with window indicators", async t => {
   const f = await fixture(t);
@@ -236,7 +241,6 @@ test("Tab clears section action messages and invalid recipes cannot open approva
   assert.deepEqual(f.commands, []);
 });
 
-
 test("an unmanaged recipe Skill skips installation and goes straight to the agent prompt", async t => {
   const f = await fixture(t);
   const skillDirectory = path.join(f.home, ".agents", "skills", "agent-depot-apprecipe");
@@ -276,7 +280,7 @@ test("Git keys and highlight are isolated from recipe focus and restored after T
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, frame => !frame.includes("1 selected"));
   view.stdin.write("\r");
-  await new Promise(resolve => setTimeout(resolve, 30));
+  await waitForFrame(view.lastFrame, () => opened.length > 0);
   assert.deepEqual(opened, [source.id]);
   view.stdin.write("d");
   await waitForFrame(view.lastFrame, /remove Git Source/);

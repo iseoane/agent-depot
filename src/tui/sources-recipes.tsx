@@ -145,8 +145,9 @@ export function useSourcesRecipes({
     const current = modeRef.current;
     if (current.kind === "busy") return true;
     if (current.kind === "install") {
-      // The recipe guide also accepts n to decline non-text selection prompts.
-      // Fixed versions retain literal input, and in-flight installs cannot cancel.
+      // Host/scope/version are selection prompts; version chooses latest or fixed
+      // by number. Only the separate fixed mode accepts free-text version input.
+      // n declines these selections; fixed input and in-flight installs are untouched.
       const decline = input === "n" && ["host", "scope", "version"].includes(current.action.kind);
       handleCatalogActionKey(flow, current.action, input, decline ? { ...key, escape: true } : key);
       return true;
