@@ -8,7 +8,7 @@ import { CliUsageError } from "./usage-error.js";
 export const EXPORT_USAGE = "agent-depot export [--out <file>] [--no-sources] [--no-skills] [--no-apps] [--source <id|url>...] [--skill <path|name>...] [--app <name>...]";
 
 export async function runProfileExport(values: readonly string[], operations: SourceOperations, apps: AppOperations,
-  output: (line: string) => void, diagnostic: (line: string) => void): Promise<number> {
+  output: (line: string) => void, diagnostic: (line: string) => void, homeDirectory?: string): Promise<number> {
   const sources: string[] = [], skills: string[] = [], appNames: string[] = [];
   const filters: { -readonly [Key in keyof ProfileFilters]: ProfileFilters[Key] } = { sources, skills, apps: appNames };
   let out: string | undefined;
@@ -30,7 +30,7 @@ export async function runProfileExport(values: readonly string[], operations: So
       }
     } else throw new CliUsageError(`Usage: ${EXPORT_USAGE}`);
   }
-  const plan = await buildProfileExport(operations, apps, filters);
+  const plan = await buildProfileExport(operations, apps, { ...filters, homeDirectory });
   for (const line of plan.preview) diagnostic(line);
   const content = serializeProfile(plan.profile);
   if (out === undefined) output(content.trimEnd());

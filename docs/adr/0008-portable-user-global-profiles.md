@@ -34,3 +34,17 @@ stderr. `--out` creates a new file exclusively; it never overwrites an existing
 file or follows an existing symlink. No Source refresh, recipe approval or command
 execution occurs during export. Invalid/nonportable export candidates are excluded
 with reasons; strict parsing rejects such items in incoming profiles.
+
+### Ticket 01 review corrections
+
+Canonical output orders Sources by URL, Skills by Source identity/path and recipes
+by name/platform, independent of insertion order. A missing Source block for an
+exported external Skill warrants a preview warning, not forced inclusion. Export
+uses the existing read-only global inventory to name unmanaged Skills, with an
+injectable home directory, and reports only exclusions that actually occurred.
+
+URL query keys associated with credentials are rejected in portable declaration
+text. Home-relative manual guidance is portable; version/latest regex patterns
+are not filesystem paths. Manifest-derived Skill failures are rethrown as profile
+field-path diagnostics. Existing `--out` files remain untouched with a suggestion
+to choose another path.

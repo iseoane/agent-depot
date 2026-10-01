@@ -41,7 +41,7 @@ function assertPortableText(value: unknown, field: string): void {
     if (/[a-z][a-z0-9+.-]*:\/\/[^\s/]*@/iu.test(value)) {
       throw new Error(`${field}: credentials are not portable`);
     }
-    for (const match of value.matchAll(/https?:\/\/[^\s"'<>]+/giu)) {
+    for (const match of value.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/giu)) {
       const url = new URL(match[0]);
       if ([...url.searchParams.keys()].some(key => /^(?:token|key|apikey|api_key|secret|password|passwd|auth|sig|signature|access_token)$/iu.test(key))) {
         throw new Error(`${field}: credentials are not portable`);
@@ -111,7 +111,11 @@ export function parseProfile(value: unknown): Profile {
   });
   rejectDuplicates(sources, source => source.url, "sources");
   rejectDuplicates(apps, app => JSON.stringify([app.name, app.platform ?? null]), "apps");
-  return { format: PROFILE_FORMAT, agentDepotVersion: root.agentDepotVersion, sources, skills: parsedSkills, apps };
+  const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+  sources.sort((a, b) => compare(a.url, b.url));
+  const sortedSkills = [...parsedSkills].sort((a, b) => compare(JSON.stringify([a.source, a.path]), JSON.stringify([b.source, b.path])));
+  apps.sort((a, b) => compare(a.name, b.name) || compare(a.platform ?? "", b.platform ?? ""));
+  return { format: PROFILE_FORMAT, agentDepotVersion: root.agentDepotVersion, sources, skills: sortedSkills, apps };
 }
 
 export function serializeProfile(profile: Profile): string {

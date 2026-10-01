@@ -42,3 +42,24 @@ locally, not as independent parallel reviews.
   free-text portability checks. Added a failing public-parser regression, fixed
   using Node path predicates, and reran all checks (668 tests passed). No remaining
   ticket-01 requirement gaps found. Import and the TUI are intentionally deferred.
+
+### External review feedback applied
+
+All should-fix items and nits from `p01-review.md` are addressed:
+field-path Skill errors, prefix-free exclusion reasons, query credential keys
+(including encoded/non-HTTP URLs), portable home-relative manual guidance and
+regex patterns, existing-output protection/guidance, missing credential/version/
+name-filter tests, and explicit CLI inclusion documentation. Canonical ordering,
+missing-Source warnings, actual-only exclusions with named unmanaged Skills,
+CLI help/import placement, test whitespace and `validateOne` are also corrected.
+
+- TDD: new diagnostic, query credential, false-positive, existing-output,
+  canonical-order and exclusion regressions failed before their fixes.
+- `pnpm test:single tests/profile.test.ts`: 19 passed; CLI suite: 70 passed.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`: passed (678 tests).
+- Built CLI runtime harness: isolated HOME/XDG state reports `unmanaged-tool` by
+  name; exporting again to an existing file exits 1, gives choose-another-path
+  guidance and leaves the file byte-identical.
+- Rollback boundary for review corrections: profile validation/diagnostics,
+  canonicalization and export previews/tests/docs only; no persistence schemas,
+  approvals, Skill contents or Host wiring changed.

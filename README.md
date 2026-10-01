@@ -598,8 +598,9 @@ Stdout contains JSON only; stderr shows the preview and exclusion reasons.
 `--out` requires a new file (existing files and symlinks are not replaced).
 Profiles contain canonical Git URLs with discovery inclusion, recorded Skill
 version policies/Hosts/user methods, and complete App recipes, including recipes
-for other platforms. Source inclusion defaults to true because discovery choices
-are not persisted today. Export neither refreshes Sources nor runs App commands.
+for other platforms. CLI export always writes `included: true`; discovery choices are transient, while
+the TUI may pass explicit inclusion choices to the shared export core.
+Export neither refreshes Sources nor runs App commands.
 
 Local paths and obvious credentials are not portable. Nonportable/invalid items
 are excluded with reasons, as are unmanaged/App-owned and project Skills,
@@ -609,6 +610,3 @@ profiles before sharing them—arbitrary secrets cannot be detected automaticall
 
 Import and the fifth Import/Export TUI tab are planned in subsequent tickets;
 this release implements the profile format and CLI export only.
-
-CLI export always writes `included: true`; discovery choices are transient, while
-the TUI may pass explicit inclusion choices to the shared export core.

@@ -57,7 +57,7 @@ test("export includes only portable managed state and recipes without running co
     runner: async () => { throw new Error("must not execute"); } });
   await mkdir(apps.directory);
   await writeFile(path.join(apps.directory, "tool.json"), JSON.stringify(recipe));
-  const result = await buildProfileExport(operations, apps);
+  const result = await buildProfileExport(operations, apps, { homeDirectory: home });
   assert.deepEqual(result.profile.sources, [{ url: source.url, included: true }]);
   assert.deepEqual(result.profile.skills, [{ source: { kind: "builtin", id: "builtin:agent-depot" },
     path: "doctor-md-agents", version: { policy: "latest" }, hosts: ["pi", "claude"] }]);
@@ -76,7 +76,7 @@ test("CLI export keeps stdout JSON-only, previews on stderr, and supports file o
   await mkdir(appOperations.directory);
   await writeFile(path.join(appOperations.directory, "tool.json"), JSON.stringify(recipe));
   const stdout: string[] = [], stderr: string[] = [];
-  const dependencies = { operations, appOperations, stdout: (line: string) => stdout.push(line),
+  const dependencies = { homeDirectory: home, operations, appOperations, stdout: (line: string) => stdout.push(line),
     stderr: (line: string) => stderr.push(line) };
   assert.equal(await runCli(["export", "--source", source.id, "--no-skills", "--app", "tool"], dependencies), 0);
   const exported = parseProfile(JSON.parse(stdout.join("\n")));
@@ -111,13 +111,14 @@ test("export explains local Sources, App-owned Skills and invalid recipes, even 
   const adapted = { ...operations, listSources: async () => [
     { kind: "git" as const, id: "local", url: "/home/user/repo" },
   ] };
-  const result = await buildProfileExport(adapted, apps);
+  const result = await buildProfileExport(adapted, apps, { homeDirectory: home });
   assert.deepEqual(result.profile.sources, []);
   assert.deepEqual(result.profile.skills, []);
   assert.match(result.preview.join("\n"), /local-path.*not portable/);
   assert.match(result.preview.join("\n"), /Excluded Skill doctor-md-agents: App-owned/);
   assert.match(result.preview.join("\n"), /Excluded App recipe broken.json/);
-  assert.deepEqual((await buildProfileExport(adapted, apps, { noApps: true })).profile.skills, []);
+  assert.doesNotMatch(result.preview.join("\n"), /(?:\(|: )Error: /);
+  assert.deepEqual((await buildProfileExport(adapted, apps, { homeDirectory: home, noApps: true })).profile.skills, []);
 });
 
 test("export preserves explicit discovery choices and repeated selections", async t => {
@@ -128,7 +129,7 @@ test("export preserves explicit discovery choices and repeated selections", asyn
   const second = await operations.addGitSource("https://example.com/second.git");
   const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
   const result = await buildProfileExport(operations, apps, {
-    sources: [first.id, second.url], includedSourceIds: [second.id],
+    homeDirectory: home, sources: [first.id, second.url], includedSourceIds: [second.id],
   });
   assert.deepEqual(result.profile.sources, [
     { url: first.url, included: false }, { url: second.url, included: true },
@@ -180,7 +181,7 @@ test("CLI export refuses an existing output path with guidance and leaves it unc
   await writeFile(out, "keep this content\n");
   const stderr: string[] = [];
   assert.equal(await runCli(["export", "--out", out], {
-    operations: createSourceOperations({ statePath: path.join(home, "sources.json") }),
+    homeDirectory: home, operations: createSourceOperations({ statePath: path.join(home, "sources.json") }),
     appOperations: createAppOperations({ recipesDirectory: path.join(home, "apps") }),
     stdout: () => assert.fail("file export must not write stdout"), stderr: line => stderr.push(line),
   }), 1);
@@ -216,10 +217,70 @@ test("CLI filters Skills and Apps by name and records the running package versio
   }
   const stdout: string[] = [];
   assert.equal(await runCli(["export", "--skill", "chosen", "--app", "chosen-app"], {
-    operations, appOperations: apps, stdout: line => stdout.push(line), stderr: () => {},
+    homeDirectory: home, operations, appOperations: apps, stdout: line => stdout.push(line), stderr: () => {},
   }), 0);
   const exported = parseProfile(JSON.parse(stdout.join("\n")));
   assert.equal(exported.agentDepotVersion, AGENT_DEPOT_PACKAGE_VERSION);
   assert.deepEqual(exported.skills.map(skill => skill.path), ["nested/chosen"]);
   assert.deepEqual(exported.apps.map(app => app.name), ["chosen-app"]);
+});
+
+test("export is canonical across insertion orders and warns about omitted Skill Sources", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-order-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  await mkdir(apps.directory);
+  await writeFile(path.join(apps.directory, "z.json"), JSON.stringify({ ...recipe, name: "z-app" }));
+  await writeFile(path.join(apps.directory, "a.json"), JSON.stringify({ ...recipe, name: "a-app" }));
+  const outputs: string[] = [];
+  for (const [index, order] of [["z", "a"], ["a", "z"]].entries()) {
+    const operations = createSourceOperations({ statePath: path.join(home, `sources-${index}.json`) });
+    for (const name of order) {
+      const source = await operations.addGitSource(`https://example.com/${name}.git`);
+      await operations.addUserGlobalInstallation!({
+        source: { kind: "external", url: source.url }, path: `skills/${name}`,
+        version: { policy: "latest" }, hosts: ["pi"],
+        installation: { path: `.agents/skills/${name}`, adopted: false },
+      });
+    }
+    const result = await buildProfileExport(operations, apps, { homeDirectory: home });
+    outputs.push(serializeProfile(result.profile));
+    assert.deepEqual(result.profile.sources.map(source => source.url), ["https://example.com/a.git", "https://example.com/z.git"]);
+    assert.deepEqual(result.profile.skills.map(skill => skill.path), ["skills/a", "skills/z"]);
+    assert.deepEqual(result.profile.apps.map(app => app.name), ["a-app", "z-app"]);
+    const partial = await buildProfileExport(operations, apps, { homeDirectory: home, noSources: true });
+    assert.match(partial.preview.join("\n"), /WARNING: Skill skills\/a references Source https:\/\/example.com\/a.git not included in profile/);
+  }
+  assert.equal(outputs[0], outputs[1]);
+});
+
+test("export reports named unmanaged Skills and only real exclusions", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-unmanaged-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ statePath: path.join(home, "sources.json") });
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const options = { homeDirectory: home, noSources: true };
+  const empty = await buildProfileExport(operations, apps, options);
+  assert.deepEqual(empty.preview, ["Preview: export portable user-global profile"]);
+  const skill = path.join(home, ".agents", "skills", "unmanaged-tool");
+  await mkdir(skill, { recursive: true });
+  await writeFile(path.join(skill, "SKILL.md"), "---\nname: unmanaged-tool\ndescription: A tool\n---\nInstructions\n");
+  const result = await buildProfileExport(operations, apps, options);
+  assert.match(result.preview.join("\n"), /Excluded unmanaged Skill unmanaged-tool: not tracked/);
+  assert.doesNotMatch(result.preview.join("\n"), /Excluded App approvals|Excluded unmanaged Skills, project-scope/);
+});
+
+
+test("profile serialization orders same-name platform recipes independently of input order", () => {
+  const linux = { ...recipe, platform: "linux" };
+  const first = parseProfile({ ...profile, apps: [recipe, linux] });
+  const second = parseProfile({ ...profile, apps: [linux, recipe] });
+  assert.equal(serializeProfile(first), serializeProfile(second));
+  assert.deepEqual(first.apps.map(app => app.platform), ["linux", "windows"]);
+});
+
+test("query credential checks cover non-HTTP URLs and encoded parameter names", () => {
+  assert.throws(() => parseProfile({ ...profile, skills: [{ ...profile.skills[0],
+    methods: { update: { kind: "command", argv: ["curl", "ftp://api.x.com/?%74oken=abc"] } } }] }),
+  { message: /^skills\[0\].methods.update.argv\[1\]: credentials/ });
 });
