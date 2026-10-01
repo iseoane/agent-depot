@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn as spawnProcess } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { fakeAppFixture } from "../fake-app-fixture.js";
 
 import pty from "@homebridge/node-pty-prebuilt-multiarch";
 
@@ -39,7 +41,7 @@ class TuiSession {
   private exit: { exitCode: number; signal?: number } | undefined;
   private rawLength = 0;
 
-  constructor() {
+  constructor(environment: NodeJS.ProcessEnv = {}) {
     // Ink renders only the final frame when it detects CI (`CI` / `CONTINUOUS_INTEGRATION`), which leaves an
     // interactive PTY blank. The session is a real terminal, so hide the CI markers from the child.
     const inherited = { ...process.env };
@@ -50,7 +52,7 @@ class TuiSession {
       cols: 110,
       rows: 40,
       cwd: projectRoot,
-      env: { ...inherited, TERM: "xterm-256color", HOME: homeDirectory, USERPROFILE: homeDirectory, NO_COLOR: "1", FORCE_COLOR: "0" },
+      env: { ...inherited, TERM: "xterm-256color", HOME: homeDirectory, USERPROFILE: homeDirectory, NO_COLOR: "1", FORCE_COLOR: "0", ...environment },
     });
     this.terminal.onData((data) => {
       this.output += data;
@@ -175,4 +177,31 @@ test("a non-interactive run exits 1 with a clean message", { timeout: 60_000 }, 
   assert.equal(code, 1);
   assert.equal(stdout, "");
   assert.equal(stderr.trim(), "Error: agent-depot tui requires an interactive terminal");
+});
+
+test("the TUI approves and installs an App, then offers its update", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const fixture = await fakeAppFixture(sandbox);
+  const session = new TuiSession({
+    PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
+    XDG_STATE_HOME: path.join(sandbox, "state"),
+    XDG_CONFIG_HOME: path.join(sandbox, "config"),
+    XDG_CACHE_HOME: path.join(sandbox, "cache"),
+  });
+  try {
+    await session.waitFor(/add · r refresh/u);
+    await session.send("3", /Apps \(user-global\) \(1\)/u);
+    await assert.rejects(readFile(fixture.log), { code: "ENOENT" });
+    // Empty Managed/global, Managed/project and Unmanaged roots precede Apps.
+    await session.send("jjjj", /fixture-app/u);
+    await session.send("\r", /Approve fixture-app\? y\/n/u);
+    await session.send("y", /Approved fixture-app/u);
+    await session.send("i", /install fixture-app\? y\/n/u);
+    await session.send("y", /fixture-app: installed/u);
+    assert.equal(await readFile(fixture.state, "utf8"), "1.0.0");
+    const updates = await session.send("4", /App: fixture-app/u);
+    assert.match(updates, /1\.0\.0/);
+    assert.match(updates, /2\.0\.0/);
+    session.press("q");
+    assert.equal(await session.exitCode(), 0);
+  } finally { session.kill(); }
 });
