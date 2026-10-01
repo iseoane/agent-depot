@@ -255,3 +255,34 @@ test("conflicts show only differing keys and existing Sources explain ignored di
   assert.match(difference, /methods: existing .*old.* -> incoming .*new/);
   assert.doesNotMatch(difference, /source:|path:|installation:/);
 });
+
+test("CLI invalid JSON diagnostics identify the profile file and leave destination untouched", async t => {
+  const { home, operations, apps } = await fixture(t);
+  const file = path.join(home, "broken-profile.json");
+  await writeFile(file, "{not JSON");
+  const errors: string[] = [];
+  assert.equal(await runCli(["import", file, "--yes"], { homeDirectory: home, operations, appOperations: apps,
+    stdout: () => assert.fail("invalid JSON cannot produce a plan"), stderr: line => errors.push(line) }), 1);
+  assert.ok(errors[0]!.includes(`${file}: invalid JSON (`));
+  assert.equal((await operations.listSources()).length, 1);
+  assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+  assert.deepEqual(await apps.load(), []);
+});
+
+test("later blocks recheck destination recipes created by a confirmed Skill method", async t => {
+  const { home, apps } = await fixture(t);
+  const root = path.join(home, "builtin");
+  await mkdir(path.join(root, "writer"), { recursive: true });
+  await writeFile(path.join(root, "writer", "SKILL.md"), "---\nname: writer\ndescription: Fixture writer\n---\nInstructions\n");
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json"), builtInRoot: root });
+  const created = { ...recipe, install: { manual: "Created during Skill method" } };
+  const method = { kind: "command", argv: ["node", "-e", `require('node:fs').mkdirSync('apps',{recursive:true}),require('node:fs').writeFileSync('apps/late.json',${JSON.stringify(JSON.stringify(created))})`] };
+  const input = parseProfile({ ...profile, sources: [], skills: [{ ...selection, path: "writer", methods: { install: method } }] });
+  const plan = await buildProfileImport(input, operations, apps);
+  assert.deepEqual(plan.items.map(item => item.status), ["add", "add"]);
+  const result = await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home });
+  assert.deepEqual(result.map(item => item.status), ["added", "skipped"]);
+  assert.match(result[1]!.detail!, /late\.json.*Created during Skill method/);
+  assert.equal((await apps.load()).length, 1);
+  assert.equal(await readFile(path.join(apps.directory, "late.json"), "utf8"), JSON.stringify(created));
+});

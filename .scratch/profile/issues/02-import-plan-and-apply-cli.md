@@ -48,3 +48,30 @@ imported; Skill conflicts show only differing fields. Regression seams include
 read-only CLI preview and built CLI fetching a pinned local Git fixture without
 registering its Source. Rollback boundary: declaration-preview diagnostics and
 their tests/README guidance, without changing installation execution.
+
+Review correction — apply reloads and diagnostics: shared classifiers load only
+one destination block and reuse it across skips; every attempted write invalidates
+that snapshot, including failures that may already have persisted state. Later
+blocks load after preceding writes, preserving method-created recipe conflicts.
+Strict per-item validation stays in place. Core apply is the single write gate;
+CLI unconfirmed handling only reports the outcome. Invalid JSON errors now show
+`<file>: invalid JSON (<reason>)`. Import ordering was aligned with adjacent imports.
+
+Review feedback checklist:
+- [x] Reserve same-name destination recipes, including invalid named JSON; warn on unknown names.
+- [x] Reject duplicate profile App names with overlapping applicability.
+- [x] Show Source, Hosts, policy and every method argv before --yes; name unregistered fetches.
+- [x] Show conflict differences per key and existing recipe file paths.
+- [x] Explain ignored discovery inclusion on existing Source rows.
+- [x] Scope apply reloads per block and preserve write/drift safety.
+- [x] Name the file in JSON syntax errors; align recipe permissions and README guidance.
+- [x] Keep only core apply as the write gate.
+
+Final verification: `pnpm typecheck`, `pnpm lint`, `pnpm test` — 694/694 passed.
+Focused import tests: 13/13; profile parser/export tests: 22/22. Built CLI fixture
+fetches a pinned Git Source without registration or network access. A real Skill
+method creates a destination recipe before the App block, and that App is skipped.
+Reviewed Standards and Spec separately in-process; no unresolved findings.
+Rollback boundary for this work unit: block-local recheck extraction, CLI JSON
+error context/single-gate changes and associated regression tests; the two blocker
+fixes remain independently committed.

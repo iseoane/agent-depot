@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { applyProfileImport, buildProfileImport, type ProfileImportEnvironment } from "./profile-import.js";
 import type { AppOperations } from "./app-flow.js";
 import { buildProfileExport, type ProfileFilters } from "./profile-export.js";
+import { applyProfileImport, buildProfileImport, type ProfileImportEnvironment } from "./profile-import.js";
 import { serializeProfile } from "./profile.js";
 import type { SourceOperations } from "./sources.js";
 import { CliUsageError } from "./usage-error.js";
@@ -67,10 +67,14 @@ export async function runProfileImport(values: readonly string[], operations: So
   const file = values[0];
   if (!file || file.startsWith("--")) throw new CliUsageError(`Usage: ${IMPORT_USAGE}`);
   const { filters, confirmed } = parseProfileOptions(values.slice(1), true);
-  const plan = await buildProfileImport(JSON.parse(await readFile(file, "utf8")), operations, apps, filters);
+  const content = await readFile(file, "utf8");
+  let input: unknown;
+  try { input = JSON.parse(content); }
+  catch (error) { throw new Error(`${file}: invalid JSON (${error instanceof Error ? error.message : String(error)})`); }
+  const plan = await buildProfileImport(input, operations, apps, filters);
   for (const line of plan.preview) output(line);
-  if (!confirmed) { output("Import not confirmed; rerun with --yes. Nothing was written."); return 0; }
   const results = await applyProfileImport(plan, operations, apps, confirmed, output, environment);
+  if (!confirmed) { output("Import not confirmed; rerun with --yes. Nothing was written."); return 0; }
   for (const result of results) output(`${result.status}: ${result.item.label}${result.detail ? `; ${result.detail}` : ""}`);
   return results.some(result => result.status === "failed") ? 1 : 0;
 }

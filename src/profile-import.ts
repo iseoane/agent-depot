@@ -10,7 +10,7 @@ import { parseProfile, PROFILE_FORMAT, type Profile } from "./profile.js";
 import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "./project-manifest.js";
 import { defaultProjectSkillTreeAccess, executeSingleInstall, formatVersionPolicy, outputSingleInstallPreview, planSingleInstall,
   type InstallEnvironment } from "./skill-install.js";
-import { resolveProjectSource, type SourceOperations } from "./sources.js";
+import { resolveProjectSource, type Source, type SourceOperations } from "./sources.js";
 
 export type ProfileImportItem = (
   { readonly block: "sources"; readonly value: Profile["sources"][number] } |
@@ -71,6 +71,38 @@ async function loadImportRecipes(apps: AppOperations) {
   }));
 }
 
+function classifySource(value: Profile["sources"][number], sources: readonly Source[]): ProfileImportItem {
+  const exists = sources.some(source => source.kind === "git" && canonicalizeGitSourceUrl(source.url) === value.url);
+  return { block: "sources", value, label: `Source ${value.url} (included: ${value.included})`, status: exists ? "same" : "add",
+    ...(exists && !value.included ? { difference: "included: existing true -> incoming false (discovery inclusion is not imported)" } : {}) };
+}
+function classifySkill(value: Profile["skills"][number], skills: readonly ProjectSkillSelection[]): ProfileImportItem {
+  const existing = skills.find(skill => skillIdentity(skill) === skillIdentity(value));
+  return { block: "skills", value, label: `Skill ${value.path}`, ...comparison(existing && skillChoices(existing), skillChoices(value)) };
+}
+function classifyRecipe(value: Profile["apps"][number], recipes: Awaited<ReturnType<typeof loadImportRecipes>>): ProfileImportItem {
+  const existing = recipes.filter(entry => entry.name === value.name);
+  return { block: "apps", value, label: `App recipe ${value.name} (${value.platform ?? "all platforms"}; unapproved; Apps are not installed)`,
+    status: existing.length ? "conflict" : "add",
+    ...(existing.length ? { difference: existing.map(entry => `${entry.file}: name ${JSON.stringify(value.name)} already present; ${
+      fieldDifferences(entry.content ?? {}, value).join("; ") || "content identical"}`).join("; ") } : {}) };
+}
+
+/** Load only this block; retained across skips and invalidated after every attempted write. */
+async function loadImportClassifier(block: ProfileImportItem["block"], operations: SourceOperations, apps: AppOperations) {
+  if (block === "sources") {
+    const sources = await operations.listSources();
+    return (item: ProfileImportItem) => item.block === "sources" ? classifySource(item.value, sources) : item;
+  }
+  if (block === "skills") {
+    if (!operations.listUserGlobalInstallations) throw new Error("Profile import requires user-global installation listing");
+    const skills = await operations.listUserGlobalInstallations();
+    return (item: ProfileImportItem) => item.block === "skills" ? classifySkill(item.value, skills) : item;
+  }
+  const recipes = await loadImportRecipes(apps);
+  return (item: ProfileImportItem) => item.block === "apps" ? classifyRecipe(item.value, recipes) : item;
+}
+
 /** Read-only classification. Inclusion is a transient frontend choice, not persisted Source state. */
 export async function buildProfileImport(input: unknown, operations: SourceOperations, apps: AppOperations,
   filters: ProfileFilters = {}): Promise<ProfileImportPlan> {
@@ -81,23 +113,11 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   const recipes = await loadImportRecipes(apps);
   const items: ProfileImportItem[] = [];
   for (const value of selectProfileItems(profile.sources, filters.sources, filters.noSources,
-    source => [source.url, sourceIdForUrl(source.url)], "sources")) {
-    const exists = sources.some(source => source.kind === "git" && canonicalizeGitSourceUrl(source.url) === value.url);
-    items.push({ block: "sources", value, label: `Source ${value.url} (included: ${value.included})`, status: exists ? "same" : "add",
-      ...(exists && !value.included ? { difference: "included: existing true -> incoming false (discovery inclusion is not imported)" } : {}) });
-  }
+    source => [source.url, sourceIdForUrl(source.url)], "sources")) items.push(classifySource(value, sources));
   for (const value of selectProfileItems(profile.skills, filters.skills, filters.noSkills,
-    skill => [skill.path, path.posix.basename(skill.path)], "skills")) {
-    const existing = skills.find(skill => skillIdentity(skill) === skillIdentity(value));
-    items.push({ block: "skills", value, label: `Skill ${value.path}`,
-      ...comparison(existing && skillChoices(existing), skillChoices(value)) });
-  }
+    skill => [skill.path, path.posix.basename(skill.path)], "skills")) items.push(classifySkill(value, skills));
   for (const value of selectProfileItems(profile.apps, filters.apps, filters.noApps, recipe => [recipe.name], "apps")) {
-    const existing = recipes.filter(entry => entry.name === value.name);
-    items.push({ block: "apps", value, label: `App recipe ${value.name} (${value.platform ?? "all platforms"}; unapproved; Apps are not installed)`,
-      status: existing.length ? "conflict" : "add",
-      ...(existing.length ? { difference: existing.map(entry => `${entry.file}: name ${JSON.stringify(value.name)} already present; ${
-        fieldDifferences(entry.content ?? {}, value).join("; ") || "content identical"}`).join("; ") } : {}) });
+    items.push(classifyRecipe(value, recipes));
   }
   const preview = ["Preview: import portable user-global profile", ...items.flatMap(item => {
     const status = item.block === "sources" && item.status === "same" && !item.value.included
@@ -156,14 +176,19 @@ export async function applyProfileImport(plan: ProfileImportPlan, operations: So
   confirmed: boolean, output: (line: string) => void, environment: ProfileImportEnvironment = {}): Promise<readonly ProfileImportResult[]> {
   const results: ProfileImportResult[] = [];
   for (const block of ["sources", "skills", "apps"] as const) {
+    let classify: Awaited<ReturnType<typeof loadImportClassifier>> | undefined;
     for (const item of plan.items.filter(item => item.block === block)) {
       if (!confirmed || item.status !== "add") { results.push({ item, status: "skipped" }); continue; }
       try {
-        const recheck = await buildProfileImport({ format: PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
-          sources: [], skills: [], apps: [], [block]: [item.value] }, operations, apps);
-        if (recheck.items[0]!.status !== "add") {
-          results.push({ item, status: "skipped", detail: recheck.preview.join("\n") }); continue;
+        parseProfile({ format: PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
+          sources: [], skills: [], apps: [], [block]: [item.value] });
+        classify ??= await loadImportClassifier(block, operations, apps);
+        const recheck = classify(item);
+        if (recheck.status !== "add") {
+          results.push({ item, status: "skipped", detail: `${recheck.status}: ${recheck.label}${recheck.difference ? `; ${recheck.difference}` : ""}` }); continue;
         }
+        // Even a failing install method can persist state or change recipe files.
+        classify = undefined;
         if (item.block === "sources") await operations.addGitSource(item.value.url);
         else if (item.block === "apps") await writeRecipe(apps.directory, item.value);
         else {
