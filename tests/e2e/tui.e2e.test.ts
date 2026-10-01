@@ -140,6 +140,9 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
     const updates = await session.send("4", /no Git sources to refresh/u);
     assert.match(updates, /Updates \(scope: all\)/u);
 
+    const profile = await session.send("5", /e export · i import/u);
+    assert.match(profile, /5 Import\/Export/u);
+
     const sources = await session.send("1", /builtin:agent-depot/u);
     assert.match(sources, /add · r refresh/u);
 

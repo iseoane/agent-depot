@@ -144,6 +144,7 @@ test("App views render with the real source operations on a temporary home", asy
       ["2", /\[2 Catalog\]/],
       ["3", /\[3 Installations\]/],
       ["4", /\[4 Updates\]/],
+      ["5", /\[5 Import\/Export\]/],
       ["1", /\[1 Sources\]/],
     ];
     for (const [key, header] of views) {
@@ -212,4 +213,12 @@ test("the number keys still switch views", async () => {
     await waitForFrame(lastFrame, tab);
   }
   unmount();
+});
+
+test("key 5 opens Profile actions", async () => {
+  const view = render(<App operations={operations} />);
+  await waitForFrame(view.lastFrame, /builtin:agent-depot/);
+  view.stdin.write("5");
+  await waitForFrame(view.lastFrame, /e export.*i import/);
+  view.unmount();
 });

@@ -6,10 +6,11 @@ import type { SourceOperations } from "../sources.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
 import { InstallationsView } from "./installations-view.js";
+import { useKeys } from "./keys.js";
+import { ProfileView } from "./profile-view.js";
 import { SourcesView } from "./sources-view.js";
 import { separatorLine, theme } from "./theme.js";
 import { UpdatesView } from "./updates-view.js";
-import { useKeys } from "./keys.js";
 
 export interface AppProps {
   /** Source operations the views call directly; injectable for tests. */
@@ -20,13 +21,14 @@ export interface AppProps {
   readonly onExit?: () => void;
 }
 
-type ViewName = "sources" | "catalog" | "installations" | "updates";
+type ViewName = "sources" | "catalog" | "installations" | "updates" | "profile";
 
 const TABS: readonly (readonly [ViewName, string])[] = [
   ["sources", "1 Sources"],
   ["catalog", "2 Catalog"],
   ["installations", "3 Installations"],
   ["updates", "4 Updates"],
+  ["profile", "5 Import/Export"],
 ];
 
 /** Compact keys of the current view; the tab bar already shows how to switch views. */
@@ -38,6 +40,8 @@ function hintsOf(view: ViewName, catalogFocusedOnSource: boolean): string {
       return `j/k move · Enter expand · space mark · a all · i install · / filter${catalogFocusedOnSource ? " · s all sources" : ""} · q quit`;
     case "installations":
       return "j/k move · Enter expand · space mark · a all · u uninstall · h add hosts · A adopt · q quit";
+    case "profile":
+      return "e export · i import · q quit";
     case "updates":
       return "j/k move · space mark · a all · Enter preview · r check again · q quit";
   }
@@ -66,6 +70,7 @@ export function App({ operations, environment, onExit }: AppProps) {
     else if (input === "2") showView("catalog");
     else if (input === "3") showView("installations");
     else if (input === "4") showView("updates");
+    else if (input === "5") showView("profile");
   });
 
   return (
@@ -95,6 +100,8 @@ export function App({ operations, environment, onExit }: AppProps) {
           environment={environment}
           onCapturingChange={onCapturingChange}
         />
+      ) : view === "profile" ? (
+        <ProfileView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
       ) : view === "updates" ? (
         <UpdatesView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
       ) : (

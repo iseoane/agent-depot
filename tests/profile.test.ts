@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { createAppOperations } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
-import { buildProfileExport } from "../src/profile-export.js";
+import { buildProfileExport, writeProfileExport } from "../src/profile-export.js";
 import { test } from "node:test";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
@@ -84,6 +84,11 @@ test("CLI export keeps stdout JSON-only, previews on stderr, and supports file o
   assert.deepEqual(exported.apps, [recipe]);
   assert.match(stderr.join("\n"), /Preview: export/);
   stdout.length = 0;
+  await operations.addUserGlobalInstallation!({
+    source: { kind: "builtin", id: "builtin:agent-depot" }, path: "doctor-md-agents",
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: ".agents/skills/doctor-md-agents", adopted: false },
+  });
   const out = path.join(home, "profile.json");
   assert.equal(await runCli(["export", "--out", out, "--no-sources", "--no-apps"], dependencies), 0);
   assert.equal(stdout.length, 0);
@@ -180,8 +185,10 @@ test("CLI export refuses an existing output path with guidance and leaves it unc
   const out = path.join(home, "profile.json");
   await writeFile(out, "keep this content\n");
   const stderr: string[] = [];
+  const operations = createSourceOperations({ statePath: path.join(home, "sources.json") });
+  await operations.addGitSource("https://example.com/skills.git");
   assert.equal(await runCli(["export", "--out", out], {
-    homeDirectory: home, operations: createSourceOperations({ statePath: path.join(home, "sources.json") }),
+    homeDirectory: home, operations,
     appOperations: createAppOperations({ recipesDirectory: path.join(home, "apps") }),
     stdout: () => assert.fail("file export must not write stdout"), stderr: line => stderr.push(line),
   }), 1);
@@ -305,4 +312,51 @@ test("profile rejects same-name recipes whose applicability overlaps on any plat
   }
   assert.deepEqual(parseProfile({ ...profile, apps: [recipe, { ...recipe, platform: "linux" }] }).apps.map(app => app.platform),
     ["linux", "windows"]);
+});
+
+
+test("empty exports are refused by the core writer and CLI without creating files or stdout", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-empty-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const appOperations = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const empty = parseProfile({ ...profile, sources: [], skills: [], apps: [] });
+  const out = path.join(home, "empty.json");
+  await assert.rejects(writeProfileExport(out, empty), /Nothing selected; nothing written/);
+  await assert.rejects(access(out), { code: "ENOENT" });
+  const stdout: string[] = [], stderr: string[] = [];
+  const dependencies = { homeDirectory: home, operations, appOperations,
+    stdout: (line: string) => stdout.push(line), stderr: (line: string) => stderr.push(line) };
+  for (const args of [["export"], ["export", "--out", out]]) {
+    assert.equal(await runCli(args, dependencies), 1);
+    assert.match(stderr.at(-1)!, /Nothing selected; nothing written/);
+  }
+  assert.deepEqual(stdout, []);
+  await assert.rejects(access(out), { code: "ENOENT" });
+});
+
+test("export exposes classified exclusions and warnings while preserving the CLI preview", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-diagnostics-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  await operations.addUserGlobalInstallation!({
+    source: { kind: "external", url: "https://example.com/omitted.git" }, path: "demo",
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: ".agents/skills/demo", adopted: false },
+  });
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const result = await buildProfileExport(operations, apps, { homeDirectory: home });
+  assert.ok("exclusions" in result);
+  assert.deepEqual(result.exclusions, [
+    { block: "sources", label: "built-in Source", reason: "always present (built-in Skill selections remain portable)" },
+    { block: "skills", label: "installation location and version evidence for Skill demo", reason: "machine-specific" },
+  ]);
+  assert.ok("warnings" in result);
+  assert.deepEqual(result.warnings, [{ kind: "source", message: "WARNING: Skill demo references Source https://example.com/omitted.git not included in profile" }]);
+  assert.deepEqual(result.preview, [
+    "Preview: export portable user-global profile", "Skill demo [pi] (latest)",
+    "Excluded built-in Source: always present (built-in Skill selections remain portable)",
+    "Excluded installation location and version evidence for Skill demo: machine-specific",
+    "WARNING: Skill demo references Source https://example.com/omitted.git not included in profile",
+  ]);
 });
