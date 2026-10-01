@@ -118,7 +118,12 @@ export function parseProfile(value: unknown): Profile {
     }
   });
   rejectDuplicates(sources, source => source.url, "sources");
-  rejectDuplicates(apps, app => JSON.stringify([app.name, app.platform ?? null]), "apps");
+  apps.forEach((app, index) => {
+    if (apps.slice(0, index).some(previous => previous.name === app.name &&
+      (previous.platform === undefined || app.platform === undefined || previous.platform === app.platform))) {
+      throw new Error(`apps[${index}]: duplicate applicable App name ${JSON.stringify(app.name)}`);
+    }
+  });
   const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
   sources.sort((a, b) => compare(a.url, b.url));
   const sortedSkills = [...parsedSkills].sort((a, b) => compare(JSON.stringify([a.source, a.path]), JSON.stringify([b.source, b.path])));

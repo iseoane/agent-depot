@@ -297,3 +297,12 @@ test("URL credential keys normalize separators and cover fragments", () => {
     { message: "apps[0].install.argv[1]: credentials are not portable" });
   }
 });
+
+test("profile rejects same-name recipes whose applicability overlaps on any platform", () => {
+  for (const apps of [[recipe, { ...recipe, platform: undefined }],
+    [{ ...recipe, platform: undefined }, { ...recipe, platform: "linux" }]]) {
+    assert.throws(() => parseProfile({ ...profile, apps }), /apps\[1\].*duplicate.*applicable/);
+  }
+  assert.deepEqual(parseProfile({ ...profile, apps: [recipe, { ...recipe, platform: "linux" }] }).apps.map(app => app.platform),
+    ["linux", "windows"]);
+});

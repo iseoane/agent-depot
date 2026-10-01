@@ -608,5 +608,42 @@ installation locations/evidence, approval receipts, installed-App state and
 pending updates. Free-text recipe portability checks are conservative; review
 profiles before sharing them—arbitrary secrets cannot be detected automatically.
 
-Import and the fifth Import/Export TUI tab are planned in subsequent tickets;
-this release implements the profile format and CLI export only.
+## Import a user-global Profile
+
+Preview first, then explicitly confirm the same selection:
+
+```sh
+agent-depot import profile.json
+agent-depot import profile.json --yes
+agent-depot import profile.json --no-apps --skill doctor-md-agents --yes
+```
+
+Import uses the same independent block/name filters as export. It reports **add**,
+**same** (skipped), and **conflict** (difference shown, skipped). Without `--yes`,
+nothing is written. Existing choices and conflicting files are never replaced.
+A profile produced by a newer Agent Depot version gives a warning, not an error.
+
+Confirmed additions run in order: Source registration, user-global Skills through
+normal refreshed install previews and safety checks, then App recipes. Recorded
+Hosts, version policies and user methods are retained. Even without `--yes`,
+each add-Skill preview shows its Source, Hosts, version policy and full argv for
+every user-provided method, marked as running only after confirmation. The normal
+install preview still appears before execution. Each failure is reported independently and remaining items
+continue; any failed item makes the command exit non-zero.
+
+Recipes, including those for other platforms, arrive **unapproved** in `apps/`.
+A same-name destination recipe blocks import only when its platform overlaps the
+incoming recipe: equal platforms overlap, and a missing platform overlaps every
+platform. Disjoint platform recipes can both be added. Invalid recipe JSON uses
+its raw name and platform for the same check; unknown-name files are reported
+with read/parse details without blocking unrelated Apps. A profile cannot contain
+same-name recipes whose platform applicability overlaps. Import never installs Apps or runs
+recipe commands. Review and approve applicable
+recipes with `agent-depot app approve <name> --yes` before using their lifecycle
+commands. Source discovery inclusion remains a transient frontend choice, not a
+persisted change to an existing Source. Skills carry their own Source identity,
+so omitting their Source block does not force registration; the preview names
+unregistered Sources that will be fetched without registering. Existing Source
+rows explain when discovery inclusion differs but is not imported.
+
+The fifth Import/Export TUI tab remains planned in ticket 03.

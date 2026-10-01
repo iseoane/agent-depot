@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck } from "./app-flow.js";
 import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
-import { EXPORT_USAGE, runProfileExport } from "./profile-cli.js";
+import { EXPORT_USAGE, IMPORT_USAGE, runProfileExport, runProfileImport } from "./profile-cli.js";
 import { pathsOverlap } from "./path-safety.js";
 import { skillTreeBaseline, type SkillCandidate } from "./skill-discovery.js";
 import {
@@ -134,6 +134,7 @@ const USAGE = [
   "  agent-depot app install|update|uninstall <name> [--yes] [--manual-done]",
   "  agent-depot app uninstall <name> --forget [--yes]",
   `  ${EXPORT_USAGE}`,
+  `  ${IMPORT_USAGE}`,
   "  agent-depot tui",
   "  agent-depot --version",
 ].join("\n");
@@ -172,6 +173,8 @@ const SOURCE_SUBCOMMANDS = new Map<string, SourceSubcommandHandler>([
 ]);
 
 const COMMANDS = new Map<string, CommandHandler>([
+  ["import", (values, { operations, dependencies, output }) => runProfileImport(values, operations,
+    dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output, dependencies)],
   ["export", (values, { operations, dependencies, output }) => runProfileExport(values, operations,
     dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }),
     output, dependencies.stderr ?? (line => console.error(line)), dependencies.homeDirectory)],
