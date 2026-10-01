@@ -150,6 +150,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     assert.deepEqual(
       builtinCandidates.map((line) => line.split("\t").slice(0, 3).join("\t")),
       [
+        "Candidate: builtin:agent-depot\tagent-depot-apprecipe\tagent-depot-apprecipe",
         "Candidate: builtin:agent-depot\tdoctor-md-agents\tdoctor-md-agents",
         "Candidate: builtin:agent-depot\tdoctor-md-skill\tdoctor-md-skill",
       ],

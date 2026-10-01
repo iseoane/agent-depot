@@ -129,7 +129,7 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
   try {
     await session.waitFor(/Agent Depot[\s\S]*add · r refresh/u);
 
-    const catalog = await session.send("2", /builtin:agent-depot \(2\)[\s\S]*doctor-md-skill/u);
+    const catalog = await session.send("2", /builtin:agent-depot \(3\)[\s\S]*doctor-md-skill/u);
     assert.match(catalog, /Scope: all sources/u);
 
     const installations = await session.send("3", /Managed \(user-global\) \(0\)/u);
