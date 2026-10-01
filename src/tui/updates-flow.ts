@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 
 import { errorText } from "./batch.js";
 import type { TuiEnvironment } from "./environment.js";
@@ -35,6 +35,10 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
   const { operations, env, clock, mounted, checkedRef, latest, setChecked, setCursor, setMode, setMessage } = inputs;
   const [state, setState] = useState<LoadState>({ status: "loading", label: REFRESHING });
   const loadToken = useRef(0);
+  const pendingAnswer = useRef<((done: boolean) => void) | undefined>(undefined);
+  useEffect(() => () => {
+    pendingAnswer.current?.(false);
+  }, []);
 
   const load = useCallback(async (refresh: boolean) => {
     const token = ++loadToken.current;
@@ -82,9 +86,14 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
     setMode({ kind: "busy", label: "Applying updates..." });
     let result: UpdatesMessage;
     try {
-      const outcome = await runUpdates(prepared, confirmedPaths, plan => new Promise<boolean>(answer => {
-        if (!mounted.current) { answer(false); return; }
-        setMode({ kind: "manual", plan, answer });
+      const outcome = await runUpdates(prepared, confirmedPaths, (plan, reason) => new Promise<boolean>(resolve => {
+        if (!mounted.current) { resolve(false); return; }
+        const answer = (done: boolean) => {
+          pendingAnswer.current = undefined;
+          resolve(done);
+        };
+        pendingAnswer.current = answer;
+        setMode({ kind: "manual", plan, reason, answer });
       }));
       result = { kind: outcome.failed === 0 ? "ok" : "error", lines: outcome.lines };
     } catch (error) {

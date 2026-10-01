@@ -18,3 +18,16 @@
   Parallel sub-agent review unavailable in this harness.
 - Rollback boundary: `src/tui/updates*`, accompanying Updates tests, and ticket/spec notes.
   Shared App/Skill core operations remain unchanged.
+
+### Review corrections
+
+- App checks now run independently from Skill scope loads; failures have an Apps
+  error line without hiding Skill rows (and vice versa). CLI loading is unchanged.
+- Declining or unmounting a manual prompt settles the batch and clears pending
+  update evidence without changing tracking. Spawn-fallback reasons remain visible
+  in both the manual prompt and cancellation result.
+- Recipe-change regression confirms execution is refused and tracking preserved.
+- Five regressions failed before the fixes; the recipe-change safety test already
+  passed. Final `pnpm typecheck`, `pnpm lint`, `pnpm test`: 624 passed, 0 failed.
+- Rollback boundary: this review correction's App cancellation operation, Updates
+  changes, regression tests and notes; no CLI workflow changes.

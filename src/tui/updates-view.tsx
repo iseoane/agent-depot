@@ -122,7 +122,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   const window = computeWindow(entries.length, index, height);
   const view = { shown, updatable, unknown, upToDate, entries };
-  const hasErrors = (data?.results ?? []).some((result) => result.error !== undefined);
+  const hasErrors = data?.appError !== undefined || (data?.results ?? []).some((result) => result.error !== undefined);
 
   return (
     <Box flexDirection="column">

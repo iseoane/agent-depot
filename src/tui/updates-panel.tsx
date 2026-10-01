@@ -15,6 +15,7 @@ export function CheckStatus({ data, now }: { readonly data: UpdatesData; readonl
       {data.refresh.failed.map((failure) => (
         <Text key={failure.source} color={theme.warning}>refresh failed for {failure.source}: {failure.reason}</Text>
       ))}
+      {data.appError ? <Text color={theme.error}>Error (Apps): {data.appError}</Text> : null}
       {errors.map((result) => <Text key={result.scope} color={theme.error}>Error ({result.scope}): {result.error}</Text>)}
     </>
   );
@@ -84,6 +85,7 @@ export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
           <Text>Environment: {mode.plan.environment}</Text>
           <Text>Working directory: {mode.plan.cwd}</Text>
           <Text>Manual: {mode.plan.manual}</Text>
+          {mode.reason ? <Text color={theme.warning}>{mode.reason}</Text> : null}
           <Text>Manual step done, check now? y/n</Text>
         </Box>
       );

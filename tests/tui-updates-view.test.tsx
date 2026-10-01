@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { render } from "ink-testing-library";
+import { createAppOperations } from "../src/app-flow.js";
 
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
@@ -852,7 +853,6 @@ test("several keys delivered in a single write are handled one by one", async (t
 });
 
 test("mixed Skills and Apps continue after App failure with a combined summary", async t => {
-  const { createAppOperations } = await import("../src/app-flow.js");
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated" }]);
   const recipesDirectory = path.join(f.home, "apps");
@@ -889,4 +889,21 @@ test("mixed Skills and Apps continue after App failure with a combined summary",
   assert.match(frame, /Updated portable\/one/);
   assert.match(frame, /Failed App: bad/);
   assert.match(frame, /Updated App: good/);
+});
+
+test("App inventory failure leaves user-global Skill updates available", async t => {
+  const f = await fixture(t);
+  await seedGlobal(f, { name: "one", state: "outdated" });
+  const recipesDirectory = path.join(f.home, "not-a-directory");
+  await writeFile(recipesDirectory, "invalid directory");
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, appEnvironment: { recipesDirectory } }} />);
+  t.after(() => { view.unmount(); view.cleanup(); });
+  const frame = await waitForFrame(view.lastFrame, frame => frame.includes("Error (Apps)") && frame.includes("portable/one"));
+  assert.ok(!frame.includes("Error (user-global)"));
+  view.stdin.write("a");
+  await waitForFrame(view.lastFrame, /1 selected/);
+  view.stdin.write(ENTER);
+  await waitForFrame(view.lastFrame, /Apply 1 update/);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Update summary: 1 updated, 0 failed/);
 });

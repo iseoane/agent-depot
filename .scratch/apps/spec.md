@@ -269,3 +269,9 @@ fresh confirmed preview.
   cancelled item counts as unsuccessful in the existing updated/failed summary.
 - Update success and tracking are delegated to core normalized-version evidence;
   changed versions may differ from latest and report old/new/latest.
+
+Ticket 07 review: App check failures are independent of Skill scope failures.
+Declining a manual update or unmounting its prompt clears pending version evidence;
+it does not attest completion or alter installed tracking. The manual prompt and
+cancellation summary show the spawn-fallback reason. App previews include the
+loaded installed/latest version pair.

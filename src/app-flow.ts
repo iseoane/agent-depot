@@ -461,6 +461,11 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       : { status: "failed", reason };
   }
 
+  /** Cancels manual update evidence without attesting completion or changing tracking. */
+  async function cancelManual(plan: AppLifecyclePlan): Promise<void> {
+    if (plan.action === "update") await clearPendingUpdate(plan.entry.recipe!.name);
+  }
+
   async function completeManual(plan: AppLifecyclePlan, done: boolean): Promise<AppLifecycleResult> {
     if (!done) throw new Error("Manual step completion not confirmed");
     try {
@@ -495,7 +500,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  return { checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, trackedApps, previewForget, forgetApp };
+  return { checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;
