@@ -202,3 +202,10 @@ These notes come from the four candidate apps reviewed during exploration on 202
   - It writes skill copies into the Host skill roots, which is the motivation for `skills`.
   - Licensed under PolyForm Noncommercial.
 - **Archify:** a plain `SKILL.md` directory, already covered by the skill flow. It is not an App.
+
+### Ticket 03 lifecycle decisions
+
+- Installed-App records use sibling `app-installations/`, one atomic JSON record per hashed App name containing name, canonical recipe file and verified installed version. Independent App writes do not read-modify-write a shared file; existing `sources.json` remains unchanged.
+- CLI follows the existing non-interactive preview/rerun convention. `--yes` confirms execution only; `--manual-done --yes` explicitly attests completed manual work and checks version without rerunning argv. `app uninstall <name> --forget --yes` explicitly drops tracking without executing the recipe.
+- Open Question 4 resolved: teardown remains a separate action, never implicitly executed by uninstall. Each lifecycle step requires its own preview/confirmation.
+- Manual completion rechecks approval, but permits executable resolution to change as a consequence of installation/removal. Automated execution requires the previewed executable to remain unchanged.
