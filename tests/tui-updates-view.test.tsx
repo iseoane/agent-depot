@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { render } from "ink-testing-library";
+import { createAppOperations } from "../src/app-flow.js";
 
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
@@ -849,4 +850,60 @@ test("several keys delivered in a single write are handled one by one", async (t
   const frame = await waitForFrame(lastFrame, /1 selected/);
   assert.match(frame.split("\n").find((line) => line.includes("portable/three")) ?? "", /\[x\]/);
   unmount();
+});
+
+test("mixed Skills and Apps continue after App failure with a combined summary", async t => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }]);
+  const recipesDirectory = path.join(f.home, "apps");
+  await mkdir(recipesDirectory);
+  for (const name of ["bad", "good"]) {
+    await writeFile(path.join(recipesDirectory, `${name}.json`), JSON.stringify({
+      name, install: { manual: "install" }, uninstall: { manual: "remove" }, update: { argv: [name, "update"] },
+      version: { argv: [name, "version"], pattern: "(\\S+)" }, latest: { npm: name },
+    }));
+  }
+  let updated = false;
+  let lookups = 0;
+  const appEnvironment = { recipesDirectory, homeDirectory: f.home,
+    resolveExecutable: async (name: string) => `/usr/bin/${name}`,
+    fetch: async () => { lookups++; return new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })); },
+    runner: async (exe: string, args: readonly string[]) => {
+      if (args[0] === "update" && exe.endsWith("good")) updated = true;
+      return { code: args[0] === "update" && exe.endsWith("bad") ? 1 : 0, signal: null,
+        stdout: Buffer.from(updated && exe.endsWith("good") ? "2.0.0" : "1.0.0"), stderr: "", outputTooLarge: false };
+    },
+  };
+  const apps = createAppOperations(appEnvironment);
+  for (const entry of await apps.load()) await apps.approve(entry);
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, appEnvironment }} />);
+  t.after(() => { view.unmount(); view.cleanup(); });
+  await waitForFrame(view.lastFrame, frame => frame.includes("App: good") && frame.includes("portable/one"));
+  view.stdin.write("a");
+  await waitForFrame(view.lastFrame, /3 selected/);
+  view.stdin.write(ENTER);
+  await waitForFrame(view.lastFrame, /Apply 3 updates/);
+  assert.equal(lookups, 2);
+  view.stdin.write("y");
+  const frame = await waitForFrame(view.lastFrame, /Update summary: 2 updated, 1 failed/);
+  assert.match(frame, /Updated portable\/one/);
+  assert.match(frame, /Failed App: bad/);
+  assert.match(frame, /Updated App: good/);
+});
+
+test("App inventory failure leaves user-global Skill updates available", async t => {
+  const f = await fixture(t);
+  await seedGlobal(f, { name: "one", state: "outdated" });
+  const recipesDirectory = path.join(f.home, "not-a-directory");
+  await writeFile(recipesDirectory, "invalid directory");
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, appEnvironment: { recipesDirectory } }} />);
+  t.after(() => { view.unmount(); view.cleanup(); });
+  const frame = await waitForFrame(view.lastFrame, frame => frame.includes("Error (Apps)") && frame.includes("portable/one"));
+  assert.ok(!frame.includes("Error (user-global)"));
+  view.stdin.write("a");
+  await waitForFrame(view.lastFrame, /1 selected/);
+  view.stdin.write(ENTER);
+  await waitForFrame(view.lastFrame, /Apply 1 update/);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Update summary: 1 updated, 0 failed/);
 });

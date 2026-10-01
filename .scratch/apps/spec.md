@@ -257,3 +257,21 @@ fresh confirmed preview.
   remain with their respective tickets.
 - TUI “forget” is deferred: use CLI `app uninstall <name> --forget --yes`
   when version cannot confirm removal. No implicit forgetting occurs in the TUI.
+
+### Ticket 07 TUI Updates decisions
+
+- Apps share selection, scope filtering, the unknown fold, re-check and batch
+  preview/confirmation with Skills. App rows are labelled `App:` and user-global.
+- Preview plans reuse loaded checks; confirmation does not look up latest again.
+  The existing post-batch reload is a fresh check, as for Skills.
+- Manual-only steps and spawn fallbacks pause the confirmed batch at the existing
+  “Manual step done, check now?” prompt. Declining continues remaining items; the
+  cancelled item counts as unsuccessful in the existing updated/failed summary.
+- Update success and tracking are delegated to core normalized-version evidence;
+  changed versions may differ from latest and report old/new/latest.
+
+Ticket 07 review: App check failures are independent of Skill scope failures.
+Declining a manual update or unmounting its prompt clears pending version evidence;
+it does not attest completion or alter installed tracking. The manual prompt and
+cancellation summary show the spawn-fallback reason. App previews include the
+loaded installed/latest version pair.
