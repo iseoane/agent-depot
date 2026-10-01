@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-01
+
+### Added
+
+- **Profiles**: a portable, versioned `agent-depot-profile/v1` JSON file to carry a user-global setup to another Agent Depot installation (ADR 0008). It holds Git Sources, user-global Skill selections (Source, path, version policy, Hosts, methods) and App recipe contents, plus the producing `agentDepotVersion`. Local-path and built-in Sources, unmanaged and App-owned Skills, approvals and installed state are never exported; credentials in URLs and absolute paths are rejected, and output is canonically ordered.
+- `agent-depot export [--out <file>]` with `--no-sources`, `--no-skills`, `--no-apps` and repeatable `--source`, `--skill`, `--app`; refuses an existing output file and an empty selection.
+- `agent-depot import <file> [--yes]`: an add-only plan (add / same / conflict with per-field differences) that never removes or changes anything present. Without `--yes` nothing is written and every Skill's Hosts, version policy and method argv are shown. Imported App recipes arrive unapproved and Apps are never installed; a recipe conflicts only with a same-name recipe whose platform overlaps.
+- TUI: a fifth tab **5 Import/Export** with checklists for both directions, previews, y/n confirmation and per-item results.
+- TUI: an **App recipes** section in Sources (`Tab` to switch) lists every recipe with its status (approved, needs approval, invalid, not applicable), previews and approves it with Enter, and `n` shows how to add one: install the `agent-depot-apprecipe` skill from the TUI and paste the suggested prompt, or write the recipe by hand in the shown `apps/` directory.
+
 ## [0.3.0] - 2026-10-01
 
 ### Added
