@@ -123,6 +123,7 @@ const USAGE = [
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot update check --scope <project|user-global>",
   "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>... | --app <name>...) [--yes] [--confirm-path <relative-path>...]",
+  "    Apps run after Skills; --all --scope project skips Apps.",
   "  agent-depot skill remove <id|path>... [--yes]",
   "  agent-depot skill remove <id|path> --host <host>... [--yes]",
   "  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]",

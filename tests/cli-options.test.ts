@@ -82,3 +82,10 @@ test("update option parsing handles --confirm-path", async () => {
 test("usage text documents update apply --confirm-path", async () => {
   assert.match(await failure(["bogus"]), /agent-depot update apply --scope <project\|user-global> \(--all \| --skill <id\|path>\.\.\. \| --app <name>\.\.\.\) \[--yes\] \[--confirm-path <relative-path>\.\.\.\]/u);
 });
+
+test("help explains App batch execution order and project-scope exclusion", async () => {
+  const lines: string[] = [];
+  assert.equal(await runCli(["--help"], { stdout: line => lines.push(line) }), 0);
+  assert.match(lines.join("\n"), /Apps run after Skills/u);
+  assert.match(lines.join("\n"), /--all --scope project skips Apps/u);
+});

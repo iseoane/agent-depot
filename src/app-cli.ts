@@ -1,6 +1,6 @@
 import { PROJECT_HOSTS, type ProjectHost } from "./project-manifest.js";
 import { APP_RECIPE_SCHEMA } from "./app-schema.js";
-import { type AppOperations, type AppEntry, type AppLifecyclePlan, type AppLifecycleResult } from "./app-flow.js";
+import { checkAppUpdates, type AppUpdateCheck, type AppOperations, type AppEntry, type AppLifecyclePlan, type AppLifecycleResult } from "./app-flow.js";
 import { CliUsageError } from "./usage-error.js";
 
 export async function runAppCommand(
@@ -15,9 +15,7 @@ export async function runAppCommand(
     return 0;
   }
   if (command === "list" && args.length === 0) {
-    for (const entry of await apps.load()) {
-      if (entry.applicable || entry.error) await show(entry, true);
-    }
+    for (const update of await checkAppUpdates(apps)) await show(update.entry, update);
     return 0;
   }
   if (command === "install" || command === "update" || command === "uninstall" || command === "setup" || command === "teardown") {
@@ -63,8 +61,7 @@ export async function runAppCommand(
   }
   return failed ? 1 : 0;
 
-  async function show(entry: AppEntry, includeLatest = false) {
-    const update = includeLatest ? await apps.checkUpdate(entry) : undefined;
+  async function show(entry: AppEntry, update?: AppUpdateCheck) {
     const result = update?.inspection ?? await apps.inspect(entry);
     const columns = [
       entry.recipe?.name ?? entry.file, result.status,

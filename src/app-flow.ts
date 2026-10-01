@@ -218,7 +218,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     await writeFileAtomically(receiptPath(entry), JSON.stringify({ hash: entry.hash }), { mode: 0o600 });
   }
 
-  async function checkApproval(entry: AppEntry): Promise<AppInspection | undefined> {
+  async function approvalProblem(entry: AppEntry): Promise<AppInspection | undefined> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
     const [current] = await load([entry.file]);
@@ -240,7 +240,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   async function inspect(entry: AppEntry): Promise<AppInspection> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
-    const approval = await checkApproval(entry);
+    const approval = await approvalProblem(entry);
     if (approval) return approval;
     const { executable, blocked } = await resolve(entry.recipe.version.argv[0]);
     if (!executable || blocked) {
@@ -269,7 +269,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
         const latest = entry.recipe.latest;
         reason = "latest executable unavailable";
         if ("argv" in latest) {
-          const approval = await checkApproval(entry);
+          const approval = await approvalProblem(entry);
           if (approval) reason = approval.reason ?? approval.status;
           if (!approval) {
             const { executable, blocked } = await resolve(latest.argv[0]);
@@ -344,7 +344,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   }
 
   async function planStep(entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost): Promise<AppLifecyclePlan> {
-    const approval = await checkApproval(entry);
+    const approval = await approvalProblem(entry);
     if (approval) throw new Error(approval.reason ?? approval.status);
     const hostAction = action === "setup" || action === "teardown";
     const step = hostAction ? (host ? entry.recipe![action]?.[host] : undefined) : entry.recipe![action];
@@ -453,7 +453,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   async function completeManual(plan: AppLifecyclePlan, done: boolean): Promise<AppLifecycleResult> {
     if (!done) throw new Error("Manual step completion not confirmed");
     // Installation/removal may legitimately change PATH resolution during manual work.
-    const approval = await checkApproval(plan.entry);
+    const approval = await approvalProblem(plan.entry);
     if (approval) throw new Error(approval.reason ?? approval.status);
     if (!plan.manual) throw new Error("No manual step declared");
     if (plan.action === "update") {
@@ -483,3 +483,15 @@ export function createAppOperations(environment: AppEnvironment = {}) {
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;
+
+/** Concurrent independent checks; one broken App must not hide the rest of a batch. */
+export async function checkAppUpdates(apps: AppOperations): Promise<readonly AppUpdateCheck[]> {
+  const entries = (await apps.load()).filter(entry => entry.applicable || entry.error);
+  return Promise.all(entries.map(async entry => {
+    try { return await apps.checkUpdate(entry); }
+    catch (error) {
+      const reason = `App check failed: ${error instanceof Error ? error.message : String(error)}`;
+      return { entry, status: "unknown" as const, inspection: { status: "invalid" as const, reason }, reason };
+    }
+  }));
+}

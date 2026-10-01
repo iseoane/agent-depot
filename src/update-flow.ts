@@ -1,6 +1,7 @@
-import { type AppOperations } from "./app-flow.js";
 import { homedir } from "node:os";
 import path from "node:path";
+
+import { checkAppUpdates, type AppOperations } from "./app-flow.js";
 
 import {
   type ProjectInstallationFileSystem,
@@ -87,7 +88,7 @@ export async function loadUpdates(input: UpdateScopeInput): Promise<LoadedUpdate
     ...(input.installationFileSystem === undefined ? {} : { installationFileSystem: input.installationFileSystem }),
   };
   const appUpdates = input.scope === "user-global" && input.apps
-    ? await Promise.all((await input.apps.load()).filter(entry => entry.applicable || entry.error).map(entry => input.apps!.checkUpdate(entry)))
+    ? await checkAppUpdates(input.apps)
     : [];
   return { assessment, installed, context, appUpdates };
 }

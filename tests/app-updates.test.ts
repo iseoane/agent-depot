@@ -311,3 +311,64 @@ test("HTTP latest failures retain actionable reasons in core and CLI output", as
     }
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
+
+test("a malformed App and a throwing App check do not hide Skill updates", async () => {
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
+  try {
+    const { runCli } = await import("../src/cli.js");
+    const { createSourceOperations } = await import("../src/sources.js");
+    const { readdir } = await import("node:fs/promises");
+    const operations = createSourceOperations({ statePath: path.join(f.home, "sources.json") });
+    const lines: string[] = [];
+    const deps = { operations, appOperations: f.apps, homeDirectory: f.home,
+      stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) };
+    assert.equal(await runCli(["install", "--scope", "user-global", "--source", "builtin:agent-depot",
+      "--skill", "doctor-md-agents", "--host", "pi", "--version", "latest", "--portable-v1", "--yes"], deps), 0);
+    const [skill] = await operations.listUserGlobalInstallations!();
+    await operations.updateUserGlobalInstallation!({ ...skill!, installation: { ...skill!.installation!,
+      resolvedVersion: { kind: "builtin-package", version: "0.0.1" },
+    } });
+    await f.apps.approve(f.entry);
+    const receipts = path.join(f.home, "app-approvals");
+    for (const file of await readdir(receipts)) await writeFile(path.join(receipts, file), "{broken receipt");
+    await writeFile(path.join(f.home, "apps", "broken.json"), "{broken recipe");
+    lines.length = 0;
+    assert.equal(await runCli(["update", "check", "--scope", "user-global"], deps), 0, lines.join("\n"));
+    assert.ok(lines.some(line => line.includes("Updateable (1)")));
+    assert.ok(lines.some(line => line.includes("App example: unknown") && line.includes("App check failed")));
+    assert.ok(lines.some(line => line.includes("broken.json") && line.includes("unknown")));
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("app list starts independent latest lookups concurrently and keeps recipe order", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let started = 0;
+  let notify!: () => void;
+  const both = new Promise<void>(resolve => { notify = resolve; });
+  const f = await fixture({ npm: "example" }, async () => {
+    if (++started === 2) notify();
+    await gate;
+    return new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } }));
+  });
+  try {
+    const { runCli } = await import("../src/cli.js");
+    await f.apps.approve(f.entry);
+    await writeFile(path.join(f.home, "apps", "second.json"), JSON.stringify({ ...f.entry.recipe, name: "second" }));
+    const second = (await f.apps.load()).find(entry => entry.recipe?.name === "second")!;
+    await f.apps.approve(second);
+    const lines: string[] = [];
+    const pending = runCli(["app", "list"], { appOperations: f.apps,
+      stdout: line => lines.push(line), stderr: line => lines.push(line) });
+    let timer: NodeJS.Timeout | undefined;
+    const concurrent = await Promise.race([both.then(() => true), new Promise<boolean>(resolve => {
+      timer = setTimeout(() => resolve(false), 1000);
+    })]);
+    clearTimeout(timer);
+    release();
+    assert.equal(await pending, 0);
+    assert.equal(concurrent, true);
+    assert.ok(lines[0]?.startsWith("example\t"));
+    assert.ok(lines[1]?.startsWith("second\t"));
+  } finally { release(); await rm(f.home, { recursive: true, force: true }); }
+});

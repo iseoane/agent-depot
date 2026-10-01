@@ -68,7 +68,7 @@ Example:
   - Without this rule, a Windows install could make `version` report a false "installed" on Linux, and a Linux uninstall could never be confirmed.
 - **Manual fallback.** It applies only when the process cannot be spawned (for example the executable is missing, or Windows cannot launch a `.cmd` shim without a shell). A command that starts and exits non-zero is reported as a failure with its output. It never falls back to `manual`.
 - **After a manual step**, the user confirms that it is done. Agent Depot then runs `version`:
-  - After install or update, the App is recorded as installed only if `version` succeeds.
+  - After install, the App is recorded as installed only if `version` succeeds. After update, the verified version must also differ from the pre-update version; unchanged versions fail without rewriting tracking. A changed version may differ from latest and is reported with old/new/latest.
   - After uninstall, it stops tracking the App only if `version` no longer succeeds, or if the user explicitly forgets it.
 - App steps run with the user's home directory as their working directory. Skill methods are confined to the project root; apps are not.
 - Apps are user-global only in this iteration.
@@ -220,3 +220,13 @@ These notes come from the four candidate apps reviewed during exploration on 202
 Open Question 3 resolved: `update apply --scope user-global` accepts repeatable `--app <name>` and existing `--skill <id|path>` together, or `--all` for both. Apps are excluded from project scope. Batch manual steps are completed separately through `app update <name> --manual-done --yes`.
 
 Latest HTTP checks are anonymous, redirect-free, capped at 1 MiB and time out after five seconds. Strict SemVer comparison ignores a leading `v`, orders prereleases and suppresses updates when installed is at or ahead of latest. Other versions use opaque inequality, which can offer downgrades. GitHub `/releases/latest` excludes drafts and prereleases; npm metadata uses `dist-tags.latest`. HTTP failures retain reasons in checks/listings.
+
+
+### Ticket 05 review corrections
+
+Manual update fallbacks save private, atomic, recipe-hash-bound pre-update/latest
+version evidence in sibling `app-pending-updates/`, allowing `--manual-done` to
+verify changes across processes. App checks are concurrent and isolated per App;
+one failing check does not hide Skill reports. App updates execute after Skills;
+project `--all` skips Apps. Registry identities are validated, metadata requests
+are anonymous and redirect-free, and unknown results carry actionable reasons.
