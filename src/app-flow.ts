@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { writeFileAtomically } from "./atomic-file.js";
 import { parseAppRecipe, type AppRecipe, type AppStep } from "./app-recipes.js";
+import { type ProjectHost } from "./project-manifest.js";
 import { runProcess } from "./process-runner.js";
 import { defaultSourceStatePath } from "./source-state.js";
 
@@ -38,7 +39,8 @@ export interface AppEnvironment {
 
 export interface AppLifecyclePlan extends AppStep {
   readonly entry: AppEntry;
-  readonly action: "install" | "uninstall";
+  readonly action: "install" | "uninstall" | "setup" | "teardown";
+  readonly host?: ProjectHost;
   readonly executable?: string;
   readonly warning?: string;
   readonly cwd: string;
@@ -52,7 +54,7 @@ export interface TrackedApp {
 }
 
 export interface AppLifecycleResult {
-  readonly status: "installed" | "untracked" | "manual required" | "failed";
+  readonly status: "installed" | "untracked" | "manual required" | "failed" | "completed";
   readonly manual?: string;
   readonly reason?: string;
 }
@@ -284,18 +286,20 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     return { name, file };
   }
 
-  async function planLifecycle(entry: AppEntry, action: AppLifecyclePlan["action"]): Promise<AppLifecyclePlan> {
+  async function planLifecycle(entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost): Promise<AppLifecyclePlan> {
     const approval = await checkApproval(entry);
     if (approval) throw new Error(approval.reason ?? approval.status);
-    const step = entry.recipe![action];
+    const hostAction = action === "setup" || action === "teardown";
+    const step = hostAction ? (host ? entry.recipe![action]?.[host] : undefined) : entry.recipe![action];
+    if (!step || (host && !hostAction)) throw new Error("No declared App step for the requested Host/action");
     const resolution = step.argv ? await resolve(step.argv[0]) : undefined;
-    return Object.freeze({ entry, action, ...step, executable: resolution?.executable,
+    return Object.freeze({ entry, action, host, ...step, executable: resolution?.executable,
       warning: resolution?.blocked ? WINDOWS_EXECUTABLE_WARNING : undefined,
       cwd: home, environment: isWsl ? "linux (WSL)" : platform });
   }
 
   async function recheckPlan(plan: AppLifecyclePlan): Promise<void> {
-    const current = await planLifecycle(plan.entry, plan.action);
+    const current = await planLifecycle(plan.entry, plan.action, plan.host);
     const sameArgv = current.argv?.length === plan.argv?.length
       && current.argv?.every((arg, index) => arg === plan.argv?.[index]) !== false;
     if (!sameArgv || current.executable !== plan.executable || current.warning !== plan.warning
@@ -305,7 +309,16 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     }
   }
 
-  async function recordOutcome(plan: AppLifecyclePlan): Promise<AppLifecycleResult> {
+  async function recordOutcome(plan: AppLifecyclePlan, manual = false): Promise<AppLifecycleResult> {
+    if (plan.action === "setup" || plan.action === "teardown") {
+      if (manual) {
+        const inspection = await inspect(plan.entry);
+        if (inspection.status !== "installed") {
+          return { status: "failed", reason: `Version did not confirm installation (${inspection.status}); Host wiring is not verified` };
+        }
+      }
+      return { status: "completed" };
+    }
     const inspection = await inspect(plan.entry);
     const name = plan.entry.recipe!.name;
     if (plan.action === "install" && inspection.status === "installed") {
@@ -360,7 +373,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     const approval = await checkApproval(plan.entry);
     if (approval) throw new Error(approval.reason ?? approval.status);
     if (!plan.manual) throw new Error("No manual step declared");
-    return recordOutcome(plan);
+    return recordOutcome(plan, true);
   }
 
   async function forgetApp(name: string, confirmed: boolean): Promise<void> {

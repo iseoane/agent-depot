@@ -209,3 +209,8 @@ These notes come from the four candidate apps reviewed during exploration on 202
 - CLI follows the existing non-interactive preview/rerun convention. `--yes` confirms execution only; `--manual-done --yes` explicitly attests completed manual work and checks version without rerunning argv. `app uninstall <name> --forget --yes` explicitly drops tracking without executing the recipe.
 - Open Question 4 resolved: teardown remains a separate action, never implicitly executed by uninstall. Each lifecycle step requires its own preview/confirmation.
 - Manual completion rechecks approval, but permits executable resolution to change as a consequence of installation/removal. Automated execution requires the previewed executable to remain unchanged.
+
+### Ticket 04 Host lifecycle decisions
+
+- Setup/teardown reuse lifecycle plans and execution, with repeated `--host <host>` selections. Duplicate, unknown or undeclared Hosts are rejected before execution. Every selected Host is previewed; independent execution failures are reported per Host and do not stop remaining selections.
+- Host actions do not persist wiring state or change installed-App records. Automated success means only that the delegated command succeeded. Manual completion uses `--manual-done --yes` and requires a successful version check, which does not verify Host wiring (including teardown).
