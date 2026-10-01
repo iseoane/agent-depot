@@ -500,7 +500,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  return { checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
+  return { directory, checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;

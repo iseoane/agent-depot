@@ -95,3 +95,17 @@ Defensively rejected matcher patterns are skipped individually with a file-named
 warning. Only a failure to load the recipe directory disables all exclusions;
 Skill listing remains usable. Ownership labels
 are deferred rather than inspecting or inventing App artifact records.
+
+### Ticket 11 recipe management in Sources
+
+Sources hosts an App recipes section below Git Sources, not a new tab. Recipes
+remain user-owned files, not Source resources. Tab switches section focus so Git
+Source navigation and keys retain their behavior. Listing/reload parse recipes
+and check approval only; they never run version/latest commands. Recipe load
+errors degrade to a section-local error line. Enter uses shared-core preview
+and approval with the existing y/n panel; changed content requires renewed approval.
+
+The add guide has exactly two routes: the built-in `agent-depot-apprecipe` Skill
+(install if missing through the existing Catalog flow, then show an agent prompt),
+or manual JSON authoring in the displayed `apps/` directory using
+`agent-depot app schema`. Lifecycle actions stay in Installations and Updates.

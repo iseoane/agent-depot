@@ -46,7 +46,7 @@ export interface AppContext {
 /** Recipe name, falling back to the file identity for invalid recipes. */
 export const appName = (entry: AppEntry) => entry.recipe?.name ?? entry.file;
 
-function stepLines(step: {
+export function appStepLines(step: {
   readonly argv?: readonly string[];
   readonly manual?: string;
   readonly executable?: string;
@@ -101,7 +101,7 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
       manage.setMode({ kind: "busy", label: "Preparing recipe approval..." });
       const steps = await apps.preview(entry);
       if (manage.isMounted()) {
-        manage.setMode({ kind: "app-approve", entry, lines: steps.flatMap(step => [step.step, ...stepLines(step)]) });
+        manage.setMode({ kind: "app-approve", entry, lines: steps.flatMap(step => [step.step, ...appStepLines(step)]) });
       }
     } else if (input === "h") {
       const choices = PROJECT_HOSTS.filter(host => entries.some(entry => entry.recipe?.setup?.[host] || entry.recipe?.teardown?.[host]));
@@ -198,7 +198,7 @@ export function AppPanel({ mode }: { readonly mode: AppMode }) {
       lines={[
         `Environment: ${mode.plan.environment}`,
         `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,
-        ...stepLines(mode.plan),
+        ...appStepLines(mode.plan),
       ]}
       question={mode.kind === "app-manual"
         ? "Manual step done, check now? y/n"

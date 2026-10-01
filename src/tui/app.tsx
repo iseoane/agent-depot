@@ -82,6 +82,7 @@ export function App({ operations, environment, onExit }: AppProps) {
       {view === "sources" ? (
         <SourcesView
           operations={operations}
+          environment={environment}
           onCapturingChange={onCapturingChange}
           onOpenCatalog={(source) => {
             setCatalogSourceId(source.id);
