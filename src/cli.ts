@@ -5,6 +5,9 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { createAppOperations, type AppOperations } from "./app-flow.js";
+import { runAppCommand } from "./app-cli.js";
+
 import { pathsOverlap } from "./path-safety.js";
 import { skillTreeBaseline, type SkillCandidate } from "./skill-discovery.js";
 import {
@@ -91,6 +94,7 @@ import {
 } from "./user-global-skill-inventory.js";
 
 export interface CliDependencies {
+  readonly appOperations?: AppOperations;
   readonly operations?: SourceOperations;
   readonly stdout?: (line: string) => void;
   readonly stderr?: (line: string) => void;
@@ -123,6 +127,9 @@ const USAGE = [
   "  agent-depot skill remove <id|path> --host <host>... [--yes]",
   "  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]",
   "  agent-depot uninstall [--skills] [--unmanaged-skill <exact-global-path>...] [--data] [--cli] [--yes]",
+  "  agent-depot app schema|list",
+  "  agent-depot app validate <file>...",
+  "  agent-depot app approve <name> [--yes]",
   "  agent-depot tui",
   "  agent-depot --version",
 ].join("\n");
@@ -161,6 +168,7 @@ const SOURCE_SUBCOMMANDS = new Map<string, SourceSubcommandHandler>([
 ]);
 
 const COMMANDS = new Map<string, CommandHandler>([
+  ["app", (values, { dependencies, output }) => runAppCommand(values, dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output)],
   ["install", async (values, { operations, dependencies, output }) => {
     await runInstall(values, operations, dependencies, output);
     return 0;
