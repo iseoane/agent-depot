@@ -35,7 +35,7 @@ test("import plan classifies identical choices and shows conflicts without writi
   await mkdir(apps.directory);
   await writeFile(path.join(apps.directory, "existing.json"), JSON.stringify(recipe));
   const plan = await buildProfileImport(profile, operations, apps);
-  assert.deepEqual(plan.items.map(item => item.status), ["same", "conflict", "conflict"]);
+  assert.deepEqual(plan.items.map(item => item.status), ["same", "conflict", "same"]);
   assert.match(plan.preview.join("\n"), /hosts.*claude.*pi/);
   assert.match(plan.preview.join("\n"), /WARNING.*newer/);
   assert.equal((await operations.listUserGlobalInstallations!())[0]!.hosts[0], "claude");
@@ -62,7 +62,7 @@ test("confirmed import installs recorded Hosts and methods, writes unapproved re
   assert.equal(entries.length, 2);
   for (const entry of entries) assert.notEqual((await apps.approvalStatus(entry)).status, "approved");
   assert.deepEqual((await buildProfileImport(input, operations, apps)).items.map(item => item.status),
-    ["same", "same", "add", "conflict", "conflict"]);
+    ["same", "same", "add", "same", "same"]);
 });
 
 test("CLI import requires confirmation, supports export filters, and rejects malformed profiles before writes", async t => {

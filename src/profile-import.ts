@@ -89,6 +89,11 @@ function classifySkill(value: Profile["skills"][number], skills: readonly Projec
 function classifyRecipe(value: Profile["apps"][number], recipes: Awaited<ReturnType<typeof loadImportRecipes>>): ProfileImportItem {
   const existing = recipes.filter(entry => entry.name === value.name &&
     (entry.platform === undefined || value.platform === undefined || entry.platform === value.platform));
+  if (existing.length === 1 && !existing[0]!.error &&
+    existing[0]!.platform === value.platform &&
+    fieldDifferences(existing[0]!.content ?? {}, value).length === 0) {
+    return { block: "apps", value, label: `App recipe ${value.name} (${value.platform ?? "all platforms"}; unapproved; Apps are not installed)`, status: "same" };
+  }
   return { block: "apps", value, label: `App recipe ${value.name} (${value.platform ?? "all platforms"}; unapproved; Apps are not installed)`,
     status: existing.length ? "conflict" : "add",
     ...(existing.length ? { difference: existing.map(entry => `${entry.file}: name ${JSON.stringify(value.name)} already present with overlapping platforms; ${
