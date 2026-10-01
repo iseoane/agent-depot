@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- CI uses `actions/checkout@v7`, `actions/setup-node@v7` and `pnpm/action-setup@v6`, which run on Node.js 24 instead of the deprecated Node.js 20.
+- The App and Profile modules are assigned to dependency-boundary zones, so `pnpm audit:dead-code` passes again.
+
 ## [0.4.0] - 2026-10-01
 
 ### Added
