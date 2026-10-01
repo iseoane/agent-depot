@@ -218,11 +218,18 @@ export async function loadUpdateRows(
     appError = errorText(error);
   }
   for (const check of appChecks) {
-    rows.push({ kind: "app", key: `app:${check.entry.file}`, scope: "user-global", check,
-      path: `App: ${check.entry.recipe?.name ?? check.entry.file}`, policy: "latest",
-      installed: check.installedVersion ?? "?", available: check.latestVersion ?? "?",
+    rows.push({
+      kind: "app",
+      key: `app:${check.entry.file}`,
+      scope: "user-global",
+      check,
+      path: `App: ${check.entry.recipe?.name ?? check.entry.file}`,
+      policy: "latest",
+      installed: check.installedVersion ?? "?",
+      available: check.latestVersion ?? "?",
       status: APP_STATUS_LABEL[check.status],
-      reason: check.reason ?? check.inspection.reason ?? check.inspection.status });
+      reason: check.reason ?? check.inspection.reason ?? check.inspection.status,
+    });
   }
   return { results, rows, refresh, apps, appError, checkedAt: (options.now ?? Date.now)() };
 }
@@ -331,7 +338,11 @@ export interface UpdateOutcome {
  * answer (or absent callback) cancels and clears pending update evidence.
  * A Skill that became locally modified after the preview fails instead of being overwritten.
  */
-export async function runUpdates(prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[], confirmManual?: (plan: AppLifecyclePlan, reason: string | undefined) => Promise<boolean>): Promise<UpdateOutcome> {
+export async function runUpdates(
+  prepared: PreparedUpdates,
+  confirmedPaths: readonly ScopedPath[],
+  confirmManual?: (plan: AppLifecyclePlan, reason: string | undefined) => Promise<boolean>,
+): Promise<UpdateOutcome> {
   const updated: string[] = [];
   const failedLines: string[] = [];
   for (const group of prepared.groups) {
