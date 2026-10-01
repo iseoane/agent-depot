@@ -217,3 +217,45 @@ test("corrupt records are skipped with warnings and do not block explicit forget
     assert.deepEqual(await f.apps.trackedApps(() => {}), []);
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
+
+test("Host lifecycle accepts only declared steps and leaves App tracking unchanged", async () => {
+  const f = await fixture(async (_command, args, options) => {
+    assert.equal(options?.cwd, f.home);
+    assert.equal(options?.maxStderrBytes, 1048576);
+    return result(args[0] === "--version" ? "1.2.3" : "");
+  }, { ...recipe, setup: { pi: { argv: ["example", "setup"] } } });
+  try {
+    const plan = await f.apps.planLifecycle(f.entry, "setup", "pi");
+    assert.equal(plan.host, "pi");
+    await assert.rejects(f.apps.executeLifecycle(plan, false), /confirm/u);
+    assert.equal((await f.apps.executeLifecycle(plan, true)).status, "completed");
+    assert.deepEqual(await f.apps.trackedApps(), []);
+    await assert.rejects(f.apps.planLifecycle(f.entry, "setup", "claude"), /declared/u);
+    await assert.rejects(f.apps.planLifecycle(f.entry, "teardown", "pi"), /declared/u);
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("Host manual completion checks version and approval without claiming wiring or changing tracking", async () => {
+  let mode = "spawn";
+  const f = await fixture(async (_command, args) => {
+    if (args[0] === "--version") return result(mode === "absent" ? "" : "1.2.3");
+    if (mode === "spawn") throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    return result("failure", 2);
+  }, { ...recipe, teardown: { pi: { argv: ["example", "undo"], manual: "undo yourself" } } });
+  try {
+    const plan = await f.apps.planLifecycle(f.entry, "teardown", "pi");
+    assert.equal((await f.apps.executeLifecycle(plan, true)).status, "manual required");
+    await assert.rejects(f.apps.completeManual(plan, false), /completion/u);
+    assert.equal((await f.apps.completeManual(plan, true)).status, "completed");
+    mode = "exit";
+    assert.equal((await f.apps.executeLifecycle(plan, true)).status, "failed");
+    mode = "absent";
+    assert.equal((await f.apps.completeManual(plan, true)).status, "failed");
+    const changedResolver = createAppOperations({ ...f.environment, resolveExecutable: async () => "/other/example" });
+    await assert.rejects(changedResolver.executeLifecycle(plan, true), /changed/u);
+    await writeFile(f.file, JSON.stringify({ ...recipe, homepage: "changed" }));
+    await assert.rejects(f.apps.executeLifecycle(plan, true), /approval/u);
+    await assert.rejects(f.apps.completeManual(plan, true), /approval/u);
+    assert.deepEqual(await f.apps.trackedApps(), []);
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});

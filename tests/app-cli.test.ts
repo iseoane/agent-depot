@@ -324,3 +324,46 @@ test("manual rerun hints quote shell metacharacters in App names", async () => {
     assert.ok(lines.some(line => line.includes(`app install ${quoted} --manual-done --yes`)));
   } finally { await rm(home, { recursive: true, force: true }); }
 });
+
+test("Host CLI previews all selections, continues after failure and rejects undeclared Hosts", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-hosts-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  try {
+    await writeFile(path.join(directory, "recipe.json"), JSON.stringify({ name: "example",
+      install: { manual: "install" }, update: { manual: "update" }, uninstall: { manual: "remove" },
+      version: { argv: ["example", "--version"], pattern: "(v1)" },
+      setup: { pi: { argv: ["example", "pi"], manual: "manual pi" }, codex: { argv: ["example", "codex"] } },
+      teardown: { pi: { manual: "undo pi" } },
+    }));
+    const calls: string[] = [];
+    const apps = createAppOperations({ recipesDirectory: directory, homeDirectory: home,
+      resolveExecutable: async () => "/usr/bin/example", runner: async (_command, args) => {
+        calls.push(args[0]!);
+        return { code: args[0] === "pi" ? 2 : 0, signal: null, stdout: Buffer.from("v1"), stderr: "bad", outputTooLarge: false };
+      } });
+    await apps.approve((await apps.load())[0]!);
+    const lines: string[] = [];
+    const deps = { appOperations: apps, stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) };
+    const selection = ["app", "setup", "example", "--host", "pi", "--host", "codex"];
+    assert.equal(await runCli(selection, deps), 1);
+    assert.deepEqual(calls, []);
+    assert.equal(await runCli([...selection, "--yes"], deps), 1);
+    assert.deepEqual(calls, ["pi", "codex"]);
+    assert.ok(lines.includes("example (pi): failed"));
+    assert.ok(lines.includes("example (codex): completed"));
+    calls.length = 0;
+    assert.equal(await runCli(["app", "setup", "example", "--host", "pi", "--host", "claude", "--yes"], deps), 1);
+    assert.deepEqual(calls, []);
+    assert.equal(await runCli(["app", "teardown", "example", "--host", "pi", "--yes"], deps), 1);
+    assert.ok(lines.some(line => line.includes("--host pi --manual-done --yes")));
+    assert.equal(await runCli(["app", "teardown", "example", "--host", "pi", "--manual-done", "--yes"], deps), 0);
+    assert.deepEqual(calls, ["--version"]);
+    assert.deepEqual(await apps.trackedApps(), []);
+    for (const args of [["setup", "example"], ["setup", "example", "--host"],
+      ["setup", "example", "--host", "bad"], ["setup", "example", "--host", "pi", "--host", "pi"],
+      ["install", "example", "--host", "pi"], ["setup", "example", "--host", "pi", "--forget"]]) {
+      assert.equal(await runCli(["app", ...args], deps), 1);
+    }
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

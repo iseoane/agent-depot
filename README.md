@@ -508,6 +508,8 @@ unresolvable version check means not installed. The schema describes structure;
 agent-depot app install example          # preview only; exits non-zero until confirmed
 agent-depot app install example --yes
 agent-depot app uninstall example --yes
+agent-depot app setup example --host pi --host codex --yes
+agent-depot app teardown example --host pi --yes
 ```
 
 Each step previews its argv/manual text, resolved executable, home working
@@ -535,3 +537,9 @@ use non-interactive flags; installers requiring a terminal belong in `manual`
 steps. EOF lets stdin-based prompts fail rather than wait for input, but a
 process ignoring EOF can still hang; cancel it manually. Captured App stdout
 and stderr are each capped at 1 MiB; failures show only their last 4 KiB.
+
+App setup/teardown accepts only Hosts declared for that action. All selected steps
+are previewed before execution; each Host gets an outcome and failures do not stop
+remaining Hosts. For manual completion, rerun the selected Host with
+`--manual-done --yes`. This checks the App version, not Host wiring. Host actions
+never change installed-App tracking.

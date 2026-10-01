@@ -1,5 +1,6 @@
+import { PROJECT_HOSTS, type ProjectHost } from "./project-manifest.js";
 import { APP_RECIPE_SCHEMA } from "./app-schema.js";
-import { type AppOperations, type AppEntry } from "./app-flow.js";
+import { type AppOperations, type AppEntry, type AppLifecyclePlan } from "./app-flow.js";
 import { CliUsageError } from "./usage-error.js";
 
 export async function runAppCommand(
@@ -8,7 +9,7 @@ export async function runAppCommand(
   output: (line: string) => void,
 ): Promise<number> {
   const [command, ...args] = values;
-  const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|uninstall <name> [--yes] [--manual-done]; app uninstall <name> --forget [--yes] (--manual-done requires a declared manual step)";
+  const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|uninstall <name> [--yes] [--manual-done]; app setup|teardown <name> --host <host>... [--yes] [--manual-done]; app uninstall <name> --forget [--yes] (--manual-done requires a declared manual step)";
   if (command === "schema" && args.length === 0) {
     output(JSON.stringify(APP_RECIPE_SCHEMA, null, 2));
     return 0;
@@ -19,7 +20,7 @@ export async function runAppCommand(
     }
     return 0;
   }
-  if (command === "install" || command === "uninstall") {
+  if (command === "install" || command === "uninstall" || command === "setup" || command === "teardown") {
     return runLifecycle(command, args, apps, output, usage);
   }
   if (command !== "validate" && command !== "approve") throw new CliUsageError(usage);
@@ -74,14 +75,26 @@ export async function runAppCommand(
 }
 
 async function runLifecycle(
-  action: "install" | "uninstall",
+  action: AppLifecyclePlan["action"],
   args: readonly string[],
   apps: AppOperations,
   output: (line: string) => void,
   usage: string,
 ): Promise<number> {
-  const flags = args.filter(arg => arg.startsWith("--"));
-  const names = args.filter(arg => !arg.startsWith("--"));
+  const hostAction = action === "setup" || action === "teardown";
+  const hosts: ProjectHost[] = [];
+  const remaining: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] !== "--host") { remaining.push(args[index]!); continue; }
+    const host = args[++index];
+    if (!hostAction || !PROJECT_HOSTS.some(value => value === host) || hosts.includes(host as ProjectHost)) {
+      throw new CliUsageError(usage);
+    }
+    hosts.push(host as ProjectHost);
+  }
+  if (hostAction && !hosts.length) throw new CliUsageError(usage);
+  const flags = remaining.filter(arg => arg.startsWith("--"));
+  const names = remaining.filter(arg => !arg.startsWith("--"));
   const confirmed = flags.includes("--yes");
   const done = flags.includes("--manual-done");
   const forget = flags.includes("--forget");
@@ -102,21 +115,42 @@ async function runLifecycle(
   }
   const entries = (await apps.load()).filter(entry => entry.applicable && entry.recipe?.name === name);
   if (entries.length !== 1) throw new Error("No unique applicable recipe found");
-  const plan = await apps.planLifecycle(entries[0]!, action);
-  output(`App ${name} ${action}: ${plan.argv ? JSON.stringify(plan.argv) : "manual only"}\t${plan.executable ?? "unresolved"}\tcwd: ${plan.cwd}\tenvironment: ${plan.environment}`);
-  if (plan.warning) output(plan.warning);
-  if (plan.manual) output(`Manual (never executed): ${plan.manual}`);
+  // Validate and preview the whole selection before executing any Host.
+  const plans = await Promise.all((hostAction ? hosts : [undefined]).map(
+    host => apps.planLifecycle(entries[0]!, action, host),
+  ));
+  for (const plan of plans) showPlan(plan);
   if (!confirmed) throw new Error("App step not confirmed; rerun with --yes after reviewing the preview");
-  const result = done ? await apps.completeManual(plan, true) : await apps.executeLifecycle(plan, true);
-  output(`${name}: ${result.status}`);
-  if (result.reason) output(result.reason);
-  if (result.status === "manual required") {
-    output(`Manual (never executed): ${result.manual}`);
-    const quotedName = process.platform === "win32"
-      ? "'" + name.replaceAll("'", "''") + "'"
-      : "'" + name.replaceAll("'", "'\\''") + "'";
-    const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
-    output(`After completing it, run app ${action} ${quotedName} --manual-done --yes to check version (${shell}).`);
+  let failed = false;
+  for (const plan of plans) {
+    try { if (await applyPlan(plan) !== 0) failed = true; }
+    catch (error) {
+      if (!hostAction) throw error;
+      output(`${name} (${plan.host}): failed`);
+      output(error instanceof Error ? error.message : String(error));
+      failed = true;
+    }
   }
-  return result.status === "installed" || result.status === "untracked" ? 0 : 1;
+  return failed ? 1 : 0;
+
+  function showPlan(plan: AppLifecyclePlan) {
+    output(`App ${name} ${action}${plan.host ? ` (${plan.host})` : ""}: ${plan.argv ? JSON.stringify(plan.argv) : "manual only"}\t${plan.executable ?? "unresolved"}\tcwd: ${plan.cwd}\tenvironment: ${plan.environment}`);
+    if (plan.warning) output(plan.warning);
+    if (plan.manual) output(`Manual (never executed): ${plan.manual}`);
+  }
+
+  async function applyPlan(plan: AppLifecyclePlan): Promise<number> {
+    const result = done ? await apps.completeManual(plan, true) : await apps.executeLifecycle(plan, true);
+    output(`${name}${plan.host ? ` (${plan.host})` : ""}: ${result.status}`);
+    if (result.reason) output(result.reason);
+    if (result.status === "manual required") {
+      output(`Manual (never executed): ${result.manual}`);
+      const quotedName = process.platform === "win32"
+        ? "'" + name.replaceAll("'", "''") + "'"
+        : "'" + name.replaceAll("'", "'\\''") + "'";
+      const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
+      output(`After completing it, run app ${action} ${quotedName}${plan.host ? ` --host ${plan.host}` : ""} --manual-done --yes to check version (${shell}).`);
+    }
+    return result.status === "installed" || result.status === "untracked" || result.status === "completed" ? 0 : 1;
+  }
 }

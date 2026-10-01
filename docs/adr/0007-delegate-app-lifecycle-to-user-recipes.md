@@ -27,3 +27,8 @@ Recipes live in `apps/` beside environment-local `sources.json`; private atomic 
 Installed-App records live in sibling `app-installations/`, keyed by hashed App name and published using the existing atomic-file adapter. This keeps App state separate from the strict Source/Skill state schema and avoids shared read-modify-write updates. Records contain identity, canonical recipe path and verified installed version only.
 
 Uninstall never implicitly runs Host teardown: teardown remains separately previewed and confirmed. The non-interactive CLI uses `--manual-done --yes` to attest manual completion, and `uninstall --forget --yes` to explicitly drop tracking without running commands.
+
+### Ticket 04 Host lifecycle decisions
+
+- Setup/teardown reuse lifecycle plans and execution, with repeated `--host <host>` selections. Duplicate, unknown or undeclared Hosts are rejected before execution. Every selected Host is previewed; independent execution failures are reported per Host and do not stop remaining selections.
+- Host actions do not persist wiring state or change installed-App records. Automated success means only that the delegated command succeeded. Manual completion uses `--manual-done --yes` and requires a successful version check, which does not verify Host wiring (including teardown).
