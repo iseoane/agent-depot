@@ -145,3 +145,10 @@ test("profile rejects drive-absolute Skill paths and duplicate portable identiti
   assert.throws(() => parseProfile({ ...profile, apps: [recipe, recipe] }), /apps\[1\]/);
   assert.equal(parseProfile({ ...profile, apps: [recipe, { ...recipe, platform: "linux" }] }).apps.length, 2);
 });
+
+test("portable command arguments reject root-only and Windows root-relative paths", () => {
+  for (const argument of ["/", "\\Users\\me"]) {
+    assert.throws(() => parseProfile({ ...profile, apps: [{ ...recipe,
+      install: { argv: ["tool", argument] } }] }), /apps\[0\].install.argv\[1\]/);
+  }
+});

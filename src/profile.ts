@@ -1,3 +1,4 @@
+import path from "node:path";
 import { parseAppRecipe, type AppRecipe } from "./app-recipes.js";
 import { canonicalizeGitSourceUrl } from "./git-source.js";
 import { containsCredentialArgument, parseProjectManifest, type ProjectSkillSelection } from "./project-manifest.js";
@@ -31,7 +32,9 @@ function list(value: unknown, field: string): unknown[] {
 /** Recipes can contain free text; portable profiles additionally forbid machine paths and credentials. */
 function assertPortableText(value: unknown, field: string): void {
   if (typeof value === "string") {
-    if (/(?:^|[\s="'(])(?:\/(?!\/)[\w.]|[A-Za-z]:[/\\]|\\\\|~[/\\])/u.test(value)) {
+    const commandPath = /(?:\.argv\[\d+\]|\.cwd)$/u.test(field) &&
+      (path.posix.isAbsolute(value) || path.win32.isAbsolute(value));
+    if (commandPath || /(?:^|[\s="'(])(?:\/(?!\/)[\w.]|[A-Za-z]:[/\\]|\\\\|~[/\\])/u.test(value)) {
       throw new Error(`${field}: absolute local paths are not portable`);
     }
     if (/[a-z][a-z0-9+.-]*:\/\/[^\s/]*@/iu.test(value)) {

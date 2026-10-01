@@ -17,9 +17,9 @@
   `src/profile-export.ts`; CLI filters/output: `src/profile-cli.ts`.
 - Tests use public core and CLI seams with temporary state/recipe directories.
   TDD red runs covered the missing format/core, CLI dispatch, portability and
-  credential/identity checks; `pnpm test:single tests/profile.test.ts`: 8 passed.
+  credential/identity checks; `pnpm test:single tests/profile.test.ts`: 9 passed.
 - `pnpm test:single tests/cli.test.ts`: 70 passed; version/help suite: 8 passed.
-- `pnpm typecheck`, `pnpm lint`, `pnpm test`: passed (667 tests).
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`: passed (668 tests).
 - Built CLI runtime harness: isolated HOME/XDG state, `node dist/src/cli.js export`,
   parsed stdout as an empty v1 profile and observed exclusion preview on stderr.
 - ADR 0008 records the portable boundary, add-only import, machine-local approvals
@@ -27,3 +27,18 @@
 - Rollback boundary: remove the profile modules/tests and export CLI dispatch/help,
   shared credential helper, ADR 0008 and associated profile docs; no existing
   persistence schemas or installations were changed.
+
+## Review
+
+Reviewed `git diff c800aad...4761cde` against repository guidance and this ticket.
+The environment exposes no sub-agent facility, so Standards and Spec were checked
+locally, not as independent parallel reviews.
+
+- **Standards:** no documented-standard violations. One advisory possible
+  Duplicated Code smell: export wraps each candidate in the same minimal profile
+  envelope to reuse validation. Retained as explicit validation rather than adding
+  a generic abstraction.
+- **Spec:** found root-only POSIX and root-relative Windows command paths bypassed
+  free-text portability checks. Added a failing public-parser regression, fixed
+  using Node path predicates, and reran all checks (668 tests passed). No remaining
+  ticket-01 requirement gaps found. Import and the TUI are intentionally deferred.
