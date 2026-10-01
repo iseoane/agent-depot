@@ -56,7 +56,7 @@ test("spawn failure guides manual completion; non-zero exit never falls back", a
   let mode = "spawn";
   const f = await fixture(async (_command, args) => {
     if (args[0] === "--version") return result();
-    if (mode === "spawn") throw new Error("ENOENT");
+    if (mode === "spawn") throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     return { ...result("failure output", 2), stderr: "diagnostic" };
   });
   try {
@@ -151,5 +151,34 @@ test("automated uninstall untracks only after version fails; missing command wit
     assert.deepEqual(await f.apps.trackedApps(), []);
     const missing = createAppOperations({ ...f.environment, resolveExecutable: async () => undefined });
     assert.equal((await missing.executeLifecycle(await missing.planLifecycle(f.entry, "uninstall"), true)).status, "failed");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("only launch errors offer manual fallback; unexpected runner errors propagate", async () => {
+  let code = "ENOENT";
+  const f = await fixture(async () => { throw Object.assign(new Error("runner error"), { code }); });
+  try {
+    const plan = await f.apps.planLifecycle(f.entry, "install");
+    for (code of ["ENOENT", "EACCES", "ENOEXEC", "EPERM"]) {
+      assert.equal((await f.apps.executeLifecycle(plan, true)).status, "manual required");
+    }
+    code = "EIO";
+    await assert.rejects(f.apps.executeLifecycle(plan, true), /runner error/u);
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("oversized output and signals fail with bounded diagnostics and no tracking", async () => {
+  let oversized = true;
+  const f = await fixture(async () => ({ ...result("x".repeat(10000)),
+    stderr: "y".repeat(10000), code: null, signal: "SIGTERM", outputTooLarge: oversized }));
+  try {
+    const plan = await f.apps.planLifecycle(f.entry, "install");
+    const failure = await f.apps.executeLifecycle(plan, true);
+    assert.equal(failure.status, "failed");
+    assert.match(failure.reason!, /output exceeded 1048576/u);
+    assert.ok(failure.reason!.length < 9000);
+    assert.deepEqual(await f.apps.trackedApps(), []);
+    oversized = false;
+    assert.match((await f.apps.executeLifecycle(plan, true)).reason!, /SIGTERM/u);
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });

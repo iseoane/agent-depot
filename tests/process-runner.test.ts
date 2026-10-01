@@ -33,3 +33,15 @@ test("kills the process and flags output above the byte limit", async () => {
 test("rejects when the command cannot be spawned", async () => {
   await assert.rejects(runProcess("definitely-not-a-real-command-xyz", []), /ENOENT/);
 });
+
+test("caps stderr as well as stdout and closes stdin for non-interactive commands", async () => {
+  const oversized = await runProcess(node, ["-e", "process.stderr.write('x'.repeat(100000));setTimeout(()=>{},5000)"], {
+    maxOutputBytes: 32,
+  });
+  assert.equal(oversized.outputTooLarge, true);
+  assert.ok(Buffer.byteLength(oversized.stderr) <= 32);
+  const input = await runProcess(node, ["-e", "process.stdin.on('end',()=>process.stdout.write('eof'));process.stdin.resume()"], {
+    captureStdout: true,
+  });
+  assert.equal(input.stdout.toString(), "eof");
+});

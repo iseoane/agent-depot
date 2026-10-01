@@ -57,6 +57,9 @@ export interface AppLifecycleResult {
   readonly reason?: string;
 }
 
+const APP_OUTPUT_LIMIT = 1024 * 1024;
+const DIAGNOSTIC_BYTES = 4096;
+
 const WINDOWS_EXECUTABLE_WARNING = "will not run (Windows executable on WSL)";
 
 export function createAppOperations(environment: AppEnvironment = {}) {
@@ -226,7 +229,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     }
     try {
       const result = await runner(executable, entry.recipe.version.argv.slice(1), {
-        cwd: home, captureStdout: true, maxOutputBytes: 1024 * 1024,
+        cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT,
       });
       const installedVersion = result.code === 0 && !result.signal && !result.outputTooLarge
         ? new RegExp(entry.recipe.version.pattern).exec(result.stdout.toString("utf8"))?.[1]
@@ -274,7 +277,11 @@ export function createAppOperations(environment: AppEnvironment = {}) {
 
   async function recheckPlan(plan: AppLifecyclePlan): Promise<void> {
     const current = await planLifecycle(plan.entry, plan.action);
-    if (JSON.stringify(current) !== JSON.stringify(plan)) {
+    const sameArgv = current.argv?.length === plan.argv?.length
+      && current.argv?.every((arg, index) => arg === plan.argv?.[index]) !== false;
+    if (!sameArgv || current.executable !== plan.executable || current.warning !== plan.warning
+      || current.manual !== plan.manual || current.entry.hash !== plan.entry.hash
+      || current.cwd !== plan.cwd || current.environment !== plan.environment) {
       throw new Error("App step changed; review the preview again");
     }
   }
@@ -305,13 +312,19 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     let result;
     try {
       result = await runner(plan.executable, plan.argv.slice(1), {
-        cwd: home, captureStdout: true, maxOutputBytes: 1024 * 1024,
+        cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT,
       });
     } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (!code || !["ENOENT", "EACCES", "ENOEXEC", "EPERM"].includes(code)) throw error;
       return manualFallback(plan, error instanceof Error ? error.message : String(error));
     }
     if (result.code !== 0 || result.signal || result.outputTooLarge) {
-      return { status: "failed", reason: `App step failed (exit ${result.code}, signal ${result.signal}): ${result.stdout.toString("utf8")} ${result.stderr}` };
+      const reason = result.outputTooLarge ? `output exceeded ${APP_OUTPUT_LIMIT} bytes`
+        : `exit ${result.code}, signal ${result.signal}`;
+      const stdout = result.stdout.subarray(-DIAGNOSTIC_BYTES).toString("utf8");
+      const stderr = Buffer.from(result.stderr).subarray(-DIAGNOSTIC_BYTES).toString("utf8");
+      return { status: "failed", reason: `App step failed (${reason}): ${stdout} ${stderr}` };
     }
     return recordOutcome(plan);
   }

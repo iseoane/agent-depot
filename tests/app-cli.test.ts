@@ -236,7 +236,7 @@ test("CLI install previews before confirmation and manual completion checks with
       runner: async (_command, args, options) => {
         calls.push([...args]);
         assert.equal(options?.cwd, home);
-        if (args[0] === "install") throw new Error("cannot spawn");
+        if (args[0] === "install") throw Object.assign(new Error("cannot spawn"), { code: "ENOENT" });
         return { code: installed ? 0 : 1, signal: null, stdout: Buffer.from("1.2.3"),
           stderr: "", outputTooLarge: false };
       },

@@ -527,3 +527,11 @@ tracking without running any recipe command, even if the recipe is gone.
 Atomic per-App records live in sibling `app-installations/`. Uninstall does not
 implicitly run Host teardown. Latest-version lookups, updates and Host steps
 remain separate work.
+
+
+App lifecycle commands are non-interactive: stdin is ignored (EOF), as in the
+existing Skill command runner, and there is no execution timeout. Recipes must
+use non-interactive flags; installers requiring a terminal belong in `manual`
+steps. EOF lets stdin-based prompts fail rather than wait for input, but a
+process ignoring EOF can still hang; cancel it manually. Captured App stdout
+and stderr are each capped at 1 MiB; failures show only their last 4 KiB.

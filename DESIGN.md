@@ -115,3 +115,11 @@ V1 explicitly rejects:
 5. The exact Windows symlink creation mechanics and required runtime validation remain implementation/check prerequisites. The resolved failure behavior is to stop the target operation with actionable guidance when symlink creation fails, including on Windows, without creating a duplicate managed copy. How should adoption compare content and guide resolution of same-name conflicts?
 6. How is version availability detected for skills, including built-in skills and sources without reliable version metadata?
 7. What CLI grammar, prompts, exit statuses, and user-facing error format should the operations expose?
+
+
+App lifecycle commands are non-interactive: stdin is ignored (EOF), as in the
+existing Skill command runner, and there is no execution timeout. Recipes must
+use non-interactive flags; installers requiring a terminal belong in `manual`
+steps. EOF lets stdin-based prompts fail rather than wait for input, but a
+process ignoring EOF can still hang; cancel it manually. Captured App stdout
+and stderr are each capped at 1 MiB; failures show only their last 4 KiB.
