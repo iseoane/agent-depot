@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { AppOperations } from "./app-flow.js";
-import { buildProfileExport, writeProfileExport, type ProfileFilters } from "./profile-export.js";
+import { buildProfileExport, requireProfileExportSelection, writeProfileExport, type ProfileFilters } from "./profile-export.js";
 import { applyProfileImport, buildProfileImport, type ProfileImportEnvironment } from "./profile-import.js";
 import { serializeProfile } from "./profile.js";
 import type { SourceOperations } from "./sources.js";
@@ -15,6 +15,7 @@ export async function runProfileExport(values: readonly string[], operations: So
   const { filters, out } = parseProfileOptions(values, false);
   const plan = await buildProfileExport(operations, apps, { ...filters, homeDirectory });
   for (const line of plan.preview) diagnostic(line);
+  requireProfileExportSelection(plan.profile);
   const content = serializeProfile(plan.profile);
   if (out === undefined) output(content.trimEnd());
   else {

@@ -22,6 +22,23 @@ export interface ProfileExportOptions extends ProfileFilters {
   readonly homeDirectory?: string;
 }
 
+export interface ProfileExportExclusion {
+  readonly block: "sources" | "skills" | "apps";
+  readonly label: string;
+  readonly reason: string;
+}
+export interface ProfileExportWarning {
+  readonly kind: "load" | "source";
+  readonly message: string;
+}
+export type ProfileExportDiagnostic = ProfileExportExclusion | ProfileExportWarning;
+export interface ProfileExportPlan {
+  readonly profile: Profile;
+  readonly exclusions: readonly ProfileExportExclusion[];
+  readonly warnings: readonly ProfileExportWarning[];
+  readonly preview: readonly string[];
+}
+
 export function selectProfileItems<T>(items: readonly T[], requested: readonly string[] | undefined, disabled: boolean | undefined,
   names: (item: T) => readonly string[], block: string): readonly T[] {
   if (disabled && requested?.length) throw new Error(`${block}: filters cannot be combined with --no-${block}`);
@@ -39,10 +56,14 @@ function validateOne<Block extends "sources" | "skills" | "apps">(block: Block, 
 
 /** Read-only export plan shared by terminal frontends; never refreshes Sources or executes recipes. */
 export async function buildProfileExport(operations: SourceOperations, apps: AppOperations,
-  options: ProfileExportOptions = {}): Promise<{ readonly profile: Profile; readonly preview: readonly string[] }> {
+  options: ProfileExportOptions = {}): Promise<ProfileExportPlan> {
   if (!operations.listUserGlobalInstallations) throw new Error("Profile export requires user-global installation listing");
   if (!AGENT_DEPOT_PACKAGE_VERSION) throw new Error("Unable to determine the Agent Depot package version");
-  const preview: string[] = [];
+  const diagnostics: ProfileExportDiagnostic[] = [];
+  const exclude = (block: ProfileExportExclusion["block"], label: string, reason: string) => {
+    diagnostics.push({ block, label, reason });
+  };
+  const warn = (message: string) => diagnostics.push({ kind: "load", message });
   const sources = selectProfileItems(await operations.listSources(), options.sources, options.noSources,
     source => source.kind === "git" ? [source.id, source.url] : [source.id], "sources");
   const allInstallations = await operations.listUserGlobalInstallations();
@@ -51,11 +72,11 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
   const entries = selectProfileItems(await apps.load(), options.apps, options.noApps,
     entry => [entry.recipe?.name ?? path.basename(entry.file)], "apps");
   const owned = await loadAppOwnedSkillFilter({ appEnvironment: { recipesDirectory: apps.directory },
-    reportWarning: warning => preview.push(warning) });
+    reportWarning: warn });
   const portableSources: Profile["sources"][number][] = [];
   for (const source of sources) {
     if (source.kind === "builtin") {
-      preview.push("Excluded built-in Source: always present (built-in Skill selections remain portable)");
+      exclude("sources", "built-in Source", "always present (built-in Skill selections remain portable)");
       continue;
     }
     try {
@@ -63,22 +84,22 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
         url: source.url, included: options.includedSourceIds?.includes(source.id) ?? true,
       }));
     } catch (error) {
-      preview.push(`Excluded Source ${source.id}: local-path or invalid Source, not portable (${error instanceof Error ? error.message : String(error)})`);
+      exclude("sources", `Source ${source.id}`, `local-path or invalid Source, not portable (${error instanceof Error ? error.message : String(error)})`);
     }
   }
   const skills: Profile["skills"][number][] = [];
   for (const skill of installations) {
     if (owned(path.posix.basename(skill.installation?.path ?? skill.path))) {
-      preview.push(`Excluded Skill ${skill.path}: App-owned`);
+      exclude("skills", `Skill ${skill.path}`, "App-owned");
       continue;
     }
     const { source, path: skillPath, version, hosts, methods } = skill;
     const selection = { source, path: skillPath, version, hosts, ...(methods ? { methods } : {}) };
     try {
       skills.push(validateOne("skills", selection));
-      if (skill.installation) preview.push(`Excluded installation location and version evidence for Skill ${skill.path}: machine-specific`);
+      if (skill.installation) exclude("skills", `installation location and version evidence for Skill ${skill.path}`, "machine-specific");
     } catch (error) {
-      preview.push(`Excluded Skill ${skill.path}: not portable (${error instanceof Error ? error.message : String(error)})`);
+      exclude("skills", `Skill ${skill.path}`, `not portable (${error instanceof Error ? error.message : String(error)})`);
     }
   }
   const recipes: Profile["apps"][number][] = [];
@@ -87,41 +108,58 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
       if (entry.error) throw new Error(entry.error);
       recipes.push(validateOne("apps", entry.recipe));
     } catch (error) {
-      preview.push(`Excluded App recipe ${path.basename(entry.file)}: ${error instanceof Error ? error.message : String(error)}`);
+      exclude("apps", `App recipe ${path.basename(entry.file)}`, error instanceof Error ? error.message : String(error));
     }
   }
   if (!options.noSkills) {
     const inventory = await scanUserGlobalSkillInventory({
       homeDirectory: options.homeDirectory, managedInstallations: allInstallations,
-      appEnvironment: { recipesDirectory: apps.directory }, reportWarning: warning => preview.push(warning),
+      appEnvironment: { recipesDirectory: apps.directory }, reportWarning: warn,
     });
     for (const name of new Set([...inventory.unmanaged, ...inventory.symlinks].map(skill => skill.name))) {
-      preview.push(`Excluded unmanaged Skill ${name}: not tracked`);
+      exclude("skills", `unmanaged Skill ${name}`, "not tracked");
     }
   }
   const profile = parseProfile({ format: PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
     sources: portableSources, skills, apps: recipes });
-  return { profile, preview: profileExportPreview(profile, preview) };
+  return {
+    profile,
+    exclusions: diagnostics.filter((item): item is ProfileExportExclusion => "block" in item),
+    warnings: [...diagnostics.filter((item): item is ProfileExportWarning => "kind" in item), ...sourceWarnings(profile)],
+    preview: profileExportPreview(profile, diagnostics),
+  };
 }
 
-/** Shared preview for a frontend-selected subset of a validated export. */
-export function profileExportPreview(profile: Profile, exclusions: readonly string[] = []): readonly string[] {
-  const warnings = profile.skills.flatMap(skill => {
+function sourceWarnings(profile: Profile): readonly ProfileExportWarning[] {
+  return profile.skills.flatMap(skill => {
     const identity = skill.source;
     if (identity.kind === "external" && "url" in identity && !profile.sources.some(source => source.url === identity.url)) {
-      return [`WARNING: Skill ${skill.path} references Source ${identity.url} not included in profile`];
+      return [{ kind: "source" as const, message: `WARNING: Skill ${skill.path} references Source ${identity.url} not included in profile` }];
     }
     return [];
   });
+}
+
+/** Shared preview for a frontend-selected subset; Source warnings are recomputed. */
+export function profileExportPreview(profile: Profile, diagnostics: readonly ProfileExportDiagnostic[] = []): readonly string[] {
   return ["Preview: export portable user-global profile",
     ...profile.sources.map(source => `Source ${sourceIdForUrl(source.url)} ${source.url} (included: ${source.included})`),
     ...profile.skills.map(skill => `Skill ${skill.path} [${skill.hosts.join(", ")}] (${skill.version.policy})`),
     ...profile.apps.map(recipe => `App recipe ${recipe.name} (${recipe.platform ?? "all platforms"}; no approval)`),
-    ...exclusions, ...warnings];
+    ...diagnostics.flatMap(item => "block" in item ? [`Excluded ${item.label}: ${item.reason}`] : item.kind === "load" ? [item.message] : []),
+    ...sourceWarnings(profile).map(warning => warning.message)];
+}
+
+/** Empty profiles are valid to parse, but are not useful export artifacts. */
+export function requireProfileExportSelection(profile: Profile): void {
+  if (!profile.sources.length && !profile.skills.length && !profile.apps.length) {
+    throw new Error("Nothing selected; nothing written.");
+  }
 }
 
 /** Exclusively create an export artifact; never replace a file or follow a symlink. */
 export async function writeProfileExport(file: string, profile: Profile): Promise<void> {
+  requireProfileExportSelection(profile);
   try { await writeFile(file, serializeProfile(profile), { encoding: "utf8", flag: "wx" }); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`${file} already exists; choose another path`);

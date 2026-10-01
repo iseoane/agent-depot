@@ -651,5 +651,5 @@ rows explain when discovery inclusion differs but is not imported.
 
 The **5 Import/Export** TUI tab offers grouped checklists and the same shared-core
 previews as the CLI. Exclusions and conflicts cannot be selected. Export creates
-a new file only; import adds missing choices without replacing existing ones.
+a new file only; empty exports write nothing (CLI reports an error). Import adds missing choices without replacing existing ones.
 Imported recipes remain unapproved and Apps are never installed by import.

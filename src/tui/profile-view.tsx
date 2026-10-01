@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { Box, Text } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAppOperations } from "../app-flow.js";
-import { buildProfileExport, profileExportPreview, writeProfileExport } from "../profile-export.js";
+import { buildProfileExport, profileExportPreview, writeProfileExport, type ProfileExportDiagnostic } from "../profile-export.js";
 import { applyProfileImport, buildProfileImport, type ProfileImportPlan } from "../profile-import.js";
 import { type Profile } from "../profile.js";
 import type { SourceOperations } from "../sources.js";
@@ -41,7 +41,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const [lines, setLines] = useState<readonly string[]>([]);
   const [profile, setProfile] = useState<Profile>();
   const [plan, setPlan] = useState<ProfileImportPlan>();
-  const exclusions = useRef<readonly string[]>([]);
+  const exclusions = useRef<readonly ProfileExportDiagnostic[]>([]);
   const action = useRef<"export" | "import">("export");
   const height = useListHeight(listHeight, 5);
   const run = async (work: () => Promise<void>) => {
@@ -71,12 +71,13 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
           const exported = await buildProfileExport(operations, apps, { homeDirectory: environment.homeDirectory });
           if (!mounted.current) return;
           setProfile(exported.profile);
-          exclusions.current = exported.preview.filter(line => line.startsWith("Excluded") || (line.startsWith("WARNING:") && !line.includes("not included in profile")));
+          exclusions.current = [...exported.exclusions, ...exported.warnings.filter(warning => warning.kind === "load")];
           loadRows([
             ...exported.profile.sources.map((value, index): Row => ({ block: "sources", index, label: `Sources: ${value.url}`, selectable: true })),
             ...exported.profile.skills.map((value, index): Row => ({ block: "skills", index, label: `Skills: ${value.path}`, selectable: true })),
             ...exported.profile.apps.map((value, index): Row => ({ block: "apps", index, label: `Apps: ${value.name} (${value.platform ?? "all platforms"})`, selectable: true })),
-            ...exclusions.current.map((label, index): Row => ({ block: "apps", index: -index - 1, label, selectable: false })),
+            ...exclusions.current.map((item, index): Row => ({ block: "apps", index: -index - 1,
+              label: "block" in item ? `Excluded ${item.label}: ${item.reason}` : item.message, selectable: false })),
           ], "export-list");
         });
       } else if (input === "i") { action.current = "import"; prompt("import-path"); }
