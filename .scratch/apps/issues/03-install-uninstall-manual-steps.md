@@ -29,3 +29,9 @@ Applied all feedback from `t03-review.md`: private record directory with permiss
 Regression coverage includes realistic launch errors versus unexpected rejections, oversized output, signal exits, private directory/file modes, traversal-like App identities, corrupt records (including explicit forget of a corrupt selected record), argv-only manual completion rejection and shell quoting. Existing CLI tests cover duplicate/unknown flags, incompatible forget flags, selection arity and unconfirmed forget.
 
 Verification after corrections: `pnpm typecheck` and `pnpm lint` passed; `pnpm test` passed 558 tests with 0 failures/skips. Focused lifecycle (11), App CLI (8) and process runner (5) tests passed. Diff whitespace check passed.
+
+### Shared-runner stderr regression correction
+
+Restored stdout-only `maxOutputBytes` semantics for Git Source and other existing callers. Added opt-in `maxStderrBytes`, set only by App version/lifecycle execution. TDD regression proves 100,000 bytes of stderr with small stdout succeeds under a stdout-only 128-byte limit; explicit stderr-limit coverage remains green. `trackedApps` already accepts an injected warning reporter and defaults to `process.emitWarning`.
+
+Verification: focused process runner tests 6 passed; typecheck/lint passed; full suite 559 passed, 0 failures/skips.

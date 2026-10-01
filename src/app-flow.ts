@@ -229,7 +229,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     }
     try {
       const result = await runner(executable, entry.recipe.version.argv.slice(1), {
-        cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT,
+        cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
       });
       const installedVersion = result.code === 0 && !result.signal && !result.outputTooLarge
         ? new RegExp(entry.recipe.version.pattern).exec(result.stdout.toString("utf8"))?.[1]
@@ -332,7 +332,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     let result;
     try {
       result = await runner(plan.executable, plan.argv.slice(1), {
-        cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT,
+        cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
       });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException | null)?.code;
