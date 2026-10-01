@@ -502,11 +502,12 @@ capture group. Commands run from the user's home directory. An unsuccessful or
 unresolvable version check means not installed. The schema describes structure;
 `app validate` additionally enforces argv safety and regex semantics.
 
-### Install and uninstall
+### Install, update and uninstall
 
 ```sh
 agent-depot app install example          # preview only; exits non-zero until confirmed
 agent-depot app install example --yes
+agent-depot app update example --yes
 agent-depot app uninstall example --yes
 agent-depot app setup example --host pi --host codex --yes
 agent-depot app teardown example --host pi --yes
@@ -527,8 +528,41 @@ when the version check succeeds. Uninstall retains tracking while version still
 succeeds; `agent-depot app uninstall example --forget --yes` explicitly removes
 tracking without running any recipe command, even if the recipe is gone.
 Atomic per-App records live in sibling `app-installations/`. Uninstall does not
-implicitly run Host teardown. Latest-version lookups, updates and Host steps
-remain separate work.
+implicitly run Host teardown.
+
+`app list` and `update check --scope user-global` resolve latest versions from
+GitHub Releases, npm, or approved `latest.argv`. Missing or failed lookups are
+unknown, never offered as updates. Public HTTP requests send no credentials,
+reject redirects, cap responses at 1 MiB and time out after five seconds.
+
+```sh
+agent-depot update apply --scope user-global --all --yes
+agent-depot update apply --scope user-global --skill 0 --app example --yes
+agent-depot app update example --manual-done --yes
+```
+
+`--all` includes Apps and Skills; repeat `--app <name>` to select Apps alongside
+Skills. App updates run **after Skills** in the same batch. Apps are user-global
+only; `--all --scope project` skips Apps. Every selected step is previewed before the
+batch confirmation; independent failures do not stop the remaining updates.
+Manual batch outcomes are completed separately using `app update --manual-done`.
+Updates record the version confirmed by the recipe's version command, not the
+registry response. Updates require a changed version; unchanged versions fail
+without rewriting installed tracking. Leading `v` and SemVer build-metadata-only
+changes count as unchanged, just as in availability checks. Successful results show
+`installed <old> -> <new> (latest <latest>)`, even when new differs from latest.
+A confirmed manual update preview/fallback saves private version evidence in
+sibling `app-pending-updates/`, so a later `--manual-done` invocation can compare
+against the pre-update version. An attested manual completion consumes this
+evidence even on failure; get a fresh confirmed preview before retrying.
+
+Strict SemVer comparison ignores a leading `v`, orders prereleases and does not
+offer a downgrade when installed is at or ahead of latest. Non-SemVer versions
+use opaque inequality and **may offer a downgrade**. GitHub `/releases/latest`
+excludes drafts and prereleases; npm uses package metadata's `dist-tags.latest`.
+`app list` checks Apps concurrently, preserving listing order. One App check
+failure does not hide other Apps or Skill updates. Lookup failures show reasons
+(redirect, rate limit, HTTP status, timeout, oversized or invalid response).
 
 
 App lifecycle commands are non-interactive: stdin is ignored (EOF), as in the

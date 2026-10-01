@@ -68,7 +68,7 @@ Example:
   - Without this rule, a Windows install could make `version` report a false "installed" on Linux, and a Linux uninstall could never be confirmed.
 - **Manual fallback.** It applies only when the process cannot be spawned (for example the executable is missing, or Windows cannot launch a `.cmd` shim without a shell). A command that starts and exits non-zero is reported as a failure with its output. It never falls back to `manual`.
 - **After a manual step**, the user confirms that it is done. Agent Depot then runs `version`:
-  - After install or update, the App is recorded as installed only if `version` succeeds.
+  - After install, the App is recorded as installed only if `version` succeeds. After update, the verified version must also differ from the pre-update version; unchanged versions fail without rewriting tracking. A changed version may differ from latest and is reported with old/new/latest.
   - After uninstall, it stops tracking the App only if `version` no longer succeeds, or if the user explicitly forgets it.
 - App steps run with the user's home directory as their working directory. Skill methods are confined to the project root; apps are not.
 - Apps are user-global only in this iteration.
@@ -181,7 +181,7 @@ This is a built-in skill in `builtin:agent-depot`, installed through the normal 
 
 1. **Resolved:** User-edited recipes live in `apps/` beside `sources.json` in the existing per-environment state directory, not a new config root.
 2. Whether a bare `npm` resolves to a launchable executable on Windows with `shell: false`. If it does not, the `argv` + `manual` form covers it.
-3. Exact CLI grammar, and whether `update apply` selects Apps by name, by index, or both.
+3. **Resolved:** User-global `update apply` selects Apps by repeatable `--app <name>` alongside existing Skill selections; `--all` includes both.
 4. **Resolved:** `teardown` stays separate; uninstall never implicitly executes another step.
 5. **Resolved:** One-time approval uses the canonical file path and exact content hash, with private atomic receipts in sibling `app-approvals/`. CLI approval is only `app approve <name> --yes`; `app validate` never approves. Changed bytes require renewed approval; restoring approved bytes restores approval.
 6. **Resolved:** WSL manages Linux only. Windows PATH hits are skipped in favor of Linux candidates; there is no cross-environment view or Windows execution.
@@ -214,3 +214,26 @@ These notes come from the four candidate apps reviewed during exploration on 202
 
 - Setup/teardown reuse lifecycle plans and execution, with repeated `--host <host>` selections. Duplicate, unknown or undeclared Hosts are rejected before execution. Every selected Host is previewed; independent execution failures are reported per Host and do not stop remaining selections.
 - Host actions do not persist wiring state or change installed-App records. Automated success means only that the delegated command succeeded. Manual completion uses `--manual-done --yes` and requires a successful version check, which does not verify Host wiring (including teardown).
+
+### Ticket 05 update decisions
+
+Open Question 3 resolved: `update apply --scope user-global` accepts repeatable `--app <name>` and existing `--skill <id|path>` together, or `--all` for both. Apps are excluded from project scope. Batch manual steps are completed separately through `app update <name> --manual-done --yes`.
+
+Latest HTTP checks are anonymous, redirect-free, capped at 1 MiB and time out after five seconds. Strict SemVer comparison ignores a leading `v`, orders prereleases and suppresses updates when installed is at or ahead of latest. Other versions use opaque inequality, which can offer downgrades. GitHub `/releases/latest` excludes drafts and prereleases; npm metadata uses `dist-tags.latest`. HTTP failures retain reasons in checks/listings.
+
+
+### Ticket 05 review corrections
+
+Manual update fallbacks save private, atomic, recipe-hash-bound pre-update/latest
+version evidence in sibling `app-pending-updates/`, allowing `--manual-done` to
+verify changes across processes. App checks are concurrent and isolated per App;
+one failing check does not hide Skill reports. App updates execute after Skills;
+project `--all` skips Apps. Registry identities are validated, metadata requests
+are anonymous and redirect-free, and unknown results carry actionable reasons.
+
+
+Final review: update verification and availability share normalized version
+identity (leading `v` and SemVer build metadata do not count as a change). Batch
+plans reuse the loaded check without a second latest lookup. Attested manual
+completion consumes saved pending evidence even on failure; retries require a
+fresh confirmed preview.

@@ -1,6 +1,6 @@
 import { PROJECT_HOSTS, type ProjectHost } from "./project-manifest.js";
 import { APP_RECIPE_SCHEMA } from "./app-schema.js";
-import { type AppOperations, type AppEntry, type AppLifecyclePlan } from "./app-flow.js";
+import { checkAppUpdates, type AppUpdateCheck, type AppOperations, type AppEntry, type AppLifecyclePlan, type AppLifecycleResult } from "./app-flow.js";
 import { CliUsageError } from "./usage-error.js";
 
 export async function runAppCommand(
@@ -9,18 +9,16 @@ export async function runAppCommand(
   output: (line: string) => void,
 ): Promise<number> {
   const [command, ...args] = values;
-  const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|uninstall <name> [--yes] [--manual-done]; app setup|teardown <name> --host <host>... [--yes] [--manual-done]; app uninstall <name> --forget [--yes] (--manual-done requires a declared manual step)";
+  const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|update|uninstall <name> [--yes] [--manual-done]; app setup|teardown <name> --host <host>... [--yes] [--manual-done]; app uninstall <name> --forget [--yes] (--manual-done requires a declared manual step)";
   if (command === "schema" && args.length === 0) {
     output(JSON.stringify(APP_RECIPE_SCHEMA, null, 2));
     return 0;
   }
   if (command === "list" && args.length === 0) {
-    for (const entry of await apps.load()) {
-      if (entry.applicable || entry.error) await show(entry);
-    }
+    for (const update of await checkAppUpdates(apps)) await show(update.entry, update);
     return 0;
   }
-  if (command === "install" || command === "uninstall" || command === "setup" || command === "teardown") {
+  if (command === "install" || command === "update" || command === "uninstall" || command === "setup" || command === "teardown") {
     return runLifecycle(command, args, apps, output, usage);
   }
   if (command !== "validate" && command !== "approve") throw new CliUsageError(usage);
@@ -63,12 +61,16 @@ export async function runAppCommand(
   }
   return failed ? 1 : 0;
 
-  async function show(entry: AppEntry) {
-    const result = await apps.inspect(entry);
+  async function show(entry: AppEntry, update?: AppUpdateCheck) {
+    const result = update?.inspection ?? await apps.inspect(entry);
     const columns = [
       entry.recipe?.name ?? entry.file, result.status,
       result.installedVersion ?? "unknown", result.executable ?? "unresolved",
     ];
+    if (update) {
+      columns.push(`latest: ${update.latestVersion ?? "unknown"}`, update.status);
+      if (update.reason && update.reason !== result.reason) columns.push(update.reason);
+    }
     if (result.reason) columns.push(result.reason);
     output(columns.join("\t"));
   }
@@ -141,16 +143,28 @@ async function runLifecycle(
 
   async function applyPlan(plan: AppLifecyclePlan): Promise<number> {
     const result = done ? await apps.completeManual(plan, true) : await apps.executeLifecycle(plan, true);
-    output(`${name}${plan.host ? ` (${plan.host})` : ""}: ${result.status}`);
+    output(`${name}${plan.host ? ` (${plan.host})` : ""}: ${describeAppResult(result)}`);
     if (result.reason) output(result.reason);
     if (result.status === "manual required") {
       output(`Manual (never executed): ${result.manual}`);
-      const quotedName = process.platform === "win32"
-        ? "'" + name.replaceAll("'", "''") + "'"
-        : "'" + name.replaceAll("'", "'\\''") + "'";
-      const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
-      output(`After completing it, run app ${action} ${quotedName}${plan.host ? ` --host ${plan.host}` : ""} --manual-done --yes to check version (${shell}).`);
+      output(describeManualCompletion(plan));
     }
     return result.status === "installed" || result.status === "untracked" || result.status === "completed" ? 0 : 1;
   }
+}
+
+/** Copyable completion command for the platform's documented shell. */
+export function describeManualCompletion(plan: AppLifecyclePlan): string {
+  const name = plan.entry.recipe!.name;
+  const quotedName = process.platform === "win32"
+    ? "'" + name.replaceAll("'", "''") + "'"
+    : "'" + name.replaceAll("'", "'\\''") + "'";
+  const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
+  return `After completing it, run app ${plan.action} ${quotedName}${plan.host ? ` --host ${plan.host}` : ""} --manual-done --yes to check version (${shell}).`;
+}
+
+export function describeAppResult(result: AppLifecycleResult): string {
+  return result.status === "installed" && result.previousVersion
+    ? `installed ${result.previousVersion} -> ${result.installedVersion} (latest ${result.latestVersion ?? "unknown"})`
+    : result.status;
 }

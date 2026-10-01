@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { compareAppVersions, sameAppVersion } from "./app-version.js";
+import { fetchAppLatest } from "./app-latest.js";
 import { writeFileAtomically } from "./atomic-file.js";
 import { parseAppRecipe, type AppRecipe, type AppStep } from "./app-recipes.js";
 import { type ProjectHost } from "./project-manifest.js";
@@ -26,6 +28,15 @@ export interface AppInspection {
   readonly reason?: string;
 }
 
+export interface AppUpdateCheck {
+  readonly entry: AppEntry;
+  readonly inspection: AppInspection;
+  readonly status: "unknown" | "current" | "update available";
+  readonly installedVersion?: string;
+  readonly latestVersion?: string;
+  readonly reason?: string;
+}
+
 export interface AppEnvironment {
   readonly recipesDirectory?: string;
   readonly homeDirectory?: string;
@@ -34,13 +45,16 @@ export interface AppEnvironment {
   /** Test seam for simulated Windows drive mounts; defaults to /mnt. */
   readonly wslMountRoot?: string;
   readonly runner?: typeof runProcess;
+  readonly fetch?: typeof globalThis.fetch;
   readonly resolveExecutable?: (name: string) => Promise<string | undefined>;
 }
 
 export interface AppLifecyclePlan extends AppStep {
   readonly entry: AppEntry;
-  readonly action: "install" | "uninstall" | "setup" | "teardown";
+  readonly action: "install" | "update" | "uninstall" | "setup" | "teardown";
   readonly host?: ProjectHost;
+  readonly previousVersion?: string;
+  readonly latestVersion?: string;
   readonly executable?: string;
   readonly warning?: string;
   readonly cwd: string;
@@ -56,6 +70,9 @@ export interface TrackedApp {
 export interface AppLifecycleResult {
   readonly status: "installed" | "untracked" | "manual required" | "failed" | "completed";
   readonly manual?: string;
+  readonly previousVersion?: string;
+  readonly installedVersion?: string;
+  readonly latestVersion?: string;
   readonly reason?: string;
 }
 
@@ -201,7 +218,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     await writeFileAtomically(receiptPath(entry), JSON.stringify({ hash: entry.hash }), { mode: 0o600 });
   }
 
-  async function checkApproval(entry: AppEntry): Promise<AppInspection | undefined> {
+  async function approvalProblem(entry: AppEntry): Promise<AppInspection | undefined> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
     const [current] = await load([entry.file]);
@@ -223,7 +240,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   async function inspect(entry: AppEntry): Promise<AppInspection> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
-    const approval = await checkApproval(entry);
+    const approval = await approvalProblem(entry);
     if (approval) return approval;
     const { executable, blocked } = await resolve(entry.recipe.version.argv[0]);
     if (!executable || blocked) {
@@ -242,6 +259,45 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     } catch {
       return { status: "not installed", executable };
     }
+  }
+  async function checkUpdate(entry: AppEntry): Promise<AppUpdateCheck> {
+    const inspection = await inspect(entry);
+    let latestVersion: string | undefined;
+    let reason = inspection.status === "installed" ? "latest not declared" : inspection.reason ?? inspection.status;
+    if (inspection.status === "installed" && entry.recipe?.latest) {
+      try {
+        const latest = entry.recipe.latest;
+        reason = "latest executable unavailable";
+        if ("argv" in latest) {
+          const approval = await approvalProblem(entry);
+          if (approval) reason = approval.reason ?? approval.status;
+          if (!approval) {
+            const { executable, blocked } = await resolve(latest.argv[0]);
+            if (executable && !blocked) {
+              reason = "latest command failed";
+              const result = await runner(executable, latest.argv.slice(1), {
+                cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
+              });
+              if (result.code === 0 && !result.signal && !result.outputTooLarge) {
+                latestVersion = new RegExp(latest.pattern).exec(result.stdout.toString("utf8"))?.[1];
+                reason = "invalid response";
+              }
+            }
+          }
+        } else {
+          const lookup = await fetchAppLatest(latest, environment.fetch ?? globalThis.fetch);
+          latestVersion = lookup.latestVersion;
+          reason = lookup.reason ?? "invalid response";
+        }
+      } catch { reason = "latest lookup failed"; }
+    }
+    const comparison = latestVersion && inspection.installedVersion
+      ? compareAppVersions(inspection.installedVersion, latestVersion) : undefined;
+    const status = !latestVersion || !inspection.installedVersion ? "unknown" as const
+      : (comparison !== undefined ? comparison >= 0 : sameAppVersion(latestVersion, inspection.installedVersion)) ? "current" as const
+      : "update available" as const;
+    return { entry, inspection, installedVersion: inspection.installedVersion, status, latestVersion,
+      reason: status === "unknown" ? reason : undefined };
   }
   const installations = path.join(path.dirname(directory), "app-installations");
   const installationPath = (name: string) => path.join(
@@ -286,8 +342,8 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     return { name, file };
   }
 
-  async function planLifecycle(entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost): Promise<AppLifecyclePlan> {
-    const approval = await checkApproval(entry);
+  async function planStep(entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost): Promise<AppLifecyclePlan> {
+    const approval = await approvalProblem(entry);
     if (approval) throw new Error(approval.reason ?? approval.status);
     const hostAction = action === "setup" || action === "teardown";
     const step = hostAction ? (host ? entry.recipe![action]?.[host] : undefined) : entry.recipe![action];
@@ -298,8 +354,21 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       cwd: home, environment: isWsl ? "linux (WSL)" : platform });
   }
 
+  async function planLifecycle(
+    entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost, loadedUpdate?: AppUpdateCheck,
+  ): Promise<AppLifecyclePlan> {
+    const plan = await planStep(entry, action, host);
+    if (action !== "update") return plan;
+    if (loadedUpdate && (loadedUpdate.entry.canonicalFile !== entry.canonicalFile || loadedUpdate.entry.hash !== entry.hash)) {
+      throw new Error("Update check belongs to a different recipe; check again");
+    }
+    const update = loadedUpdate ?? await checkUpdate(entry);
+    if (!update.installedVersion) throw new Error("Update requires a successful installed version check");
+    return Object.freeze({ ...plan, previousVersion: update.installedVersion, latestVersion: update.latestVersion });
+  }
+
   async function recheckPlan(plan: AppLifecyclePlan): Promise<void> {
-    const current = await planLifecycle(plan.entry, plan.action, plan.host);
+    const current = await planStep(plan.entry, plan.action, plan.host);
     const sameArgv = current.argv?.length === plan.argv?.length
       && current.argv?.every((arg, index) => arg === plan.argv?.[index]) !== false;
     if (!sameArgv || current.executable !== plan.executable || current.warning !== plan.warning
@@ -321,19 +390,24 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     }
     const inspection = await inspect(plan.entry);
     const name = plan.entry.recipe!.name;
-    if (plan.action === "install" && inspection.status === "installed") {
+    if ((plan.action === "install" || plan.action === "update") && inspection.status === "installed") {
+      if (plan.action === "update" && (!plan.previousVersion || sameAppVersion(inspection.installedVersion!, plan.previousVersion))) {
+        return { status: "failed", reason: `version unchanged (${plan.previousVersion ?? "unknown"}); expected ${plan.latestVersion ?? "unknown"}` };
+      }
       await mkdir(installations, { recursive: true, mode: 0o700 });
       await chmod(installations, 0o700);
       await writeFileAtomically(installationPath(name), JSON.stringify({
         name, recipeFile: plan.entry.canonicalFile, installedVersion: inspection.installedVersion,
       }), { mode: 0o600 });
-      return { status: "installed" };
+      if (plan.action === "update") await clearPendingUpdate(name);
+      return { status: "installed", previousVersion: plan.previousVersion,
+        installedVersion: inspection.installedVersion, latestVersion: plan.latestVersion };
     }
     if (plan.action === "uninstall" && inspection.status === "not installed") {
       await forgetApp(name, true);
       return { status: "untracked" };
     }
-    return { status: "failed", reason: plan.action === "install"
+    return { status: "failed", reason: plan.action !== "uninstall"
       ? `Version did not confirm installation (${inspection.status}); tracking unchanged`
       : `Version still succeeds or cannot be checked (${inspection.status}); tracking retained` };
   }
@@ -362,18 +436,53 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     return recordOutcome(plan);
   }
 
-  function manualFallback(plan: AppLifecyclePlan, reason = "Executable unavailable"): AppLifecycleResult {
+  const pendingUpdates = path.join(path.dirname(directory), "app-pending-updates");
+  const pendingUpdatePath = (name: string) => path.join(pendingUpdates, path.basename(installationPath(name)));
+
+  async function clearPendingUpdate(name: string): Promise<void> {
+    await unlink(pendingUpdatePath(name)).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    });
+  }
+
+  async function manualFallback(plan: AppLifecyclePlan, reason = "Executable unavailable"): Promise<AppLifecycleResult> {
+    if (plan.action === "update" && plan.manual) {
+      await mkdir(pendingUpdates, { recursive: true, mode: 0o700 });
+      await chmod(pendingUpdates, 0o700);
+      await writeFileAtomically(pendingUpdatePath(plan.entry.recipe!.name), JSON.stringify({
+        recipeFile: plan.entry.canonicalFile, hash: plan.entry.hash,
+        previousVersion: plan.previousVersion, latestVersion: plan.latestVersion,
+      }), { mode: 0o600 });
+    }
     return plan.manual ? { status: "manual required", manual: plan.manual, reason }
       : { status: "failed", reason };
   }
 
   async function completeManual(plan: AppLifecyclePlan, done: boolean): Promise<AppLifecycleResult> {
     if (!done) throw new Error("Manual step completion not confirmed");
-    // Installation/removal may legitimately change PATH resolution during manual work.
-    const approval = await checkApproval(plan.entry);
-    if (approval) throw new Error(approval.reason ?? approval.status);
-    if (!plan.manual) throw new Error("No manual step declared");
-    return recordOutcome(plan, true);
+    try {
+      // Installation/removal may legitimately change PATH resolution during manual work.
+      const approval = await approvalProblem(plan.entry);
+      if (approval) throw new Error(approval.reason ?? approval.status);
+      if (!plan.manual) throw new Error("No manual step declared");
+      if (plan.action === "update") {
+        try {
+          const pending = JSON.parse(await readFile(pendingUpdatePath(plan.entry.recipe!.name), "utf8"));
+          if (pending.recipeFile !== plan.entry.canonicalFile || pending.hash !== plan.entry.hash
+            || typeof pending.previousVersion !== "string" || !pending.previousVersion
+            || (pending.latestVersion !== undefined && typeof pending.latestVersion !== "string")) {
+            throw new Error("Manual update baseline changed; preview the update again");
+          }
+          plan = { ...plan, previousVersion: pending.previousVersion, latestVersion: pending.latestVersion };
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      return await recordOutcome(plan, true);
+    } finally {
+      // Attesting completion consumes the baseline even when verification fails.
+      if (plan.action === "update") await clearPendingUpdate(plan.entry.recipe!.name);
+    }
   }
 
   async function forgetApp(name: string, confirmed: boolean): Promise<void> {
@@ -383,7 +492,19 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  return { load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, trackedApps, previewForget, forgetApp };
+  return { checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, trackedApps, previewForget, forgetApp };
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;
+
+/** Concurrent independent checks; one broken App must not hide the rest of a batch. */
+export async function checkAppUpdates(apps: AppOperations): Promise<readonly AppUpdateCheck[]> {
+  const entries = (await apps.load()).filter(entry => entry.applicable || entry.error);
+  return Promise.all(entries.map(async entry => {
+    try { return await apps.checkUpdate(entry); }
+    catch (error) {
+      const reason = `App check failed: ${error instanceof Error ? error.message : String(error)}`;
+      return { entry, status: "unknown" as const, inspection: { status: "invalid" as const, reason }, reason };
+    }
+  }));
+}

@@ -20,7 +20,7 @@ Recipes live in `apps/` beside environment-local `sources.json`; private atomic 
 - Agent Depot tracks App identity and installed version, not filesystem provenance or rollback of App-created artifacts. A successful version check does not prove Host wiring is correct.
 - Declared owned-skill names/globs only exclude skills from unmanaged adoption/removal; they do not verify those paths.
 - CLI and TUI use shared core flows, and Apps join existing Installations and Updates views. Project-scoped Apps and per-project steps remain out of scope.
-- Update-selection CLI grammar remains open; teardown-before-uninstall is resolved below. Other open questions are in `.scratch/apps/spec.md`; recipe placement, approval and WSL environment boundaries are resolved.
+- Update-selection CLI grammar and teardown-before-uninstall are resolved below. Other open questions are in `.scratch/apps/spec.md`; recipe placement, approval and WSL environment boundaries are resolved.
 
 ## Lifecycle implementation decisions (ticket 03)
 
@@ -32,3 +32,41 @@ Uninstall never implicitly runs Host teardown: teardown remains separately previ
 
 - Setup/teardown reuse lifecycle plans and execution, with repeated `--host <host>` selections. Duplicate, unknown or undeclared Hosts are rejected before execution. Every selected Host is previewed; independent execution failures are reported per Host and do not stop remaining selections.
 - Host actions do not persist wiring state or change installed-App records. Automated success means only that the delegated command succeeded. Manual completion uses `--manual-done --yes` and requires a successful version check, which does not verify Host wiring (including teardown).
+
+### Ticket 05 update decisions
+
+- User-global `update apply` accepts repeated `--app <name>` alongside existing `--skill` selections; `--all` includes both. Project scope never selects Apps. Manual batch outcomes direct users to `app update <name> --manual-done --yes`.
+- Latest HTTP lookups use anonymous public GitHub Releases/npm endpoints, no redirects, a five-second timeout and a 1 MiB response cap. Missing/unresolvable latest is unknown. Strict SemVer versions (ignoring a leading `v`) are updateable only when latest is newer, including prerelease ordering; installed versions at or ahead of latest are current. Opaque versions retain inequality, which can offer a downgrade. The existing Skill comparator is deliberately permissive, so Apps use a strict comparator without changing Skill behavior.
+
+### Ticket 05 review: verified update outcomes
+
+Update plans carry the pre-update installed version and the selected latest version
+(or unknown). Automated and manual updates succeed only when the post-update
+`version` differs from the pre-update version. Equality uses the same leading-`v`
+normalization as availability checks and strict SemVer equality (ignoring build
+metadata) when both versions parse. An unchanged version fails with
+`version unchanged (<old>); expected <latest>` and leaves installed tracking
+unchanged. A changed version may differ from latest; report
+`installed <old> -> <new> (latest <latest>)` and record the verified new version.
+
+Confirmed manual fallbacks persist the pre-update version and latest in private,
+atomic sibling `app-pending-updates/` records, bound to canonical recipe path and
+content hash. `--manual-done` uses this baseline across CLI invocations. An
+attested manual-completion attempt consumes the baseline even on failure; retry
+requires a fresh confirmed preview. Successful automated updates also remove it. This is version evidence, not tracking App-written artifacts.
+
+
+### Ticket 05 review: public registry lookup
+
+npm lookup validates package names and reads `dist-tags.latest` from package
+metadata, with scoped slash encoding (`@scope%2Fname`) and npm's install-v1 media
+type. GitHub lookup rejects dot-prefixed identity segments, encodes each segment,
+and sends the package-version User-Agent, GitHub media type and API version.
+`/releases/latest` excludes drafts and prereleases. No redirects are followed,
+including same-origin ones; redirect, rate-limit, HTTP-status, timeout, oversize
+and malformed-response reasons remain visible in checks and listings.
+
+
+Batch planning reuses the already-loaded App update check, bound to the same
+canonical recipe path and content hash, rather than fetching latest again.
+Approval and executable rechecks still run before execution.
