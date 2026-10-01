@@ -237,11 +237,14 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     return undefined;
   }
 
-  async function inspect(entry: AppEntry): Promise<AppInspection> {
+  /** A supplied cache checks recipe approval without running version; omit it for a live check. */
+  async function inspect(entry: AppEntry, cached?: { installedVersion?: string }): Promise<AppInspection> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
     const approval = await approvalProblem(entry);
     if (approval) return approval;
+    if (cached) return cached.installedVersion
+      ? { status: "installed", installedVersion: cached.installedVersion } : { status: "not installed" };
     const { executable, blocked } = await resolve(entry.recipe.version.argv[0]);
     if (!executable || blocked) {
       return { status: "not installed", executable, reason: blocked ? WINDOWS_EXECUTABLE_WARNING : undefined };

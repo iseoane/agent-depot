@@ -1,5 +1,8 @@
 import type { Key } from "ink";
 
+import type { AppEntry } from "../app-flow.js";
+
+import { appName } from "./app-actions.js";
 import { startBulkHostAddition, startBulkUninstall, type BulkTarget } from "./bulk-actions.js";
 import { skillOf, sourceIdOf, type InstallationsData, type UnmanagedGroup } from "./installations.js";
 import { leavesOf, targetOf, type InstallationNode, type NodeData } from "./installations-tree.js";
@@ -25,6 +28,7 @@ export interface BrowseContext {
   /** Undefined while the installations are loading. */
   readonly data: InstallationsData | undefined;
   readonly manage: ManageContext;
+  readonly startApps: (entries: readonly AppEntry[], input: string) => void;
   readonly startAdoption: (group: UnmanagedGroup) => void;
   setMessage(message: ViewMessage | undefined): void;
 }
@@ -105,7 +109,18 @@ function actOnRow(context: BrowseContext, snapshot: TreeSnapshot<NodeData>, row:
   }
   context.setMessage(undefined);
   if (item.kind === "unmanaged") actOnUnmanaged(context, item.group, input, key);
-  else actOnInstallation(context, data, item, input, key);
+  else if (item.kind === "app") {
+    if (input === "A") context.setMessage({ kind: "error", text: "Adoption applies to unmanaged Skills, not Apps" });
+    else if (key.return && item.row.inspection.status !== "needs approval") {
+      const { entry, inspection } = item.row;
+      const approved = inspection.status === "installed" || inspection.status === "not installed";
+      context.setMessage({
+        kind: approved ? "ok" : "error",
+        text: approved ? `${appName(entry)} is already approved` : inspection.reason ?? inspection.status,
+      });
+    } else context.startApps([item.row.entry], key.return ? "approve" : input);
+  }
+  else if (item.kind === "installation") actOnInstallation(context, data, item, input, key);
 }
 
 /** Keys while browsing: navigation, marks, bulk actions and the per-row actions. */
@@ -114,7 +129,11 @@ export function handleBrowseKey(context: BrowseContext, input: string, key: Key)
   if (navigateTree(context.navigation, snapshot, context.height, input, key)) return;
   const row = snapshot.visible[snapshot.at];
   const rowAction = input === "A" || key.return || input === "u" || input === "h" || input === "i";
-  if (input === " ") markRow(context, row);
+  const appMarks = leavesOf(context.navigation.latestRoots()).filter(node => context.marks.markedRef.current.has(node.id) && node.data.kind === "app");
+  if ((input === "u" || input === "h" || input === "i") && appMarks.length) {
+    if (markedTargets(context).length) context.setMessage({ kind: "error", text: "Select Apps or Skills separately for bulk actions" });
+    else context.startApps(appMarks.flatMap(node => node.data.kind === "app" ? [node.data.row.entry] : []), input);
+  } else if (input === " ") markRow(context, row);
   else if (input === "a") markAllListed(context, snapshot.visible);
   else if ((input === "u" || input === "h" || input === "i") && context.data && markedTargets(context).length > 0) {
     // Marks, including those on collapsed rows, turn the action into a bulk one.

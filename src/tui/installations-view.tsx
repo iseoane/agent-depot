@@ -1,6 +1,8 @@
 import { Box, Text } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { createAppOperations } from "../app-flow.js";
+import { handleAppKey, isAppMode, startAppAction } from "./app-actions.js";
 import type { SourceOperations } from "../sources.js";
 import type { InstalledSkills } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
@@ -42,6 +44,7 @@ type LoadState =
 export function InstallationsView({ operations, environment, onCapturingChange, listHeight }: InstallationsViewProps) {
   const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
+  const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [mode, setModeState] = useState<InstallationsMode>(BROWSE);
   // Mirrors the mode synchronously so later keystrokes and the shell never see stale state.
@@ -56,14 +59,16 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     setModeState(next);
   };
 
+  const loadGeneration = useRef(0);
   const reload = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     try {
-      const data = await loadInstallations(operations, env);
-      if (mounted.current) setState({ status: "ready", data });
+      const data = await loadInstallations(operations, env, apps);
+      if (mounted.current && generation === loadGeneration.current) setState({ status: "ready", data });
     } catch (error) {
-      if (mounted.current) setState({ status: "error", message: errorText(error) });
+      if (mounted.current && generation === loadGeneration.current) setState({ status: "error", message: errorText(error) });
     }
-  }, [operations, env, mounted]);
+  }, [operations, env, apps, mounted]);
 
   useEffect(() => {
     void reload();
@@ -73,6 +78,31 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const roots = useMemo(() => (data ? buildTree(data) : []), [data]);
   const navigation = useTreeNavigation<NodeData>(roots, defaultExpanded);
   const { rows, index } = navigation;
+  const checked = useRef(new Set<string>());
+  const highlighted = rows[index]?.node.data;
+  useEffect(() => {
+    if (highlighted?.kind !== "app") return;
+    const { entry } = highlighted.row;
+    const identity = `${entry.file}:${entry.hash}`;
+    if (checked.current.has(identity)) return;
+    checked.current.add(identity);
+    const generation = loadGeneration.current;
+    void apps.inspect(entry).then(inspection => {
+      if (!mounted.current || generation !== loadGeneration.current) return;
+      setState(previous => previous.status !== "ready" ? previous : {
+        ...previous,
+        data: {
+          ...previous.data,
+          apps: previous.data.apps?.map(row => row.entry.file === entry.file && row.entry.hash === entry.hash
+            ? { entry, inspection } : row),
+        },
+      });
+    }).catch(error => {
+      if (!mounted.current || generation !== loadGeneration.current) return;
+      checked.current.delete(identity);
+      setMessage({ kind: "error", text: errorText(error) });
+    });
+  }, [highlighted, apps, mounted]);
 
   const installed = useMemo<InstalledSkills>(
     () => ({
@@ -94,6 +124,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     isMounted: () => mounted.current,
     unmark: (ids) => marks.setMarked(new Set([...marks.markedRef.current].filter((id) => !ids.includes(id)))),
     finish: async (result) => {
+      checked.current.clear();
       await reload();
       if (!mounted.current) return;
       setMessage(result);
@@ -119,11 +150,13 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     manage,
     startAdoption: (group) => void startAdoption(adoption, group),
     setMessage,
+    startApps: (entries, input) => void startAppAction({ apps, manage }, entries, input),
   };
 
   useKeys((input, key) => {
     const current = modeRef.current;
     if (current.kind === "browse") handleBrowseKey(browse, input, key);
+    else if (isAppMode(current)) handleAppKey({ apps, manage }, current, input, key);
     else if (!handleManageKey(manage, current, input, key)) handleAdoptionKey(adoption, current, input, key);
   });
 
@@ -132,7 +165,9 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const ready = state.data;
   const window = computeWindow(rows.length, index, height);
   const listed = rows.slice(window.start, window.end);
-  const selectedCount = leavesOf(roots).filter((node) => marks.marked.has(node.id)).length;
+  const markedLeaves = leavesOf(roots).filter(node => marks.marked.has(node.id));
+  const selectedCount = markedLeaves.length;
+  const markedApps = markedLeaves.filter(node => node.data.kind === "app").length;
   // The legend explains the markers, so it shows only while a rendered row carries one.
   const legendNeeded = listed.some((row) => row.node.data.kind === "installation" && markersOf(row.node.data.row) !== "");
 
@@ -144,6 +179,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
         <TreeRowLine key={row.node.id} row={row} selected={window.start + offset === index} marked={marks.marked.has(row.node.id)} />
       ))}
       <ListFooter indicator={window.indicator} selectedCount={selectedCount} message={message} />
+      {markedApps > 0 ? <Text color={theme.muted}>{markedApps} Apps marked</Text> : null}
       {legendNeeded ? <Text color={theme.muted}>{LEGEND}</Text> : null}
       <ModePanel mode={mode} />
     </Box>

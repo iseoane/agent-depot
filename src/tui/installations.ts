@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { createAppOperations, type AppEntry, type AppInspection, type AppOperations } from "../app-flow.js";
 import {
   defaultProjectManifestPath,
   ProjectManifestStore,
@@ -19,6 +20,7 @@ import {
   type UserGlobalSkillInventoryEntry,
 } from "../user-global-skill-inventory.js";
 import type { Source, SourceOperations } from "../sources.js";
+import { errorText } from "./batch.js";
 import { prepareInstall, type PreparedInstall } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
 
@@ -84,7 +86,14 @@ export function groupUnmanaged(inventory: UserGlobalSkillInventory): readonly Un
     });
 }
 
+export interface AppRow {
+  readonly entry: AppEntry;
+  readonly inspection: AppInspection;
+}
+
 export interface InstallationsData {
+  readonly apps?: readonly AppRow[];
+  readonly appsError?: string;
   /** Undefined when the configured operations cannot read user-global state. */
   readonly global?: readonly InstallationRow[];
   readonly project: readonly InstallationRow[];
@@ -140,8 +149,23 @@ async function toRow(
 export async function loadInstallations(
   operations: SourceOperations,
   environment: TuiEnvironment,
+  appOperations: AppOperations = createAppOperations({ homeDirectory: homeOf(environment), ...environment.appEnvironment }),
 ): Promise<InstallationsData> {
   const home = homeOf(environment);
+  let apps: readonly AppRow[] = [];
+  let appsError: string | undefined;
+  try {
+    const tracked = await appOperations.trackedApps();
+    apps = await Promise.all((await appOperations.load()).filter(entry => entry.applicable).map(async entry => ({
+      entry,
+      inspection: await appOperations.inspect(entry, {
+        installedVersion: tracked.find(record => record.name === entry.recipe?.name
+          && record.recipeFile === entry.canonicalFile)?.installedVersion,
+      }),
+    })));
+  } catch (error) {
+    appsError = errorText(error);
+  }
   const globalRecords = operations.listUserGlobalInstallations
     ? await operations.listUserGlobalInstallations()
     : undefined;
@@ -170,7 +194,7 @@ export async function loadInstallations(
     ? groupUnmanaged(await scanUserGlobalSkillInventory({ homeDirectory: home, managedInstallations: globalRecords }))
     : [];
   const sources = await operations.listSources().catch(() => []);
-  return { global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources };
+  return { global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps, ...(appsError === undefined ? {} : { appsError }) };
 }
 
 /** Source id of an installation's Source, when that Source is still registered. */
