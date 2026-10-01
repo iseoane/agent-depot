@@ -6,26 +6,28 @@ import { test, type TestContext } from "node:test";
 import { render } from "ink-testing-library";
 import { createAppOperations } from "../src/app-flow.js";
 import { parseProfile } from "../src/profile.js";
-import { createSourceOperations } from "../src/sources.js";
+import { GitSourceAccessAdapter } from "../src/git-source.js";
+import { createSourceOperations, type SourceOperationsOptions } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import { ProfileView } from "../src/tui/profile-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = {}) {
   const home = await mkdtemp(path.join(tmpdir(), "profile-tui-"));
   const directory = path.join(home, "apps");
   await mkdir(directory);
-  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json"), ...sourceOptions });
   const environment = { homeDirectory: home, appEnvironment: { recipesDirectory: directory,
     runner: async () => { throw new Error("Recipes must not execute"); } } };
-  const view = render(<App operations={operations} environment={environment} />);
+  let exits = 0;
+  const view = render(<App operations={operations} environment={environment} onExit={() => { exits++; }} />);
   t.after(() => { view.unmount(); return rm(home, { recursive: true, force: true }); });
   await waitForFrame(view.lastFrame, /builtin:agent-depot/);
   view.stdin.write("5");
   await waitForFrame(view.lastFrame, /e export.*i import/);
-  return { home, directory, operations, environment, view };
+  return { home, directory, operations, environment, view, exits: () => exits };
 }
 
 test("export shows grouped choices and exclusions, confirms a new file and refuses replacement", async t => {
@@ -168,4 +170,207 @@ test("browse hints do not advertise scrolling; result summaries do", async t => 
   f.view.stdin.write("\r");
   const result = await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
   assert.match(result, /j\/k scroll/);
+});
+
+
+async function importFile(view: ReturnType<typeof render>, file: string): Promise<string> {
+  view.stdin.write("i");
+  await waitForFrame(view.lastFrame, /Profile path: _/);
+  // Deliberately paste the entire path in one event, rather than typing character by character.
+  view.stdin.write(file);
+  await waitForFrame(view.lastFrame, frame => frame.includes(`Profile path: ${file}_`));
+  view.stdin.write("\r");
+  return waitForFrame(view.lastFrame, frame => !frame.includes("Profile path:") && !frame.includes("Loading Profile"));
+}
+
+async function browse(view: ReturnType<typeof render>): Promise<string> {
+  return waitForFrame(view.lastFrame, frame => frame.includes("e export · i import · q quit") &&
+    !frame.includes("Enter submit") && !frame.includes("j/k move"));
+}
+
+for (const action of ["export", "import"] as const) {
+  test(`${action} paths capture q and digits, ignore empty Enter, accept a pasted path and Backspace, and cancel with Esc`, async t => {
+    const f = await fixture(t);
+    await f.operations.addGitSource("https://example.com/skills.git");
+    if (action === "export") {
+      f.view.stdin.write("e");
+      await waitForFrame(f.view.lastFrame, /Sources: https:/);
+      f.view.stdin.write("\r");
+    } else f.view.stdin.write("i");
+    await waitForFrame(f.view.lastFrame, /Profile path: _/);
+    f.view.stdin.write("\r");
+    f.view.stdin.write("q12345");
+    const captured = await waitForFrame(f.view.lastFrame, /Profile path: q12345_/);
+    assert.match(captured, /\[5 Import\/Export\]/);
+    assert.equal(f.exits(), 0);
+    f.view.stdin.write("\u007f");
+    await waitForFrame(f.view.lastFrame, /Profile path: q1234_/);
+    // A multi-character chunk must be preserved, including spaces and view/quit keys.
+    f.view.stdin.write("/pasted q12345 path.json");
+    await waitForFrame(f.view.lastFrame, /Profile path: q1234\/pasted q12345 path.json_/);
+    f.view.stdin.write("\u001b");
+    const cancelled = await browse(f.view);
+    assert.doesNotMatch(cancelled, /Profile path:|Apply Profile/);
+    assert.equal(f.exits(), 0);
+  });
+}
+
+test("Esc cancels both checklists and a fresh path prompt starts empty", async t => {
+  const f = await fixture(t);
+  await f.operations.addGitSource("https://example.com/skills.git");
+  f.view.stdin.write("e");
+  await waitForFrame(f.view.lastFrame, /Sources: https:/);
+  f.view.stdin.write("\u001b");
+  assert.doesNotMatch(await browse(f.view), /\[x\]|Excluded built-in/);
+  const file = path.join(f.home, "cancel.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [], skills: [], apps: [recipe] }));
+  await importFile(f.view, file);
+  await waitForFrame(f.view.lastFrame, /add: App recipe demo/);
+  f.view.stdin.write("\u001b");
+  assert.doesNotMatch(await browse(f.view), /add: App recipe demo/);
+  assert.deepEqual(await createAppOperations(f.environment.appEnvironment).load(), []);
+  f.view.stdin.write("i");
+  await waitForFrame(f.view.lastFrame, /Profile path: _/);
+});
+
+test("unchecking an exported Source recomputes the subset's omitted-Source warning", async t => {
+  const f = await fixture(t);
+  const source = await f.operations.addGitSource("https://example.com/skills.git");
+  await f.operations.addUserGlobalInstallation!({
+    source: { kind: "external", url: source.url }, path: "demo",
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: ".agents/skills/demo", adopted: false },
+  });
+  f.view.stdin.write("e");
+  await waitForFrame(f.view.lastFrame, /\[x\].*Skills: demo/);
+  f.view.stdin.write(" ");
+  await waitForFrame(f.view.lastFrame, /\[ \].*Sources:/);
+  f.view.stdin.write("\r");
+  await waitForFrame(f.view.lastFrame, /Profile path: _/);
+  const file = path.join(f.home, "subset.json");
+  f.view.stdin.write(file);
+  await waitForFrame(f.view.lastFrame, frame => frame.includes(file));
+  f.view.stdin.write("\r");
+  const preview = await waitForFrame(f.view.lastFrame, /not included in profile/);
+  assert.match(preview, /WARNING: Skill demo references Source https:\/\/example.com\/skills.git not included in/);
+  f.view.stdin.write("y");
+  await waitForFrame(f.view.lastFrame, /Exported profile to/);
+  const exported = parseProfile(JSON.parse(await readFile(file, "utf8")));
+  assert.deepEqual(exported.sources, []);
+  assert.deepEqual(exported.skills.map(skill => skill.path), ["demo"]);
+});
+
+test("import shows same reasons, keeps them unselectable, and reports Sources and successful and failing Skills", async t => {
+  const f = await fixture(t);
+  const existing = await f.operations.addGitSource("https://example.com/existing.git");
+  const skill = { source: { kind: "builtin", id: "builtin:agent-depot" }, path: "doctor-md-agents",
+    version: { policy: "latest" }, hosts: ["pi"] };
+  const file = path.join(f.home, "results.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [{ url: existing.url, included: false }, { url: "https://example.com/new.git", included: true }],
+    skills: [skill, { ...skill, path: "missing-skill" }], apps: [] }));
+  await importFile(f.view, file);
+  const same = await waitForFrame(f.view.lastFrame, /same: Source/);
+  assert.match(same, /included: existing true ->\s+incoming false/);
+  assert.match(same, /discovery inclusion is not imported/);
+  assert.match(same, /not selectable/);
+  f.view.stdin.write(" ");
+  // Cursor begins on the same Source: space must not mark it.
+  const stillSame = await waitForFrame(f.view.lastFrame, /\[ \].*same: Source/);
+  assert.doesNotMatch(stillSame, /\[x\].*same: Source/);
+  f.view.stdin.write("\r");
+  await waitForFrame(f.view.lastFrame, /Apply Profile/);
+  f.view.stdin.write("y");
+  const results = await waitForFrame(f.view.lastFrame, /failed: Skill missing-skill/);
+  assert.match(results, /skipped: Source https:\/\/example.com\/existing.git/);
+  assert.match(results, /added: Source https:\/\/example.com\/new.git/);
+  assert.match(results, /added: Skill doctor-md-agents/);
+  assert.deepEqual((await f.operations.listUserGlobalInstallations!()).map(skill => skill.path), ["doctor-md-agents"]);
+  // On the second plan the tracked Skill itself is same and cannot be selected.
+  await importFile(f.view, file);
+  const repeated = await waitForFrame(f.view.lastFrame, /same: Skill doctor-md-agents/);
+  assert.match(repeated, /\[ \].*same: Skill doctor-md-agents.*not selectable/);
+});
+
+test("import can deselect every addition and confirm an empty plan without adding recipes", async t => {
+  const f = await fixture(t);
+  const file = path.join(f.home, "empty-import.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [], skills: [], apps: [recipe] }));
+  await importFile(f.view, file);
+  await waitForFrame(f.view.lastFrame, /\[x\].*add: App recipe demo/);
+  f.view.stdin.write(" ");
+  await waitForFrame(f.view.lastFrame, /\[ \].*add: App recipe demo/);
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, /\[x\].*add: App recipe demo/);
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, /\[ \].*add: App recipe demo/);
+  f.view.stdin.write("\r");
+  const preview = await waitForFrame(f.view.lastFrame, /Apply Profile/);
+  assert.doesNotMatch(preview, /add: App recipe demo/);
+  f.view.stdin.write("y");
+  await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
+  assert.deepEqual(await createAppOperations(f.environment.appEnvironment).load(), []);
+});
+
+for (const [label, content, reason] of [
+  ["invalid JSON", "{", /Expected|Unexpected|JSON/],
+  ["invalid profile", JSON.stringify({ format: "agent-depot-profile/v9" }), /profile.format/],
+] as const) {
+  test(`import reports ${label} without writing or losing navigation`, async t => {
+    const f = await fixture(t);
+    const file = path.join(f.home, "invalid.json");
+    await writeFile(file, content);
+    const result = await importFile(f.view, file);
+    assert.match(result, /Error:/);
+    assert.match(result, reason);
+    assert.deepEqual(await createAppOperations(f.environment.appEnvironment).load(), []);
+    assert.equal((await f.operations.listSources()).length, 1);
+    f.view.stdin.write("1");
+    await waitForFrame(f.view.lastFrame, /\[1 Sources\]/);
+  });
+}
+
+test("busy import ignores view, quit, cancel, toggle and action keys until the runner finishes", async t => {
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let markStarted = () => {};
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  const gitAccess = new GitSourceAccessAdapter({ cachePath: await mkdtemp(path.join(tmpdir(), "profile-busy-cache-")),
+    runner: { run: async () => {
+      markStarted();
+      await gate;
+      throw new Error("intentional clone failure");
+    } } });
+  t.after(() => { release(); return rm(gitAccess.cachePath, { recursive: true, force: true }); });
+  const f = await fixture(t, { gitAccess });
+  const file = path.join(f.home, "busy.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [{ url: "https://example.com/busy.git", included: true }],
+    skills: [{ source: { kind: "external", url: "https://example.com/busy.git" }, path: "demo",
+      version: { policy: "latest" }, hosts: ["pi"] }], apps: [recipe] }));
+  await importFile(f.view, file);
+  await waitForFrame(f.view.lastFrame, /add: App recipe demo/);
+  f.view.stdin.write("\r");
+  await waitForFrame(f.view.lastFrame, /Apply Profile/);
+  f.view.stdin.write("y");
+  await started;
+  await waitForFrame(f.view.lastFrame, /Loading Profile/);
+  f.view.stdin.write("q12345einy ajk");
+  f.view.stdin.write("\u001b");
+  f.view.stdin.write("\r");
+  // Give queued input events time to drain while the external runner remains blocked.
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const busy = f.view.lastFrame()!;
+  assert.match(busy, /Loading Profile/);
+  assert.match(busy, /\[5 Import\/Export\]/);
+  assert.doesNotMatch(busy, /Profile path:/);
+  assert.equal(f.exits(), 0);
+  release();
+  const results = await waitForFrame(f.view.lastFrame, /added: App recipe demo/);
+  assert.match(results, /added: Source https:\/\/example.com\/busy.git/);
+  assert.match(results, /failed: Skill demo[\s\S]*intentional clone failure/);
+  assert.equal((await createAppOperations(f.environment.appEnvironment).load()).length, 1);
+  assert.equal(f.exits(), 0);
 });

@@ -167,7 +167,8 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
         setMode("browse");
         return;
       }
-      if (key.return && typed.current.trim()) {
+      if (key.return) {
+        if (!typed.current.trim()) return;
         if (current === "export-path") {
           showLines(profileExportPreview(chosenProfile(), diagnostics.current), "confirm");
         } else void run(async () => {
