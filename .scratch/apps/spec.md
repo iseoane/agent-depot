@@ -22,7 +22,7 @@ Apps are integrated into the existing TUI and CLI. The TUI gains no new tab, top
 
 ## Recipe model
 
-- **One recipe per file.** Each recipe is a JSON file in an `apps/` directory inside Agent Depot's per-user directory for the current environment. Linux/WSL and Windows each have their own directory, next to `sources.json` (or its config counterpart, see Open Questions).
+- **One recipe per file.** Each recipe is a JSON file in an `apps/` directory inside Agent Depot's per-user directory for the current environment. Linux/WSL and Windows each have their own directory, next to `sources.json` in the existing environment-local state directory.
 - **Identity.** `name` is the App identity. The file name is free, for example `codegraph.json` or `codegraph-linux.json`.
 - **Platform.** The optional `platform` field takes `linux`, `windows`, or `darwin`; WSL counts as `linux`.
   - A recipe without `platform` applies to every platform.
@@ -58,13 +58,13 @@ Example:
 
 - Every step is previewed (exact argv or manual text, environment, App, step) and requires explicit confirmation. This is the same safety contract as user-provided skill methods.
 - **Recipe approval.** Agent Depot runs `version` and `latest.argv` without a per-run prompt: in the TUI, in `app list`, in `app validate`, and in update checks. It cannot know that those commands are read-only. The argv rules would accept `"version": {"argv": ["npm", "i", "-g", "x"]}`, and recipes are often written by an AI agent from third-party READMEs. Before Agent Depot runs any command from a recipe, the user must therefore approve that recipe once:
-  - Approval is keyed on a hash of the recipe file's content.
+  - Approval is keyed on the canonical recipe file path and a hash of its exact content, stored atomically in sibling `app-approvals/`.
   - The approval preview shows every argv in the recipe.
   - A new or changed recipe is shown as "needs approval", and none of its commands run until the user approves it.
   - Install, update, uninstall, setup, and teardown still need their own per-step confirmation.
 - **Resolved executable.** Previews and `app list` show the absolute path that the step's executable resolves to.
 - **WSL PATH isolation.** WSL appends Windows directories to `PATH`, for example `%APPDATA%\npm` and `%LOCALAPPDATA%\pnpm`. Those directories hold extensionless npm shims that Linux can resolve. Observed on the author's machine: `/mnt/c/Users/<user>/AppData/Roaming/npm/codegraph` and `.../gitnexus` are on the WSL `PATH`.
-  - On WSL, an executable that resolves under `/mnt/<drive>/` belongs to the Windows environment. It is treated as "not installed in this environment" and is never run.
+  - On WSL, a PATH candidate whose realpath is under `/mnt/<drive>/` belongs to Windows and is skipped while looking for a Linux candidate. If no Linux candidate exists, it is treated as "not installed in this environment" and never run. The PATH candidate, not its realpath, is spawned to preserve shim/multicall behavior.
   - Without this rule, a Windows install could make `version` report a false "installed" on Linux, and a Linux uninstall could never be confirmed.
 - **Manual fallback.** It applies only when the process cannot be spawned (for example the executable is missing, or Windows cannot launch a `.cmd` shim without a shell). A command that starts and exits non-zero is reported as a failure with its output. It never falls back to `manual`.
 - **After a manual step**, the user confirms that it is done. Agent Depot then runs `version`:
@@ -79,8 +79,9 @@ Example:
 - `agent-depot app list` lists recipes that apply to this environment, with installed version, latest version, and status. It also lists invalid recipes with the reason.
 - `agent-depot app install|update|uninstall <name> [--yes]`, and `agent-depot app setup|teardown <name> --host <host>... [--yes]`.
 - `agent-depot app schema` prints the recipe JSON Schema.
-- `agent-depot app validate <file>...` validates recipes.
-  - For recipes matching the current platform it also runs `version`, after showing the argv and asking for confirmation (or with `--yes`). Agent Depot cannot know that the command is read-only.
+- `agent-depot app approve <name> [--yes]` previews one applicable recipe and every argv; only `--yes` records approval.
+- `agent-depot app validate <file>...` validates recipes and does not accept `--yes` or record approval.
+  - For matching, already-approved recipes it runs `version`. Unapproved recipes only show the argv preview and needs-approval state; approve by name separately. Agent Depot cannot know that the command is read-only.
   - It reports recipes for other platforms as not applicable here, so they never seem to disappear.
 - App updates also appear in `agent-depot update check` / `update apply` alongside skills.
 
@@ -178,12 +179,12 @@ This is a built-in skill in `builtin:agent-depot`, installed through the normal 
 
 ## Open Questions
 
-1. Recipe directory: next to `sources.json` in the state directory, or in an XDG config / `%APPDATA%` config directory? Recipes are user-edited files.
+1. **Resolved:** User-edited recipes live in `apps/` beside `sources.json` in the existing per-environment state directory, not a new config root.
 2. Whether a bare `npm` resolves to a launchable executable on Windows with `shell: false`. If it does not, the `argv` + `manual` form covers it.
 3. Exact CLI grammar, and whether `update apply` selects Apps by name, by index, or both.
 4. Whether `teardown` runs automatically before `uninstall` when the user confirms it, or stays a separate action.
-5. Recipe approval mechanism. The proposal is a one-time approval keyed on the recipe content hash. The alternative is to confine `version` and `latest.argv` to the recipe's own executable plus a fixed set of version flags, so that no approval is needed. The two can be combined.
-6. App identity across environments seen from WSL (Linux vs `/mnt/c` Windows installs). Each environment manages only its own; confirm that no cross-environment view is wanted.
+5. **Resolved:** One-time approval uses the canonical file path and exact content hash, with private atomic receipts in sibling `app-approvals/`. CLI approval is only `app approve <name> --yes`; `app validate` never approves. Changed bytes require renewed approval; restoring approved bytes restores approval.
+6. **Resolved:** WSL manages Linux only. Windows PATH hits are skipped in favor of Linux candidates; there is no cross-environment view or Windows execution.
 
 ## Further Notes
 

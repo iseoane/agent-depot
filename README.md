@@ -468,3 +468,39 @@ entry points and the module-layer boundaries (`cli` -> `application` -> `core`
 - `pnpm test:coverage`: runs the tests with built-in V8 coverage
   (`NODE_V8_COVERAGE`, source maps) into `coverage/v8`, which Fallow reads.
   It rebuilds `dist/` with source maps; no extra dependencies are needed.
+
+## User-global App recipes
+
+Place user-owned JSON recipes in `apps/` next to the per-user `sources.json`
+(Linux/WSL: `${XDG_STATE_HOME:-~/.local/state}/agent-depot/apps`; Windows:
+`%APPDATA%\Agent Depot\apps`). Recipes are never rewritten or supplied by Sources.
+
+```sh
+agent-depot app schema
+agent-depot app validate /path/to/example.json
+agent-depot app list
+agent-depot app approve example --yes
+```
+
+Validation previews every declared argv and its resolved executable but never
+approves recipes (`validate --yes` is rejected). Review the preview before using
+`app approve <name> --yes`: approval authorizes version commands, not just
+read-only behavior. Private, atomically written approval receipts live in sibling
+`app-approvals/` and are keyed to the canonical file path and exact content hash.
+Changed bytes require approval again; restoring approved bytes restores approval.
+`app list` never approves recipes. Invalid recipes are shown with
+reasons; validation exits non-zero for invalid recipes. Other-platform recipes
+are reported as not applicable and never executed. WSL counts as Linux and never
+runs executables whose realpath is under `/mnt/<drive>/`; it skips those PATH
+candidates while looking for Linux executables. Commands spawn the PATH candidate
+rather than the realpath so shims and multicall binaries retain their identity.
+
+Required fields are `name`, `install`, `update`, `uninstall`, and `version`.
+Lifecycle steps contain `argv`, `manual`, or both; manual text is never executed.
+`version` contains safe no-shell `argv` and a JavaScript regex `pattern` with one
+capture group. Commands run from the user's home directory. An unsuccessful or
+unresolvable version check means not installed. The schema describes structure;
+`app validate` additionally enforces argv safety and regex semantics.
+
+This initial recipe flow does not execute lifecycle steps or latest-version
+lookups; those integrations are separate work.
