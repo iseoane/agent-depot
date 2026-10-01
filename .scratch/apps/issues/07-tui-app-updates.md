@@ -31,3 +31,15 @@
   passed. Final `pnpm typecheck`, `pnpm lint`, `pnpm test`: 624 passed, 0 failed.
 - Rollback boundary: this review correction's App cancellation operation, Updates
   changes, regression tests and notes; no CLI workflow changes.
+
+### CLI re-review corrections
+
+- CLI checks Apps independently with a category-specific error; `loadUpdates`
+  now accepts/returns Skill data only. Skill listing failure retains App check
+  output, and App inventory failure retains Skill assessment and application.
+- Both CLI regression tests failed before implementation and now pass.
+- Focused `tests/app-updates.test.ts`: 21 passed; final typecheck/lint passed;
+  full suite: 626 passed, 0 failed. Runtime boundary: public CLI with temporary
+  per-user files, injected executable resolution, runner and HTTP fetch.
+- Rollback boundary: CLI check separation, Skill-only update-flow types, the two
+  CLI regressions and these notes. TUI row/signature formatting is independent.

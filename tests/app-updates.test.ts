@@ -428,3 +428,48 @@ test("batch planning reuses the loaded latest check instead of fetching twice", 
     assert.ok(lines.some(line => line.includes("installed 1.0.0 -> 2.0.0 (latest 2.0.0)")));
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
+
+test("CLI Skill listing failure still reports App update checks", async () => {
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
+  try {
+    const { runCli } = await import("../src/cli.js");
+    const { createSourceOperations } = await import("../src/sources.js");
+    await f.apps.approve(f.entry);
+    await writeFile(path.join(f.home, "sources.json"), "{}");
+    const lines: string[] = [];
+    assert.equal(await runCli(["update", "check", "--scope", "user-global"], {
+      appOperations: f.apps, homeDirectory: f.home,
+      operations: createSourceOperations({ statePath: path.join(f.home, "sources.json") }),
+      stdout: line => lines.push(line), stderr: line => lines.push(line),
+    }), 1);
+    assert.ok(lines.some(line => line.includes("App example: update available")), lines.join("\n"));
+    assert.ok(lines.some(line => line.includes("Error (Skills, user-global)")), lines.join("\n"));
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("CLI App inventory failure reports its error without hiding or blocking Skill updates", async () => {
+  const f = await fixture({ npm: "example" }, async () => { throw new Error("no network"); });
+  try {
+    const { runCli } = await import("../src/cli.js");
+    const { createSourceOperations } = await import("../src/sources.js");
+    const operations = createSourceOperations({ statePath: path.join(f.home, "sources.json") });
+    const lines: string[] = [];
+    const deps = { operations, appOperations: f.apps, homeDirectory: f.home,
+      stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) };
+    assert.equal(await runCli(["install", "--scope", "user-global", "--source", "builtin:agent-depot",
+      "--skill", "doctor-md-agents", "--host", "pi", "--version", "latest", "--portable-v1", "--yes"], deps), 0);
+    const [skill] = await operations.listUserGlobalInstallations!();
+    await operations.updateUserGlobalInstallation!({ ...skill!, installation: { ...skill!.installation!,
+      resolvedVersion: { kind: "builtin-package", version: "0.0.1" },
+    } });
+    await rm(path.join(f.home, "apps"), { recursive: true });
+    await writeFile(path.join(f.home, "apps"), "not a directory");
+    lines.length = 0;
+    assert.equal(await runCli(["update", "check", "--scope", "user-global"], deps), 1);
+    assert.ok(lines.some(line => line.includes("Error (Apps)")), lines.join("\n"));
+    assert.ok(lines.some(line => line.includes("Updateable (1)")), lines.join("\n"));
+    lines.length = 0;
+    assert.equal(await runCli(["update", "apply", "--scope", "user-global", "--skill", "0", "--yes"], deps), 1);
+    assert.ok(lines.some(line => line.includes("Updated Skill")), lines.join("\n"));
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});

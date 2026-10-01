@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { createAppOperations, type AppOperations } from "./app-flow.js";
+import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck } from "./app-flow.js";
 import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
 
 import { pathsOverlap } from "./path-safety.js";
@@ -900,27 +900,46 @@ async function runUpdate(
 ): Promise<number> {
   const options = parseUpdateOptions(argv);
   const apps = dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory });
-  const { assessment, installed, context, appUpdates } = await loadUpdates({
-    apps,
-    scope: options.scope,
-    operations,
-    ...(dependencies.homeDirectory === undefined ? {} : { homeDirectory: dependencies.homeDirectory }),
-    ...(dependencies.projectRoot === undefined ? {} : { projectRoot: dependencies.projectRoot }),
-    ...(dependencies.sourceAccess === undefined ? {} : { sourceAccess: dependencies.sourceAccess }),
-    ...(dependencies.projectManifestStore === undefined ? {} : { projectManifestStore: dependencies.projectManifestStore }),
-    ...(dependencies.installationOptions?.fileSystem === undefined ? {} : { installationFileSystem: dependencies.installationOptions.fileSystem }),
-  });
-  const userGlobalInventory = options.action === "check" && options.scope === "user-global"
-    ? await scanUserGlobalSkillInventory({ homeDirectory: context.projectRoot, managedInstallations: installed })
-    : undefined;
+  let appUpdates: readonly AppUpdateCheck[] = [];
+  let appCheckFailed = false;
+  if (options.scope === "user-global") {
+    try {
+      appUpdates = await checkAppUpdates(apps);
+    } catch (error) {
+      appCheckFailed = true;
+      output(`Error (Apps): ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  let loaded: Awaited<ReturnType<typeof loadUpdates>> | undefined;
+  try {
+    loaded = await loadUpdates({
+      scope: options.scope,
+      operations,
+      ...(dependencies.homeDirectory === undefined ? {} : { homeDirectory: dependencies.homeDirectory }),
+      ...(dependencies.projectRoot === undefined ? {} : { projectRoot: dependencies.projectRoot }),
+      ...(dependencies.sourceAccess === undefined ? {} : { sourceAccess: dependencies.sourceAccess }),
+      ...(dependencies.projectManifestStore === undefined ? {} : { projectManifestStore: dependencies.projectManifestStore }),
+      ...(dependencies.installationOptions?.fileSystem === undefined ? {} : { installationFileSystem: dependencies.installationOptions.fileSystem }),
+    });
+  } catch (error) {
+    output(`Error (Skills, ${options.scope}): ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (loaded) {
+    const { assessment, installed, context } = loaded;
+    const userGlobalInventory = options.action === "check" && options.scope === "user-global"
+      ? await scanUserGlobalSkillInventory({ homeDirectory: context.projectRoot, managedInstallations: installed })
+      : undefined;
 
-  outputUpdateAssessment(assessment, options.scope, output, userGlobalInventory);
+    outputUpdateAssessment(assessment, options.scope, output, userGlobalInventory);
+  }
   for (const item of appUpdates) {
     output(`App ${item.entry.recipe?.name ?? item.entry.file}: ${item.status}; installed ${item.installedVersion ?? "unknown"}; latest ${item.latestVersion ?? "unknown"}${item.reason ? `; ${item.reason}` : ""}`);
   }
+  if (!loaded) return 1;
   if (options.action === "check") {
-    return 0;
+    return appCheckFailed ? 1 : 0;
   }
+  const { assessment, context } = loaded;
   const selectedApps = options.all ? appUpdates.filter(item => item.status === "update available")
     : options.requestedApps.map(name => {
       const matches = appUpdates.filter(item => item.entry.recipe?.name === name);
@@ -930,7 +949,7 @@ async function runUpdate(
       return matches[0]!;
     });
   const appPlans = [];
-  let appFailed = 0;
+  let appFailed = appCheckFailed ? 1 : 0;
   for (const item of selectedApps) {
     try {
       const plan = await apps.planLifecycle(item.entry, "update", undefined, item);
