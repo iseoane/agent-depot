@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-01
+
+### Added
+
+- **Apps**: user-global applications (for example Engram, CodeGraph, GitNexus) managed through user-declared JSON recipes in the per-user `apps/` directory. Agent Depot delegates the lifecycle to the App's own commands, tracks the installed version and never tracks what an App writes, clones App repositories or ships built-in recipes (ADR 0007).
+- `agent-depot app schema | validate | approve | list`: recipe JSON Schema, validation per platform (WSL counts as Linux), content-hash approval required before any recipe command runs, and listing with installed version and resolved executable.
+- `agent-depot app install | uninstall | update <name>` and `app setup | teardown <name> --host <host>...`: previewed and confirmed steps run without a shell from the home directory; manual steps are shown and confirmed with `--manual-done`; installed state is recorded only when `version` confirms it; `app uninstall --forget` drops tracking explicitly.
+- Latest-version lookup from GitHub Releases, the npm registry or an approved argv; Apps join `update check` and `update apply` (`--app <name>`); an update succeeds only when the version changes, and semver downgrades are never offered.
+- TUI: an "Apps (user-global)" group in Installations (approve, install, uninstall, Host setup/teardown, bulk marks) and App rows in the Updates batch, with lazy version checks so start-up stays fast.
+- Recipe-declared `skills` names/globs exclude App-owned skills from the unmanaged adopt and remove flows.
+- Built-in skill `agent-depot-apprecipe` guides an AI agent to research an App and write valid, platform-aware recipes.
+
+### Changed
+
+- `runProcess` accepts an opt-in `maxStderrBytes`; Source and Skill commands keep their previous behaviour.
+
+### Internal
+
+- Hermetic end-to-end coverage for Apps in the CLI and in a real terminal.
+- Test processes ignore an exported `XDG_STATE_HOME`, so a developer's own state no longer affects the suite (`prepublishOnly` failed with a manual-testing sandbox exported).
+
 ## [0.2.1] - 2026-09-30
 
 ### Fixed
