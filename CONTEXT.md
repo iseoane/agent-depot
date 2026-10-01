@@ -4,6 +4,10 @@ This context defines the product language for discovering, installing, and updat
 
 ## Language
 
+**Profile**:
+A portable collection of user-global Source discovery choices, managed Skill selections and App recipes that can be exported and added on another machine without replacing existing choices or transferring approvals or installed state.
+_Avoid_: Backup, sync (a Profile transfers choices, not machine state)
+
 **Host**:
 A coding-agent environment in which a managed skill can be made available. Initial hosts are Pi, Claude Code, Codex, and OpenCode.
 _Avoid_: Platform, target agent (when referring to the installed environment)

@@ -113,11 +113,13 @@ const EMPTY_PROJECT_MANIFEST: ProjectManifest = Object.freeze({
 
 export class ProjectManifestError extends Error {
   readonly manifestPath: string;
+  readonly reason: string;
 
   constructor(manifestPath: string, reason: string) {
     super(`Invalid project manifest ${JSON.stringify(manifestPath)}: ${reason}`);
     this.name = "ProjectManifestError";
     this.manifestPath = manifestPath;
+    this.reason = reason;
   }
 }
 
@@ -260,6 +262,11 @@ function isShellInterpreter(executable: string): boolean {
     "dash", "ksh", "ksh93", "csh", "tcsh", "ash",
     "cmd", "cmd.exe", "command.com", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
   ]).has(normalized);
+}
+
+/** Shared conservative credential check for portable declarations, including recipe free text. */
+export function containsCredentialArgument(value: string): boolean {
+  return CREDENTIAL_FLAG.test(value) || containsObviousCredential(value);
 }
 
 function containsObviousCredential(value: string): boolean {

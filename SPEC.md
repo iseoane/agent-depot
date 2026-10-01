@@ -128,3 +128,23 @@ These do not block the closed functional V1 direction, but must be resolved befo
 6. Per-host skill compatibility detection and installation/update methods.
 7. Which upstream metadata or checks provide comparable version signals for skills; when no reliable signal exists, status is unknown and the skill is not treated as updateable.
 8. CLI command grammar, prompts, and user-facing error/reporting format beyond the established rule to continue independent batch updates after a failure.
+
+## Portable user-global Profiles
+
+A Profile captures Git Sources and discovery inclusion, user-global managed Skill
+selections with recorded Hosts/version policies/methods, and full App recipes.
+`agent-depot export [--out <file>]` exports strict `agent-depot-profile/v1` JSON;
+block exclusions and repeated Source/Skill/App filters select independently.
+Local paths, credentials, unmanaged/App-owned Skills, project selections,
+installation evidence, caches, approvals and installed-App state do not travel.
+Core parsing reuses portable manifest and App recipe validation.
+
+Add-only import and the fifth **5 Import/Export** TUI tab are approved follow-up
+work: conflicts are skipped, existing choices never change, recipes arrive
+unapproved and Apps are never installed by import. This tab is the explicit
+exception to the existing no-new-tabs direction; App lifecycle stays in existing
+views. See [ADR 0008](docs/adr/0008-portable-user-global-profiles.md) and
+[the Profile spec](.scratch/profile/spec.md).
+
+CLI export always writes `included: true`; discovery choices are transient, while
+the TUI may pass explicit inclusion choices to the shared export core.
