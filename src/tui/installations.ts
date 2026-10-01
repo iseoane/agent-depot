@@ -193,7 +193,12 @@ export async function loadInstallations(
 
   const unmanagedWarnings: string[] = [];
   const unmanaged = globalRecords
-    ? groupUnmanaged(await scanUserGlobalSkillInventory({ homeDirectory: home, managedInstallations: globalRecords, appEnvironment: environment.appEnvironment, reportWarning: warning => unmanagedWarnings.push(warning) }))
+    ? groupUnmanaged(await scanUserGlobalSkillInventory({
+        homeDirectory: home,
+        managedInstallations: globalRecords,
+        appEnvironment: environment.appEnvironment,
+        reportWarning: warning => unmanagedWarnings.push(warning),
+      }))
     : [];
   const sources = await operations.listSources().catch(() => []);
   return { unmanagedWarnings, global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps, ...(appsError === undefined ? {} : { appsError }) };

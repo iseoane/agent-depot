@@ -5,6 +5,8 @@ import {
 export const APP_GITHUB_PATTERN = "^[\\w-][\\w.-]*/[\\w-][\\w.-]*$";
 export const APP_NPM_PATTERN = "^(?:@[a-z0-9~-][a-z0-9._~-]*/)?[a-z0-9~-][a-z0-9._~-]*$";
 
+export const APP_SKILL_PATTERN = "^(?!\\*+$)(?!\\s*$)[^/\\\\\\u0000]+$";
+
 export interface AppStep {
   readonly argv?: readonly [string, ...string[]];
   readonly manual?: string;
@@ -122,7 +124,11 @@ export function parseAppRecipe(value: unknown): AppRecipe {
     if (!Array.isArray(item.skills)) throw new Error("skills: expected a list");
     skills = [];
     for (const [index, skill] of item.skills.entries()) {
-      skills.push(text(skill, `skills[${index}]`));
+      const pattern = text(skill, `skills[${index}]`);
+      if (!new RegExp(APP_SKILL_PATTERN, "u").test(pattern)) {
+        throw new Error(`skills[${index}]: expected a non-empty name pattern without path separators or NUL, and not only stars`);
+      }
+      skills.push(pattern);
     }
   }
   return {

@@ -453,24 +453,31 @@ test("ownership matches whole names case-sensitively with only star special and 
   }
 });
 
-test("recipe failures warn visibly and degrade to no exclusions", async () => {
+test("invalid recipes warn by file without disabling valid ownership exclusions", async () => {
   const home = await makeHome();
   try {
     const apps = path.join(home, "apps");
     await mkdir(apps);
     await makeSkill(home, ".agents", "owned-demo");
+    await makeSkill(home, ".agents", "ordinary");
+    await writeFile(path.join(apps, "valid.json"), JSON.stringify({
+      name: "valid", install: { manual: "install" }, update: { manual: "update" },
+      uninstall: { manual: "remove" }, version: { argv: ["valid"], pattern: "(.*)" }, skills: ["owned-*"],
+    }));
     for (const content of ["{", JSON.stringify({ name: "owner", install: { manual: "install" }, update: { manual: "update" }, uninstall: { manual: "remove" }, version: { argv: ["owner"], pattern: "(.*)" }, skills: ["owned/*"] })]) {
       await writeFile(path.join(apps, "app.json"), content);
       const warnings: string[] = [];
       const inventory = await scanUserGlobalSkillInventory({ homeDirectory: home, appEnvironment: { recipesDirectory: apps }, reportWarning: warning => warnings.push(warning) });
-      assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["owned-demo"]);
-      assert.match(warnings.join("\n"), /WARNING: App-owned Skill exclusions unavailable; no exclusions applied/);
+      assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["ordinary"]);
+      assert.equal(warnings.length, 1);
+      assert.ok(warnings[0]?.includes(path.join(apps, "app.json")));
     }
     await rm(apps, { recursive: true });
     await writeFile(apps, "not a directory");
     const warnings: string[] = [];
-    assert.equal((await scanUserGlobalSkillInventory({ homeDirectory: home, appEnvironment: { recipesDirectory: apps }, reportWarning: warning => warnings.push(warning) })).unmanaged.length, 1);
+    assert.equal((await scanUserGlobalSkillInventory({ homeDirectory: home, appEnvironment: { recipesDirectory: apps }, reportWarning: warning => warnings.push(warning) })).unmanaged.length, 2);
     assert.equal(warnings.length, 1);
+    assert.match(warnings[0] ?? "", /exclusions unavailable; no exclusions applied/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }

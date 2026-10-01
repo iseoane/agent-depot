@@ -23,3 +23,16 @@
   wiring with these tests and ADR section; App lifecycle flows are unchanged.
 
 - Final verification: `pnpm typecheck`, `pnpm lint`, `pnpm test`: 634 passed.
+
+## Review corrections
+
+- Invalid recipes warn by file and no longer disable other valid ownership
+  exclusions. Directory loading failures still warn and yield no exclusions.
+- Parser and JSON Schema reject separators, NUL, empty/whitespace-only patterns
+  and star-only patterns; the matcher retains defensive per-pattern validation.
+- TDD evidence: failing inventory isolation, parser/schema safety and star-only
+  tests each passed after their respective implementation changes.
+- Verification: parser/schema 9 tests, inventory 18 tests, App CLI 10 tests;
+  `pnpm typecheck` and `pnpm lint` pass; full `pnpm test`: 637 passed.
+- This correction unit can be reverted independently of the original exclusion
+  feature; its boundary is validation, warning isolation and presentation cleanup.

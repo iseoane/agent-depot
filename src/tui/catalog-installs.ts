@@ -71,7 +71,11 @@ export async function loadInstalledSkills(
     manifestStoreOf(environment).load().then((manifest) => manifest.skills, () => []),
     operations.listSources().catch(() => []),
   ]);
-  const unmanagedNames = await scanUserGlobalSkillInventory({ homeDirectory: homeOf(environment), appEnvironment: environment.appEnvironment, managedInstallations: global }).then(
+  const unmanagedNames = await scanUserGlobalSkillInventory({
+    homeDirectory: homeOf(environment),
+    appEnvironment: environment.appEnvironment,
+    managedInstallations: global,
+  }).then(
     (inventory) => new Set([...inventory.unmanaged, ...inventory.symlinks].map((entry) => entry.name)),
     () => new Set<string>(),
   );

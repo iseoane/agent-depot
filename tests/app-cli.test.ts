@@ -367,3 +367,33 @@ test("Host CLI previews all selections, continues after failure and rejects unde
     }
   } finally { await rm(home, { recursive: true, force: true }); }
 });
+
+test("validate and list report invalid owned-skill patterns without running commands", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-owned-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const file = path.join(home, "owner.json");
+  const appOperations = createAppOperations({
+    homeDirectory: home,
+    recipesDirectory: home,
+    runner: async () => { assert.fail("invalid recipes must not execute commands"); },
+  });
+  const lines: string[] = [];
+  const dependencies = {
+    appOperations,
+    stdout: (line: string) => lines.push(line),
+    stderr: (line: string) => lines.push(line),
+  };
+  for (const pattern of ["owned/path", "owned\\path", "owned\u0000name", "", "*"]) {
+    await writeFile(file, JSON.stringify({
+      name: "owner", install: { manual: "install" }, update: { manual: "update" },
+      uninstall: { manual: "remove" }, version: { argv: ["owner"], pattern: "(.*)" }, skills: [pattern],
+    }));
+    lines.length = 0;
+    assert.equal(await runCli(["app", "validate", file], dependencies), 1);
+    assert.match(lines.join("\n"), /skills\[0\]/u);
+    lines.length = 0;
+    await runCli(["app", "list"], dependencies);
+    assert.match(lines.join("\n"), /skills\[0\]/u);
+    assert.ok(lines.join("\n").includes(file));
+  }
+});

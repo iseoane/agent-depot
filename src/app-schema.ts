@@ -1,4 +1,4 @@
-import { APP_GITHUB_PATTERN, APP_NPM_PATTERN } from "./app-recipes.js";
+import { APP_GITHUB_PATTERN, APP_NPM_PATTERN, APP_SKILL_PATTERN } from "./app-recipes.js";
 import { PROJECT_HOSTS } from "./project-manifest.js";
 
 const argv = {
@@ -42,6 +42,6 @@ export const APP_RECIPE_SCHEMA = {
         },
       ],
     },
-    setup: hosts, teardown: hosts, skills: { type: "array", items: text },
+    setup: hosts, teardown: hosts, skills: { type: "array", items: { ...text, pattern: APP_SKILL_PATTERN } },
   },
 };

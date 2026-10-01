@@ -178,3 +178,28 @@ test("latest GitHub rejects dot-prefixed owner and repository segments", () => {
   assert.deepEqual(parseAppRecipe({ ...recipe, latest: { github: "owner-name/repo.name" } }).latest,
     { github: "owner-name/repo.name" });
 });
+
+test("owned-skill names reject separators, NUL and empty text in parser and schema", () => {
+  const valid = ["owned-*", "literal?", "[ab]", "exact", "a**b"];
+  const invalid = ["", "   ", "owned/path", "owned\\path", "owned\u0000name"];
+  for (const skill of valid) {
+    assert.deepEqual(parseAppRecipe({ ...recipe, skills: [skill] }).skills, [skill]);
+  }
+  for (const skill of invalid) {
+    assert.throws(() => parseAppRecipe({ ...recipe, skills: [skill] }), /skills\[0\]/u, JSON.stringify(skill));
+  }
+  const items: { readonly minLength: number; readonly pattern?: string } = APP_RECIPE_SCHEMA.properties.skills.items;
+  assert.ok(items.pattern, "schema must validate owned-skill names");
+  const pattern = new RegExp(items.pattern, "u");
+  for (const skill of valid) assert.equal(pattern.test(skill), true, skill);
+  for (const skill of invalid) assert.equal(pattern.test(skill), false, JSON.stringify(skill));
+});
+
+test("star-only ownership patterns cannot hide the entire unmanaged inventory", () => {
+  const schemaPattern = APP_RECIPE_SCHEMA.properties.skills.items.pattern;
+  for (const skill of ["*", "**", "*****"]) {
+    assert.throws(() => parseAppRecipe({ ...recipe, skills: [skill] }), /skills\[0\]/u, skill);
+    assert.equal(new RegExp(schemaPattern, "u").test(skill), false, skill);
+  }
+  assert.deepEqual(parseAppRecipe({ ...recipe, skills: ["*specific*"] }).skills, ["*specific*"]);
+});
