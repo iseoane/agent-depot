@@ -915,7 +915,7 @@ async function runUpdate(
 
   outputUpdateAssessment(assessment, options.scope, output, userGlobalInventory);
   for (const item of appUpdates) {
-    output(`App ${item.entry.recipe?.name ?? item.entry.file}: ${item.status}; installed ${item.installedVersion ?? "unknown"}; latest ${item.latestVersion ?? "unknown"}`);
+    output(`App ${item.entry.recipe?.name ?? item.entry.file}: ${item.status}; installed ${item.installedVersion ?? "unknown"}; latest ${item.latestVersion ?? "unknown"}${item.reason ? `; ${item.reason}` : ""}`);
   }
   if (options.action === "check") {
     return 0;

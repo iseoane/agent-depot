@@ -1,3 +1,4 @@
+import { APP_GITHUB_PATTERN, APP_NPM_PATTERN } from "./app-recipes.js";
 import { PROJECT_HOSTS } from "./project-manifest.js";
 
 const argv = {
@@ -33,11 +34,11 @@ export const APP_RECIPE_SCHEMA = {
         version,
         {
           type: "object", additionalProperties: false, required: ["github"],
-          properties: { github: { ...text, pattern: "^[\\w.-]+/[\\w.-]+$" } },
+          properties: { github: { ...text, pattern: APP_GITHUB_PATTERN } },
         },
         {
           type: "object", additionalProperties: false, required: ["npm"],
-          properties: { npm: text },
+          properties: { npm: { ...text, pattern: APP_NPM_PATTERN, maxLength: 214, not: { enum: ["node_modules", "favicon.ico"] } } },
         },
       ],
     },

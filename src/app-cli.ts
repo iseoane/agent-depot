@@ -72,6 +72,7 @@ export async function runAppCommand(
     ];
     if (update) {
       columns.push(`latest: ${update.latestVersion ?? "unknown"}`, update.status);
+      if (update.reason && update.reason !== result.reason) columns.push(update.reason);
     }
     if (result.reason) columns.push(result.reason);
     output(columns.join("\t"));

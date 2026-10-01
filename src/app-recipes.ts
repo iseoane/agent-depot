@@ -2,6 +2,9 @@ import {
   parsePortableInstallationMethod, PROJECT_HOSTS, type ProjectHost,
 } from "./project-manifest.js";
 
+export const APP_GITHUB_PATTERN = "^[\\w-][\\w.-]*/[\\w-][\\w.-]*$";
+export const APP_NPM_PATTERN = "^(?:@[a-z0-9~-][a-z0-9._~-]*/)?[a-z0-9~-][a-z0-9._~-]*$";
+
 export interface AppStep {
   readonly argv?: readonly [string, ...string[]];
   readonly manual?: string;
@@ -91,11 +94,15 @@ function latest(value: unknown): AppRecipe["latest"] {
   const item = object(value, ["github", "npm", "argv", "pattern"], "latest");
   if (Object.keys(item).length === 1 && item.github !== undefined) {
     const github = text(item.github, "latest.github");
-    if (!/^[\w.-]+\/[\w.-]+$/u.test(github)) throw new Error("latest.github: expected owner/repo");
+    if (!new RegExp(APP_GITHUB_PATTERN).test(github)) throw new Error("latest.github: expected owner/repo");
     return { github };
   }
   if (Object.keys(item).length === 1 && item.npm !== undefined) {
-    return { npm: text(item.npm, "latest.npm") };
+    const npm = text(item.npm, "latest.npm");
+    if (npm.length > 214 || !new RegExp(APP_NPM_PATTERN).test(npm) || ["node_modules", "favicon.ico"].includes(npm)) {
+      throw new Error("latest.npm: expected a valid npm package name");
+    }
+    return { npm };
   }
   return version(item, "latest");
 }

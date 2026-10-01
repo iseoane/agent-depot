@@ -546,8 +546,12 @@ Skills. Apps are user-global only. Every selected step is previewed before the
 batch confirmation; independent failures do not stop the remaining updates.
 Manual batch outcomes are completed separately using `app update --manual-done`.
 Updates record the version confirmed by the recipe's version command, not the
-registry response. Version identity ignores a leading `v` before a digit and
-does not infer semantic version ordering.
+registry response. Strict SemVer comparison ignores a leading `v`, orders prereleases and does not
+offer a downgrade when installed is at or ahead of latest. Non-SemVer versions
+use opaque inequality and **may offer a downgrade**. GitHub `/releases/latest`
+excludes drafts and prereleases; npm uses package metadata's `dist-tags.latest`.
+Lookup failures show reasons (redirect, rate limit, HTTP status, timeout,
+oversized or invalid response).
 
 
 App lifecycle commands are non-interactive: stdin is ignored (EOF), as in the

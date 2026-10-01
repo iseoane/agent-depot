@@ -219,4 +219,4 @@ These notes come from the four candidate apps reviewed during exploration on 202
 
 Open Question 3 resolved: `update apply --scope user-global` accepts repeatable `--app <name>` and existing `--skill <id|path>` together, or `--all` for both. Apps are excluded from project scope. Batch manual steps are completed separately through `app update <name> --manual-done --yes`.
 
-Latest HTTP checks are anonymous, redirect-free, capped at 1 MiB and time out after five seconds. Version identity comparison ignores a leading `v` before a digit, consistent with opaque Skill versions rather than introducing a semantic-version ordering requirement.
+Latest HTTP checks are anonymous, redirect-free, capped at 1 MiB and time out after five seconds. Strict SemVer comparison ignores a leading `v`, orders prereleases and suppresses updates when installed is at or ahead of latest. Other versions use opaque inequality, which can offer downgrades. GitHub `/releases/latest` excludes drafts and prereleases; npm metadata uses `dist-tags.latest`. HTTP failures retain reasons in checks/listings.

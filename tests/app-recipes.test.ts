@@ -161,3 +161,20 @@ test("schema and parser agree on hosts, required fields, steps and latest varian
     }));
   }
 });
+
+test("latest npm accepts registry package names but rejects credentials, paths and invalid names", () => {
+  for (const npm of ["example", "@scope/example", "some-package.v2", "@scope-name/tool_name"]) {
+    assert.deepEqual(parseAppRecipe({ ...recipe, latest: { npm } }).latest, { npm });
+  }
+  for (const npm of ["../example", "@scope/../example", "@scope", "UPPER", "a b", "https://registry.npmjs.org/a", "a?token=secret", "_hidden", ".hidden", "a".repeat(215)]) {
+    assert.throws(() => parseAppRecipe({ ...recipe, latest: { npm } }), /latest.npm/u, npm);
+  }
+});
+
+test("latest GitHub rejects dot-prefixed owner and repository segments", () => {
+  for (const github of ["./repo", "../repo", ".owner/repo", "owner/.", "owner/..", "owner/.repo"]) {
+    assert.throws(() => parseAppRecipe({ ...recipe, latest: { github } }), /latest.github/u, github);
+  }
+  assert.deepEqual(parseAppRecipe({ ...recipe, latest: { github: "owner-name/repo.name" } }).latest,
+    { github: "owner-name/repo.name" });
+});

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { compareAppVersions } from "./app-version.js";
 import { fetchAppLatest } from "./app-latest.js";
 import { writeFileAtomically } from "./atomic-file.js";
 import { parseAppRecipe, type AppRecipe, type AppStep } from "./app-recipes.js";
@@ -24,6 +25,15 @@ export interface AppInspection {
   readonly status: "invalid" | "not applicable here" | "needs approval" | "installed" | "not installed";
   readonly installedVersion?: string;
   readonly executable?: string;
+  readonly reason?: string;
+}
+
+export interface AppUpdateCheck {
+  readonly entry: AppEntry;
+  readonly inspection: AppInspection;
+  readonly status: "unknown" | "current" | "update available";
+  readonly installedVersion?: string;
+  readonly latestVersion?: string;
   readonly reason?: string;
 }
 
@@ -250,35 +260,45 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       return { status: "not installed", executable };
     }
   }
-  async function checkUpdate(entry: AppEntry) {
+  async function checkUpdate(entry: AppEntry): Promise<AppUpdateCheck> {
     const inspection = await inspect(entry);
     let latestVersion: string | undefined;
+    let reason = inspection.status === "installed" ? "latest not declared" : inspection.reason ?? inspection.status;
     if (inspection.status === "installed" && entry.recipe?.latest) {
       try {
         const latest = entry.recipe.latest;
+        reason = "latest executable unavailable";
         if ("argv" in latest) {
           const approval = await checkApproval(entry);
+          if (approval) reason = approval.reason ?? approval.status;
           if (!approval) {
             const { executable, blocked } = await resolve(latest.argv[0]);
             if (executable && !blocked) {
+              reason = "latest command failed";
               const result = await runner(executable, latest.argv.slice(1), {
                 cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
               });
               if (result.code === 0 && !result.signal && !result.outputTooLarge) {
                 latestVersion = new RegExp(latest.pattern).exec(result.stdout.toString("utf8"))?.[1];
+                reason = "invalid response";
               }
             }
           }
         } else {
-          latestVersion = await fetchAppLatest(latest, environment.fetch ?? globalThis.fetch);
+          const lookup = await fetchAppLatest(latest, environment.fetch ?? globalThis.fetch);
+          latestVersion = lookup.latestVersion;
+          reason = lookup.reason ?? "invalid response";
         }
-      } catch { /* Lookup failures remain unknown and do not abort the batch. */ }
+      } catch { reason = "latest lookup failed"; }
     }
     const normalize = (version: string) => version.replace(/^v(?=\d)/u, "");
+    const comparison = latestVersion && inspection.installedVersion
+      ? compareAppVersions(inspection.installedVersion, latestVersion) : undefined;
     const status = !latestVersion || !inspection.installedVersion ? "unknown" as const
-      : normalize(latestVersion) === normalize(inspection.installedVersion) ? "current" as const
+      : (comparison !== undefined ? comparison >= 0 : normalize(latestVersion) === normalize(inspection.installedVersion)) ? "current" as const
       : "update available" as const;
-    return { entry, ...inspection, inspection, status, latestVersion };
+    return { entry, inspection, installedVersion: inspection.installedVersion, status, latestVersion,
+      reason: status === "unknown" ? reason : undefined };
   }
   const installations = path.join(path.dirname(directory), "app-installations");
   const installationPath = (name: string) => path.join(

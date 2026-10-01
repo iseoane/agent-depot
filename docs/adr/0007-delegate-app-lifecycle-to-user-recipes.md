@@ -36,7 +36,7 @@ Uninstall never implicitly runs Host teardown: teardown remains separately previ
 ### Ticket 05 update decisions
 
 - User-global `update apply` accepts repeated `--app <name>` alongside existing `--skill` selections; `--all` includes both. Project scope never selects Apps. Manual batch outcomes direct users to `app update <name> --manual-done --yes`.
-- Latest HTTP lookups use anonymous public GitHub Releases/npm endpoints, no redirects, a five-second timeout and a 1 MiB response cap. Missing/unresolvable latest is unknown. Version comparison follows existing opaque version identity semantics, ignoring a leading `v` before a digit; it does not infer semantic ordering.
+- Latest HTTP lookups use anonymous public GitHub Releases/npm endpoints, no redirects, a five-second timeout and a 1 MiB response cap. Missing/unresolvable latest is unknown. Strict SemVer versions (ignoring a leading `v`) are updateable only when latest is newer, including prerelease ordering; installed versions at or ahead of latest are current. Opaque versions retain inequality, which can offer a downgrade. The existing Skill comparator is deliberately permissive, so Apps use a strict comparator without changing Skill behavior.
 
 ### Ticket 05 review: verified update outcomes
 
@@ -51,3 +51,14 @@ Confirmed manual fallbacks persist the pre-update version and latest in private,
 atomic sibling `app-pending-updates/` records, bound to canonical recipe path and
 content hash. `--manual-done` uses this baseline across CLI invocations; successful
 updates remove it. This is version evidence, not tracking App-written artifacts.
+
+
+### Ticket 05 review: public registry lookup
+
+npm lookup validates package names and reads `dist-tags.latest` from package
+metadata, with scoped slash encoding (`@scope%2Fname`) and npm's install-v1 media
+type. GitHub lookup rejects dot-prefixed identity segments, encodes each segment,
+and sends the package-version User-Agent, GitHub media type and API version.
+`/releases/latest` excludes drafts and prereleases. No redirects are followed,
+including same-origin ones; redirect, rate-limit, HTTP-status, timeout, oversize
+and malformed-response reasons remain visible in checks and listings.

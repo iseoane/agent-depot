@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 
 async function fixture(latest: unknown, fetch: typeof globalThis.fetch) {
@@ -31,8 +32,9 @@ test("approved GitHub latest check offers an update and execution records verifi
   const f = await fixture({ github: "owner/repo" }, async (url, options) => {
     assert.equal(url, "https://api.github.com/repos/owner/repo/releases/latest");
     assert.equal(options?.credentials, "omit");
-    assert.equal(options?.redirect, "error");
-    assert.deepEqual(options?.headers, { Accept: "application/json" });
+    assert.equal(options?.redirect, "manual");
+    assert.deepEqual(options?.headers, { Accept: "application/vnd.github+json",
+      "User-Agent": `agent-depot/${AGENT_DEPOT_PACKAGE_VERSION}`, "X-GitHub-Api-Version": "2022-11-28" });
     return new Response(JSON.stringify({ tag_name: "v2.0.0" }));
   });
   try {
@@ -44,15 +46,15 @@ test("approved GitHub latest check offers an update and execution records verifi
 });
 
 test("npm lookup distinguishes current from unknown without real network", async () => {
-  let response = new Response(JSON.stringify({ version: "1.0.0" }));
+  let response = new Response(JSON.stringify({ "dist-tags": { latest: "1.0.0" } }));
   const f = await fixture({ npm: "@scope/example" }, async url => {
-    assert.equal(url, "https://registry.npmjs.org/%40scope%2Fexample/latest");
+    assert.equal(url, "https://registry.npmjs.org/@scope%2Fexample");
     return response;
   });
   try {
     await f.apps.approve(f.entry);
     assert.equal((await f.apps.checkUpdate(f.entry)).status, "current");
-    for (const body of ["bad JSON", JSON.stringify({ version: "" }), "x".repeat(1024 * 1024 + 1)]) {
+    for (const body of ["bad JSON", JSON.stringify({ "dist-tags": { latest: "" } }), "x".repeat(1024 * 1024 + 1)]) {
       response = new Response(body);
       assert.equal((await f.apps.checkUpdate(f.entry)).status, "unknown");
     }
@@ -75,7 +77,7 @@ test("latest argv requires unchanged approval and uses bounded home execution", 
 });
 
 test("CLI existing update batch selects Apps and continues after an App failure", async () => {
-  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
   try {
     const { runCli } = await import("../src/cli.js");
     const { createSourceOperations } = await import("../src/sources.js");
@@ -121,7 +123,7 @@ test("app update CLI previews, confirms and checks manual completion", async () 
 });
 
 test("batch all applies approved Apps, subset excludes others and project rejects Apps", async () => {
-  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
   try {
     const { runCli } = await import("../src/cli.js");
     const { createSourceOperations } = await import("../src/sources.js");
@@ -144,7 +146,7 @@ test("HTTP timeout and truncated bodies are unknown, never update candidates", a
   const f = await fixture({ github: "owner/repo" }, async () => new Promise<Response>(() => {}));
   try {
     await f.apps.approve(f.entry);
-    assert.equal((await f.apps.checkUpdate(f.entry)).status, "unknown");
+    assert.equal((await f.apps.checkUpdate(f.entry)).reason, "timeout");
     const brokenBody = createAppOperations({ ...f.environment, fetch: async () => new Response(new ReadableStream({
       start(controller) { controller.error(new Error("connection lost")); },
     })) });
@@ -153,7 +155,7 @@ test("HTTP timeout and truncated bodies are unknown, never update candidates", a
 });
 
 test("one existing batch selects a real built-in Skill and an App together", async () => {
-  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
   try {
     const { runCli } = await import("../src/cli.js");
     const { createSourceOperations } = await import("../src/sources.js");
@@ -176,7 +178,7 @@ test("one existing batch selects a real built-in Skill and an App together", asy
 });
 
 test("manual batch completion guidance safely quotes shell-active App names", async () => {
-  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
   try {
     const { runCli } = await import("../src/cli.js");
     const { createSourceOperations } = await import("../src/sources.js");
@@ -207,7 +209,7 @@ test("a failed latest executable lookup remains unknown rather than aborting the
 });
 
 test("unchanged update versions fail without recording success", async () => {
-  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
   try {
     await f.apps.approve(f.entry);
     const apps = createAppOperations({ ...f.environment, runner: async () => ({
@@ -221,7 +223,7 @@ test("unchanged update versions fail without recording success", async () => {
 });
 
 test("manual update verifies its saved baseline across CLI invocations and reports a different new version", async () => {
-  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
   let version = "1.0.0";
   try {
     const { runCli } = await import("../src/cli.js");
@@ -241,5 +243,71 @@ test("manual update verifies its saved baseline across CLI invocations and repor
     assert.equal(await runCli(["app", "update", "example", "--manual-done", "--yes"], deps()), 0);
     assert.ok(lines.some(line => line.includes("installed 1.0.0 -> 1.9.0 (latest 2.0.0)")));
     assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.9.0");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("semver availability excludes downgrades and orders prereleases while retaining opaque fallback", async () => {
+  let installed = "3.0.0";
+  let latest = "2.0.0";
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: latest } })));
+  try {
+    await writeFile(f.entry.file, JSON.stringify({ ...f.entry.recipe, version: { argv: ["example", "version"], pattern: "(\\S+)" } }));
+    const apps = createAppOperations({ ...f.environment, runner: async () => ({
+      code: 0, signal: null, stdout: Buffer.from(installed), stderr: "", outputTooLarge: false,
+    }) });
+    const [entry] = await apps.load();
+    await apps.approve(entry!);
+    for (const [current, available, status] of [
+      ["3.0.0", "2.0.0", "current"], ["v2.0.0", "2.0.0-rc.1", "current"],
+      ["2.0.0-rc.2", "2.0.0-rc.10", "update available"], ["2.0.0-rc.10", "2.0.0-rc.2", "current"],
+      ["2.0.0-alpha", "2.0.0", "update available"], ["2.0.0+local", "2.0.0+remote", "current"],
+      ["nightly-old", "nightly-new", "update available"], ["01.0.0", "1.0.0", "update available"],
+      ["2.0.0-01", "2.0.0-1", "update available"],
+    ]) {
+      installed = current!; latest = available!;
+      assert.equal((await apps.checkUpdate(entry!)).status, status, `${current} vs ${available}`);
+    }
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("unscoped npm metadata lookup uses dist-tags.latest and npm's metadata media type", async () => {
+  const f = await fixture({ npm: "example" }, async (url, options) => {
+    assert.equal(url, "https://registry.npmjs.org/example");
+    assert.deepEqual(options?.headers, { Accept: "application/vnd.npm.install-v1+json" });
+    return new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" }, version: "9.0.0" }));
+  });
+  try {
+    await f.apps.approve(f.entry);
+    assert.equal((await f.apps.checkUpdate(f.entry)).latestVersion, "2.0.0");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("HTTP latest failures retain actionable reasons in core and CLI output", async () => {
+  let response = new Response("", { status: 302, headers: { Location: "https://other.example/repo" } });
+  const f = await fixture({ github: "owner/repo" }, async () => response);
+  try {
+    const { runCli } = await import("../src/cli.js");
+    const { createSourceOperations } = await import("../src/sources.js");
+    await f.apps.approve(f.entry);
+    for (const [status, reason] of [[302, "redirected — update latest.github"], [429, "rate-limited"], [403, "rate-limited"], [404, "HTTP 404"]] as const) {
+      response = new Response("", { status, headers: status === 403 ? { "X-RateLimit-Remaining": "0" } : {} });
+      const check = await f.apps.checkUpdate(f.entry);
+      assert.equal(check.status, "unknown");
+      assert.equal(check.reason, reason);
+      const lines: string[] = [];
+      const deps = { appOperations: f.apps, homeDirectory: f.home,
+        operations: createSourceOperations({ statePath: path.join(f.home, "sources.json") }),
+        stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) };
+      response = new Response("", { status, headers: status === 403 ? { "X-RateLimit-Remaining": "0" } : {} });
+      assert.equal(await runCli(["update", "check", "--scope", "user-global"], deps), 0);
+      assert.ok(lines.some(line => line.includes(reason)));
+      response = new Response("", { status, headers: status === 403 ? { "X-RateLimit-Remaining": "0" } : {} });
+      assert.equal(await runCli(["app", "list"], deps), 0);
+      assert.ok(lines.filter(line => line.includes(reason)).length >= 2);
+    }
+    for (const [body, reason] of [["bad JSON", "invalid response"], [JSON.stringify({ tag_name: "" }), "invalid response"], ["x".repeat(1024 * 1024 + 1), "too large"]]) {
+      response = new Response(body);
+      assert.equal((await f.apps.checkUpdate(f.entry)).reason, reason);
+    }
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
