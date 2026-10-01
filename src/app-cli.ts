@@ -1,6 +1,6 @@
 import { PROJECT_HOSTS, type ProjectHost } from "./project-manifest.js";
 import { APP_RECIPE_SCHEMA } from "./app-schema.js";
-import { type AppOperations, type AppEntry, type AppLifecyclePlan } from "./app-flow.js";
+import { type AppOperations, type AppEntry, type AppLifecyclePlan, type AppLifecycleResult } from "./app-flow.js";
 import { CliUsageError } from "./usage-error.js";
 
 export async function runAppCommand(
@@ -145,7 +145,7 @@ async function runLifecycle(
 
   async function applyPlan(plan: AppLifecyclePlan): Promise<number> {
     const result = done ? await apps.completeManual(plan, true) : await apps.executeLifecycle(plan, true);
-    output(`${name}${plan.host ? ` (${plan.host})` : ""}: ${result.status}`);
+    output(`${name}${plan.host ? ` (${plan.host})` : ""}: ${describeAppResult(result)}`);
     if (result.reason) output(result.reason);
     if (result.status === "manual required") {
       output(`Manual (never executed): ${result.manual}`);
@@ -163,4 +163,10 @@ export function describeManualCompletion(plan: AppLifecyclePlan): string {
     : "'" + name.replaceAll("'", "'\\''") + "'";
   const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
   return `After completing it, run app ${plan.action} ${quotedName}${plan.host ? ` --host ${plan.host}` : ""} --manual-done --yes to check version (${shell}).`;
+}
+
+export function describeAppResult(result: AppLifecycleResult): string {
+  return result.status === "installed" && result.previousVersion
+    ? `installed ${result.previousVersion} -> ${result.installedVersion} (latest ${result.latestVersion ?? "unknown"})`
+    : result.status;
 }

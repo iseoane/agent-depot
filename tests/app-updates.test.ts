@@ -93,8 +93,8 @@ test("CLI existing update batch selects Apps and continues after an App failure"
     assert.equal(await runCli(["update", "check", "--scope", "user-global"], deps), 0);
     assert.ok(lines.some(line => line.includes("App example") && line.includes("update available")));
     assert.equal(await runCli(["update", "apply", "--scope", "user-global", "--app", "example", "--app", "second", "--yes"], deps), 1);
-    assert.ok(lines.some(line => line.includes("App second: installed")));
-    assert.ok(lines.some(line => line.includes("Update summary: 1 updated, 1 failed")));
+    assert.ok(lines.some(line => line.includes("App second: failed")));
+    assert.ok(lines.some(line => line.includes("Update summary: 0 updated, 2 failed")));
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
 
@@ -116,7 +116,7 @@ test("app update CLI previews, confirms and checks manual completion", async () 
     await f.apps.approve(entry!);
     assert.equal(await runCli(["app", "update", "example", "--yes"], deps), 1);
     assert.ok(lines.some(line => line.includes("Manual (never executed): update yourself")));
-    assert.equal(await runCli(["app", "update", "example", "--manual-done", "--yes"], deps), 0);
+    assert.equal(await runCli(["app", "update", "example", "--manual-done", "--yes"], deps), 1);
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
 
@@ -203,5 +203,43 @@ test("a failed latest executable lookup remains unknown rather than aborting the
       return "/bin/example";
     } });
     assert.equal((await apps.checkUpdate(f.entry)).status, "unknown");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("unchanged update versions fail without recording success", async () => {
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  try {
+    await f.apps.approve(f.entry);
+    const apps = createAppOperations({ ...f.environment, runner: async () => ({
+      code: 0, signal: null, stdout: Buffer.from("1.0.0"), stderr: "", outputTooLarge: false,
+    }) });
+    const outcome = await apps.executeLifecycle(await apps.planLifecycle(f.entry, "update"), true);
+    assert.equal(outcome.status, "failed");
+    assert.equal(outcome.reason, "version unchanged (1.0.0); expected 2.0.0");
+    assert.deepEqual(await apps.trackedApps(), []);
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("manual update verifies its saved baseline across CLI invocations and reports a different new version", async () => {
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ version: "2.0.0" })));
+  let version = "1.0.0";
+  try {
+    const { runCli } = await import("../src/cli.js");
+    await writeFile(f.entry.file, JSON.stringify({ ...f.entry.recipe, update: { manual: "update yourself" } }));
+    const environment = { ...f.environment, runner: async () => ({
+      code: 0, signal: null, stdout: Buffer.from(version), stderr: "", outputTooLarge: false,
+    }) };
+    const apps = createAppOperations(environment);
+    await apps.approve((await apps.load())[0]!);
+    const lines: string[] = [];
+    const deps = () => ({ appOperations: createAppOperations(environment),
+      stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) });
+    assert.equal(await runCli(["app", "update", "example", "--yes"], deps()), 1);
+    assert.equal(await runCli(["app", "update", "example", "--manual-done", "--yes"], deps()), 1);
+    assert.ok(lines.some(line => line.includes("version unchanged (1.0.0); expected 2.0.0")));
+    version = "1.9.0";
+    assert.equal(await runCli(["app", "update", "example", "--manual-done", "--yes"], deps()), 0);
+    assert.ok(lines.some(line => line.includes("installed 1.0.0 -> 1.9.0 (latest 2.0.0)")));
+    assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.9.0");
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });

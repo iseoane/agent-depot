@@ -37,3 +37,17 @@ Uninstall never implicitly runs Host teardown: teardown remains separately previ
 
 - User-global `update apply` accepts repeated `--app <name>` alongside existing `--skill` selections; `--all` includes both. Project scope never selects Apps. Manual batch outcomes direct users to `app update <name> --manual-done --yes`.
 - Latest HTTP lookups use anonymous public GitHub Releases/npm endpoints, no redirects, a five-second timeout and a 1 MiB response cap. Missing/unresolvable latest is unknown. Version comparison follows existing opaque version identity semantics, ignoring a leading `v` before a digit; it does not infer semantic ordering.
+
+### Ticket 05 review: verified update outcomes
+
+Update plans carry the pre-update installed version and the selected latest version
+(or unknown). Automated and manual updates succeed only when the post-update
+`version` differs from the pre-update version. An unchanged version fails with
+`version unchanged (<old>); expected <latest>` and leaves installed tracking
+unchanged. A changed version may differ from latest; report
+`installed <old> -> <new> (latest <latest>)` and record the verified new version.
+
+Confirmed manual fallbacks persist the pre-update version and latest in private,
+atomic sibling `app-pending-updates/` records, bound to canonical recipe path and
+content hash. `--manual-done` uses this baseline across CLI invocations; successful
+updates remove it. This is version evidence, not tracking App-written artifacts.

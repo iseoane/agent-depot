@@ -43,6 +43,8 @@ export interface AppLifecyclePlan extends AppStep {
   readonly entry: AppEntry;
   readonly action: "install" | "update" | "uninstall" | "setup" | "teardown";
   readonly host?: ProjectHost;
+  readonly previousVersion?: string;
+  readonly latestVersion?: string;
   readonly executable?: string;
   readonly warning?: string;
   readonly cwd: string;
@@ -58,6 +60,9 @@ export interface TrackedApp {
 export interface AppLifecycleResult {
   readonly status: "installed" | "untracked" | "manual required" | "failed" | "completed";
   readonly manual?: string;
+  readonly previousVersion?: string;
+  readonly installedVersion?: string;
+  readonly latestVersion?: string;
   readonly reason?: string;
 }
 
@@ -318,7 +323,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     return { name, file };
   }
 
-  async function planLifecycle(entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost): Promise<AppLifecyclePlan> {
+  async function planStep(entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost): Promise<AppLifecyclePlan> {
     const approval = await checkApproval(entry);
     if (approval) throw new Error(approval.reason ?? approval.status);
     const hostAction = action === "setup" || action === "teardown";
@@ -330,8 +335,16 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       cwd: home, environment: isWsl ? "linux (WSL)" : platform });
   }
 
+  async function planLifecycle(entry: AppEntry, action: AppLifecyclePlan["action"], host?: ProjectHost): Promise<AppLifecyclePlan> {
+    const plan = await planStep(entry, action, host);
+    if (action !== "update") return plan;
+    const update = await checkUpdate(entry);
+    if (!update.installedVersion) throw new Error("Update requires a successful installed version check");
+    return Object.freeze({ ...plan, previousVersion: update.installedVersion, latestVersion: update.latestVersion });
+  }
+
   async function recheckPlan(plan: AppLifecyclePlan): Promise<void> {
-    const current = await planLifecycle(plan.entry, plan.action, plan.host);
+    const current = await planStep(plan.entry, plan.action, plan.host);
     const sameArgv = current.argv?.length === plan.argv?.length
       && current.argv?.every((arg, index) => arg === plan.argv?.[index]) !== false;
     if (!sameArgv || current.executable !== plan.executable || current.warning !== plan.warning
@@ -354,12 +367,19 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     const inspection = await inspect(plan.entry);
     const name = plan.entry.recipe!.name;
     if ((plan.action === "install" || plan.action === "update") && inspection.status === "installed") {
+      if (plan.action === "update" && (!plan.previousVersion || inspection.installedVersion === plan.previousVersion)) {
+        return { status: "failed", reason: `version unchanged (${plan.previousVersion ?? "unknown"}); expected ${plan.latestVersion ?? "unknown"}` };
+      }
       await mkdir(installations, { recursive: true, mode: 0o700 });
       await chmod(installations, 0o700);
       await writeFileAtomically(installationPath(name), JSON.stringify({
         name, recipeFile: plan.entry.canonicalFile, installedVersion: inspection.installedVersion,
       }), { mode: 0o600 });
-      return { status: "installed" };
+      if (plan.action === "update") await unlink(pendingUpdatePath(name)).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      });
+      return { status: "installed", previousVersion: plan.previousVersion,
+        installedVersion: inspection.installedVersion, latestVersion: plan.latestVersion };
     }
     if (plan.action === "uninstall" && inspection.status === "not installed") {
       await forgetApp(name, true);
@@ -394,7 +414,18 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     return recordOutcome(plan);
   }
 
-  function manualFallback(plan: AppLifecyclePlan, reason = "Executable unavailable"): AppLifecycleResult {
+  const pendingUpdates = path.join(path.dirname(directory), "app-pending-updates");
+  const pendingUpdatePath = (name: string) => path.join(pendingUpdates, path.basename(installationPath(name)));
+
+  async function manualFallback(plan: AppLifecyclePlan, reason = "Executable unavailable"): Promise<AppLifecycleResult> {
+    if (plan.action === "update" && plan.manual) {
+      await mkdir(pendingUpdates, { recursive: true, mode: 0o700 });
+      await chmod(pendingUpdates, 0o700);
+      await writeFileAtomically(pendingUpdatePath(plan.entry.recipe!.name), JSON.stringify({
+        recipeFile: plan.entry.canonicalFile, hash: plan.entry.hash,
+        previousVersion: plan.previousVersion, latestVersion: plan.latestVersion,
+      }), { mode: 0o600 });
+    }
     return plan.manual ? { status: "manual required", manual: plan.manual, reason }
       : { status: "failed", reason };
   }
@@ -405,6 +436,19 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     const approval = await checkApproval(plan.entry);
     if (approval) throw new Error(approval.reason ?? approval.status);
     if (!plan.manual) throw new Error("No manual step declared");
+    if (plan.action === "update") {
+      try {
+        const pending = JSON.parse(await readFile(pendingUpdatePath(plan.entry.recipe!.name), "utf8"));
+        if (pending.recipeFile !== plan.entry.canonicalFile || pending.hash !== plan.entry.hash
+          || typeof pending.previousVersion !== "string" || !pending.previousVersion
+          || (pending.latestVersion !== undefined && typeof pending.latestVersion !== "string")) {
+          throw new Error("Manual update baseline changed; preview the update again");
+        }
+        plan = { ...plan, previousVersion: pending.previousVersion, latestVersion: pending.latestVersion };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
     return recordOutcome(plan, true);
   }
 

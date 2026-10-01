@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { createAppOperations, type AppOperations } from "./app-flow.js";
-import { describeManualCompletion, runAppCommand } from "./app-cli.js";
+import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
 
 import { pathsOverlap } from "./path-safety.js";
 import { skillTreeBaseline, type SkillCandidate } from "./skill-discovery.js";
@@ -978,7 +978,7 @@ async function runUpdate(
   for (const plan of appPlans) {
     try {
       const outcome = await apps.executeLifecycle(plan, true);
-      output(`App ${plan.entry.recipe!.name}: ${outcome.status}${outcome.reason ? `: ${outcome.reason}` : ""}`);
+      output(`App ${plan.entry.recipe!.name}: ${describeAppResult(outcome)}${outcome.reason ? `: ${outcome.reason}` : ""}`);
       if (outcome.status === "installed") appUpdated++;
       else {
         appFailed++;
