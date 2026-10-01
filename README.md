@@ -1,6 +1,28 @@
 # Agent Depot
 
-Agent Depot keeps a global catalog of Git Sources for future skill discovery.
+Agent Depot is a cross-platform manager for the reusable resources that coding agents
+use. It discovers Skills from Git Sources, installs them into one or more Hosts
+(Pi, Claude Code, Codex and OpenCode), keeps track of what it installed and updates
+it safely, all from a CLI or an interactive TUI.
+
+What it does:
+
+- **Sources and catalog**: register Git repositories (plus the built-in
+  `builtin:agent-depot` Source) and discover the Skills they contain.
+- **Install Skills** user-global or per project, for several Hosts at once, pinned
+  to a version or following the latest. A project manifest lets a fresh checkout
+  reinstall the same Skills.
+- **Updates**: check and apply updates in batch; every change is previewed first and
+  needs explicit confirmation.
+- **Existing installations**: report unmanaged Skills already on disk, adopt the
+  ones that exactly match a Source, or remove them by explicit path.
+- **Apps**: install, update and uninstall user-global applications through
+  user-written App recipes that must be approved before they run.
+- **Profiles**: export your user-global Sources, Skill selections and App recipes to
+  a portable file and import them, add-only, on another machine.
+
+Agent Depot never overwrites or deletes content without a preview and confirmation,
+and refuses unsafe paths and links.
 
 Requires Node.js >= 24 (Active LTS). The [interactive TUI](#interactive-tui)
 needs an interactive terminal.
