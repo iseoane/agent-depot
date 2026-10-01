@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 
 - Hermetic end-to-end coverage for Apps in the CLI and in a real terminal.
-- Test processes ignore an exported `XDG_STATE_HOME`, so a developer's own state no longer affects the suite (`prepublishOnly` failed with a manual-testing sandbox exported).
+- Test processes ignore an exported `XDG_STATE_HOME`, so a developer's own state no longer affects the suite.
+- Test processes ignore `FORCE_COLOR`, which `node --test` sets when run from a real terminal; the TUI tests no longer fail under `npm publish` in a TTY.
 
 ## [0.2.1] - 2026-09-30
 
