@@ -4,9 +4,29 @@
 
 **Blocked by:** 01.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Nothing present in the destination is removed, replaced or changed; conflicts are skipped and their difference is shown.
-- [ ] One item's failure does not stop the others; results are summarised per item.
-- [ ] Imported recipes are unapproved and Apps are never installed by import.
-- [ ] Without `--yes` nothing is written.
+- [x] Nothing present in the destination is removed, replaced or changed; conflicts are skipped and their difference is shown.
+- [x] One item's failure does not stop the others; results are summarised per item.
+- [x] Imported recipes are unapproved and Apps are never installed by import.
+- [x] Without `--yes` nothing is written.
+
+## Comments
+
+Implemented shared `src/profile-import.ts` classification/apply and CLI import.
+Source inclusion stays transient; filtered-out Source blocks do not force
+registration for self-contained Skill identities. Recipe publication uses an
+exclusive atomic hard link and a hashed identity plus UUID filename, preventing
+overwrite, traversal and reuse of stale approval receipts. Apps never run.
+
+Verification: `pnpm typecheck`, `pnpm lint`, import tests (7/7), profile
+tests (21/21), CLI tests (70/70), full `pnpm test` (687/687). The import suite
+executes the built CLI against an isolated, pinned local Git fixture with no
+network access; it also exercises external-method execution after its preview.
+
+Review baseline: `d0478692a90c310eefc05bf447b95fa834b5109e`. Standards and Spec
+reviewed separately in-process because no sub-agent tool was available; no
+unresolved findings. The review simplified the nested Skill installation branch.
+Rollback boundary: remove the Profile import module/tests, import command/help,
+shared filter/parser extraction and this README section; export behavior and
+existing installation operations remain unchanged.

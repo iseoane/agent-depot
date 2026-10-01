@@ -21,7 +21,7 @@ export interface ProfileExportOptions extends ProfileFilters {
   readonly homeDirectory?: string;
 }
 
-function select<T>(items: readonly T[], requested: readonly string[] | undefined, disabled: boolean | undefined,
+export function selectProfileItems<T>(items: readonly T[], requested: readonly string[] | undefined, disabled: boolean | undefined,
   names: (item: T) => readonly string[], block: string): readonly T[] {
   if (disabled && requested?.length) throw new Error(`${block}: filters cannot be combined with --no-${block}`);
   for (const name of requested ?? []) {
@@ -42,12 +42,12 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
   if (!operations.listUserGlobalInstallations) throw new Error("Profile export requires user-global installation listing");
   if (!AGENT_DEPOT_PACKAGE_VERSION) throw new Error("Unable to determine the Agent Depot package version");
   const preview: string[] = [];
-  const sources = select(await operations.listSources(), options.sources, options.noSources,
+  const sources = selectProfileItems(await operations.listSources(), options.sources, options.noSources,
     source => source.kind === "git" ? [source.id, source.url] : [source.id], "sources");
   const allInstallations = await operations.listUserGlobalInstallations();
-  const installations = select(allInstallations, options.skills, options.noSkills,
+  const installations = selectProfileItems(allInstallations, options.skills, options.noSkills,
     skill => [skill.path, path.posix.basename(skill.path)], "skills");
-  const entries = select(await apps.load(), options.apps, options.noApps,
+  const entries = selectProfileItems(await apps.load(), options.apps, options.noApps,
     entry => [entry.recipe?.name ?? path.basename(entry.file)], "apps");
   const owned = await loadAppOwnedSkillFilter({ appEnvironment: { recipesDirectory: apps.directory },
     reportWarning: warning => preview.push(warning) });
