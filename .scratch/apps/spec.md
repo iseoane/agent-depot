@@ -214,3 +214,9 @@ These notes come from the four candidate apps reviewed during exploration on 202
 
 - Setup/teardown reuse lifecycle plans and execution, with repeated `--host <host>` selections. Duplicate, unknown or undeclared Hosts are rejected before execution. Every selected Host is previewed; independent execution failures are reported per Host and do not stop remaining selections.
 - Host actions do not persist wiring state or change installed-App records. Automated success means only that the delegated command succeeded. Manual completion uses `--manual-done --yes` and requires a successful version check, which does not verify Host wiring (including teardown).
+
+### Ticket 05 update decisions
+
+Open Question 3 resolved: `update apply --scope user-global` accepts repeatable `--app <name>` and existing `--skill <id|path>` together, or `--all` for both. Apps are excluded from project scope. Batch manual steps are completed separately through `app update <name> --manual-done --yes`.
+
+Latest HTTP checks are anonymous, redirect-free, capped at 1 MiB and time out after five seconds. Version identity comparison ignores a leading `v` before a digit, consistent with opaque Skill versions rather than introducing a semantic-version ordering requirement.

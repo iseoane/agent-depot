@@ -32,3 +32,8 @@ Uninstall never implicitly runs Host teardown: teardown remains separately previ
 
 - Setup/teardown reuse lifecycle plans and execution, with repeated `--host <host>` selections. Duplicate, unknown or undeclared Hosts are rejected before execution. Every selected Host is previewed; independent execution failures are reported per Host and do not stop remaining selections.
 - Host actions do not persist wiring state or change installed-App records. Automated success means only that the delegated command succeeded. Manual completion uses `--manual-done --yes` and requires a successful version check, which does not verify Host wiring (including teardown).
+
+### Ticket 05 update decisions
+
+- User-global `update apply` accepts repeated `--app <name>` alongside existing `--skill` selections; `--all` includes both. Project scope never selects Apps. Manual batch outcomes direct users to `app update <name> --manual-done --yes`.
+- Latest HTTP lookups use anonymous public GitHub Releases/npm endpoints, no redirects, a five-second timeout and a 1 MiB response cap. Missing/unresolvable latest is unknown. Version comparison follows existing opaque version identity semantics, ignoring a leading `v` before a digit; it does not infer semantic ordering.

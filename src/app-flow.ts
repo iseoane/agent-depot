@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { fetchAppLatest } from "./app-latest.js";
 import { writeFileAtomically } from "./atomic-file.js";
 import { parseAppRecipe, type AppRecipe, type AppStep } from "./app-recipes.js";
 import { type ProjectHost } from "./project-manifest.js";
@@ -34,12 +35,13 @@ export interface AppEnvironment {
   /** Test seam for simulated Windows drive mounts; defaults to /mnt. */
   readonly wslMountRoot?: string;
   readonly runner?: typeof runProcess;
+  readonly fetch?: typeof globalThis.fetch;
   readonly resolveExecutable?: (name: string) => Promise<string | undefined>;
 }
 
 export interface AppLifecyclePlan extends AppStep {
   readonly entry: AppEntry;
-  readonly action: "install" | "uninstall" | "setup" | "teardown";
+  readonly action: "install" | "update" | "uninstall" | "setup" | "teardown";
   readonly host?: ProjectHost;
   readonly executable?: string;
   readonly warning?: string;
@@ -243,6 +245,36 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       return { status: "not installed", executable };
     }
   }
+  async function checkUpdate(entry: AppEntry) {
+    const inspection = await inspect(entry);
+    let latestVersion: string | undefined;
+    if (inspection.status === "installed" && entry.recipe?.latest) {
+      const latest = entry.recipe.latest;
+      if ("argv" in latest) {
+        const approval = await checkApproval(entry);
+        if (!approval) {
+          const { executable, blocked } = await resolve(latest.argv[0]);
+          if (executable && !blocked) {
+            try {
+              const result = await runner(executable, latest.argv.slice(1), {
+                cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
+              });
+              if (result.code === 0 && !result.signal && !result.outputTooLarge) {
+                latestVersion = new RegExp(latest.pattern).exec(result.stdout.toString("utf8"))?.[1];
+              }
+            } catch { /* Unknown latest version is not an available update. */ }
+          }
+        }
+      } else {
+        latestVersion = await fetchAppLatest(latest, environment.fetch ?? globalThis.fetch);
+      }
+    }
+    const normalize = (version: string) => version.replace(/^v(?=\d)/u, "");
+    const status = !latestVersion || !inspection.installedVersion ? "unknown" as const
+      : normalize(latestVersion) === normalize(inspection.installedVersion) ? "current" as const
+      : "update available" as const;
+    return { entry, ...inspection, status, latestVersion };
+  }
   const installations = path.join(path.dirname(directory), "app-installations");
   const installationPath = (name: string) => path.join(
     installations, createHash("sha256").update(name).digest("hex") + ".json",
@@ -321,7 +353,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     }
     const inspection = await inspect(plan.entry);
     const name = plan.entry.recipe!.name;
-    if (plan.action === "install" && inspection.status === "installed") {
+    if ((plan.action === "install" || plan.action === "update") && inspection.status === "installed") {
       await mkdir(installations, { recursive: true, mode: 0o700 });
       await chmod(installations, 0o700);
       await writeFileAtomically(installationPath(name), JSON.stringify({
@@ -333,7 +365,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       await forgetApp(name, true);
       return { status: "untracked" };
     }
-    return { status: "failed", reason: plan.action === "install"
+    return { status: "failed", reason: plan.action !== "uninstall"
       ? `Version did not confirm installation (${inspection.status}); tracking unchanged`
       : `Version still succeeds or cannot be checked (${inspection.status}); tracking retained` };
   }
@@ -383,7 +415,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  return { load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, trackedApps, previewForget, forgetApp };
+  return { checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, trackedApps, previewForget, forgetApp };
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;

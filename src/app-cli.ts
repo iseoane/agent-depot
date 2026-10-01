@@ -9,7 +9,7 @@ export async function runAppCommand(
   output: (line: string) => void,
 ): Promise<number> {
   const [command, ...args] = values;
-  const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|uninstall <name> [--yes] [--manual-done]; app setup|teardown <name> --host <host>... [--yes] [--manual-done]; app uninstall <name> --forget [--yes] (--manual-done requires a declared manual step)";
+  const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|update|uninstall <name> [--yes] [--manual-done]; app setup|teardown <name> --host <host>... [--yes] [--manual-done]; app uninstall <name> --forget [--yes] (--manual-done requires a declared manual step)";
   if (command === "schema" && args.length === 0) {
     output(JSON.stringify(APP_RECIPE_SCHEMA, null, 2));
     return 0;
@@ -20,7 +20,7 @@ export async function runAppCommand(
     }
     return 0;
   }
-  if (command === "install" || command === "uninstall" || command === "setup" || command === "teardown") {
+  if (command === "install" || command === "update" || command === "uninstall" || command === "setup" || command === "teardown") {
     return runLifecycle(command, args, apps, output, usage);
   }
   if (command !== "validate" && command !== "approve") throw new CliUsageError(usage);
