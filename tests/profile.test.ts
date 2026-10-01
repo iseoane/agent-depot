@@ -198,7 +198,6 @@ test("Source and external Skill URLs reject credentials with the corresponding f
   }
 });
 
-
 test("CLI filters Skills and Apps by name and records the running package version", async t => {
   const home = await mkdtemp(path.join(tmpdir(), "ad-profile-names-"));
   t.after(() => rm(home, { recursive: true, force: true }));
@@ -270,7 +269,6 @@ test("export reports named unmanaged Skills and only real exclusions", async t =
   assert.doesNotMatch(result.preview.join("\n"), /Excluded App approvals|Excluded unmanaged Skills, project-scope/);
 });
 
-
 test("profile serialization orders same-name platform recipes independently of input order", () => {
   const linux = { ...recipe, platform: "linux" };
   const first = parseProfile({ ...profile, apps: [recipe, linux] });
@@ -283,4 +281,19 @@ test("query credential checks cover non-HTTP URLs and encoded parameter names", 
   assert.throws(() => parseProfile({ ...profile, skills: [{ ...profile.skills[0],
     methods: { update: { kind: "command", argv: ["curl", "ftp://api.x.com/?%74oken=abc"] } } }] }),
   { message: /^skills\[0\].methods.update.argv\[1\]: credentials/ });
+});
+
+test("malformed URLs in recipe text report the exact field path", () => {
+  assert.throws(() => parseProfile({ ...profile, apps: [{ ...recipe,
+    install: { manual: "see http://[bad" } }] }),
+  { message: "apps[0].install.manual: invalid URL" });
+});
+
+test("URL credential keys normalize separators and cover fragments", () => {
+  for (const suffix of ["?api-key=1", "?api_key=1", "?access_token=1", "?accesstoken=1",
+    "?private-token=1", "?PRIVATE_TOKEN=1", "#token=1", "#api-key=1", "#%74oken=1"]) {
+    assert.throws(() => parseProfile({ ...profile, apps: [{ ...recipe,
+      install: { argv: ["curl", `https://api.x.com/${suffix}`] } }] }),
+    { message: "apps[0].install.argv[1]: credentials are not portable" });
+  }
 });

@@ -63,3 +63,14 @@ CLI help/import placement, test whitespace and `validateOne` are also corrected.
 - Rollback boundary for review corrections: profile validation/diagnostics,
   canonicalization and export previews/tests/docs only; no persistence schemas,
   approvals, Skill contents or Host wiring changed.
+
+### Final URL review corrections
+
+`p01-review2.md` addressed: malformed URLs retain their exact field path,
+credential query/fragment keys normalize separators and case (including
+private-token), and test-file double blank lines are removed. Both new parser
+regressions failed before the fix. Verification: 21 focused profile tests,
+`pnpm typecheck`, `pnpm lint`, and `pnpm test` passed (680 tests).
+Runtime harness: N/A for this bounded parser-only correction; public parser tests
+exercise the boundary without external execution. Rollback boundary: URL parsing
+and credential-key checks in `src/profile.ts` plus the two regression tests.

@@ -42,8 +42,16 @@ function assertPortableText(value: unknown, field: string): void {
       throw new Error(`${field}: credentials are not portable`);
     }
     for (const match of value.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/giu)) {
-      const url = new URL(match[0]);
-      if ([...url.searchParams.keys()].some(key => /^(?:token|key|apikey|api_key|secret|password|passwd|auth|sig|signature|access_token)$/iu.test(key))) {
+      let url: URL;
+      try {
+        url = new URL(match[0]);
+      } catch {
+        throw new Error(`${field}: invalid URL`);
+      }
+      const keys = [...url.searchParams.keys(), ...new URLSearchParams(url.hash.slice(1)).keys()];
+      if (keys.some(key => /^(?:token|key|apikey|secret|password|passwd|auth|sig|signature|accesstoken|privatetoken)$/u.test(
+        key.replace(/[-_]/gu, "").toLowerCase(),
+      ))) {
         throw new Error(`${field}: credentials are not portable`);
       }
     }
