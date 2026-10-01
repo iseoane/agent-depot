@@ -237,3 +237,21 @@ identity (leading `v` and SemVer build metadata do not count as a change). Batch
 plans reuse the loaded check without a second latest lookup. Attested manual
 completion consumes saved pending evidence even on failure; retries require a
 fresh confirmed preview.
+
+### Ticket 06 TUI decisions
+
+- Startup loads recipes, checks approval and reads verified tracking as a cache;
+  focusing an App lazily runs `version`, once per recipe content/view reload.
+  Installations never looks up latest. Cached tracking is not fresh version evidence.
+- `h` reuses the Host checklist as an action selector, not persisted wiring state:
+  checked means setup, unchecked means teardown. Hosts with teardown declarations
+  start checked, so deselecting them explicitly chooses teardown. Only declared
+  steps run; each receives its own preview and y/n confirmation.
+- Marked Apps use the existing marks and batch runner, with per-step confirmations,
+  independent failures and a combined result. Mixed App/Skill marks require separate
+  selections rather than silently dropping either resource category.
+- Manual-only steps directly ask “done, check now”; spawn fallbacks show that
+  prompt after the automated attempt. Declining skips that step and continues the
+  remaining marked Apps. Uninstall does not implicitly teardown.
+- Ticket 06 covers Installations only; Updates and owned-Skill inventory filtering
+  remain with their respective tickets.

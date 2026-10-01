@@ -1,11 +1,12 @@
 import type { BulkTarget } from "./bulk-actions.js";
-import type { InstallationRow, InstallationsData, UnmanagedGroup } from "./installations.js";
+import type { AppRow, InstallationRow, InstallationsData, UnmanagedGroup } from "./installations.js";
 import type { TreeNode, VisibleRow } from "./tree.js";
 
 /** What a tree node stands for: a scope or source group, a managed installation or an unmanaged Skill. */
 export type NodeData =
   | { readonly kind: "group"; readonly label: string }
   | { readonly kind: "installation"; readonly row: InstallationRow }
+  | { readonly kind: "app"; readonly row: AppRow }
   | { readonly kind: "unmanaged"; readonly group: UnmanagedGroup };
 
 export type InstallationNode = TreeNode<NodeData>;
@@ -44,6 +45,10 @@ export function buildTree(data: InstallationsData): readonly InstallationNode[] 
     data: { kind: "group", label: `Unmanaged (user-global) (${data.unmanaged.length})` },
     children: data.unmanaged.map((group): InstallationNode => ({ id: `unmanaged:${group.name}`, data: { kind: "unmanaged", group } })),
   });
+  if (data.apps?.length) roots.push({
+    id: "scope:apps", data: { kind: "group", label: `Apps (user-global) (${data.apps.length})` },
+    children: data.apps.map(row => ({ id: `app:${row.entry.file}`, data: { kind: "app", row } })),
+  });
   return roots;
 }
 
@@ -72,6 +77,10 @@ export function describeNode(row: VisibleRow<NodeData>): string {
   const { data } = row.node;
   if (data.kind === "group") return `${row.expandable ? (row.expanded ? "▾" : "▸") : " "} ${data.label}`;
   if (data.kind === "installation") return data.row.selection.path;
+  if (data.kind === "app") {
+    const { entry, inspection } = data.row;
+    return `${entry.recipe?.name ?? entry.file}  ${inspection.status === "invalid" ? `invalid recipe: ${inspection.reason}` : inspection.installedVersion ?? inspection.status}`;
+  }
   return `${data.group.name} [${data.group.hosts.join(", ")}]`;
 }
 

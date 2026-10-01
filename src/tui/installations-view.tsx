@@ -1,6 +1,8 @@
 import { Box, Text } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { createAppOperations } from "../app-flow.js";
+import { APP_KINDS, handleAppKey, startAppAction, type AppMode } from "./app-actions.js";
 import type { SourceOperations } from "../sources.js";
 import type { InstalledSkills } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
@@ -42,6 +44,7 @@ type LoadState =
 export function InstallationsView({ operations, environment, onCapturingChange, listHeight }: InstallationsViewProps) {
   const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
+  const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [mode, setModeState] = useState<InstallationsMode>(BROWSE);
   // Mirrors the mode synchronously so later keystrokes and the shell never see stale state.
@@ -56,12 +59,14 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     setModeState(next);
   };
 
+  const loadGeneration = useRef(0);
   const reload = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     try {
       const data = await loadInstallations(operations, env);
-      if (mounted.current) setState({ status: "ready", data });
+      if (mounted.current && generation === loadGeneration.current) setState({ status: "ready", data });
     } catch (error) {
-      if (mounted.current) setState({ status: "error", message: errorText(error) });
+      if (mounted.current && generation === loadGeneration.current) setState({ status: "error", message: errorText(error) });
     }
   }, [operations, env, mounted]);
 
@@ -73,6 +78,21 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const roots = useMemo(() => (data ? buildTree(data) : []), [data]);
   const navigation = useTreeNavigation<NodeData>(roots, defaultExpanded);
   const { rows, index } = navigation;
+  const checked = useRef(new Set<string>());
+  const highlighted = rows[index]?.node.data;
+  useEffect(() => {
+    if (highlighted?.kind !== "app") return;
+    const { entry } = highlighted.row;
+    const identity = `${entry.file}:${entry.hash}`;
+    if (checked.current.has(identity)) return;
+    checked.current.add(identity);
+    const generation = loadGeneration.current;
+    void apps.inspect(entry).then(inspection => {
+      if (mounted.current && generation === loadGeneration.current) setState(previous => previous.status !== "ready" ? previous : {
+        ...previous, data: { ...previous.data, apps: previous.data.apps?.map(row => row.entry.file === entry.file && row.entry.hash === entry.hash ? { entry, inspection } : row) },
+      });
+    }).catch(error => { if (mounted.current) setMessage({ kind: "error", text: errorText(error) }); });
+  }, [highlighted, apps, mounted]);
 
   const installed = useMemo<InstalledSkills>(
     () => ({
@@ -94,6 +114,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     isMounted: () => mounted.current,
     unmark: (ids) => marks.setMarked(new Set([...marks.markedRef.current].filter((id) => !ids.includes(id)))),
     finish: async (result) => {
+      checked.current.clear();
       await reload();
       if (!mounted.current) return;
       setMessage(result);
@@ -119,11 +140,13 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     manage,
     startAdoption: (group) => void startAdoption(adoption, group),
     setMessage,
+    startApps: (entries, input) => void startAppAction({ apps, manage }, entries, input),
   };
 
   useKeys((input, key) => {
     const current = modeRef.current;
     if (current.kind === "browse") handleBrowseKey(browse, input, key);
+    else if (APP_KINDS.some(kind => kind === current.kind)) handleAppKey({ apps, manage }, current as AppMode, input, key);
     else if (!handleManageKey(manage, current, input, key)) handleAdoptionKey(adoption, current, input, key);
   });
 

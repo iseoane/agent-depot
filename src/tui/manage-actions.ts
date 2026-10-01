@@ -1,5 +1,6 @@
 import type { Key } from "ink";
 
+import { APP_KINDS, type AppMode } from "./app-actions.js";
 import type { ProjectHost } from "../project-manifest.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
@@ -47,6 +48,7 @@ export type ManageMode =
       readonly skill: SkillCandidate;
       readonly prepared: Extract<UninstallPreparation, { kind: "ready" }>;
     }
+  | AppMode
   | UnmanagedMode
   | BulkMode
   | { readonly kind: "busy"; readonly label: string };
@@ -59,6 +61,7 @@ const MANAGE_KINDS: ReadonlySet<string> = new Set<ManageMode["kind"]>([
   "confirm-host-exposure",
   "confirm-host-remove",
   "confirm-uninstall",
+  ...APP_KINDS,
   ...UNMANAGED_KINDS,
   ...BULK_KINDS,
   "busy",

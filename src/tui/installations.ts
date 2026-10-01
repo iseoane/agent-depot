@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { createAppOperations, type AppEntry, type AppInspection } from "../app-flow.js";
 import {
   defaultProjectManifestPath,
   ProjectManifestStore,
@@ -84,7 +85,13 @@ export function groupUnmanaged(inventory: UserGlobalSkillInventory): readonly Un
     });
 }
 
+export interface AppRow {
+  readonly entry: AppEntry;
+  readonly inspection: AppInspection;
+}
+
 export interface InstallationsData {
+  readonly apps?: readonly AppRow[];
   /** Undefined when the configured operations cannot read user-global state. */
   readonly global?: readonly InstallationRow[];
   readonly project: readonly InstallationRow[];
@@ -142,6 +149,11 @@ export async function loadInstallations(
   environment: TuiEnvironment,
 ): Promise<InstallationsData> {
   const home = homeOf(environment);
+  const appOperations = createAppOperations({ homeDirectory: home, ...environment.appEnvironment });
+  const tracked = await appOperations.trackedApps();
+  const apps = await Promise.all((await appOperations.load()).filter(entry => entry.applicable).map(async entry => ({
+    entry, inspection: await appOperations.inspect(entry, { installedVersion: tracked.find(record => record.name === entry.recipe?.name && record.recipeFile === entry.canonicalFile)?.installedVersion }),
+  })));
   const globalRecords = operations.listUserGlobalInstallations
     ? await operations.listUserGlobalInstallations()
     : undefined;
@@ -170,7 +182,7 @@ export async function loadInstallations(
     ? groupUnmanaged(await scanUserGlobalSkillInventory({ homeDirectory: home, managedInstallations: globalRecords }))
     : [];
   const sources = await operations.listSources().catch(() => []);
-  return { global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources };
+  return { global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps };
 }
 
 /** Source id of an installation's Source, when that Source is still registered. */
