@@ -1,5 +1,7 @@
 # Agent Depot
 
+[**English**](README.md) · [Español](README.es.md)
+
 Agent Depot is a cross-platform manager for the reusable resources that coding agents
 use. It discovers Skills from Git Sources, installs them into one or more Hosts
 (Pi, Claude Code, Codex and OpenCode), keeps track of what it installed and updates
@@ -426,7 +428,6 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marks (or the highlighted skill), `/` filter, `s` toggle one Source or all (when opened from a Source) |
 | Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill, `space` marks a leaf and `a` marks all visible leaves: with marks, `u` and `h` act on all of them with one combined preview and one confirmation (project installations are skipped with a reason) |
 | Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot assess" line |
-
 | Import/Export | `e` export, `i` import; enter a file path, `space` toggle choices, `a` toggle all, `Enter` preview, `y` apply; `j`/`k` scroll previews and results |
 
 Safety model:

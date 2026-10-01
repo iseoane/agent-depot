@@ -30,6 +30,7 @@
     "!skills/**/test_*.py",
     "!skills/**/testdata",
     "README.md",
+    "README.es.md",
     "LICENSE",
     "CHANGELOG.md"
   ],
