@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 
-import { createAppOperations, type AppEntry, type AppInspection } from "../app-flow.js";
+import { createAppOperations, type AppEntry, type AppInspection, type AppOperations } from "../app-flow.js";
 import {
   defaultProjectManifestPath,
   ProjectManifestStore,
@@ -92,6 +92,7 @@ export interface AppRow {
 
 export interface InstallationsData {
   readonly apps?: readonly AppRow[];
+  readonly appsError?: string;
   /** Undefined when the configured operations cannot read user-global state. */
   readonly global?: readonly InstallationRow[];
   readonly project: readonly InstallationRow[];
@@ -147,13 +148,23 @@ async function toRow(
 export async function loadInstallations(
   operations: SourceOperations,
   environment: TuiEnvironment,
+  appOperations: AppOperations = createAppOperations({ homeDirectory: homeOf(environment), ...environment.appEnvironment }),
 ): Promise<InstallationsData> {
   const home = homeOf(environment);
-  const appOperations = createAppOperations({ homeDirectory: home, ...environment.appEnvironment });
-  const tracked = await appOperations.trackedApps();
-  const apps = await Promise.all((await appOperations.load()).filter(entry => entry.applicable).map(async entry => ({
-    entry, inspection: await appOperations.inspect(entry, { installedVersion: tracked.find(record => record.name === entry.recipe?.name && record.recipeFile === entry.canonicalFile)?.installedVersion }),
-  })));
+  let apps: readonly AppRow[] = [];
+  let appsError: string | undefined;
+  try {
+    const tracked = await appOperations.trackedApps();
+    apps = await Promise.all((await appOperations.load()).filter(entry => entry.applicable).map(async entry => ({
+      entry,
+      inspection: await appOperations.inspect(entry, {
+        installedVersion: tracked.find(record => record.name === entry.recipe?.name
+          && record.recipeFile === entry.canonicalFile)?.installedVersion,
+      }),
+    })));
+  } catch (error) {
+    appsError = error instanceof Error ? error.message : String(error);
+  }
   const globalRecords = operations.listUserGlobalInstallations
     ? await operations.listUserGlobalInstallations()
     : undefined;
@@ -182,7 +193,7 @@ export async function loadInstallations(
     ? groupUnmanaged(await scanUserGlobalSkillInventory({ homeDirectory: home, managedInstallations: globalRecords }))
     : [];
   const sources = await operations.listSources().catch(() => []);
-  return { global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps };
+  return { global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps, ...(appsError === undefined ? {} : { appsError }) };
 }
 
 /** Source id of an installation's Source, when that Source is still registered. */

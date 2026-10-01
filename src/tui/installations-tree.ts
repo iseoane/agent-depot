@@ -45,9 +45,9 @@ export function buildTree(data: InstallationsData): readonly InstallationNode[] 
     data: { kind: "group", label: `Unmanaged (user-global) (${data.unmanaged.length})` },
     children: data.unmanaged.map((group): InstallationNode => ({ id: `unmanaged:${group.name}`, data: { kind: "unmanaged", group } })),
   });
-  if (data.apps?.length) roots.push({
-    id: "scope:apps", data: { kind: "group", label: `Apps (user-global) (${data.apps.length})` },
-    children: data.apps.map(row => ({ id: `app:${row.entry.file}`, data: { kind: "app", row } })),
+  if (data.apps?.length || data.appsError) roots.push({
+    id: "scope:apps", data: { kind: "group", label: `Apps (user-global) (${data.apps?.length ?? 0})${data.appsError ? ` — ${data.appsError}` : ""}` },
+    children: (data.apps ?? []).map(row => ({ id: `app:${row.entry.file}`, data: { kind: "app", row } })),
   });
   return roots;
 }

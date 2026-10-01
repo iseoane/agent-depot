@@ -63,12 +63,12 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const reload = useCallback(async () => {
     const generation = ++loadGeneration.current;
     try {
-      const data = await loadInstallations(operations, env);
+      const data = await loadInstallations(operations, env, apps);
       if (mounted.current && generation === loadGeneration.current) setState({ status: "ready", data });
     } catch (error) {
       if (mounted.current && generation === loadGeneration.current) setState({ status: "error", message: errorText(error) });
     }
-  }, [operations, env, mounted]);
+  }, [operations, env, apps, mounted]);
 
   useEffect(() => {
     void reload();

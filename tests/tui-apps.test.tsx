@@ -9,7 +9,18 @@ import { createSourceOperations } from "../src/sources.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
-async function fixture(t: TestContext, failure?: "spawn" | "exit") {
+interface FixtureSetup {
+  readonly home: string;
+  readonly apps: ReturnType<typeof createAppOperations>;
+  readonly appEnvironment: AppEnvironment;
+  readonly commands: string[];
+}
+
+async function fixture(
+  t: TestContext,
+  failure?: "spawn" | "exit",
+  beforeRender?: (setup: FixtureSetup) => Promise<void>,
+) {
   const home = await mkdtemp(path.join(tmpdir(), "tui-apps-"));
   const recipesDirectory = path.join(home, "state", "apps");
   await mkdir(recipesDirectory, { recursive: true });
@@ -33,6 +44,7 @@ async function fixture(t: TestContext, failure?: "spawn" | "exit") {
     },
   };
   const apps = createAppOperations(appEnvironment);
+  await beforeRender?.({ home, apps, appEnvironment, commands });
   const view = render(<InstallationsView operations={createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") })}
     environment={{ homeDirectory: home, projectRoot: home, appEnvironment }} listHeight={20} />);
   t.after(async () => { view.unmount(); await rm(home, { recursive: true, force: true, maxRetries: 3 }); });
@@ -140,18 +152,20 @@ test("changed and invalid recipes cannot execute through the TUI", async t => {
 });
 
 test("approved Apps stay cached at startup and version checks are lazy on focus", async t => {
-  const { view, apps, commands } = await fixture(t);
-  const [entry] = await apps.load();
-  await apps.approve(entry!);
-  await apps.executeLifecycle(await apps.planLifecycle(entry!, "install"), true);
+  const { view, commands } = await fixture(t, undefined, async ({ apps, commands }) => {
+    const [entry] = await apps.load();
+    await apps.approve(entry!);
+    await apps.executeLifecycle(await apps.planLifecycle(entry!, "install"), true);
+    commands.length = 0;
+  });
   await waitForFrame(view.lastFrame, frame => frame.includes("Apps (user-global)"));
-  assert.deepEqual(commands, ["install", "version"]);
+  assert.deepEqual(commands, []);
   await selectDemo(view);
-  await waitForFrame(view.lastFrame, frame => frame.includes("demo  1.0.0"));
-  assert.deepEqual(commands, ["install", "version", "version"]);
+  await waitForFrame(view.lastFrame, frame => frame.includes("demo  1.0.0") && commands.length === 1);
+  assert.deepEqual(commands, ["version"]);
   view.stdin.write("kj");
   await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("> ") && line.includes("demo")));
-  assert.deepEqual(commands, ["install", "version", "version"]);
+  assert.deepEqual(commands, ["version"]);
 });
 
 test("approval detects changed content and allows reviewing the fresh recipe", async t => {
@@ -202,3 +216,19 @@ for (const failure of ["spawn", "exit"] as const) {
     }
   });
 }
+
+async function writeSkill(home: string) {
+  const directory = path.join(home, ".agents", "skills", "sample");
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, "SKILL.md"), "---\nname: sample\ndescription: Sample skill\n---\n");
+}
+
+test("an unreadable App tracking directory does not hide Skill rows", async t => {
+  const { view, commands } = await fixture(t, undefined, async ({ home }) => {
+    await writeSkill(home);
+    // readdir on a file makes the real trackedApps operation fail.
+    await writeFile(path.join(home, "state", "app-installations"), "not a directory");
+  });
+  await waitForFrame(view.lastFrame, frame => frame.includes("sample") && frame.includes("Apps (user-global)") && frame.includes("ENOTDIR"));
+  assert.equal(commands.length, 0);
+});
