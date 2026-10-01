@@ -7,6 +7,7 @@ import { createAppOperations } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { buildProfileExport } from "../src/profile-export.js";
 import { test } from "node:test";
+import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
 
 const recipe = {
@@ -41,7 +42,7 @@ test("profile rejects unknown fields, versions and nonportable content with fiel
   ] as const) assert.throws(() => parseProfile(value), reason);
 });
 
- test("export includes only portable managed state and recipes without running commands", async t => {
+test("export includes only portable managed state and recipes without running commands", async t => {
   const home = await mkdtemp(path.join(tmpdir(), "ad-profile-"));
   t.after(() => rm(home, { recursive: true, force: true }));
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
@@ -63,9 +64,9 @@ test("profile rejects unknown fields, versions and nonportable content with fiel
   assert.deepEqual(result.profile.apps, [recipe]);
   assert.match(result.preview.join("\n"), /built-in Source.*always present/);
   assert.doesNotMatch(serializeProfile(result.profile), /installation|adopted|approvals/);
- });
+});
 
- test("CLI export keeps stdout JSON-only, previews on stderr, and supports file output and filters", async t => {
+test("CLI export keeps stdout JSON-only, previews on stderr, and supports file output and filters", async t => {
   const home = await mkdtemp(path.join(tmpdir(), "ad-profile-cli-"));
   t.after(() => rm(home, { recursive: true, force: true }));
   const operations = createSourceOperations({ statePath: path.join(home, "sources.json") });
@@ -91,7 +92,7 @@ test("profile rejects unknown fields, versions and nonportable content with fiel
   assert.equal(await runCli(["export", "--no-sources", "--source", source.id], dependencies), 1);
   assert.equal(await runCli(["export", "--yes"], dependencies), 1);
   assert.equal(await runCli(["export", "--out"], dependencies), 1);
- });
+});
 
 test("export explains local Sources, App-owned Skills and invalid recipes, even with Apps deselected", async t => {
   const home = await mkdtemp(path.join(tmpdir(), "ad-profile-exclude-"));
@@ -151,4 +152,74 @@ test("portable command arguments reject root-only and Windows root-relative path
     assert.throws(() => parseProfile({ ...profile, apps: [{ ...recipe,
       install: { argv: ["tool", argument] } }] }), /apps\[0\].install.argv\[1\]/);
   }
+});
+
+test("Skill parser errors use profile field paths rather than manifest wrappers", () => {
+  assert.throws(() => parseProfile({ ...profile, skills: [{ ...profile.skills[0], hosts: ["unknown"] }] }),
+    { message: /^skills\[0\].hosts\[0\]: / });
+});
+
+test("portable profiles reject query credentials in method URLs", () => {
+  for (const key of ["token", "key", "apikey", "api_key", "secret", "password", "passwd", "auth", "sig", "signature", "access_token", "TOKEN"]) {
+    assert.throws(() => parseProfile({ ...profile, skills: [{ ...profile.skills[0],
+      methods: { update: { kind: "command", argv: ["curl", `https://api.x.com/?${key}=abc`] } } }] }),
+    { message: /^skills\[0\].methods.update.argv\[1\]: credentials/ });
+  }
+});
+
+test("portable recipe instructions allow home-relative guidance and regex path literals", () => {
+  const portableRecipe = { ...recipe, install: { manual: "add ~/bin to PATH" },
+    version: { ...recipe.version, pattern: "/opt/tool/(.*)" } };
+  assert.deepEqual(parseProfile({ ...profile, apps: [portableRecipe] }).apps, [portableRecipe]);
+});
+
+test("CLI export refuses an existing output path with guidance and leaves it unchanged", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-existing-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const out = path.join(home, "profile.json");
+  await writeFile(out, "keep this content\n");
+  const stderr: string[] = [];
+  assert.equal(await runCli(["export", "--out", out], {
+    operations: createSourceOperations({ statePath: path.join(home, "sources.json") }),
+    appOperations: createAppOperations({ recipesDirectory: path.join(home, "apps") }),
+    stdout: () => assert.fail("file export must not write stdout"), stderr: line => stderr.push(line),
+  }), 1);
+  assert.equal(await readFile(out, "utf8"), "keep this content\n");
+  assert.match(stderr.at(-1)!, /profile.json.*already exists; choose another path/);
+});
+
+test("Source and external Skill URLs reject credentials with the corresponding field path", () => {
+  for (const url of ["https://user:secret@example.com/skills.git", "https://example.com/skills.git?token=abc"]) {
+    assert.throws(() => parseProfile({ ...profile, sources: [{ url, included: true }] }),
+      { message: /^sources\[0\].url: / });
+    assert.throws(() => parseProfile({ ...profile, skills: [{ ...profile.skills[0],
+      source: { kind: "external", url } }] }), { message: /^skills\[0\].source.url: / });
+  }
+});
+
+
+test("CLI filters Skills and Apps by name and records the running package version", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-names-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ statePath: path.join(home, "sources.json") });
+  for (const name of ["chosen", "other"]) {
+    await operations.addUserGlobalInstallation!({
+      source: { kind: "builtin", id: "builtin:agent-depot" }, path: `nested/${name}`,
+      version: { policy: "latest" }, hosts: ["pi"],
+      installation: { path: `.agents/skills/${name}`, adopted: false },
+    });
+  }
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  await mkdir(apps.directory);
+  for (const name of ["chosen-app", "other-app"]) {
+    await writeFile(path.join(apps.directory, `${name}.json`), JSON.stringify({ ...recipe, name }));
+  }
+  const stdout: string[] = [];
+  assert.equal(await runCli(["export", "--skill", "chosen", "--app", "chosen-app"], {
+    operations, appOperations: apps, stdout: line => stdout.push(line), stderr: () => {},
+  }), 0);
+  const exported = parseProfile(JSON.parse(stdout.join("\n")));
+  assert.equal(exported.agentDepotVersion, AGENT_DEPOT_PACKAGE_VERSION);
+  assert.deepEqual(exported.skills.map(skill => skill.path), ["nested/chosen"]);
+  assert.deepEqual(exported.apps.map(app => app.name), ["chosen-app"]);
 });

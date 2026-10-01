@@ -36,7 +36,14 @@ export async function runProfileExport(values: readonly string[], operations: So
   if (out === undefined) output(content.trimEnd());
   else {
     // An export is a new artifact, not permission to replace an existing file or follow a symlink.
-    await writeFile(out, content, { encoding: "utf8", flag: "wx" });
+    try {
+      await writeFile(out, content, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error(`${out} already exists; choose another path`);
+      }
+      throw error;
+    }
     diagnostic(`Exported profile to ${out}`);
   }
   return 0;

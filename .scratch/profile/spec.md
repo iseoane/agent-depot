@@ -61,3 +61,6 @@ The file contains no credentials, no absolute local paths, and no machine-specif
 
 - A conflicting App recipe is skipped like any other conflict; there is no "save as copy" option.
 - The profile records the Agent Depot version that produced it (`agentDepotVersion`); import warns, without failing, when it is newer than the running version.
+
+CLI export always writes `included: true`; discovery choices are transient, while
+the TUI may pass explicit inclusion choices to the shared export core.

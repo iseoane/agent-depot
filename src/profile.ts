@@ -1,7 +1,7 @@
 import path from "node:path";
 import { parseAppRecipe, type AppRecipe } from "./app-recipes.js";
 import { canonicalizeGitSourceUrl } from "./git-source.js";
-import { containsCredentialArgument, parseProjectManifest, type ProjectSkillSelection } from "./project-manifest.js";
+import { containsCredentialArgument, parseProjectManifest, ProjectManifestError, type ProjectSkillSelection } from "./project-manifest.js";
 
 export const PROFILE_FORMAT = "agent-depot-profile/v1" as const;
 export interface ProfileSource {
@@ -34,11 +34,18 @@ function assertPortableText(value: unknown, field: string): void {
   if (typeof value === "string") {
     const commandPath = /(?:\.argv\[\d+\]|\.cwd)$/u.test(field) &&
       (path.posix.isAbsolute(value) || path.win32.isAbsolute(value));
-    if (commandPath || /(?:^|[\s="'(])(?:\/(?!\/)[\w.]|[A-Za-z]:[/\\]|\\\\|~[/\\])/u.test(value)) {
+    const regexPattern = /\.(?:version|latest)\.pattern$/u.test(field);
+    if (commandPath || (!regexPattern && /(?:^|[\s="'(])(?:\/(?!\/)[\w.]|[A-Za-z]:[/\\]|\\\\)/u.test(value))) {
       throw new Error(`${field}: absolute local paths are not portable`);
     }
     if (/[a-z][a-z0-9+.-]*:\/\/[^\s/]*@/iu.test(value)) {
       throw new Error(`${field}: credentials are not portable`);
+    }
+    for (const match of value.matchAll(/https?:\/\/[^\s"'<>]+/giu)) {
+      const url = new URL(match[0]);
+      if ([...url.searchParams.keys()].some(key => /^(?:token|key|apikey|api_key|secret|password|passwd|auth|sig|signature|access_token)$/iu.test(key))) {
+        throw new Error(`${field}: credentials are not portable`);
+      }
     }
     // Manual text is not argv: check credentials without forbidding its shell instructions.
     if (containsCredentialArgument(value) || value.split(/\s+/u).some(containsCredentialArgument)) {
@@ -79,7 +86,14 @@ export function parseProfile(value: unknown): Profile {
   });
   const skills = list(root.skills, "skills");
   skills.forEach((value, index) => object(value, ["source", "path", "version", "hosts", "methods"], `skills[${index}]`));
-  const parsedSkills = parseProjectManifest({ version: 1, skills }, "profile").skills;
+  let parsedSkills: readonly ProjectSkillSelection[];
+  try {
+    parsedSkills = parseProjectManifest({ version: 1, skills }, "profile").skills;
+  } catch (error) {
+    if (!(error instanceof ProjectManifestError)) throw error;
+    const [field, ...reason] = error.reason.split(" ");
+    throw new Error(`${field}: ${reason.join(" ")}`);
+  }
   parsedSkills.forEach((skill, index) => {
     assertPortableText(skill.path, `skills[${index}].path`);
     assertPortableText(skill.version, `skills[${index}].version`);

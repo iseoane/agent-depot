@@ -609,3 +609,6 @@ profiles before sharing them—arbitrary secrets cannot be detected automaticall
 
 Import and the fifth Import/Export TUI tab are planned in subsequent tickets;
 this release implements the profile format and CLI export only.
+
+CLI export always writes `included: true`; discovery choices are transient, while
+the TUI may pass explicit inclusion choices to the shared export core.

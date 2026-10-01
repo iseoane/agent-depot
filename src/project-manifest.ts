@@ -113,11 +113,13 @@ const EMPTY_PROJECT_MANIFEST: ProjectManifest = Object.freeze({
 
 export class ProjectManifestError extends Error {
   readonly manifestPath: string;
+  readonly reason: string;
 
   constructor(manifestPath: string, reason: string) {
     super(`Invalid project manifest ${JSON.stringify(manifestPath)}: ${reason}`);
     this.name = "ProjectManifestError";
     this.manifestPath = manifestPath;
+    this.reason = reason;
   }
 }
 

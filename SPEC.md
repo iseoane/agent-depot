@@ -145,3 +145,6 @@ unapproved and Apps are never installed by import. This tab is the explicit
 exception to the existing no-new-tabs direction; App lifecycle stays in existing
 views. See [ADR 0008](docs/adr/0008-portable-user-global-profiles.md) and
 [the Profile spec](.scratch/profile/spec.md).
+
+CLI export always writes `included: true`; discovery choices are transient, while
+the TUI may pass explicit inclusion choices to the shared export core.
