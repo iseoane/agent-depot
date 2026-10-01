@@ -32,7 +32,7 @@ try {
   // Source maps point at ../../src (not shipped); skill tests and fixtures are dev-only.
   const devOnly = files.filter((file) => /\.map$/u.test(file) || /(^|\/)test_[^/]*\.py$/u.test(file) || /(^|\/)testdata\//u.test(file));
   assert.deepEqual(devOnly, [], `dev-only files in tarball: ${devOnly.join(", ")}`);
-  for (const required of ["dist/src/cli.js", "package.json", "README.md", "LICENSE", "CHANGELOG.md", "skills/doctor-md-agents/SKILL.md"]) {
+  for (const required of ["dist/src/cli.js", "package.json", "README.md", "LICENSE", "CHANGELOG.md", "skills/doctor-md-agents/SKILL.md", "skills/agent-depot-apprecipe/SKILL.md", "skills/agent-depot-apprecipe/assets/example.md"]) {
     assert.ok(files.includes(required), `missing from tarball: ${required}`);
   }
 
@@ -62,6 +62,16 @@ try {
   const discovery = agentDepot("discover", "builtin:agent-depot");
   assert.equal(discovery.status, 0, discovery.output);
   assert.match(discovery.output, /doctor-md-agents/u);
+  assert.match(discovery.output, /agent-depot-apprecipe/u);
+
+  const installSkill = agentDepot("install", "--scope", "user-global", "--source", "builtin:agent-depot",
+    "--skill", "agent-depot-apprecipe", "--host", "pi", "--version", "latest", "--portable-v1", "--yes");
+  assert.equal(installSkill.status, 0, installSkill.output);
+  const installedSkill = path.join(homeDirectory, ".agents", "skills", "agent-depot-apprecipe");
+  for (const file of ["SKILL.md", "assets/example.md"]) {
+    assert.equal(readFileSync(path.join(installedSkill, file), "utf8"),
+      readFileSync(path.join(root, "skills", "agent-depot-apprecipe", file), "utf8"));
+  }
 
   // The TUI entry point must load with Ink/React resolved from the installed dependencies.
   const tuiEntry = path.join(installDirectory, "node_modules", ...manifest.name.split("/"), "dist", "src", "tui", "render.js");
