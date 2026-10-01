@@ -95,7 +95,7 @@ test("invalid import errors remain usable and long export lists are windowed", a
   t.after(() => view.unmount());
   view.stdin.write("e");
   const frame = await waitForFrame(view.lastFrame, /of 21/);
-  assert.ok(frame.split("\n").length < 10);
+  assert.ok(frame.split("\n").length < 12);
   view.stdin.write("j".repeat(20));
   await waitForFrame(view.lastFrame, /19–21 of 21/);
 });
@@ -117,6 +117,55 @@ test("import previews recorded method argv and unregistered Sources; declining w
   assert.match(preview, /argv=\["demo","install"\]/);
   assert.match(preview, /will be fetched but not registered/);
   f.view.stdin.write("n");
-  await waitForFrame(f.view.lastFrame, /e export · i import · j\/k scroll · q quit/);
+  await waitForFrame(f.view.lastFrame, /e export · i import · q quit/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+});
+
+test("export renders real group headers and plain exclusions rather than synthetic App checkboxes", async t => {
+  const f = await fixture(t);
+  const source = await f.operations.addGitSource("https://example.com/skills.git");
+  await f.operations.addUserGlobalInstallation!({
+    source: { kind: "external", url: source.url }, path: "demo",
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: ".agents/skills/demo", adopted: false },
+  });
+  await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
+  f.view.stdin.write("e");
+  const frame = await waitForFrame(f.view.lastFrame, /Skills: demo/);
+  for (const group of ["Sources", "Skills", "Apps", "Excluded"]) assert.match(frame, new RegExp(`^${group}$`, "m"));
+  assert.match(frame, /\[x\].*Sources: https:\/\/example.com\/skills.git/);
+  assert.match(frame, /\[x\].*Skills: demo/);
+  assert.doesNotMatch(frame, /\[ \].*Excluded built-in/);
+});
+
+test("space and all toggle export choices; an empty selection stops before the file prompt", async t => {
+  const f = await fixture(t);
+  await f.operations.addGitSource("https://example.com/skills.git");
+  await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
+  f.view.stdin.write("e");
+  await waitForFrame(f.view.lastFrame, /\[x\].*Sources:/);
+  f.view.stdin.write(" ");
+  const partial = await waitForFrame(f.view.lastFrame, /\[ \].*Sources:/);
+  assert.match(partial, /\[x\].*Apps: demo/);
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, /\[ \].*Apps: demo/);
+  f.view.stdin.write("a");
+  const all = await waitForFrame(f.view.lastFrame, /\[x\].*Sources:/);
+  assert.match(all, /\[x\].*Apps: demo/);
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, /\[ \].*Apps: demo/);
+  f.view.stdin.write("\r");
+  const empty = await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
+  assert.doesNotMatch(empty, /Profile path:|Apply Profile/);
+});
+
+test("browse hints do not advertise scrolling; result summaries do", async t => {
+  const f = await fixture(t);
+  const browse = f.view.lastFrame()!;
+  assert.doesNotMatch(browse, /j\/k scroll/);
+  f.view.stdin.write("e");
+  await waitForFrame(f.view.lastFrame, /Excluded built-in/);
+  f.view.stdin.write("\r");
+  const result = await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
+  assert.match(result, /j\/k scroll/);
 });

@@ -3,14 +3,14 @@ import { useCallback, useRef, useState } from "react";
 
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../project-manifest.js";
 import type { SourceOperations } from "../sources.js";
-import { ProfileView } from "./profile-view.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
 import { InstallationsView } from "./installations-view.js";
+import { useKeys } from "./keys.js";
+import { ProfileView } from "./profile-view.js";
 import { SourcesView } from "./sources-view.js";
 import { separatorLine, theme } from "./theme.js";
 import { UpdatesView } from "./updates-view.js";
-import { useKeys } from "./keys.js";
 
 export interface AppProps {
   /** Source operations the views call directly; injectable for tests. */
@@ -41,7 +41,7 @@ function hintsOf(view: ViewName, catalogFocusedOnSource: boolean): string {
     case "installations":
       return "j/k move · Enter expand · space mark · a all · u uninstall · h add hosts · A adopt · q quit";
     case "profile":
-      return "e export · i import · j/k scroll · q quit";
+      return "e export · i import · q quit";
     case "updates":
       return "j/k move · space mark · a all · Enter preview · r check again · q quit";
   }
