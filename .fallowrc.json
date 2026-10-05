@@ -66,7 +66,12 @@
           "src/app-version.ts",
           "src/package-model.ts",
           "src/package-bundles.ts",
-          "src/package-content.ts"
+          "src/package-content.ts",
+          "src/package-host-state.ts",
+          "src/package-host-plans.ts",
+          "src/package-owned-skills.ts",
+          "src/package-state.ts",
+          "src/package-flow.ts"
         ]
       },
       {
@@ -75,6 +80,7 @@
           "src/git-source.ts",
           "src/path-safety.ts",
           "src/process-runner.ts",
+          "src/executable-resolution.ts",
           "src/version.ts",
           "src/usage-error.ts",
           "src/atomic-file.ts"
