@@ -8,3 +8,6 @@ dist/
 # Static analysis and coverage output
 coverage/
 .fallow/
+
+# Subagent git worktrees
+.claude/worktrees/
