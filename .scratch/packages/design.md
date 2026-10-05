@@ -496,3 +496,35 @@ sources, and reading host CLI prose.
 4. Does a Package carrying an executable extension warrant a stronger gate than
    preview plus `--yes`, given that the receipt covers derived argv rather than
    user-authored text?
+
+## 9. Implementation reconciliation
+
+First wave, issues 01 to 03, accepted deviations and rejections.
+
+**Accepted.** `parseClaudeMarketplace` takes a third parameter,
+`readPluginManifest: (pluginRoot: string) => string | undefined`. The two-argument
+signature cannot apply the marketplace-entry version override or report a plugin's
+agents, because both live in the plugin's own `plugin.json` and the function is
+pure. The resolver keeps the purity and fixes the signature.
+
+**Accepted.** Component `paths` are source-root-relative, resolved against the
+bundle root at parse time. The design did not pin the path base. This reading is
+the one that makes the dual-format claim literal, because the Pi and the Claude
+descriptor then both name `plugins/pstack/skills`.
+
+**Pinned after review.** `PackageComponent.effect` per kind, which the design left
+unspecified. `extensions`, `hooks`, `monitors`, `mcp-servers`, and `lsp-servers`
+are `executable`. `skills`, `agents`, `commands`, and `workflows` are
+`instruction`. `prompts`, `themes`, and `output-styles` are `data`. The first wave
+had `mcp-servers` and `lsp-servers` as `data`, which understates risk, because both
+cause the host to launch a process, and `effect` drives the risk line in the
+preview. Corrected in the same commit as this note.
+
+**Rejected.** Nothing was rejected in the first wave. No deviation was left
+unrecorded.
+
+**Verified.** `pnpm typecheck`, `pnpm lint`, `pnpm audit:dead-code`, and
+`git diff --check` are clean, and `pnpm test` passes 768 tests, which includes the
+15 in `tests/package-bundles.test.ts`. The load-bearing assertion that a
+dual-format repository yields one Pi descriptor and one Claude descriptor over the
+shared skills directory is present and passes.
