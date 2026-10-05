@@ -62,7 +62,8 @@
           "src/source-state.ts",
           "src/skill-discovery.ts",
           "src/project-manifest.ts",
-          "src/app-version.ts"
+          "src/app-version.ts",
+          "src/package-model.ts"
         ]
       },
       {
