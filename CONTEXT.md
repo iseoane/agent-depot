@@ -21,11 +21,10 @@ The user's collection of available sources and selected or installed managed ski
 _Avoid_: Registry (unless referring to an external registry)
 
 **Managed resource**:
-An item selected for installation and ongoing tracking. V1 manages portable directory-based skills and user-global Apps; agent definitions, plugins/extensions, and MCP servers remain deferred as independently managed categories.
-_Avoid_: Package (unless it specifically means an npm package)
+An item selected for installation and ongoing tracking. V1 manages portable directory-based skills, user-global Apps, and host-native Packages; agent definitions and MCP servers remain deferred as independently managed categories.
 
 **Resource category**:
-A classification of a managed resource. Skill and App are confirmed V1 categories; agent definition, plugin/extension, and MCP server remain deferred categories for future scope decisions.
+A classification of a managed resource. Skill, App, and Package are confirmed V1 categories; agent definition and MCP server remain deferred categories for future scope decisions.
 
 **App**:
 A user-global application whose install, update, uninstall, and optional per-Host setup and teardown are delegated to a user-declared App recipe. An App owns any artifacts it creates, including skills or Host configuration; Agent Depot tracks its installed version, not those artifacts.
@@ -34,6 +33,19 @@ _Avoid_: CLI application, Host resource (for an App)
 **App recipe**:
 A user-owned declaration of an App's lifecycle commands and version signals, optionally specific to a platform. It is not a Source resource or a built-in recipe.
 _Avoid_: Installation method (for the whole App recipe)
+
+**Package**:
+A host-native bundle discovered inside a registered Source: a Pi package with a `pi` manifest key or conventional directories, or a Claude Code plugin with a `.claude-plugin/plugin.json` bound by an in-repo marketplace. Its lifecycle is delegated to the host CLI, and its installed state is read from the host's own state files, never written by Agent Depot.
+_Avoid_: npm package (unless it specifically means the npm distribution channel)
+
+**Bundle**:
+The unit a Package manages: a manifest plus its declared components and version, discovered as one descriptor per host format. A dual-format repository such as pstack-claude yields one Pi descriptor and one Claude descriptor over the same skills directory.
+
+**Component inventory**:
+The typed list of what a bundle provides, read from its manifest at the boundary: each component carries a kind, an ownership (`skill-category` or `host-only`), an effect, and its declared paths. Agent definitions and MCP servers surface here as `host-only` components and stay deferred.
+
+**Marketplace binding**:
+The in-repo `.claude-plugin/marketplace.json` entry that names a Claude plugin and its source. A Claude Package is installable only through such a binding; a plugin with no in-repo marketplace binding is reported but not installable.
 
 **Skill**:
 A reusable, primarily instruction-based capability distributed as a portable directory containing `SKILL.md` with required `name` and `description` metadata, and optionally supporting files such as references, scripts, and assets.
