@@ -75,7 +75,7 @@ export function createPortableExecutableResolver(
           // Preserve shim/multicall identity when spawning; realpath is only a safety check.
           return { executable: candidate, blocked: false };
         } catch {
-          // Try the next PATH entry.
+          continue;
         }
       }
     }

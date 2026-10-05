@@ -159,7 +159,6 @@ function assertHostCommand(action: PackageAction, descriptor: BundleDescriptor, 
   }
 }
 
-/** The one place that reads the host state and the selection into a template input. */
 function stepTemplateInput(
   descriptor: BundleDescriptor,
   selection: PackageSelection,

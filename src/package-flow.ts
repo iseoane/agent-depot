@@ -358,7 +358,6 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
     };
   }
 
-  /** A plan whose action the host state already satisfies runs nothing. */
   async function completeSkipped(context: OutcomeContext): Promise<PackageLifecycleResult> {
     switch (context.action) {
       case "install": {
