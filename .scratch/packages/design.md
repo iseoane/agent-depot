@@ -528,3 +528,33 @@ unrecorded.
 15 in `tests/package-bundles.test.ts`. The load-bearing assertion that a
 dual-format repository yields one Pi descriptor and one Claude descriptor over the
 shared skills directory is present and passes.
+
+Issue 09, the owned-skill guard, accepted and pinned the following.
+
+**Accepted.** The guard matches a bare Skill directory name as well as a Skill
+path. Design 4.5 pinned one matcher, and the unmanaged inventory knows only a
+local directory name, so a path-only matcher would leave the guard inert at its
+remove and inventory call sites. `bundleOwnedSkillNameMatcher` reads the
+`skillNames` the snapshot pass already collects, and `packageOwnedSkillMatcher`
+applies it only to an input with no path separator, so an install still checks the
+exact Source-relative path.
+
+**Accepted.** `SourceContentAccess.readSnapshot` now carries the bundle manifests
+beside the Skill files, through `isSourceSnapshotFile`: the scope-root
+`package.json` and the two `.claude-plugin` manifests. Before this, both
+implementations returned `SKILL.md` files only, so `discoverBundlesInSnapshot`
+returned no descriptor for any real Source and the guard could not refuse
+anything. Design 4.5 names `readSnapshot` as the pass the matcher is built from,
+so the snapshot is where the missing bytes belonged. Skill discovery filters for
+`SKILL.md` itself, so it is unchanged apart from reading a few extra blobs.
+
+**Pinned after review.** Every discovered descriptor owns its Skills, including a
+Claude plugin with no in-repo marketplace binding. The bundle owns those Skill
+paths whether or not its own lifecycle is installable, and the matcher has no
+installability concept to filter on.
+
+**Verified.** `pnpm typecheck`, `pnpm lint`, and `git diff --check` are clean, and
+`pnpm test` passes 787 tests, which includes the 11 in
+`tests/package-owned-skills.test.ts`. `pnpm audit:dead-code` reports one boundary
+coverage issue, `src/package-owned-skills.ts:1 no matching boundary zone`; the
+zone line is deliberately left to a separate commit.
