@@ -1,5 +1,4 @@
 import { access, chmod, mkdir, readFile, readdir, realpath, unlink } from "node:fs/promises";
-import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -8,6 +7,7 @@ import { compareAppVersions, sameAppVersion } from "./app-version.js";
 import { fetchAppLatest } from "./app-latest.js";
 import { writeFileAtomically } from "./atomic-file.js";
 import { parseAppRecipe, type AppRecipe, type AppStep } from "./app-recipes.js";
+import { createPortableExecutableResolver } from "./executable-resolution.js";
 import { type ProjectHost } from "./project-manifest.js";
 import { runProcess } from "./process-runner.js";
 import { defaultSourceStatePath } from "./source-state.js";
@@ -98,41 +98,12 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   const mountRoot = environment.wslMountRoot ?? "/mnt";
   const runner = environment.runner ?? runProcess;
 
-  function isWindowsExecutable(executable: string): boolean {
-    const relative = path.posix.relative(mountRoot, executable);
-    return isWsl && /^[a-z]\//iu.test(relative);
-  }
-
-  async function resolve(name: string) {
-    if (environment.resolveExecutable) {
-      const executable = await environment.resolveExecutable(name);
-      const target = executable ? await realpath(executable).catch(() => executable) : undefined;
-      return { executable, blocked: target !== undefined && isWindowsExecutable(target) };
-    }
-    let blockedExecutable: string | undefined;
-    const suffixes = platform === "win32"
-      ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")]
-      : [""];
-    for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-      if (!path.isAbsolute(dir)) continue;
-      for (const suffix of suffixes) {
-        const candidate = path.join(dir, name + suffix);
-        try {
-          await access(candidate, platform === "win32" ? constants.F_OK : constants.X_OK);
-          const target = await realpath(candidate);
-          if (isWindowsExecutable(target)) {
-            blockedExecutable ??= candidate;
-            continue;
-          }
-          // Preserve shim/multicall identity when spawning; realpath is only a safety check.
-          return { executable: candidate, blocked: false };
-        } catch {
-          // Try the next PATH entry.
-        }
-      }
-    }
-    return { executable: blockedExecutable, blocked: blockedExecutable !== undefined };
-  }
+  const resolve = createPortableExecutableResolver({
+    platform,
+    isWsl,
+    wslMountRoot: mountRoot,
+    ...(environment.resolveExecutable === undefined ? {} : { resolveExecutable: environment.resolveExecutable }),
+  });
 
   const receiptPath = (entry: AppEntry) => path.join(
     receipts, createHash("sha256").update(entry.canonicalFile!).digest("hex") + ".json",
