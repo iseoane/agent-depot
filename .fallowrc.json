@@ -65,7 +65,8 @@
           "src/project-manifest.ts",
           "src/app-version.ts",
           "src/package-model.ts",
-          "src/package-bundles.ts"
+          "src/package-bundles.ts",
+          "src/package-content.ts"
         ]
       },
       {
