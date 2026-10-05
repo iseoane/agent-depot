@@ -81,14 +81,14 @@ const highlights = (lastFrame: () => string | undefined, id: RegExp) =>
 test("n opens an input, Enter adds the Git Source, reloads the list and reports success", async () => {
   const h = harness();
   const { lastFrame, stdin, unmount } = await open(h);
-  stdin.write("n");
+  stdin.write("n1");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write(added.url);
   await waitForFrame(lastFrame, /example\/new\.git/);
   stdin.write("\r");
   const frame = await waitForFrame(lastFrame, /Added Git Source: git:aaaa/);
   assert.deepEqual(h.calls, [`add ${added.url}`]);
-  await waitForFrame(lastFrame, /git:aaaaaaaaaaaaaaaaaaaaaaaa\s+git/);
+  await waitForFrame(lastFrame, /git:aaaaaaaaaaaaaaaaaaaaaaaa\s+skills/);
   assert.match(frame, /Added Git Source: git:aaaa/);
   unmount();
 });
@@ -96,7 +96,7 @@ test("n opens an input, Enter adds the Git Source, reloads the list and reports 
 test("pasting text that starts like an escape remnant keeps it in the URL input", async () => {
   const h = harness();
   const { lastFrame, stdin, unmount } = await open(h);
-  stdin.write("n");
+  stdin.write("n1");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write("Ok");
   await waitForFrame(lastFrame, /URL: Ok/);
@@ -106,7 +106,7 @@ test("pasting text that starts like an escape remnant keeps it in the URL input"
 test("Esc cancels the add input without calling operations; backspace edits", async () => {
   const h = harness();
   const { lastFrame, stdin, unmount } = await open(h);
-  stdin.write("n");
+  stdin.write("n1");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write("abc");
   stdin.write("\u007F");
@@ -120,7 +120,7 @@ test("Esc cancels the add input without calling operations; backspace edits", as
 test("add errors are shown and keep the list", async () => {
   const h = harness({ async addGitSource() { throw new Error("clone failed"); } });
   const { lastFrame, stdin, unmount } = await open(h);
-  stdin.write("n");
+  stdin.write("n1");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write("x");
   stdin.write("\r");
@@ -179,7 +179,7 @@ test("d previews, y removes the source and reloads the list", async () => {
   stdin.write("y");
   const frame = await waitForFrame(lastFrame, /Removed Git Source: git:1234/);
   assert.deepEqual(h.calls, ["remove git:1234567890abcdef12345678"]);
-  assert.doesNotMatch(frame, /git:1234567890abcdef12345678\s+git/);
+  assert.doesNotMatch(frame, /git:1234567890abcdef12345678\s+skills/);
   unmount();
 });
 
@@ -232,7 +232,7 @@ test("App shows key hints and q does not quit while typing or confirming", async
   let exits = 0;
   const { lastFrame, stdin, unmount } = render(<App operations={h.operations} onExit={() => { exits += 1; }} />);
   await waitForFrame(lastFrame, /n add/);
-  stdin.write("n");
+  stdin.write("n1");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write("q");
   await waitForFrame(lastFrame, /URL: q/);
@@ -257,7 +257,7 @@ test("App ignores q and view keys sent in the same burst as a capturing key", as
   let exits = 0;
   const { lastFrame, stdin, unmount } = render(<App operations={h.operations} onExit={() => { exits += 1; }} />);
   await waitForFrame(lastFrame, /n add/);
-  stdin.write("n");
+  stdin.write("n1");
   stdin.write("q");
   stdin.write("2");
   const frame = await waitForFrame(lastFrame, /URL: q2/);
@@ -300,7 +300,7 @@ test("the highlight stays on the same source when a new source sorts before it",
   const { lastFrame, stdin, unmount } = await open(h);
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
-  stdin.write("n");
+  stdin.write("n1");
   await waitForFrame(lastFrame, /URL:/);
   stdin.write(added.url);
   await waitForFrame(lastFrame, /example\/new\.git/);

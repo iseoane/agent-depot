@@ -26,14 +26,14 @@ const roots: readonly TreeNode<string>[] = [
 
 const ids = (rows: ReturnType<typeof flattenVisible<string>>) => rows.map((row) => row.node.id);
 
-test("groups start collapsed except the first", () => {
-  assert.deepEqual([...defaultExpanded(roots)], ["a"]);
-  assert.deepEqual(ids(flattenVisible(roots, defaultExpanded(roots))), ["a", "a/x", "a/y", "b", "c"]);
+test("all groups start collapsed", () => {
+  assert.deepEqual([...defaultExpanded()], []);
+  assert.deepEqual(ids(flattenVisible(roots, defaultExpanded())), ["a", "b", "c"]);
 });
 
-test("the default expansion skips leading empty groups", () => {
+test("empty groups also remain collapsed by default", () => {
   const empty: readonly TreeNode<string>[] = [{ id: "e", data: "E", children: [] }, ...roots];
-  assert.deepEqual([...defaultExpanded(empty)], ["a"]);
+  assert.deepEqual(ids(flattenVisible(empty, defaultExpanded())), ["e", "a", "b", "c"]);
 });
 
 test("flattenVisible reports depth, parent, expandability and state", () => {

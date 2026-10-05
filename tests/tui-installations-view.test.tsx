@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { render } from "ink-testing-library";
+import { renderExpanded } from "./render-expanded.js";
 
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
@@ -123,7 +124,7 @@ async function open(view: View, pattern: RegExp): Promise<string> {
 }
 
 function mount(f: Fixture, extra: { onCapturingChange?: (capturing: boolean) => void } = {}) {
-  return render(
+  return renderExpanded(
     <InstallationsView operations={f.operations} environment={f.environment} {...extra} />,
   );
 }
@@ -132,7 +133,7 @@ test("shows a tree of scope, then Source, then Skills with counts, source and ma
   const f = await fixture(t);
   await f.operations.addUserGlobalInstallation!(record(["claude", "codex"], true));
   await f.manifestStore.save(parseProjectManifest({ version: 1, skills: [record(["pi"], false, "portable/other")] }));
-  const view = mount(f);
+  const view = await mount(f);
   const collapsed = await waitForFrame(view.lastFrame, /Managed \(project\) \(1\)/);
   assert.match(collapsed, /▾ Managed \(user-global\) \(1\)/);
   assert.match(collapsed, /▸ builtin:agent-depot \(1\)/);
@@ -161,7 +162,7 @@ test("the legend appears only while a visible row carries adopted or modified", 
   const f = await fixture(t);
   await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/plain"));
   await f.operations.addUserGlobalInstallation!(record(["pi"], true, "portable/kept"));
-  const view = mount(f);
+  const view = await mount(f);
   const collapsed = await waitForFrame(view.lastFrame, /▸ builtin:agent-depot \(2\)/);
   assert.ok(!collapsed.includes("tracked in place"), "no visible row carries a marker yet");
   const expanded = await open(view, /builtin:agent-depot/);
@@ -175,7 +176,7 @@ test("the legend appears only while a visible row carries adopted or modified", 
 test("Enter and the right arrow expand, the left arrow collapses or moves to the parent", async (t) => {
   const f = await fixture(t);
   await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/alpha"));
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /▸ builtin:agent-depot \(1\)/);
   await goto(view, /builtin:agent-depot/);
   const opened = await step(view, RIGHT);
@@ -197,7 +198,7 @@ test("Enter and the right arrow expand, the left arrow collapses or moves to the
 test("keys pressed in one burst act on the latest tree state", async (t) => {
   const f = await fixture(t);
   await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/alpha"));
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /▸ builtin:agent-depot \(1\)/);
   press(view.stdin, "j");
   press(view.stdin, RIGHT);
@@ -208,7 +209,7 @@ test("keys pressed in one burst act on the latest tree state", async (t) => {
 
 test("shows loading, then the empty state", async (t) => {
   const f = await fixture(t);
-  const { lastFrame, unmount } = mount(f);
+  const { lastFrame, unmount } = render(<InstallationsView operations={f.operations} environment={f.environment} />);
   assert.match(lastFrame() ?? "", /Loading installations/);
   const frame = await waitForFrame(lastFrame, /Managed \(project\) \(0\)/);
   assert.match(frame, /Managed \(user-global\) \(0\)/);
@@ -224,7 +225,7 @@ test("shows an error when the installation state cannot be read", async (t) => {
       throw new Error("state is corrupt");
     },
   };
-  const { lastFrame, unmount } = mount({ ...f, operations });
+  const { lastFrame, unmount } = await mount({ ...f, operations });
   await waitForFrame(lastFrame, /Error: state is corrupt/);
   unmount();
 });
@@ -234,7 +235,7 @@ test("missing user-global operations are reported as not supported", async (t) =
   const rest: SourceOperations = { ...f.operations };
   delete rest.addUserGlobalInstallation;
   delete rest.listUserGlobalInstallations;
-  const { lastFrame, unmount } = mount({ ...f, operations: rest });
+  const { lastFrame, unmount } = await mount({ ...f, operations: rest });
   await waitForFrame(lastFrame, /not supported/i);
   unmount();
 });
@@ -243,7 +244,7 @@ test("j and k move the highlight across installations", async (t) => {
   const f = await fixture(t);
   await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/alpha"));
   await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/beta"));
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(2\)/);
   await open(view, /builtin:agent-depot/);
   await step(view, "j");
@@ -260,7 +261,7 @@ test("a long tree renders only the rows that fit, keeps the highlight visible an
   for (let n = 0; n < 12; n += 1) {
     await f.operations.addUserGlobalInstallation!(record(["pi"], false, `portable/skill${String(n).padStart(2, "0")}`));
   }
-  const view = render(<InstallationsView operations={f.operations} environment={f.environment} listHeight={5} />);
+  const view = await renderExpanded(<InstallationsView operations={f.operations} environment={f.environment} listHeight={5} />);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(12\)/);
   await open(view, /builtin:agent-depot/);
   const top = await waitForFrame(view.lastFrame, /1–5 of 16/);
@@ -278,7 +279,7 @@ test("a long tree renders only the rows that fit, keeps the highlight visible an
 test("lists unmanaged user-global Skills in their own section, one leaf per name with its hosts", async (t) => {
   const f = await fixture(t);
   await writeUnmanaged(f.home);
-  const { lastFrame, unmount } = mount(f);
+  const { lastFrame, unmount } = await mount(f);
   const frame = await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
   const line = frame.split("\n").find((candidate) => /(^|\s)demo \[/.test(candidate)) ?? "";
   assert.match(line, /demo \[pi, codex, opencode\]/);
@@ -286,7 +287,7 @@ test("lists unmanaged user-global Skills in their own section, one leaf per name
 });
 
 async function startAdoption(f: Fixture, keys: readonly string[] = [ENTER]) {
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await goto(view, /(^|\s)demo \[/);
   press(view.stdin, "A");
@@ -300,7 +301,7 @@ test("A adopts an identical unmanaged Skill after host, version, preview and y",
   const directory = await writeUnmanaged(f.home);
   const before = await readFile(path.join(directory, "SKILL.md"), "utf8");
   const captures: boolean[] = [];
-  const view = render(
+  const view = await renderExpanded(
     <InstallationsView operations={f.operations} environment={f.environment} onCapturingChange={(value) => captures.push(value)} />,
   );
   const { lastFrame, stdin, unmount } = view;
@@ -345,7 +346,7 @@ test("adoption of a Skill whose content differs shows why and writes nothing", a
 test("adoption without a Source Skill of the same name explains why", async (t) => {
   const f = await fixture(t, []);
   await writeUnmanaged(f.home);
-  const view = mount(f);
+  const view = await mount(f);
   const { lastFrame, stdin, unmount } = view;
   await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await goto(view, /(^|\s)demo \[/);
@@ -358,7 +359,7 @@ test("adoption without a Source Skill of the same name explains why", async (t) 
 test("adopting with an extra host needs a separate exposure confirmation; n writes nothing", async (t) => {
   const f = await fixture(t);
   await writeUnmanaged(f.home);
-  const view = mount(f);
+  const view = await mount(f);
   const { lastFrame, stdin, unmount } = view;
   await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await goto(view, /(^|\s)demo \[/);
@@ -509,9 +510,31 @@ test("Esc in the picker adopts nothing", async (t) => {
 test("several keys delivered in a single write are handled one by one", async (t) => {
   const f = await fixture(t);
   await f.operations.addUserGlobalInstallation!(record(["pi"], false, "portable/alpha"));
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /▸ builtin:agent-depot \(1\)/);
   press(view.stdin, "jj");
   await waitForFrame(view.lastFrame, (frame) => /Managed \(project\)/.test(selectedLine(frame)));
   view.unmount();
+});
+
+
+test("InstallationsView starts with every scope collapsed and opens each level on demand", async (t) => {
+  const f = await fixture(t);
+  await f.operations.addUserGlobalInstallation!(record(["pi"]));
+  await f.manifestStore.save(parseProjectManifest({ version: 1, skills: [record(["pi"], false, "portable/project")] }));
+  await writeUnmanaged(f.home, SKILL_MD, "loose");
+  const view = render(<InstallationsView operations={f.operations} environment={f.environment} />);
+  try {
+    const frame = await waitForFrame(view.lastFrame, /Managed \(user-global\) \(1\)/);
+    assert.match(frame, /▸ Managed \(user-global\)/);
+    assert.match(frame, /▸ Managed \(project\)/);
+    assert.match(frame, /▸ Unmanaged \(user-global\)/);
+    assert.doesNotMatch(frame, /builtin:agent-depot|portable\/|loose/);
+    await step(view, RIGHT);
+    assert.match(view.lastFrame() ?? "", /▸ builtin:agent-depot/);
+    assert.doesNotMatch(view.lastFrame() ?? "", /portable\/demo/);
+    await step(view, "j");
+    await step(view, ENTER);
+    assert.match(view.lastFrame() ?? "", /portable\/demo/);
+  } finally { view.unmount(); }
 });

@@ -47,15 +47,15 @@ test("SourcesView lists id, kind and url of each source", async () => {
   const sources: readonly Source[] = [BUILT_IN_SOURCE, external];
   const { lastFrame, unmount } = render(<SourcesView operations={operationsFor(async () => sources)} />);
   const frame = await waitForFrame(lastFrame, /git:1234567890abcdef12345678/);
-  assert.match(frame, /builtin:agent-depot · included/);
-  assert.match(frame, /git:1234567890abcdef12345678\s+git\s+https:\/\/github\.com\/example\/skills\.git/);
+  assert.match(frame, /builtin:agent-depot\s+skills\s+included/);
+  assert.match(frame, /git:1234567890abcdef12345678\s+skills\s+https:\/\/github\.com\/example\/skills\.git/);
   unmount();
 });
 
 test("SourcesView shows an empty Git state, with or without the built-in source", async () => {
   for (const sources of [[], [BUILT_IN_SOURCE]] as const) {
     const { lastFrame, unmount } = render(<SourcesView operations={operationsFor(async () => sources)} />);
-    const frame = await waitForFrame(lastFrame, /No Git sources · n to add/);
+    const frame = await waitForFrame(lastFrame, /No sources or App recipes · n to add/);
     assert.doesNotMatch(selectedLine(frame) ?? "", /./);
     unmount();
   }
@@ -68,7 +68,7 @@ test("SourcesView shows the built-in source as a fixed row above the list that i
   );
   let frame = await waitForFrame(lastFrame, /git:1234567890abcdef12345678/);
   const lines = frame.split("\n");
-  const builtin = lines.findIndex((line) => line.includes("builtin:agent-depot · included"));
+  const builtin = lines.findIndex((line) => line.includes("builtin:agent-depot  skills  included"));
   assert.ok(builtin >= 0 && builtin < lines.findIndex((line) => line.includes(external.id)), frame);
   assert.doesNotMatch(lines[builtin] ?? "", /^>|\[.\]/);
   // The cursor starts on the first Git source and cannot move up onto the built-in row.

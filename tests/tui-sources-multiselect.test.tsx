@@ -46,12 +46,12 @@ const highlighted = (frame: string) => frame.split("\n").find((line) => line.sta
 
 test("the header row is outside the list and never highlighted", async () => {
   const { lastFrame, stdin, unmount } = await open(operationsFor([]));
-  let frame = await waitForFrame(lastFrame, /ID\s+KIND\s+URL/);
+  let frame = await waitForFrame(lastFrame, /ID\s+KIND\s+LOCATION/);
   assert.match(highlighted(frame), new RegExp(first.id));
   assert.doesNotMatch(lineOf(frame, "KIND"), /^>/);
   stdin.write(UP);
   stdin.write(UP);
-  frame = await waitForFrame(lastFrame, /ID\s+KIND\s+URL/);
+  frame = await waitForFrame(lastFrame, /ID\s+KIND\s+LOCATION/);
   assert.match(highlighted(frame), new RegExp(first.id));
   assert.equal(frame.split("\n").filter((line) => line.startsWith("> ")).length, 1);
   unmount();

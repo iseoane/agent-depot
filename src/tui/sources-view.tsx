@@ -8,7 +8,7 @@ import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
-import { useSourcesRecipes } from "./sources-recipes.js";
+import { useSourcesRecipes, type RecipeRow } from "./sources-recipes.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
@@ -19,6 +19,8 @@ export interface SourcesViewProps {
   readonly onOpenCatalog?: (source: Source) => void;
   /** Rows the list may use; defaults to what the terminal leaves. Injectable for tests. */
   readonly listHeight?: number;
+  /** Contextual browse hints for the shell footer. */
+  readonly onHintsChange?: (hints: string) => void;
 }
 
 type LoadState =
@@ -26,10 +28,22 @@ type LoadState =
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly sources: readonly Source[] };
 
+type SourceRow =
+  | { readonly id: string; readonly kind: "skills"; readonly source: GitSource }
+  | { readonly id: string; readonly kind: "app"; readonly recipe: RecipeRow };
+
 type Selection = { readonly id?: string; readonly index: number };
 
+/** Footer keys for the selected row; App seeds the footer before the view reports a selection. */
+export function sourceRowHints(row: { readonly kind: "skills" | "app" } | undefined): string {
+  if (row === undefined) return "n add · q quit";
+  return row.kind === "app"
+    ? "j/k move · Enter preview/approve · n add · r refresh · d remove · q quit"
+    : "j/k move · space mark · a all · Enter catalog · n add · r refresh · d remove · q quit";
+}
+
 /** The highlighted index: by stable id while that source exists, otherwise the bounded fallback index. */
-function resolveIndex(sources: readonly GitSource[], selection: Selection): number {
+function resolveIndex(sources: readonly { readonly id: string }[], selection: Selection): number {
   const found = sources.findIndex((source) => source.id === selection.id);
   return found >= 0 ? found : Math.min(selection.index, Math.max(sources.length - 1, 0));
 }
@@ -58,7 +72,7 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment }: SourcesViewProps) {
+export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange }: SourcesViewProps) {
   const height = useListHeight(listHeight, 9);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
@@ -127,12 +141,28 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   const sources = allSources.filter((source): source is GitSource => source.kind === "git");
   const sourcesRef = useRef<readonly GitSource[]>(sources);
   sourcesRef.current = sources;
-  const selected = resolveIndex(sources, selection);
+  const rowsRef = useRef<readonly SourceRow[]>([]);
   const recipes = useSourcesRecipes({
-    operations, environment, onCapturingChange, height, gitCount: sources.length,
+    operations, environment, onCapturingChange,
+    highlightedFile: () => {
+      const rows = rowsRef.current;
+      const row = rows[resolveIndex(rows, selectionRef.current)];
+      return row?.kind === "app" ? row.recipe.entry.file : undefined;
+    },
   });
+  const rows: readonly SourceRow[] = [
+    ...sources.map((source): SourceRow => ({ id: source.id, kind: "skills", source })),
+    ...recipes.rows.map((recipe): SourceRow => ({ id: `recipe:${recipe.entry.file}`, kind: "app", recipe })),
+  ];
+  rowsRef.current = rows;
+  const selected = resolveIndex(rows, selection);
+  const selectedRow = rows[selected];
+  const hints = sourceRowHints(selectedRow);
+  useEffect(() => { onHintsChange?.(hints); }, [hints, onHintsChange]);
   const select = (index: number) => {
-    const listed = sourcesRef.current;
+    setMessage(undefined);
+    recipes.clearMessage();
+    const listed = rowsRef.current;
     const bounded = Math.min(Math.max(index, 0), Math.max(listed.length - 1, 0));
     setSelection({ id: listed[bounded]?.id, index: bounded });
   };
@@ -193,6 +223,12 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   useKeys((input, key) => {
     const mode = modeRef.current;
     if (mode.kind === "busy") return;
+    if (mode.kind === "add-kind") {
+      if (key.escape || input === "n") dispatch({ type: "done" });
+      else if (input === "1") { typed.current = ""; dispatch({ type: "input" }); }
+      else if (input === "2") { dispatch({ type: "done" }); recipes.startAdd(); }
+      return;
+    }
     if (mode.kind === "input") {
       if (key.escape) dispatch({ type: "done" });
       else if (key.return) {
@@ -228,38 +264,36 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       return;
     }
 
-    if (recipes.handleKey(input, key)) {
-      if (key.tab) setMessage(undefined);
-      return;
-    }
+    if (recipes.handleKey(input, key)) return;
 
+    const rows = rowsRef.current;
+    const at = resolveIndex(rows, selectionRef.current);
+    const row = rows[at];
     const listed = sourcesRef.current;
-    const at = resolveIndex(listed, selectionRef.current);
-    const highlighted = listed[at];
+    const highlighted = row?.kind === "skills" ? row.source : undefined;
     if (key.downArrow || input === "j") {
       select(at + 1);
     } else if (key.upArrow || input === "k") {
       select(at - 1);
     } else if (key.pageDown) {
-      select(at + pageStep(recipes.gitHeight));
+      select(at + pageStep(height));
     } else if (key.pageUp) {
-      select(at - pageStep(recipes.gitHeight));
+      select(at - pageStep(height));
     } else if (key.return && highlighted) {
       onOpenCatalog?.(highlighted);
     } else if (input === "n") {
       setMessage(undefined);
-      typed.current = "";
-      dispatch({ type: "input" });
+      dispatch({ type: "add-kind" });
     } else if (input === " " && highlighted) {
       setMessage(undefined);
       toggle([highlighted.id]);
-    } else if (input === "a") {
+    } else if (input === "a" && row?.kind !== "app") {
       if (listed.length === 0) stop("There are no Git sources to select");
       else {
         setMessage(undefined);
         toggle(listed.map((source) => source.id));
       }
-    } else if (input === "r") {
+    } else if (input === "r" && row?.kind !== "app") {
       const targets = markedRef.current.size > 0
         ? listed.filter((source) => markedRef.current.has(source.id))
         : highlighted ? [highlighted] : [];
@@ -278,20 +312,21 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   if (state.status === "loading") return <Text>Loading sources...</Text>;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
 
-  const window = computeWindow(sources.length, selected, recipes.gitHeight);
+  const window = computeWindow(rows.length, selected, height);
 
   return (
     <Box flexDirection="column">
-      {builtin ? <Text color={theme.muted}>{"    "}{builtin.id} · included</Text> : null}
-      {sources.length === 0 ? <Text>No Git sources · n to add</Text> : null}
-      {sources.length > 0 ? <Text color={theme.muted}>{"      "}ID  KIND  URL</Text> : null}
-      {sources.slice(window.start, window.end).map((source, offset) => {
+      <Text color={theme.muted}>{"      "}ID  KIND  LOCATION / STATUS</Text>
+      {builtin ? <Text color={theme.muted}>{"    "}{builtin.id}  skills  included</Text> : null}
+      {rows.length === 0 ? <Text>No sources or App recipes · n to add</Text> : null}
+      {rows.slice(window.start, window.end).map((row, offset) => {
         const index = window.start + offset;
+        const id = row.kind === "skills" ? row.source.id : row.recipe.entry.recipe?.name ?? row.recipe.entry.file.split(/[\\/]/u).pop();
         return (
-          <Text key={source.id} {...rowStyle(!recipes.focused && index === selected)}>
-            {!recipes.focused && index === selected ? "> " : "  "}
-            {marked.has(source.id) ? "[x] " : "[ ] "}
-            {source.id}  {source.kind}  {source.url}
+          <Text key={row.id} {...rowStyle(index === selected)}>
+            {index === selected ? "> " : "  "}
+            {row.kind === "skills" ? (marked.has(row.id) ? "[x] " : "[ ] ") : "    "}
+            {id}  {row.kind}  {row.kind === "skills" ? row.source.url : `${row.recipe.entry.file} · ${row.recipe.status}`}
           </Text>
         );
       })}
@@ -305,6 +340,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
 }
 
 function Prompt({ mode }: { readonly mode: Mode }) {
+  if (mode.kind === "add-kind") return <Text>Add: 1 Skill Source · 2 App recipe (Esc cancel)</Text>;
   if (mode.kind === "input") return <Text>URL: {mode.value}</Text>;
   if (mode.kind === "busy") return <Text>Working...</Text>;
   if (mode.kind === "confirm") {

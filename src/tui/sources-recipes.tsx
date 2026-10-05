@@ -1,7 +1,8 @@
 import { Box, Text, type Key } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createAppOperations, type AppEntry } from "../app-flow.js";
+import { createAppOperations, type AppEntry, type AppLifecyclePlan } from "../app-flow.js";
+import { planAppRecipeRemoval, removeAppRecipe, type AppRecipeRemovalPlan } from "../app-recipe-removal.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../sources.js";
 import { handleCatalogActionKey, type CatalogFlowContext } from "./catalog-flow.js";
 import type { ActionMode } from "./catalog-actions.js";
@@ -13,11 +14,10 @@ import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
 import { PreviewConfirm } from "./panel-parts.js";
 import { answerYesNo } from "./mode-keys.js";
-import { rowStyle, theme } from "./theme.js";
-import { computeWindow, pageStep } from "./window.js";
+import { theme } from "./theme.js";
 
 /** One recipe file with its command-free approval status. */
-interface RecipeRow {
+export interface RecipeRow {
   readonly entry: AppEntry;
   readonly status: string;
 }
@@ -28,26 +28,25 @@ type RecipeMode =
   | { readonly kind: "busy" }
   | { readonly kind: "guide" | "manual" | "prompt" }
   | { readonly kind: "install"; readonly action: ActionMode }
-  | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[] };
+  | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly removeAfterApproval?: boolean }
+  | { readonly kind: "uninstall-question" | "remove"; readonly removal: AppRecipeRemovalPlan }
+  | { readonly kind: "uninstall-confirm" | "uninstall-manual"; readonly removal: AppRecipeRemovalPlan; readonly plan: AppLifecyclePlan };
 
 interface RecipeSectionOptions {
   readonly operations: SourceOperations;
   readonly environment?: TuiEnvironment;
   readonly onCapturingChange?: (value: boolean) => void;
-  readonly height: number;
-  readonly gitCount: number;
+  readonly highlightedFile: () => string | undefined;
 }
 
 /**
- * Returns section focus, key dispatch (true when consumed), the recipe panel,
- * and the Git list's share of the common height budget. Sources owns key dispatch.
+ * Recipe loading and captured actions; Sources owns the single list and cursor.
  */
 export function useSourcesRecipes({
   operations,
   environment,
   onCapturingChange,
-  height,
-  gitCount,
+  highlightedFile,
 }: RecipeSectionOptions) {
   const homeDirectory = environment?.homeDirectory;
   const appEnvironment = environment?.appEnvironment;
@@ -58,12 +57,8 @@ export function useSourcesRecipes({
   const mounted = useMounted();
   const [rows, setRows] = useState<readonly RecipeRow[]>([]);
   const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
   const [loadError, setLoadError] = useState<string>();
-  const [focused, setFocused] = useState(false);
-  // Ref mirrors keep Tab and subsequent keys in a single burst on the same section.
-  const focusRef = useRef(false);
-  const [index, setIndex] = useState(0);
-  const indexRef = useRef(0);
   const [mode, setModeState] = useState<RecipeMode>({ kind: "browse" });
   const modeRef = useRef<RecipeMode>(mode);
   const setMode = (next: RecipeMode) => {
@@ -75,7 +70,7 @@ export function useSourcesRecipes({
     await reload();
     if (mounted.current) setMode({ kind: "browse" });
   };
-  const preview = async (entry: AppEntry, status: string) => {
+  const preview = async (entry: AppEntry, status: string, removeAfterApproval = false) => {
     setError(undefined);
     setMode({ kind: "busy" });
     try {
@@ -83,7 +78,7 @@ export function useSourcesRecipes({
       if (mounted.current) {
         setMode({
           kind: "approve",
-          entry,
+          entry, removeAfterApproval,
           lines: [
             `File: ${entry.file}`,
             `Platform: ${entry.recipe?.platform ?? "all"}`,
@@ -140,60 +135,110 @@ export function useSourcesRecipes({
       }
     }
   };
-  /** Handles captured modes and browse keys only in the focused section. */
+  const startRemoval = async (entry: AppEntry) => {
+    setError(undefined);
+    setMode({ kind: "busy" });
+    try {
+      const approval = await apps.approvalStatus(entry);
+      if (approval.status === "needs approval") {
+        await preview(entry, approval.status, true);
+        return;
+      }
+      const removal = await planAppRecipeRemoval(apps, entry);
+      if (mounted.current) setMode({ kind: removal.installed ? "uninstall-question" : "remove", removal });
+    } catch (error) {
+      if (mounted.current) {
+        setError(errorText(error));
+        setMode({ kind: "browse" });
+      }
+    }
+  };
+  const uninstall = async (current: Extract<RecipeMode, { kind: "uninstall-confirm" | "uninstall-manual" }>) => {
+    setMode({ kind: "busy" });
+    try {
+      const result = current.kind === "uninstall-manual"
+        ? await apps.completeManual(current.plan, true)
+        : await apps.executeLifecycle(current.plan, true);
+      if (!mounted.current) return;
+      if (result.status === "manual required") setMode({ ...current, kind: "uninstall-manual" });
+      else if (result.status === "untracked") setMode({ kind: "remove", removal: current.removal });
+      else {
+        setError(`Uninstall failed: ${result.reason ?? result.status}; recipe retained`);
+        setMode({ kind: "browse" });
+      }
+    } catch (error) {
+      if (mounted.current) {
+        setError(`Uninstall failed: ${errorText(error)}; recipe retained`);
+        setMode({ kind: "browse" });
+      }
+    }
+  };
+  const startAdd = () => {
+    setError(undefined);
+    setMode({ kind: "guide" });
+  };
+  /** Captured actions take priority; browse actions use the unified cursor's recipe. */
   const handleKey = (input: string, key: Key): boolean => {
     const current = modeRef.current;
     if (current.kind === "busy") return true;
     if (current.kind === "install") {
-      // Host/scope/version are selection prompts; version chooses latest or fixed
-      // by number. Only the separate fixed mode accepts free-text version input.
-      // n declines these selections; fixed input and in-flight installs are untouched.
       const decline = input === "n" && ["host", "scope", "version"].includes(current.action.kind);
       handleCatalogActionKey(flow, current.action, input, decline ? { ...key, escape: true } : key);
       return true;
     }
     if (current.kind === "guide" || current.kind === "manual" || current.kind === "prompt") {
-      if (key.escape || input === "n") setMode({ kind: "browse" });
+      if (key.escape || input === "n") { setMode({ kind: "browse" }); void reload(); }
       else if (current.kind === "guide" && input === "1") void startAI();
       else if (current.kind === "guide" && input === "2") setMode({ kind: "manual" });
       return true;
     }
+    const cancel = () => setMode({ kind: "browse" });
     if (current.kind === "approve") {
       answerYesNo(input, key, () => {
         setMode({ kind: "busy" });
-        void apps.approve(current.entry).then(finish, error => {
-          if (mounted.current) {
-            setError(errorText(error));
-            setMode({ kind: "browse" });
-          }
+        void apps.approve(current.entry).then(async () => {
+          await reload();
+          if (!mounted.current) return;
+          if (current.removeAfterApproval) await startRemoval(current.entry);
+          else setMode({ kind: "browse" });
+        }, error => {
+          if (mounted.current) { setError(errorText(error)); cancel(); }
         });
-      }, () => setMode({ kind: "browse" }));
+      }, cancel);
       return true;
     }
-    if (key.tab) {
-      setError(undefined);
-      focusRef.current = !focusRef.current;
-      setFocused(focusRef.current);
+    if (current.kind === "uninstall-question") {
+      answerYesNo(input, key, () => {
+        setMode({ kind: "busy" });
+        void apps.planLifecycle(current.removal.entry, "uninstall").then(plan => {
+          if (mounted.current) setMode({ kind: !plan.argv && plan.manual ? "uninstall-manual" : "uninstall-confirm", removal: current.removal, plan });
+        }, error => { if (mounted.current) { setError(errorText(error)); cancel(); } });
+      }, cancel);
       return true;
     }
-    if (!focusRef.current) return false;
-    if (key.downArrow || input === "j" || key.upArrow || input === "k" || key.pageDown || key.pageUp) {
-      const step = key.pageDown || key.pageUp ? pageStep(recipeHeight) : 1;
-      const down = key.downArrow || input === "j" || key.pageDown;
-      indexRef.current = Math.min(
-        Math.max(indexRef.current + (down ? step : -step), 0),
-        Math.max(rows.length - 1, 0),
-      );
-      setIndex(indexRef.current);
-    } else if (input === "n") {
-      setError(undefined);
-      setMode({ kind: "guide" });
-    } else if (input === "r") {
-      void reload();
-    } else if (key.return) {
-      const row = rows[Math.min(indexRef.current, rows.length - 1)];
-      if (row) void preview(row.entry, row.status);
+    if (current.kind === "uninstall-confirm" || current.kind === "uninstall-manual") {
+      answerYesNo(input, key, () => { void uninstall(current); }, cancel);
+      return true;
     }
+    if (current.kind === "remove") {
+      answerYesNo(input, key, () => {
+        setMode({ kind: "busy" });
+        void removeAppRecipe(apps, current.removal, true).then(async () => {
+          if (mounted.current) setNotice(`Removed App recipe: ${current.removal.file}`);
+          await finish();
+        }, error => {
+          if (mounted.current) { setError(errorText(error)); cancel(); }
+        });
+      }, cancel);
+      return true;
+    }
+    const row = rows.find(row => row.entry.file === highlightedFile());
+    if (!row) return false;
+    if (input === "n") startAdd();
+    else if (input === "r") void reload();
+    else if (key.return) void preview(row.entry, row.status);
+    else if (input === "d") void startRemoval(row.entry);
+    else return false;
     return true;
   };
   /** Reloads parsing and approval receipts, never version/latest commands. */
@@ -216,30 +261,11 @@ export function useSourcesRecipes({
     }
   }, [apps, mounted]);
   useEffect(() => { void reload(); }, [reload]);
-  // Give each nonempty section half the rows, then reclaim unused Git capacity.
-  const budget = Math.max(height, gitCount > 0 && rows.length > 0 ? 2 : 1);
-  const gitShare = Math.min(gitCount, Math.max(1, Math.floor(budget / 2)));
-  const recipeHeight = Math.min(rows.length, budget - gitShare);
-  const gitHeight = Math.max(1, budget - recipeHeight);
-  const at = Math.min(index, rows.length - 1);
-  const window = computeWindow(rows.length, at, recipeHeight);
   const panel = (
     <Box flexDirection="column">
-      <Text {...rowStyle(focused && rows.length === 0)}>
-        App recipes · {apps.directory} · Tab switches section
-      </Text>
-      {focused ? <Text color={theme.muted}>j/k move · Enter preview · n add recipe · r reload</Text> : null}
       {loadError ? <Text color={theme.error}>Error loading App recipes: {loadError}</Text> : null}
       {error ? <Text color={theme.error}>{error}</Text> : null}
-      {rows.slice(window.start, window.end).map(({ entry, status }, offset) => {
-        const selected = focused && window.start + offset === at;
-        return (
-          <Text key={entry.file} {...rowStyle(selected)}>
-            {selected ? "> " : "  "}{entry.file.split(/[\\/]/u).pop()} · {status}
-          </Text>
-        );
-      })}
-      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {notice ? <Text color={theme.success}>{notice}</Text> : null}
       {mode.kind === "guide" ? (
         <Text>
           {"1 With the AI skill · install if missing, then copy the prompt\n"}
@@ -263,7 +289,19 @@ export function useSourcesRecipes({
       {mode.kind === "approve" ? (
         <PreviewConfirm lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n`} />
       ) : null}
+      {mode.kind === "uninstall-question" ? (
+        <Text>App {appName(mode.removal.entry)} is installed or tracked{mode.removal.installedVersion ? ` (${mode.removal.installedVersion})` : ""}. Uninstall it before removing the recipe? y/n (n cancels removal)</Text>
+      ) : null}
+      {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (
+        <PreviewConfirm lines={appStepLines(mode.plan)} question={mode.kind === "uninstall-manual"
+          ? "Complete the manual uninstall, then check now? y/n"
+          : `Uninstall ${appName(mode.removal.entry)}? y/n`} />
+      ) : null}
+      {mode.kind === "remove" ? (
+        <PreviewConfirm lines={[`Delete recipe: ${mode.removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."]}
+          question={`Remove recipe for ${appName(mode.removal.entry)}? y/n`} />
+      ) : null}
     </Box>
   );
-  return { focused, handleKey, gitHeight, panel };
+  return { rows, handleKey, startAdd, reload, clearMessage: () => { setError(undefined); setNotice(undefined); }, panel, directory: apps.directory };
 }

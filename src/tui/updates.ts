@@ -307,7 +307,7 @@ export async function prepareUpdates(
         `Environment: ${plan.environment}`,
         row.path,
         `Version: ${plan.previousVersion} -> ${plan.latestVersion ?? "unknown"}`,
-        ...(plan.argv ? [`argv: ${JSON.stringify(plan.argv)}`, `Executable: ${plan.executable ?? "unavailable"}`] : []),
+        ...(plan.argv ? [`argv: ${JSON.stringify(plan.argv)}`, `Executable: ${plan.executable ?? `${JSON.stringify(plan.argv[0])} not found in PATH`}`] : []),
         ...(plan.manual ? [`Manual: ${plan.manual}`] : []),
         `Working directory: ${plan.cwd}`,
         ...(plan.warning ? [plan.warning] : []),

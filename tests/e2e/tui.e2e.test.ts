@@ -54,7 +54,13 @@ class TuiSession {
       cols: 110,
       rows: 40,
       cwd: projectRoot,
-      env: { ...inherited, TERM: "xterm-256color", HOME: homeDirectory, USERPROFILE: homeDirectory, NO_COLOR: "1", FORCE_COLOR: "0", ...environment },
+      env: {
+        ...inherited, TERM: "xterm-256color", HOME: homeDirectory, USERPROFILE: homeDirectory,
+        XDG_STATE_HOME: path.join(homeDirectory, ".local", "state"),
+        XDG_CONFIG_HOME: path.join(homeDirectory, ".config"),
+        XDG_CACHE_HOME: path.join(homeDirectory, ".cache"),
+        NO_COLOR: "1", FORCE_COLOR: "0", ...environment,
+      },
     });
     this.terminal.onData((data) => {
       this.output += data;
@@ -131,10 +137,11 @@ class TuiSession {
 test("the TUI walks every view in a real terminal and quits cleanly", { timeout: 120_000 }, async () => {
   const session = new TuiSession();
   try {
-    await session.waitFor(/Agent Depot[\s\S]*add · r refresh/u);
+    await session.waitFor(/Agent Depot[\s\S]*n add ·/u);
 
-    const catalog = await session.send("2", /builtin:agent-depot \(3\)[\s\S]*doctor-md-skill/u);
+    const catalog = await session.send("2", /▸ builtin:agent-depot \(3\)/u);
     assert.match(catalog, /Scope: all sources/u);
+    await session.send("\r", /doctor-md-skill/u);
 
     const installations = await session.send("3", /Managed \(user-global\) \(0\)/u);
     assert.match(installations, /Unmanaged \(user-global\)/u);
@@ -146,14 +153,14 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
     assert.match(profile, /5 Import\/Export/u);
 
     const sources = await session.send("1", /builtin:agent-depot/u);
-    assert.match(sources, /add · r refresh/u);
+    assert.match(sources, /n add ·/u);
 
     // `n` opens the add-Source prompt (keys are captured), Esc cancels back to the list.
     await session.send("n", /Enter submit · Esc cancel/u);
-    await session.send("\u001b", /add · r refresh/u);
+    await session.send("\u001b", /n add ·/u);
 
     // `/` opens the Catalog filter and narrows the list.
-    await session.send("2", /doctor-md-skill/u);
+    await session.send("2", /▸ builtin:agent-depot \(3\)/u);
     await session.send("/", /Enter submit · Esc cancel/u);
     const filtered = await session.send("agents", /doctor-md-agents/u);
     // Ink repaints whole frames, each starting with the header: judge the last one only.
@@ -193,11 +200,13 @@ test("the TUI approves and installs an App, then offers its update", { timeout: 
     XDG_CACHE_HOME: path.join(sandbox, "cache"),
   });
   try {
-    await session.waitFor(/add · r refresh/u);
+    await session.waitFor(/n add ·/u);
     await session.send("3", /Apps \(user-global\) \(1\)/u);
     await assert.rejects(readFile(fixture.log), { code: "ENOENT" });
     // Empty Managed/global, Managed/project and Unmanaged roots precede Apps.
-    await session.send("jjjj", /fixture-app/u);
+    await session.send("jjj", /> ▸ Apps \(user-global\)/u);
+    await session.send("\r", /fixture-app/u);
+    await session.send("j", /> .*fixture-app/u);
     await session.send("\r", /Approve fixture-app\? y\/n/u);
     await session.send("y", /Approved fixture-app/u);
     await session.send("i", /install fixture-app\? y\/n/u);
@@ -223,7 +232,7 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     const file = path.join(root, "profile.json");
     const exporting = new TuiSession(a.env);
     sessions.push(exporting);
-    await exporting.waitFor(/add · r refresh/u);
+    await exporting.waitFor(/n add ·/u);
     await exporting.send("5", /e export · i import/u);
     const checklist = await exporting.send("e", /Enter preview/u);
     assert.match(checklist, /Sources: https:\/\/example.test\/profile\/source.git/u);
@@ -241,7 +250,7 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
 
     const importing = new TuiSession(b.env);
     sessions.push(importing);
-    await importing.waitFor(/add · r refresh/u);
+    await importing.waitFor(/n add ·/u);
     await importing.send("5", /e export · i import/u);
     await importing.send("i", /Profile path:/u);
     await importing.send(file, /profile.json/u);

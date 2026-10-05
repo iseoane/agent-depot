@@ -17,10 +17,9 @@ export interface VisibleRow<T> {
 
 export type Expanded = ReadonlySet<string>;
 
-/** Initially only the first group with children is open; every other group starts collapsed. */
-export function defaultExpanded<T>(roots: readonly TreeNode<T>[]): Expanded {
-  const first = roots.find((root) => (root.children?.length ?? 0) > 0);
-  return new Set(first ? [first.id] : []);
+/** Every group starts collapsed until the user expands it. */
+export function defaultExpanded(): Expanded {
+  return new Set();
 }
 
 /** The visible nodes in display order: children appear only under expanded parents. */

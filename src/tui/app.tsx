@@ -8,7 +8,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { InstallationsView } from "./installations-view.js";
 import { useKeys } from "./keys.js";
 import { ProfileView } from "./profile-view.js";
-import { SourcesView } from "./sources-view.js";
+import { SourcesView, sourceRowHints } from "./sources-view.js";
 import { separatorLine, theme } from "./theme.js";
 import { UpdatesView } from "./updates-view.js";
 
@@ -31,11 +31,9 @@ const TABS: readonly (readonly [ViewName, string])[] = [
   ["profile", "5 Import/Export"],
 ];
 
-/** Compact keys of the current view; the tab bar already shows how to switch views. */
-function hintsOf(view: ViewName, catalogFocusedOnSource: boolean): string {
+/** Compact keys of the views with fixed keys; Sources derives its own from the selected row. */
+function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boolean): string {
   switch (view) {
-    case "sources":
-      return "Tab section · j/k move · space mark · a all · Enter catalog · n add · r refresh · d remove · q quit";
     case "catalog":
       return `j/k move · Enter expand · space mark · a all · i install · / filter${catalogFocusedOnSource ? " · s all sources" : ""} · q quit`;
     case "installations":
@@ -59,6 +57,7 @@ export function App({ operations, environment, onExit }: AppProps) {
   }, []);
   const [view, setView] = useState<ViewName>("sources");
   const [catalogSourceId, setCatalogSourceId] = useState<string | undefined>();
+  const [sourcesHints, setSourcesHints] = useState(sourceRowHints(undefined));
   const showView = (next: ViewName) => setView(next);
 
   useKeys((input) => {
@@ -89,6 +88,7 @@ export function App({ operations, environment, onExit }: AppProps) {
           operations={operations}
           environment={environment}
           onCapturingChange={onCapturingChange}
+          onHintsChange={setSourcesHints}
           onOpenCatalog={(source) => {
             setCatalogSourceId(source.id);
             setView("catalog");
@@ -112,7 +112,7 @@ export function App({ operations, environment, onExit }: AppProps) {
           onCapturingChange={onCapturingChange}
         />
       )}
-      <Text color={theme.muted}>{capturing ? "Enter submit · Esc cancel · y/n confirm · space toggle" : hintsOf(view, catalogSourceId !== undefined)}</Text>
+      <Text color={theme.muted}>{capturing ? "Enter submit · Esc cancel · y/n confirm · space toggle" : view === "sources" ? sourcesHints : hintsOf(view, catalogSourceId !== undefined)}</Text>
     </Box>
   );
 }

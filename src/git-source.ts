@@ -177,7 +177,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
         "fetch",
         "--prune",
         "--force",
-        source.url,
+        gitSourceLocation(source.url).repositoryUrl,
         "+refs/*:refs/*",
       ]);
       return;
@@ -185,7 +185,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
 
     const temporaryDestination = `${destination}.${process.pid}.${randomUUID()}.tmp`;
     try {
-      await this.runner.run("git", ["clone", "--mirror", source.url, temporaryDestination]);
+      await this.runner.run("git", ["clone", "--mirror", gitSourceLocation(source.url).repositoryUrl, temporaryDestination]);
       await assertNoSymlinkPath(temporaryDestination, "cache path");
       if ((await pathType(temporaryDestination)) !== "directory") {
         throw new Error("Git clone did not create a directory mirror");
@@ -249,6 +249,10 @@ export class GitSourceSnapshotAccess {
   /** Reads Skill bytes and the commit they came from as one immutable snapshot. */
   async readSkillTreeSnapshot(source: GitSource, skillPath: string): Promise<GitSourceSkillTreeSnapshot> {
     const relativeSkillPath = validateSkillDirectoryPath(skillPath);
+    const directory = gitSourceLocation(source.url).directory;
+    if (directory !== undefined && !relativeSkillPath.startsWith(`${directory}/`) && relativeSkillPath !== directory) {
+      throw new Error("Selected Skill path is outside the Git Source directory");
+    }
     const destination = await this.requireMirror(source);
 
     const commit = await this.readResolvedCommit(source);
@@ -303,7 +307,7 @@ export class GitSourceSnapshotAccess {
   async readResolvedCommit(source: GitSource): Promise<GitSourceResolvedVersion> {
     const destination = await this.requireMirror(source);
 
-    const revision = source.ref === undefined ? "HEAD" : validateGitRef(source.ref);
+    const revision = validateGitRef(source.ref ?? gitSourceLocation(source.url).ref ?? "HEAD");
     const commit = (await this.runner.run("git", [
       "--git-dir",
       destination,
@@ -321,7 +325,11 @@ export class GitSourceSnapshotAccess {
     const destination = await this.requireMirror(source);
 
     const commit = await this.readResolvedCommit(source);
-    const tree = await this.runner.run("git", ["--git-dir", destination, "ls-tree", "-r", "-z", commit]);
+    const directory = gitSourceLocation(source.url).directory;
+    const tree = await this.runner.run("git", [
+      "--git-dir", destination, "ls-tree", "-r", "-z", commit,
+      ...(directory === undefined ? [] : ["--", directory]),
+    ]);
     const files: GitSourceSnapshotFile[] = [];
     for (const record of tree.split("\0")) {
       if (!record) {
@@ -337,6 +345,7 @@ export class GitSourceSnapshotAccess {
         metadata[0] === "120000"
         || metadata[1] !== "blob"
         || !relativePath
+        || (directory !== undefined && !relativePath.startsWith(`${directory}/`))
         || path.posix.basename(relativePath) !== "SKILL.md"
         || relativePath.split("/").slice(0, -1).some((segment) => EXCLUDED_LIFECYCLE_SEGMENTS.has(segment))
       ) {
@@ -513,7 +522,47 @@ export function canonicalizeGitSourceUrl(input: string): string {
     throw new Error("Git Source URL must identify a repository path");
   }
 
-  return parsed.toString();
+  const canonicalUrl = parsed.toString();
+  gitSourceLocation(canonicalUrl);
+  return canonicalUrl;
+}
+
+/**
+ * The GitHub `tree/<ref>/<directory>` shape, parsed once: Git transport, Skill discovery and the
+ * Catalog group label all read this, so a label can never describe a different scope than the one
+ * the clone and the tree walk use. Undefined for any other URL, which stays its own repository.
+ */
+export function githubTreeLocation(url: string): {
+  readonly repository: string;
+  readonly repositoryUrl: string;
+  readonly ref: string;
+  readonly directory?: string;
+} | undefined {
+  const parsed = new URL(url);
+  const segments = parsed.pathname.split("/").slice(1);
+  if (parsed.hostname !== "github.com" || !["https:", "http:"].includes(parsed.protocol) || segments[2] !== "tree") {
+    return undefined;
+  }
+  if (segments.length < 4 || !segments[0] || !segments[1] || !segments[3]) {
+    throw new Error("GitHub directory Source URL must include an owner, repository, and ref");
+  }
+  const ref = validateGitRef(decodeURIComponent(segments[3]));
+  if (ref.startsWith("-")) throw new Error("GitHub directory Source ref must not start with a dash");
+  const directory = segments.length > 4
+    ? validateSkillDirectoryPath(segments.slice(4).map((segment) => decodeURIComponent(segment)).join("/"))
+    : undefined;
+  const repository = `${segments[0]}/${segments[1]}`;
+  parsed.pathname = `/${repository}`;
+  return { repository, repositoryUrl: parsed.toString(), ref, ...(directory === undefined ? {} : { directory }) };
+}
+
+/** Keep the registered URL (and identity) while deriving Git transport and discovery scope. */
+function gitSourceLocation(url: string): {
+  readonly repositoryUrl: string;
+  readonly ref?: string;
+  readonly directory?: string;
+} {
+  return githubTreeLocation(url) ?? { repositoryUrl: url };
 }
 
 export function sourceIdForUrl(url: string): string {

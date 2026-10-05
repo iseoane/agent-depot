@@ -66,7 +66,6 @@ test("Enter previews every step; only y approves and changed content needs appro
   const f = await fixture(t);
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
-  view.stdin.write("\t");
   view.stdin.write("\r");
   let frame = await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   for (const step of ["install", "remove", "version", "latest", "setup"]) assert.ok(frame.includes(`["demo","${step}"]`), frame);
@@ -78,19 +77,18 @@ test("Enter previews every step; only y approves and changed content needs appro
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /demo.json · approved/);
+  await waitForFrame(view.lastFrame, /approved/);
   await writeFile(f.file, JSON.stringify({ ...recipe, homepage: "https://example.com" }));
   view.stdin.write("r");
   frame = await waitForFrame(view.lastFrame, /needs approval/);
   assert.deepEqual(f.commands, []);
-  assert.match(frame, /App recipes/);
+  assert.match(frame, /ID\s+KIND/);
 });
 
 test("recipe add guide offers exactly AI and manual routes, and AI reuses confirmed Skill installation", async t => {
   const f = await fixture(t);
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
-  view.stdin.write("\t");
   view.stdin.write("n");
   await waitForFrame(view.lastFrame, /1 With the AI skill/);
   view.stdin.write("2");
@@ -125,16 +123,17 @@ test("recipe add guide offers exactly AI and manual routes, and AI reuses confir
 
 test("recipe reload failures stay local and Git Source add keys remain usable", async t => {
   const f = await fixture(t);
+  await f.operations.addGitSource("https://github.com/example/skills.git");
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
+  view.stdin.write("j");
+  await waitForFrame(view.lastFrame, /> .*demo.*app/);
   await rm(f.directory, { recursive: true });
   await writeFile(f.directory, "not a directory");
-  view.stdin.write("\t");
   view.stdin.write("r");
   const frame = await waitForFrame(view.lastFrame, /Error loading App recipes/);
-  assert.match(frame, /builtin:agent-depot · included/);
-  view.stdin.write("\t");
-  view.stdin.write("n");
+  assert.match(frame, /builtin:agent-depot\s+skills\s+included/);
+  view.stdin.write("kn1");
   await waitForFrame(view.lastFrame, /URL:/);
   view.stdin.write("\u001b");
   await waitForFrame(view.lastFrame, frame => !frame.includes("URL:"));
@@ -144,7 +143,6 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   const f = await fixture(t);
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
-  view.stdin.write("\t");
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   await writeFile(f.file, JSON.stringify({ ...recipe, platform: "windows" }));
@@ -166,9 +164,9 @@ test("recipe guide captures global number and quit keys in the shell", async t =
   const view = render(<App operations={f.operations} environment={{ homeDirectory: f.home, projectRoot: f.home,
     appEnvironment: { recipesDirectory: f.directory, homeDirectory: f.home } }} onExit={() => { exited = true; }} />);
   t.after(() => view.unmount());
-  const startup = await waitForFrame(view.lastFrame, /needs approval/);
-  assert.match(startup.split("\n").at(-1) ?? "", /Tab section/);
-  view.stdin.write("\t");
+  const startup = await waitForFrame(view.lastFrame, frame => frame.includes("needs approval") && frame.includes("Enter preview/approve"));
+  assert.match(startup.split("\n").at(-1) ?? "", /Enter preview\/approve/);
+  assert.doesNotMatch(startup, /Tab section/);
   view.stdin.write("n2q");
   const frame = await waitForFrame(view.lastFrame, /agent-depot app schema/);
   assert.match(frame, /\[1 Sources\]/);
@@ -197,7 +195,7 @@ test("core approval status is explicit and reads no executables, commands or lat
   assert.equal((await apps.approvalStatus((await apps.load())[0]!)).status, "not applicable here");
 });
 
-test("Git Sources and recipes share a bounded list budget with window indicators", async t => {
+test("Git Sources and recipes share one bounded list and cursor without Tab", async t => {
   const f = await fixture(t);
   await rm(f.file);
   for (let i = 0; i < 20; i++) {
@@ -206,38 +204,31 @@ test("Git Sources and recipes share a bounded list budget with window indicators
     await writeFile(path.join(f.directory, `${name}.json`), JSON.stringify({ ...recipe, name }));
   }
   const view = f.mount(6);
-  let frame = await waitForFrame(view.lastFrame, /app-00.json/);
+  let frame = await waitForFrame(view.lastFrame, /1–6 of 40/);
   const listed = (frame: string) => frame.split("\n").filter(line => /skills-\d+\.git|app-\d+\.json/.test(line));
   assert.equal(listed(frame).length, 6, frame);
-  assert.equal(frame.match(/1–3 of 20/g)?.length, 2, frame);
-  view.stdin.write("\t");
-  view.stdin.write("j".repeat(19));
-  frame = await waitForFrame(view.lastFrame, /> app-19.json/);
+  view.stdin.write("j".repeat(39));
+  frame = await waitForFrame(view.lastFrame, /> .*app-19.*app/);
   assert.equal(listed(frame).length, 6);
-  assert.match(frame, /18–20 of 20/);
+  assert.match(frame, /35–40 of 40/);
   view.stdin.write("n");
   frame = await waitForFrame(view.lastFrame, /1 With the AI skill/);
   assert.equal(listed(frame).length, 6);
-  assert.match(frame, /n or Esc closes/);
 });
 
-test("Tab clears section action messages and invalid recipes cannot open approval", async t => {
+test("invalid recipes cannot open approval and moving the cursor clears action errors", async t => {
   const f = await fixture(t);
   await writeFile(f.file, "{}");
+  await f.operations.addGitSource("https://github.com/example/skills.git");
   const view = f.mount();
   await waitForFrame(view.lastFrame, /invalid recipe:/);
-  view.stdin.write("a");
-  await waitForFrame(view.lastFrame, /There are no Git sources to select/);
-  view.stdin.write("\t");
-  await waitForFrame(view.lastFrame, frame => frame.includes("> demo.json") && !frame.includes("There are no Git sources to select"));
+  view.stdin.write("j");
+  await waitForFrame(view.lastFrame, /> .*demo.json.*app/);
   view.stdin.write("\r");
-  const frame = await waitForFrame(view.lastFrame, frame => frame.split("\n").filter(line => line.includes("name: expected non-empty text")).length >= 2);
+  const frame = await waitForFrame(view.lastFrame, frame => frame.split("\n").filter(line => line.includes("expected non-empty text")).length >= 2);
   assert.doesNotMatch(frame, /Approve demo/);
-  // The invalid status remains in the row; only the additional action error clears.
-  const rowLines = frame.split("\n").filter(line => line.includes("name: expected non-empty text"));
-  assert.ok(rowLines.length >= 2, frame);
-  view.stdin.write("\t");
-  await waitForFrame(view.lastFrame, frame => frame.split("\n").filter(line => line.includes("name: expected non-empty text")).length === 1);
+  view.stdin.write("k");
+  await waitForFrame(view.lastFrame, frame => frame.split("\n").filter(line => line.includes("expected non-empty text")).length === 1);
   assert.deepEqual(f.commands, []);
 });
 
@@ -248,7 +239,6 @@ test("an unmanaged recipe Skill skips installation and goes straight to the agen
   await writeFile(path.join(skillDirectory, "SKILL.md"), "---\nname: agent-depot-apprecipe\ndescription: Existing recipe helper\n---\n");
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
-  view.stdin.write("\t");
   view.stdin.write("n1");
   const frame = await waitForFrame(view.lastFrame, /Use the agent-depot-apprecipe skill/);
   assert.doesNotMatch(frame, /Install agent-depot-apprecipe/);
@@ -256,16 +246,16 @@ test("an unmanaged recipe Skill skips installation and goes straight to the agen
   assert.deepEqual(f.commands, []);
 });
 
-test("Git keys and highlight are isolated from recipe focus and restored after Tab", async t => {
+test("one cursor dispatches contextual actions for Skill Sources and App recipes", async t => {
   const f = await fixture(t);
   const source = await f.operations.addGitSource("https://github.com/example/skills.git");
   const opened: string[] = [];
   const view = f.mount(undefined, source => { opened.push(source.id); });
   await waitForFrame(view.lastFrame, /needs approval/);
-  view.stdin.write("\t");
-  let frame = await waitForFrame(view.lastFrame, /> demo.json/);
+  view.stdin.write("j");
+  let frame = await waitForFrame(view.lastFrame, /> .*demo.*app/);
   assert.doesNotMatch(frame, /> \[.\] git:/);
-  view.stdin.write(" ad");
+  view.stdin.write(" a");
   view.stdin.write("\r");
   frame = await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   assert.doesNotMatch(frame, /selected|remove Git Source/);
@@ -273,7 +263,7 @@ test("Git keys and highlight are isolated from recipe focus and restored after T
   assert.ok((await f.operations.listSources()).some(item => item.id === source.id));
   view.stdin.write("n");
   await waitForFrame(view.lastFrame, frame => !frame.includes("Approve demo?"));
-  view.stdin.write("\t");
+  view.stdin.write("k");
   await waitForFrame(view.lastFrame, /> \[ \] git:/);
   view.stdin.write(" ");
   await waitForFrame(view.lastFrame, /1 selected/);
@@ -295,8 +285,7 @@ for (const stage of ["host", "scope", "version", "confirm"] as const) {
       const f = await fixture(t);
       const view = f.mount();
       await waitForFrame(view.lastFrame, /needs approval/);
-      view.stdin.write("\t");
-      view.stdin.write("n1");
+          view.stdin.write("n1");
       await waitForFrame(view.lastFrame, /Install agent-depot-apprecipe. Host/);
       if (stage !== "host") {
         view.stdin.write("1");
@@ -321,3 +310,20 @@ for (const stage of ["host", "scope", "version", "confirm"] as const) {
     });
   }
 }
+
+
+test("n can add the first App recipe and closing the guide reloads the unified list", async t => {
+  const f = await fixture(t);
+  await rm(f.file);
+  const view = f.mount();
+  await waitForFrame(view.lastFrame, /No sources or App recipes/);
+  view.stdin.write("n2");
+  await waitForFrame(view.lastFrame, /1 With the AI skill/);
+  view.stdin.write("2");
+  await waitForFrame(view.lastFrame, /agent-depot app schema/);
+  await writeFile(f.file, JSON.stringify(recipe));
+  view.stdin.write("\u001b");
+  const frame = await waitForFrame(view.lastFrame, /needs approval/);
+  assert.match(frame, /> .*demo.*app/u);
+  assert.deepEqual(f.commands, []);
+});

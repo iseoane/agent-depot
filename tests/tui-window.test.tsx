@@ -71,7 +71,7 @@ test("SourcesView renders only the rows that fit and keeps the highlighted row v
   const { lastFrame, stdin, unmount } = render(<SourcesView operations={operationsFor(gitSources)} listHeight={5} />);
   const top = await waitForFrame(lastFrame, /1–5 of 30/);
   assert.equal(top.split("\n").filter((line) => /git:/.test(line)).length, 5);
-  assert.match(top, /builtin:agent-depot · included/);
+  assert.match(top, /builtin:agent-depot\s+skills\s+included/);
   assert.match(selectedLine(top), /git:0+\b/);
   // One key at a time: each keystroke acts on the rendered selection.
   for (let step = 1; step <= 14; step += 1) {

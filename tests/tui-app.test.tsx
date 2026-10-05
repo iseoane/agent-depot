@@ -81,7 +81,9 @@ test("App switches views with 1 and 2 and shows the active view", async () => {
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("2");
-  await waitForFrame(lastFrame, (frame) => /\[2 Catalog\]/.test(frame) && /skill-of-/.test(frame));
+  await waitForFrame(lastFrame, (frame) => /\[2 Catalog\]/.test(frame) && /▸ builtin:agent-depot/.test(frame));
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /skill-of-builtin/);
   stdin.write("1");
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   unmount();
@@ -92,6 +94,8 @@ test("App opens the catalog of the highlighted source with Enter", async () => {
   await waitForFrame(lastFrame, /git:1234567890abcdef12345678/);
   stdin.write("j");
   await waitForFrame(lastFrame, (frame) => /> (\[.\] )?git:1234567890abcdef12345678/.test(frame));
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /▸ example\/skills/);
   stdin.write("\r");
   const frame = await waitForFrame(lastFrame, /skill-of-git:1234567890abcdef12345678/);
   assert.match(frame, /\[2 Catalog\]/);

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 import { render } from "ink-testing-library";
+import { renderExpanded } from "./render-expanded.js";
 import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
@@ -46,7 +47,7 @@ async function fixture(
   };
   const apps = createAppOperations(appEnvironment);
   await beforeRender?.({ home, apps, appEnvironment, commands });
-  const view = render(<InstallationsView operations={createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") })}
+  const view = await renderExpanded(<InstallationsView operations={createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") })}
     environment={{ homeDirectory: home, projectRoot: home, appEnvironment }} listHeight={20} />);
   t.after(async () => { view.unmount(); await rm(home, { recursive: true, force: true, maxRetries: 3 }); });
   return { view, apps, commands, home, installedManually: () => { installed = true; } };
@@ -417,4 +418,20 @@ test("recipes for another platform have no approvable App row", async t => {
   assert.ok(!view.lastFrame()!.includes("demo"));
   assert.ok(!view.lastFrame()!.includes("Approve"));
   assert.equal(commands.length, 0);
+});
+
+
+test("missing lifecycle executable is named in the preview and failure", async t => {
+  const { view, commands } = await fixture(t, undefined, async ({ apps }) => {
+    const [entry] = await apps.load();
+    await apps.approve(entry!);
+  }, async () => undefined);
+  await selectDemo(view);
+  view.stdin.write("i");
+  const preview = await waitForFrame(view.lastFrame, /install demo\? y\/n/);
+  assert.match(preview, /"demo" not found in PATH/u);
+  view.stdin.write("y");
+  const failure = await waitForFrame(view.lastFrame, /Required executable "demo" for install/u);
+  assert.match(failure, /PATH used by Agent Depot/u);
+  assert.deepEqual(commands, []);
 });
