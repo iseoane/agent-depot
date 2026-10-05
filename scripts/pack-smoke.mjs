@@ -19,12 +19,15 @@ const run = (command, args, options = {}) =>
 try {
   const packDirectory = path.join(sandbox, "pack");
   mkdirSync(packDirectory);
-  const [packed] = JSON.parse(run(npm, ["pack", "--json", "--pack-destination", packDirectory], { cwd: root }));
+  const packReport = JSON.parse(run(npm, ["pack", "--json", "--pack-destination", packDirectory], { cwd: root }));
+  // npm 11 reports an array of results; npm 12 reports an object keyed by package name.
+  const [packed] = Array.isArray(packReport) ? packReport : Object.values(packReport);
   const files = packed.files.map((file) => file.path);
   console.log(`Tarball ${packed.filename}: ${files.length} files`);
   for (const file of files) console.log(`  ${file}`);
 
-  const allowedTopLevel = /^(dist\/src\/|skills\/|package\.json$|README\.md$|LICENSE$|CHANGELOG\.md$)/u;
+  // npm ships every root README, including the localized ones the manifest lists.
+  const allowedTopLevel = /^(dist\/src\/|skills\/|package\.json$|README(\.[\w-]+)?\.md$|LICENSE$|CHANGELOG\.md$)/u;
   const unexpected = files.filter((file) => !allowedTopLevel.test(file));
   assert.deepEqual(unexpected, [], `unexpected files in tarball: ${unexpected.join(", ")}`);
   const forbidden = files.filter((file) => /(^|\/)(tests?|coverage|odd|\.scratch)\/|\.test\.(js|d\.ts|js\.map)$/u.test(file));
@@ -38,12 +41,23 @@ try {
 
   const installDirectory = path.join(sandbox, "install");
   const homeDirectory = path.join(sandbox, "home");
+  const stateDirectory = path.join(sandbox, "state");
+  const configDirectory = path.join(sandbox, "config");
+  const cacheDirectory = path.join(sandbox, "cache");
   mkdirSync(installDirectory);
   mkdirSync(homeDirectory);
+  mkdirSync(stateDirectory);
+  mkdirSync(configDirectory);
+  mkdirSync(cacheDirectory);
   writeFileSync(path.join(installDirectory, "package.json"), JSON.stringify({ name: "pack-smoke", private: true }));
   run(npm, ["install", "--no-audit", "--no-fund", path.join(packDirectory, packed.filename)], { cwd: installDirectory });
 
-  const env = { ...process.env, HOME: homeDirectory, USERPROFILE: homeDirectory };
+  // A HOME override alone is not enough: an exported XDG_STATE_HOME would send the CLI to the
+  // developer's real Agent Depot state, where the Skill may already be recorded.
+  const env = {
+    ...process.env, HOME: homeDirectory, USERPROFILE: homeDirectory,
+    XDG_STATE_HOME: stateDirectory, XDG_CONFIG_HOME: configDirectory, XDG_CACHE_HOME: cacheDirectory,
+  };
   const agentDepot = (...args) => {
     try {
       return { status: 0, output: run("npx", ["--no-install", "agent-depot", ...args], { cwd: installDirectory, env }) };
