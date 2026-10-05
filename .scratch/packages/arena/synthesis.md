@@ -50,7 +50,7 @@ on interface depth. That one weak point is one graft away.
 | Approval receipt | Keep it, keyed on the derived declaration digest | A Package installs foreign executable content. The selection and the ref are user-authored, and the ref can move, so one-time consent on exactly what will run is warranted. candidate-3's argument that nothing user-authored reaches the runner is true but incomplete. |
 | Installed version source | Read the host's own state files | The grounding documents `settings.json` `packages` and `installed_plugins.json` `version`. candidate-3's record-only model goes stale on any out-of-band change and cannot describe a hand-delegated install. |
 | Host polymorphism | Frozen argv tables | DESIGN.md vetoes a generic plugin framework, and the hosts converge on nothing except that skills are directories with `SKILL.md`. |
-| Pi update | `pi update --extensions`, honestly host-wide | Only that verb is grounded. `pi update <source>` and re-running `pi install` are guesses. The plan carries `affects`. |
+| Pi update | `pi update <source>`, scoped | A later check against the installed CLI found `pi update <source>` updates one package, so the per-bundle form is grounded after all. `plan.affects` still ships, because `claude plugin marketplace update` without a name is host-wide, and the type is the one place that would change if a host-wide verb is chosen. |
 
 ## Rejections
 

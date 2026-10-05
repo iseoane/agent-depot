@@ -57,7 +57,10 @@ The load-bearing decisions:
    `~/.claude/plugins/installed_plugins.json`, so `unknown` is a first-class
    status rather than a guess.
 5. **A plan declares its blast radius.** `plan.affects` names every recorded
-   coordinate the host command may change, because Pi's update is host-wide.
+   coordinate the host command may change. V1 uses the scoped verb for every
+   action, so in V1 that is the selection's own coordinates. The mechanism stays
+   because a host-wide verb is one line away, and
+   `claude plugin marketplace update` without a name is a live trap.
 6. **The canonical Skill location stays untouched.** The constraint is enforced by
    absence, and a test asserts the import edge does not exist.
 
@@ -172,7 +175,7 @@ export interface PackageLifecyclePlan {
   readonly action: PackageAction;
   readonly descriptor: BundleDescriptor;
   readonly commands: readonly PackageCommand[];
-  /** Every recorded coordinate this action may change. Pi update is host-wide. */
+  /** Every recorded coordinate this action may change. V1 actions are all scoped. */
   readonly affects: readonly PackageCoordinates[];
   readonly warnings: readonly string[];
   readonly cwd: string;
@@ -268,14 +271,18 @@ export const HOST_STEP_TEMPLATES: Readonly<Record<
   Readonly<Record<PackageAction, (input: StepTemplateInput) => readonly (readonly string[])[]>>
 >>;
 // pi.install:   [["pi", "install", piSpec]]
-// pi.update:    [["pi", "update", "--extensions"]]      host-wide, see affectedBy
+// pi.update:    [["pi", "update", piSource]]            scoped, verified
 // pi.uninstall: [["pi", "remove", piSource]]
 // claude.install:   [["claude","plugin","marketplace","add", url],   omitted when known
 //                    ["claude","plugin","install", "<plugin>@<marketplace>"]]
-// claude.update:    [["claude","plugin","update", installId]]        TODO verify verb
-// claude.uninstall: [["claude","plugin","uninstall", installId]]     TODO verify verb
+// claude.update:    [["claude","plugin","marketplace","update", marketplace],   always named
+//                    ["claude","plugin","update", installId]]
+// claude.uninstall: [["claude","plugin","uninstall", installId]]
 // select and forget run nothing.
 // Every argv is re-validated through parsePortableInstallationMethod at plan time.
+// Verbs verified on this machine; see `.scratch/packages/arena/host-cli-verbs.md`.
+// A bundle-declared `command` marketplace source is refused, because the host
+// gates it behind `--accept-command <sha256>`, which Agent Depot cannot present.
 
 export function planHostSteps(
   action: PackageAction, descriptor: BundleDescriptor, selection: PackageSelection,
@@ -288,7 +295,8 @@ export function affectedBy(
   action: PackageAction, selection: PackageSelection, recorded: readonly PackageSelection[],
 ): readonly PackageCoordinates[];
 // install, uninstall, select, forget affect [selection.coordinates].
-// update affects every recorded Pi coordinate, because pi update is host-wide.
+// update affects [selection.coordinates] with the V1 scoped verbs. Return every
+// recorded Pi coordinate only if a host-wide verb is ever chosen.
 
 export function packageApprovalDigest(declaration: PackageDeclaration): string;
 export function classifyUpdate(
@@ -475,12 +483,14 @@ sources, and reading host CLI prose.
 
 ## 8. Open questions to resolve before implementation
 
-1. Which documented Claude Code version pins the plugin update and uninstall
-   tokens, and what is Agent Depot's minimum supported host CLI version for each
-   host? The plan must not ship plausible-looking argv with no primary source.
-2. Does `pi install` on an existing declaration reconcile the checkout, and does
-   `pi update --extensions` accept a source filter, or is it whole-CLI only? This
-   decides how precise `plan.affects` can be.
+1. **Resolved.** `claude plugin update <plugin>` and
+   `claude plugin uninstall <plugin>` exist, verified on this machine. The
+   remaining question is Agent Depot's minimum supported host CLI version for
+   each host, which no primary source states yet.
+2. **Resolved.** `pi update <source>` updates one package and
+   `pi update --extensions` updates all of them. V1 uses the scoped form, so
+   `plan.affects` is the selection. Verified in
+   `.scratch/packages/arena/host-cli-verbs.md`.
 3. On Windows, does the `claude` and `pi` shim run under no-shell spawn, or does
    the blocked-executable manual fallback become the norm there?
 4. Does a Package carrying an executable extension warrant a stronger gate than

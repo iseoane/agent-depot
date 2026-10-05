@@ -21,7 +21,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] First, verify every non-obvious verb against the installed host CLI: `pi update --extensions`, the Claude plugin update and uninstall tokens, and `claude plugin marketplace add` idempotency. Mark any verb with no primary source as `manual required` rather than guessing, and record the finding on this ticket.
+Verified verbs are recorded in `.scratch/packages/arena/host-cli-verbs.md`. Build against those, not against the guesses in the first draft of the design.
+
+- [x] Every non-obvious verb verified against the installed CLI. `pi update <source>` is scoped, `pi update --extensions` is host-wide, `claude plugin update <plugin>` and `claude plugin uninstall <plugin>` exist, and `claude plugin marketplace update` is scoped only when it is given a name.
+- [ ] Use the scoped verb for every V1 action, so `affectedBy` returns the selection's own coordinates. Keep the `plan.affects` mechanism for the host-wide case.
+- [ ] `claude plugin marketplace update` is always called with the marketplace name, never unscoped.
 - [ ] Exact argv vectors are asserted per host, action, and pin.
 - [ ] A known marketplace omits only the `add` step and still runs `install`.
 - [ ] `affectedBy` returns every recorded Pi coordinate for an update.

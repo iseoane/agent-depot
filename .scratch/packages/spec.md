@@ -192,12 +192,10 @@ that chose it is in `.scratch/packages/arena/synthesis.md`.
 
 ## Open Questions
 
-1. Which documented Claude Code version pins the plugin update and uninstall
-   tokens, and what is Agent Depot's minimum supported host CLI version per host?
-   The plan must not ship plausible argv with no primary source.
-2. Does `pi install` on an existing declaration reconcile the checkout, and does
-   `pi update --extensions` accept a source filter, or is it whole-CLI only? This
-   decides how precise `plan.affects` can be.
+1. **Resolved.** `claude plugin update` and `claude plugin uninstall` exist. The
+   remaining part is Agent Depot's minimum supported host CLI version per host.
+2. **Resolved.** `pi update <source>` updates one package. V1 uses the scoped
+   verb for every action, so `plan.affects` is the selection.
 3. On Windows, do the `pi` and `claude` shims run under no-shell spawn, or does
    the blocked-executable manual fallback become the norm there?
 4. Does a Package carrying an executable extension warrant a gate stronger than
