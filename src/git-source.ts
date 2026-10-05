@@ -527,11 +527,7 @@ export function canonicalizeGitSourceUrl(input: string): string {
   return canonicalUrl;
 }
 
-/**
- * The GitHub `tree/<ref>/<directory>` shape, parsed once: Git transport, Skill discovery and the
- * Catalog group label all read this, so a label can never describe a different scope than the one
- * the clone and the tree walk use. Undefined for any other URL, which stays its own repository.
- */
+/** The GitHub tree/<ref>/<directory> shape, parsed once so the Catalog label cannot describe a different scope than the clone and tree walk use. */
 export function githubTreeLocation(url: string): {
   readonly repository: string;
   readonly repositoryUrl: string;

@@ -12,7 +12,6 @@ interface RecipeIdentity {
   readonly link?: string;
 }
 
-/** Field by field, so a reordered or added key can never read as an unchanged recipe. */
 function sameIdentity(left: RecipeIdentity, right: RecipeIdentity): boolean {
   return left.device === right.device && left.inode === right.inode && left.hash === right.hash && left.link === right.link;
 }
@@ -49,7 +48,7 @@ export async function planAppRecipeRemoval(apps: AppOperations, entry: AppEntry)
   if (inspection.status !== "installed" && inspection.status !== "not installed" && inspection.status !== "not applicable here") {
     throw new Error(`Cannot verify App state (${inspection.status}); approve the recipe before removing it`);
   }
-  // "not installed" also covers a version command that never ran, which proves nothing about the App.
+  // Nothing resolved a version executable, so installed state was never verified.
   if (inspection.status === "not installed" && (inspection.executable === undefined || inspection.reason !== undefined)) {
     throw new Error(`Cannot verify App state: the version command for ${current.recipe!.name} did not run. Make it available, then remove the recipe.`);
   }
@@ -58,20 +57,22 @@ export async function planAppRecipeRemoval(apps: AppOperations, entry: AppEntry)
     installedVersion: inspection.installedVersion ?? tracked?.installedVersion });
 }
 
-/** Rechecks the preview and installed state before unlinking only the recipe path. */
-export async function removeAppRecipe(apps: AppOperations, plan: AppRecipeRemovalPlan, confirmed: boolean): Promise<void> {
-  if (!confirmed) throw new Error("App recipe removal must be confirmed");
-  if (path.dirname(plan.file) !== path.resolve(apps.directory)) throw new Error("App recipe is outside the recipes directory");
+/** Rechecks content, inode and symlink target before any unlink; the live version read is a window. */
+async function assertRecipeUnchanged(plan: AppRecipeRemovalPlan): Promise<void> {
   const identity = await recipeIdentity(plan.file);
   const canonicalFile = await realpath(plan.file);
   if (!sameIdentity(identity, plan.identity) || canonicalFile !== plan.entry.canonicalFile) {
     throw new Error("App recipe changed after preview; removal cancelled");
   }
+}
+
+/** Rechecks the preview and installed state before unlinking only the recipe path. */
+export async function removeAppRecipe(apps: AppOperations, plan: AppRecipeRemovalPlan, confirmed: boolean): Promise<void> {
+  if (!confirmed) throw new Error("App recipe removal must be confirmed");
+  if (path.dirname(plan.file) !== path.resolve(apps.directory)) throw new Error("App recipe is outside the recipes directory");
+  await assertRecipeUnchanged(plan);
   const current = await planAppRecipeRemoval(apps, plan.entry);
   if (current.installed) throw new Error("App is still installed or tracked; uninstall it before removing its recipe");
-  // Check identity again after the live version read, which may take time.
-  if (!sameIdentity(await recipeIdentity(plan.file), plan.identity)) {
-    throw new Error("App recipe changed after preview; removal cancelled");
-  }
+  await assertRecipeUnchanged(plan);
   await unlink(plan.file);
 }

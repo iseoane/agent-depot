@@ -31,7 +31,7 @@ const TABS: readonly (readonly [ViewName, string])[] = [
   ["profile", "5 Import/Export"],
 ];
 
-/** Compact keys of the views with fixed keys; Sources derives its own from the selected row. */
+/** Sources derives its own hints from the selected row, so it is excluded here. */
 function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boolean): string {
   switch (view) {
     case "catalog":
