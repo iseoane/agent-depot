@@ -70,6 +70,25 @@ const EXCLUDED_LIFECYCLE_SEGMENTS = new Set([
   "retired",
 ]);
 
+/**
+ * One file a Source snapshot carries: a Skill manifest, or a bundle manifest the
+ * Package discovery pass reads. The Pi root `package.json` and the two Claude
+ * `.claude-plugin` manifests sit beside the Skill files in the same immutable
+ * Source view, so one read feeds both passes.
+ */
+export function isSourceSnapshotFile(relativePath: string, scopeDirectory?: string): boolean {
+  if (path.posix.basename(relativePath) === "SKILL.md") {
+    return true;
+  }
+  const segments = relativePath.split("/");
+  if (segments.at(-2) === ".claude-plugin") {
+    const name = segments.at(-1);
+    return name === "plugin.json" || name === "marketplace.json";
+  }
+  const root = scopeDirectory === undefined || scopeDirectory === "" ? "package.json" : `${scopeDirectory}/package.json`;
+  return relativePath === root;
+}
+
 export class GitSourceAccessError extends Error {
   constructor(source: GitSource, reason: string) {
     super(`Unable to refresh Git Source ${JSON.stringify(source.id)} from ${JSON.stringify(source.url)}: ${reason}`);
@@ -346,7 +365,7 @@ export class GitSourceSnapshotAccess {
         || metadata[1] !== "blob"
         || !relativePath
         || (directory !== undefined && !relativePath.startsWith(`${directory}/`))
-        || path.posix.basename(relativePath) !== "SKILL.md"
+        || !isSourceSnapshotFile(relativePath, directory)
         || relativePath.split("/").slice(0, -1).some((segment) => EXCLUDED_LIFECYCLE_SEGMENTS.has(segment))
       ) {
         continue;
