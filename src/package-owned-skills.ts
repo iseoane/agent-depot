@@ -5,6 +5,7 @@ import {
   type BundleOwnedSkillMatcher,
 } from "./package-bundles.js";
 import type { BundleDescriptor } from "./package-model.js";
+import { sourceBundleScope } from "./package-content.js";
 import { createSourceContentAccess, type SourceContentAccess } from "./skill-discovery.js";
 import { createSourceOperations, type Source } from "./sources.js";
 
@@ -55,7 +56,7 @@ export async function loadPackageOwnedSkillFilter(
   const descriptors: BundleDescriptor[] = [];
   for (const source of sources) {
     try {
-      descriptors.push(...discoverBundlesInSnapshot(await contentAccess.readSnapshot(source), {}));
+      descriptors.push(...discoverBundlesInSnapshot(await contentAccess.readSnapshot(source), sourceBundleScope(source)));
     } catch (error) {
       warn(`WARNING: Skipping Package-owned Skill exclusions for Source ${source.id}: ${errorMessage(error)}`);
     }

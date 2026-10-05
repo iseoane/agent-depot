@@ -109,6 +109,16 @@ export function parseClaudeMarketplace(
 }
 
 /**
+ * The `name` a Claude marketplace manifest declares. `planHostSteps` needs it to
+ * build `<plugin>@<marketplace>` and to name a marketplace refresh, because the
+ * name lives only in the Source's `.claude-plugin/marketplace.json`.
+ */
+export function claudeMarketplaceName(raw: string): string | undefined {
+  const manifest = parseJsonObject(raw);
+  return typeof manifest.name === "string" && manifest.name.trim() !== "" ? manifest.name.trim() : undefined;
+}
+
+/**
  * The typed component inventory for one host manifest. Pi reads the `pi` key or
  * the conventional directories; Claude reads the plugin component keys plus the
  * default `skills/` directory. Kinds are normalized once; ownership is derived

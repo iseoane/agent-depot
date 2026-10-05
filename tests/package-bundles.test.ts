@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   buildComponentInventory,
   bundleOwnedSkillMatcher,
+  claudeMarketplaceName,
   discoverBundlesInSnapshot,
   PackageManifestError,
   parseClaudeMarketplace,
@@ -192,4 +193,11 @@ test("every exported descriptor has a stable typed shape", () => {
   assert.equal(descriptor.name, "p");
   assert.equal(typeof descriptor.manifestDigest, "string");
   assert.equal(descriptor.manifestDigest.length, 64);
+});
+
+test("the marketplace name is read from the marketplace's own manifest", () => {
+  assert.equal(claudeMarketplaceName(JSON.stringify({ name: "pstack-claude", owner: { name: "Example" } })), "pstack-claude");
+  assert.equal(claudeMarketplaceName(JSON.stringify({ name: "  " })), undefined);
+  assert.equal(claudeMarketplaceName(JSON.stringify({ owner: { name: "Example" } })), undefined);
+  assert.throws(() => claudeMarketplaceName("{ not json"), PackageManifestError);
 });

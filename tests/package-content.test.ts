@@ -11,9 +11,9 @@ import {
   sourceIdForUrl,
   type GitSnapshotCommandRunner,
 } from "../src/git-source.js";
-import { createNodePackageContentAccess, type HostFacingOrigin } from "../src/package-content.js";
+import { createNodePackageContentAccess, sourceBundleScope, type HostFacingOrigin } from "../src/package-content.js";
 import { runProcess } from "../src/process-runner.js";
-import type { Source } from "../src/sources.js";
+import { BUILT_IN_SOURCE, type Source } from "../src/sources.js";
 
 const builtIn: Source = {
   id: "builtin:agent-depot",
@@ -284,3 +284,10 @@ function assertOriginCarriesNoLocalPath(origin: HostFacingOrigin, localPaths: re
     assert.equal(serialized.includes(localPath), false, `origin leaks a local path: ${serialized}`);
   }
 }
+
+test("a scoped GitHub tree Source carries its directory scope and a plain Source carries none", () => {
+  const scoped: Source = { id: "git:scoped", kind: "git", url: "https://github.com/example/repo/tree/main/plugins/demo" };
+  assert.deepEqual(sourceBundleScope(scoped), { directory: "plugins/demo" });
+  assert.deepEqual(sourceBundleScope({ id: "git:plain", kind: "git", url: "https://github.com/example/repo" }), {});
+  assert.deepEqual(sourceBundleScope(BUILT_IN_SOURCE), {});
+});

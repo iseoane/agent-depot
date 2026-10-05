@@ -43,6 +43,20 @@ export interface PackageContentAccess {
   readView(source: Source): Promise<PackageSourceView>;
 }
 
+/**
+ * The directory scope a Source's snapshot paths are rooted at. A GitHub tree
+ * URL scopes its snapshot below that directory, so the Package discovery pass
+ * and the owned-Skill guard must read the same scope or they disagree about the
+ * same Source.
+ */
+export function sourceBundleScope(source: Source): { readonly directory?: string } {
+  if (source.kind === "builtin") {
+    return Object.freeze({});
+  }
+  const directory = githubTreeLocation(source.url)?.directory;
+  return Object.freeze(directory === undefined ? {} : { directory });
+}
+
 export interface NodePackageContentAccessOptions {
   readonly builtInRoot?: string;
   readonly gitCachePath?: string;
