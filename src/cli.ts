@@ -9,7 +9,7 @@ import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdat
 import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
 import { EXPORT_USAGE, IMPORT_USAGE, runProfileExport, runProfileImport } from "./profile-cli.js";
 import { pathsOverlap } from "./path-safety.js";
-import { skillTreeBaseline, type SkillCandidate } from "./skill-discovery.js";
+import { skillTreeBaseline, type SkillCandidate, type SourceContentAccess } from "./skill-discovery.js";
 import {
   BuiltInSourceError,
   createSourceOperations,
@@ -100,6 +100,8 @@ export interface CliDependencies {
   readonly stderr?: (line: string) => void;
   readonly projectRoot?: string;
   readonly sourceAccess?: ProjectSkillTreeAccess;
+  /** Test/embedding seam for the Package-owned Skill guard's Source snapshots. */
+  readonly sourceContentAccess?: SourceContentAccess;
   readonly installationOptions?: Omit<ProjectInstallationOptions, "projectRoot" | "sourceAccess">;
   /** Test/embedding seam for the manifest transaction boundary. */
   readonly projectManifestStore?: ProjectManifestStore;
