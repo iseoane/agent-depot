@@ -189,22 +189,19 @@ export function discoverBundlesInSnapshot(
   return Object.freeze(descriptors.map((descriptor) => populateSkillNames(descriptor, files)));
 }
 
+/** Returns the Bundle that owns a Skill path, or undefined when no bundle claims it. */
+export type BundleOwnedSkillMatcher = (skillPath: string) => BundleDescriptor | undefined;
+
 /**
- * The owned-skill matcher shared by the later guard module. A skill path is
- * owned by a bundle when it sits under a `skill-category` component path, and
- * is not claimed when it crosses an excluded lifecycle segment, matching the
- * filter skill discovery applies.
+ * The owned-skill matcher shared by the guard module. A skill path is owned by
+ * a bundle when it sits under a `skill-category` component path, and is not
+ * claimed when it crosses an excluded lifecycle segment, matching the filter
+ * skill discovery applies.
  */
 export function bundleOwnedSkillMatcher(
   descriptors: readonly BundleDescriptor[],
-): (skillPath: string) => BundleDescriptor | undefined {
-  const owners = descriptors.map((descriptor) => ({
-    descriptor,
-    roots: descriptor.components
-      .filter((component) => component.kind === "skills" && component.ownership === "skill-category")
-      .flatMap((component) => component.paths),
-  }));
-
+): BundleOwnedSkillMatcher {
+  const owners = skillCategoryOwners(descriptors);
   return (skillPath: string): BundleDescriptor | undefined => {
     const normalized = normalizeSkillDirectory(skillPath);
     if (normalized === undefined || hasLifecycleSegment(normalized)) {
@@ -217,6 +214,47 @@ export function bundleOwnedSkillMatcher(
     }
     return undefined;
   };
+}
+
+/**
+ * The owned-skill matcher for one bare Skill directory name. Names come from
+ * `populateSkillNames`, so they are read from the same snapshot pass that fed
+ * discovery rather than from a hand-synced list, and the lifecycle filter is
+ * already applied where they are collected.
+ */
+export function bundleOwnedSkillNameMatcher(
+  descriptors: readonly BundleDescriptor[],
+): BundleOwnedSkillMatcher {
+  const owners = skillCategoryOwners(descriptors);
+  return (skillName: string): BundleDescriptor | undefined => {
+    if (skillName === "" || skillName.includes("/") || skillName.includes("\\")) {
+      return undefined;
+    }
+    for (const owner of owners) {
+      if (owner.names.has(skillName)) {
+        return owner.descriptor;
+      }
+    }
+    return undefined;
+  };
+}
+
+interface SkillCategoryOwner {
+  readonly descriptor: BundleDescriptor;
+  readonly roots: readonly string[];
+  readonly names: ReadonlySet<string>;
+}
+
+function skillCategoryOwners(descriptors: readonly BundleDescriptor[]): readonly SkillCategoryOwner[] {
+  return descriptors.map((descriptor) => {
+    const components = descriptor.components.filter((component) =>
+      component.kind === "skills" && component.ownership === "skill-category");
+    return {
+      descriptor,
+      roots: components.flatMap((component) => component.paths),
+      names: new Set(components.flatMap((component) => component.skillNames ?? [])),
+    };
+  });
 }
 
 const COMPONENT_KIND_ORDER: readonly PackageComponentKind[] = [
