@@ -594,10 +594,26 @@ uninstall and on `forget`, and writes it for install, select, and update. The
 record is the selection, not the install, so a confirmed removal has nothing
 left to select.
 
+**Accepted.** The environment drops the design's `contentAccess` and `adapters`
+fields. Discovery reads `SourceContentAccess`, and no `PackageHostAdapter` type
+exists because the host grammar is the frozen table in `package-host-plans.ts`.
+
+**Accepted.** `list()` returns the recorded selections unresolved, because
+`InstalledPackage` has no field for a resolution result. A Source or bundle that
+no longer resolves is reported by `inspect`'s `drift`, not by a list entry that
+would have to guess.
+
+**Pinned after review.** `skipExecution` is set for install and select when the
+host state reports installed, and for uninstall when it reports absent; update
+never skips. A skipped install records the selection and a skipped uninstall
+drops it. `executeLifecycle` throws `PackagePlanError` when the receipt for the
+freshly derived declaration is absent, because a missing receipt is a caller
+precondition and the result union carries no `needs approval` case.
+
 **Verified.** `pnpm typecheck`, `pnpm lint`, `pnpm audit:dead-code` and
 `git diff --check` are clean, and `pnpm test` passes 858 tests, which includes
-the 16 in `tests/package-flow.test.ts` covering the completed install, the
-frozen plan, the manifest and commit recheck, the unapproved fail-closed path,
-the hand-installed interop, the failed install, the honest `unknown`, the
-unchanged-version update, the batch isolation, the Claude argv order, the blocked
-WSL executable, and the absent Skill-engine import edge.
+the 17 in `tests/package-flow.test.ts` covering the completed install, the
+frozen plan, the tampered plan, the manifest and commit recheck, the unapproved
+fail-closed path, the hand-installed interop, the failed install, the honest
+`unknown`, the unchanged-version update, the batch isolation, the Claude argv
+order, the blocked WSL executable, and the absent Skill-engine import edge.
