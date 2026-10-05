@@ -22,7 +22,7 @@ Three owners, with no overlap:
 
 Commands are derived, never pasted, so nothing user-authored reaches the runner and the safety property is structural. Approval is a content-keyed receipt plus a per-run confirmation; the receipt is keyed on a digest of the derived declaration (source, ref, coordinates, manifest digest, and the exact ordered argv) rather than on a user-authored recipe file.
 
-Installed version comes from the host, so `unknown` is a first-class status and is never rendered as `current`. A plan declares its blast radius, because Pi's update command reconciles the whole configured extension set.
+Installed version comes from the host, so `unknown` is a first-class status and is never rendered as `current`. A plan declares its blast radius rather than assuming a command touches one bundle, because a host-wide verb is one line away.
 
 A bundle that carries agent definitions or MCP servers reports them as `host-only` components and lets the host own them wholly; Agent Depot never adopts, removes, names, updates, or configures them. A bundle's own skills never become a second managed copy: the canonical `~/.agents/skills` location and the Claude symlink stay under the Skill engine, no `package-*` module imports that engine, and a test asserts the import edge is absent. No file under a Host skill root is created, changed, or removed.
 
@@ -30,7 +30,7 @@ V1 hosts are Pi and Claude Code. V1 bundle sources are a Git repository scoped t
 
 ## Consequences
 
-- Pi identity is the repository URL without the ref; a git tag or commit pin is pinned, and `pi update --extensions` reconciles the checkout. A Pi package below the Source scope root and a scoped GitHub Source URL are refused rather than guessed.
+- Pi identity is the repository URL without the ref; a git tag or commit pin is pinned, and `pi update <source>` reconciles that one checkout while `pi update --extensions` updates every configured package. A Pi package below the Source scope root and a scoped GitHub Source URL are refused rather than guessed.
 - A Claude selection carries `marketplaceRoot` and `pluginName` together, so a plugin cannot be named without its marketplace, and a plugin with no in-repo marketplace binding is reported but not installable.
 - Agent Depot cannot verify installed state for an unversioned Pi git package and reports `unknown` instead of guessing; a bundle already installed by hand through an App recipe is recognized from the host's state files and runs no host command.
 - The Package category adds explicit logic and frozen argv tables, not a generic plugin framework, keeping the DESIGN.md veto in force.
