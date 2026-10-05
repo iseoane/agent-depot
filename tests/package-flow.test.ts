@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { createPackageOperations, type PackageOperations } from "../src/package-flow.js";
 import type { GitSource } from "../src/git-source.js";
-import type { PackageSelection } from "../src/package-model.js";
+import type { PackageLifecyclePlan, PackageSelection } from "../src/package-model.js";
 import type { ProcessRunOptions, ProcessRunResult } from "../src/process-runner.js";
 import type { SourceContentAccess, SourceContentFile } from "../src/skill-discovery.js";
 import type { SourceOperations } from "../src/sources.js";
@@ -255,6 +255,23 @@ test("an unapproved declaration fails closed before any host command", async () 
     const notConfirmed = await harness.operations.executeLifecycle(plan, false);
     assert.equal(notConfirmed.status, "not confirmed");
     await assert.rejects(harness.operations.executeLifecycle(plan, true), /not approved/);
+    assert.equal(harness.calls.length, 0);
+  });
+});
+
+test("a tampered plan is refused as stale before any host command", async () => {
+  await withHarness({}, async (harness) => {
+    const selection = piSelection();
+    const plan = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    const tampered: PackageLifecyclePlan = {
+      ...plan,
+      commands: [{ ...plan.commands[0]!, args: ["install", "git:github.com/example/other"] }],
+    };
+
+    const result = await harness.operations.executeLifecycle(tampered, true);
+    assert.equal(result.status, "stale plan");
+    assert.match(result.reason, /Host step 1 changed/);
     assert.equal(harness.calls.length, 0);
   });
 });
