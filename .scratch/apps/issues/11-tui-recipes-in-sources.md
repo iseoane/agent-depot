@@ -51,3 +51,10 @@ Verification after corrections: `pnpm typecheck`, `pnpm lint`, `pnpm test`
 20 Git Sources plus 20 recipes sharing six rows, runner/fetch-free listing,
 unmanaged Skill detection, key/highlight isolation, invalid-recipe Enter,
 message clearing, and n/Esc cancellation at all four install stages.
+
+Superseded on 2026-10-05 by [ticket 12](12-sources-unified-list-and-recipe-removal.md):
+Sources now hosts Skill Sources and App recipes in one windowed list with a
+single cursor and a KIND column, so the Tab-based section focus described above
+no longer exists. Marks now apply to Skill Sources only. Recipe removal, Source
+group labels in Catalog, collapsed-by-default groups, GitHub `tree/<ref>/<dir>`
+Source URLs and the per-Source Catalog warning are recorded in ticket 12.

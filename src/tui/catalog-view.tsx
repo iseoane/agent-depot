@@ -55,7 +55,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const skills = state.status === "ready" ? state.skills : [];
   const installable = useMemo(() => skills.filter((skill) => !isInstalled(skill, installed)), [state, installed]);
   const visible = useMemo(() => filterSkills(installable, filter.filter.query), [installable, filter.filter.query]);
-  const roots = useMemo(() => buildTree(visible), [visible]);
+  const roots = useMemo(() => buildTree(visible, state.status === "ready" ? state.sources : []), [visible, state]);
   const navigation = useTreeNavigation<NodeData>(roots, (nodes) => openByDefault(nodes, filter.queryRef.current));
   // Discovering again starts the list over.
   const { restart } = navigation;
@@ -103,6 +103,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
 
   return (
     <Box flexDirection="column">
+      {state.warnings.map((warning) => <Text key={warning} color={theme.warning}>{warning}</Text>)}
       <CatalogHeader scope={scope} listed={visible.length} installable={installable.length} total={skills.length} filter={filter.filter} />
       {rows.slice(window.start, window.end).map((row, offset) => (
         <CatalogRowLine key={row.node.id} row={row} selected={window.start + offset === index} marked={marks.marked.has(row.node.id)} installed={installed} />

@@ -86,8 +86,11 @@ async function moveDownTo(lastFrame: () => string | undefined, stdin: Stdin, pat
   assert.fail("selection never reached the expected line");
 }
 
-/** Opens the first Source of the expanded first group and highlights its Skill. */
+/** Opens the first scope and Source, then highlights its Skill. */
 async function revealSkill(lastFrame: () => string | undefined, stdin: Stdin): Promise<void> {
+  await moveDownTo(lastFrame, stdin, /> .*Managed \(user-global\)/);
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /builtin:agent-depot \(1\)/);
   await moveDownTo(lastFrame, stdin, /> .*builtin:agent-depot/);
   stdin.write("\r");
   await waitForFrame(lastFrame, /portable\/demo/);
@@ -113,7 +116,7 @@ test("u on a user-global installation runs the uninstall flow inside the Install
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("3");
-  await waitForFrame(lastFrame, /builtin:agent-depot \(1\)/);
+  await waitForFrame(lastFrame, /Managed \(user-global\) \(1\)/);
   await revealSkill(lastFrame, stdin);
   stdin.write("u");
   const frame = await waitForFrame(lastFrame, /Uninstall demo\? y\/n/);
@@ -127,7 +130,7 @@ test("h on an installation with missing hosts opens the host checklist without l
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
   await waitForFrame(lastFrame, /\[1 Sources\]/);
   stdin.write("3");
-  await waitForFrame(lastFrame, /builtin:agent-depot \(1\)/);
+  await waitForFrame(lastFrame, /Managed \(user-global\) \(1\)/);
   await revealSkill(lastFrame, stdin);
   stdin.write("h");
   const frame = await waitForFrame(lastFrame, /Add hosts to demo/);

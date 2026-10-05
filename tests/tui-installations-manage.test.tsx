@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { render } from "ink-testing-library";
+import { renderExpanded } from "./render-expanded.js";
 
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
@@ -109,12 +110,12 @@ async function revealSkill(view: View): Promise<void> {
 }
 
 function mount(f: Fixture, onCapturingChange?: (capturing: boolean) => void) {
-  return render(<InstallationsView operations={f.operations} environment={f.environment} onCapturingChange={onCapturingChange} />);
+  return renderExpanded(<InstallationsView operations={f.operations} environment={f.environment} onCapturingChange={onCapturingChange} />);
 }
 
 test("u on a single-host installation previews, confirms and removes it without leaving the view", async (t) => {
   const f = await fixture(t, ["pi"]);
-  const view = mount(f);
+  const view = await mount(f);
   await revealSkill(view);
   view.stdin.write("u");
   const preview = await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
@@ -129,7 +130,7 @@ test("u on a single-host installation previews, confirms and removes it without 
 
 test("u on an installation with several hosts offers all hosts or a host checklist", async (t) => {
   const f = await fixture(t, ["pi", "claude"]);
-  const view = mount(f);
+  const view = await mount(f);
   await revealSkill(view);
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all hosts.*2 choose hosts/s);
@@ -150,7 +151,7 @@ test("u on an installation with several hosts offers all hosts or a host checkli
 
 test("u with all hosts chosen removes the whole installation", async (t) => {
   const f = await fixture(t, ["pi", "claude"]);
-  const view = mount(f);
+  const view = await mount(f);
   await revealSkill(view);
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all hosts/);
@@ -165,7 +166,7 @@ test("u with all hosts chosen removes the whole installation", async (t) => {
 for (const trigger of ["h", "i"]) {
   test(`${trigger} adds only the missing hosts after two confirmations`, async (t) => {
     const f = await fixture(t, ["pi"]);
-    const view = mount(f);
+    const view = await mount(f);
     await revealSkill(view);
     view.stdin.write(trigger);
     const checklist = await waitForFrame(view.lastFrame, /\[ \] 1 claude/);
@@ -190,7 +191,7 @@ for (const trigger of ["h", "i"]) {
 
 test("h on an installation that already has every host says so", async (t) => {
   const f = await fixture(t, ["pi", "claude", "codex", "opencode"]);
-  const view = mount(f);
+  const view = await mount(f);
   await revealSkill(view);
   view.stdin.write("h");
   await waitForFrame(view.lastFrame, /already (has|exposed to) every host/i);
@@ -200,7 +201,7 @@ test("h on an installation that already has every host says so", async (t) => {
 test("the manage flows capture keys and Esc cancels without changes", async (t) => {
   const f = await fixture(t, ["pi", "claude"]);
   const changes: boolean[] = [];
-  const view = mount(f, (value) => changes.push(value));
+  const view = await mount(f, (value) => changes.push(value));
   await revealSkill(view);
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all hosts/);
@@ -227,7 +228,7 @@ test("u and h ignore group rows and project installations stay read-only", async
       hosts: ["pi"],
     }],
   }));
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /Managed \(project\) \(1\)/);
   view.stdin.write("u");
   view.stdin.write("h");
@@ -249,7 +250,7 @@ test("u and h ignore group rows and project installations stay read-only", async
 for (const input of ["i", "u", "h"]) {
   test(`Skill ${input} keeps its existing flow when the Apps group is present`, async t => {
     const f = await fixture(t, ["pi"], true);
-    const view = mount(f);
+    const view = await mount(f);
     t.after(() => view.unmount());
     await revealSkill(view);
     assert.match(view.lastFrame()!, /Apps \(user-global\) \(1\)/);

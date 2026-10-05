@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { render } from "ink-testing-library";
+import { renderExpanded } from "./render-expanded.js";
 
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
@@ -90,7 +91,7 @@ async function projectInstall(f: Fixture, name: string): Promise<void> {
 type View = ReturnType<typeof render>;
 const selectedLine = (frame: string) => frame.split("\n").find((line) => line.startsWith("> ")) ?? "";
 const records = async (f: Fixture) => Object.fromEntries((await f.operations.listUserGlobalInstallations!()).map((record) => [record.path, record.hosts]));
-const mount = (f: Fixture) => render(<InstallationsView operations={f.operations} environment={f.environment} />);
+const mount = (f: Fixture) => renderExpanded(<InstallationsView operations={f.operations} environment={f.environment} />);
 
 async function goto(view: View, pattern: RegExp): Promise<void> {
   for (let moves = 0; moves < 40; moves += 1) {
@@ -131,7 +132,7 @@ async function mark(view: View, leaf: RegExp): Promise<void> {
 test("space marks a leaf, shows the count and toggles it off", async (t) => {
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(1\)/);
   await open(view, [/builtin:agent-depot \(1\)/]);
   await mark(view, /portable\/alpha/);
@@ -145,7 +146,7 @@ test("space marks a leaf, shows the count and toggles it off", async (t) => {
 test("space on a group row says to mark skills", async (t) => {
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /Managed \(user-global\) \(1\)/);
   view.stdin.write(" ");
   await waitForFrame(view.lastFrame, /Mark skills, not group rows/);
@@ -157,7 +158,7 @@ test("a marks every visible leaf, marks on collapsed rows stay counted, and a ag
   await install(f, "alpha", ["pi"]);
   await install(f, "beta", ["pi"]);
   await unmanaged(f, "loose");
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await open(view, [/builtin:agent-depot \(2\)/, /Unmanaged/]);
   view.stdin.write("a");
@@ -178,7 +179,7 @@ test("space and j in one burst mark the row that was highlighted when space was 
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
   await install(f, "beta", ["pi"]);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(2\)/);
   await open(view, [/builtin:agent-depot \(2\)/]);
   await goto(view, /portable\/alpha/);
@@ -198,7 +199,7 @@ async function markedEverything(t: TestContext) {
   await writeFile(path.join(agentsDir(f.home, "gamma"), "SKILL.md"), `${skillMd("gamma")}edited\n`, "utf8");
   const loose = await unmanaged(f, "loose");
   await projectInstall(f, "proj");
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await open(view, [/builtin:agent-depot \(3\)/, /Managed \(project\)/, /builtin:agent-depot \(1\)/, /Unmanaged/]);
   view.stdin.write("a");
@@ -278,7 +279,7 @@ test("u with only project installations marked explains that nothing can be unin
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
   await projectInstall(f, "proj");
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /Managed \(project\) \(1\)/);
   await open(view, [/Managed \(project\)/, /builtin:agent-depot \(1\)/]);
   await mark(view, /portable\/proj/);
@@ -297,7 +298,7 @@ async function markedForHosts(t: TestContext) {
   await install(f, "full", ["claude", "pi", "codex", "opencode"]);
   await unmanaged(f, "loose");
   await projectInstall(f, "proj");
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await open(view, [/builtin:agent-depot \(3\)/, /Managed \(project\)/, /builtin:agent-depot \(1\)/, /Unmanaged/]);
   view.stdin.write("a");
@@ -356,7 +357,7 @@ test("several items are applied one after another against the moving records", a
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
   await install(f, "beta", ["pi", "claude"]);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(2\)/);
   await open(view, [/builtin:agent-depot \(2\)/]);
   view.stdin.write("a");
@@ -381,7 +382,7 @@ test("n on the exposure confirmation cancels every item", async (t) => {
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
   await install(f, "beta", ["pi"]);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(2\)/);
   await open(view, [/builtin:agent-depot \(2\)/]);
   view.stdin.write("a");
@@ -406,7 +407,7 @@ test("n on the exposure confirmation cancels every item", async (t) => {
 test("n on the combined host preview cancels every item", async (t) => {
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(1\)/);
   await open(view, [/builtin:agent-depot \(1\)/]);
   await mark(view, /portable\/alpha/);
@@ -427,7 +428,7 @@ test("a host addition that fails does not stop the other items and stays marked"
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
   await install(f, "beta", ["pi"]);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(2\)/);
   await open(view, [/builtin:agent-depot \(2\)/]);
   view.stdin.write("a");
@@ -456,7 +457,7 @@ test("h with only unmanaged or complete items says why nothing can be added", as
   const f = await fixture(t);
   await install(f, "full", ["claude", "pi", "codex", "opencode"]);
   await unmanaged(f, "loose");
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await open(view, [/builtin:agent-depot \(1\)/, /Unmanaged/]);
   view.stdin.write("a");
@@ -472,7 +473,7 @@ test("the bulk flows capture keys and Esc cancels the host checklist without cha
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);
   const changes: boolean[] = [];
-  const view = render(<InstallationsView operations={f.operations} environment={f.environment} onCapturingChange={(value) => changes.push(value)} />);
+  const view = await renderExpanded(<InstallationsView operations={f.operations} environment={f.environment} onCapturingChange={(value) => changes.push(value)} />);
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(1\)/);
   await open(view, [/builtin:agent-depot \(1\)/]);
   await mark(view, /portable\/alpha/);
@@ -505,7 +506,7 @@ function withExternalChange(f: Fixture, method: "removeUserGlobalInstallations" 
 test("an external record change between items fails the remaining uninstalls with a drift reason and leaves their files", async (t) => {
   const f = await fixture(t);
   for (const name of ["alpha", "beta", "gamma"]) await install(f, name, ["pi", "claude"]);
-  const view = render(
+  const view = await renderExpanded(
     <InstallationsView
       operations={withExternalChange(f, "removeUserGlobalInstallations", () => install(f, "intruder", ["pi"]))}
       environment={f.environment}
@@ -538,7 +539,7 @@ test("an external record change between items fails the remaining host additions
   await install(f, "alpha", ["pi"]);
   await install(f, "beta", ["pi"]);
   await install(f, "gamma", ["pi"]);
-  const view = render(
+  const view = await renderExpanded(
     <InstallationsView
       operations={withExternalChange(f, "updateUserGlobalInstallation", () => install(f, "intruder", ["pi"]))}
       environment={f.environment}

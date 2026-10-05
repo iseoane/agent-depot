@@ -2,16 +2,17 @@ import type { Key } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState, type MutableRefObject } from "react";
 
 import type { SkillCandidate } from "../skill-discovery.js";
-import type { SourceOperations } from "../sources.js";
+import type { Source, SourceOperations } from "../sources.js";
 import type { ActionMode } from "./catalog-actions.js";
 import { filterReducer, initialFilter, type FilterEvent, type FilterState } from "./catalog-filter.js";
 import { loadInstalledSkills, NO_INSTALLED, type InstalledSkills } from "./catalog-installs.js";
+import { sourceLabel } from "./catalog-tree.js";
 import type { TuiEnvironment } from "./environment.js";
 
 export type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly message: string }
-  | { readonly status: "ready"; readonly skills: readonly SkillCandidate[] };
+  | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly warnings: readonly string[]; readonly sources: readonly Source[] };
 
 /** Discovers the Skills of one Source, or of all of them, and again whenever those inputs change. */
 export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean): LoadState {
@@ -25,11 +26,27 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
     setState({ status: "loading" });
     void (async () => {
       try {
+        const sources = await operations.listSources();
         const ids = all || sourceId === undefined
-          ? (await operations.listSources()).map((source) => source.id)
+          ? sources.map((source) => source.id)
           : [sourceId];
-        const skills = await operations.discoverSkills!(ids);
-        if (!cancelled) setState({ status: "ready", skills });
+        const skills: SkillCandidate[] = [];
+        const warnings: string[] = [];
+        try {
+          skills.push(...await operations.discoverSkills!(ids));
+        } catch {
+          // Discovery is read-only: isolate failures without silently refreshing Sources.
+          const labels = new Map(sources.map((source) => [source.id, sourceLabel(source)]));
+          for (const id of ids) {
+            try {
+              skills.push(...await operations.discoverSkills!([id]));
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              warnings.push(`Source ${labels.get(id) ?? id} unavailable: ${detail}. Go to Sources (1) and refresh it with r.`);
+            }
+          }
+        }
+        if (!cancelled) setState({ status: "ready", skills, warnings, sources });
       } catch (error) {
         if (!cancelled) setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
       }

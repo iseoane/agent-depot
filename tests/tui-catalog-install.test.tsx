@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
 
-import { render } from "ink-testing-library";
+import { renderExpanded } from "./render-expanded.js";
 
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
@@ -89,8 +89,8 @@ const key = async (stdin: { write(data: string): void }, data: string) => {
   await new Promise((resolve) => setTimeout(resolve, 15));
 };
 
-function mount(f: Fixture, onCapturingChange?: (capturing: boolean) => void) {
-  const view = render(
+async function mount(f: Fixture, onCapturingChange?: (capturing: boolean) => void) {
+  const view = await renderExpanded(
     <CatalogView
       operations={f.operations}
       sourceId={BUILT_IN_SOURCE.id}
@@ -103,7 +103,7 @@ function mount(f: Fixture, onCapturingChange?: (capturing: boolean) => void) {
 
 test("Catalog without installation operations lists the skill and does not crash", async (t) => {
   const f = await fixture(t, false);
-  const { lastFrame, unmount } = mount(f);
+  const { lastFrame, unmount } = await mount(f);
   await waitForFrame(lastFrame, /Demo skill/);
   unmount();
 });
@@ -111,7 +111,7 @@ test("Catalog without installation operations lists the skill and does not crash
 test("Catalog hides a Skill installed user-global or in the project", async (t) => {
   const f = await fixture(t);
   await f.operations.addUserGlobalInstallation!(selection(["claude"]));
-  const global = mount(f);
+  const global = await mount(f);
   await waitForFrame(global.lastFrame, /All skills are installed/);
   assert.ok(!(global.lastFrame() ?? "").includes("Demo skill"));
   global.unmount();
@@ -120,7 +120,7 @@ test("Catalog hides a Skill installed user-global or in the project", async (t) 
   await new ProjectManifestStore(defaultProjectManifestPath(g.project)).save(
     parseProjectManifest({ version: 1, skills: [selection(["pi"])] }),
   );
-  const project = mount(g);
+  const project = await mount(g);
   await waitForFrame(project.lastFrame, /All skills are installed/);
   assert.ok(!(project.lastFrame() ?? "").includes("Demo skill"));
   project.unmount();
@@ -129,7 +129,7 @@ test("Catalog hides a Skill installed user-global or in the project", async (t) 
 test("Catalog offers install only: u and h do nothing", async (t) => {
   const f = await fixture(t);
   const changes: boolean[] = [];
-  const { lastFrame, stdin, unmount } = mount(f, (value) => changes.push(value));
+  const { lastFrame, stdin, unmount } = await mount(f, (value) => changes.push(value));
   await showDemo(lastFrame, stdin);
   await key(stdin, "u");
   await key(stdin, "h");
@@ -159,7 +159,7 @@ async function chooseInstall(stdin: Stdin, hostKeys: readonly string[], scopeKey
 
 test("i installs user-global step by step with a multi-host preview and confirmation", async (t) => {
   const f = await fixture(t);
-  const { lastFrame, stdin, unmount } = mount(f);
+  const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await key(stdin, "i");
   await waitForFrame(lastFrame, /\[ \] 1 pi.*\[ \] 2 claude.*\[ \] 3 codex.*\[ \] 4 opencode/s);
@@ -191,7 +191,7 @@ test("i installs user-global step by step with a multi-host preview and confirma
 
 test("host step requires at least one host", async (t) => {
   const f = await fixture(t);
-  const { lastFrame, stdin, unmount } = mount(f);
+  const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await key(stdin, "i");
   await key(stdin, ENTER);
@@ -203,7 +203,7 @@ test("host step requires at least one host", async (t) => {
 
 test("n declines the install preview without changing anything", async (t) => {
   const f = await fixture(t);
-  const { lastFrame, stdin, unmount } = mount(f);
+  const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["2"], "2", "1");
   await waitForFrame(lastFrame, /y\/n/);
@@ -217,7 +217,7 @@ test("n declines the install preview without changing anything", async (t) => {
 
 test("i installs into the project manifest and shows the project marker", async (t) => {
   const f = await fixture(t);
-  const { lastFrame, stdin, unmount } = mount(f);
+  const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["3"], "1", "1");
   const preview = await waitForFrame(lastFrame, /y\/n/);
@@ -233,7 +233,7 @@ test("i installs into the project manifest and shows the project marker", async 
 
 test("fixed version policy asks for the version text", async (t) => {
   const f = await fixture(t);
-  const { lastFrame, stdin, unmount } = mount(f);
+  const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["1"], "2", "2");
   await waitForFrame(lastFrame, /Fixed version:/);
@@ -253,7 +253,7 @@ test("adopting an identical Skill with a missing Host location needs a separate 
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, Buffer.from(file.content));
   }
-  const { lastFrame, stdin, unmount } = mount(f);
+  const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["1", "2"], "1", "1");
   const preview = await waitForFrame(lastFrame, /y\/n/);
@@ -308,7 +308,7 @@ test("the Git Source is refreshed before the preview, which reflects the refresh
     installedAtRefresh = installed;
     current = [...tree, { path: "portable/demo/extra.md", content: Uint8Array.from([0x45]), executable: false }];
   }, () => current);
-  const { lastFrame, stdin, unmount } = mount({ ...g });
+  const { lastFrame, stdin, unmount } = await mount({ ...g });
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["2"], "2", "1");
   const preview = await waitForFrame(lastFrame, /y\/n/);
@@ -327,7 +327,7 @@ test("a failed refresh aborts the install with an error and writes nothing", asy
   const { fixture: g } = await gitFixture(f, async () => {
     throw new Error("network unreachable");
   });
-  const { lastFrame, stdin, unmount } = mount({ ...g });
+  const { lastFrame, stdin, unmount } = await mount({ ...g });
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["2"], "2", "1");
   await waitForFrame(lastFrame, /network unreachable/);
@@ -339,7 +339,7 @@ test("a failed refresh aborts the install with an error and writes nothing", asy
 test("install flow captures keys, and Esc cancels it", async (t) => {
   const f = await fixture(t);
   const changes: boolean[] = [];
-  const { lastFrame, stdin, unmount } = mount(f, (value) => changes.push(value));
+  const { lastFrame, stdin, unmount } = await mount(f, (value) => changes.push(value));
   await showDemo(lastFrame, stdin);
   await key(stdin, "i");
   assert.equal(changes.at(-1), true);

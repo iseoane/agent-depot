@@ -430,7 +430,9 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   async function executeLifecycle(plan: AppLifecyclePlan, confirmed: boolean): Promise<AppLifecycleResult> {
     if (!confirmed) throw new Error("App step not confirmed; review and confirm first");
     await recheckPlan(plan);
-    if (!plan.argv || !plan.executable || plan.warning) return manualFallback(plan);
+    if (!plan.argv) return manualFallback(plan, `The ${plan.action} step requires manual completion`);
+    if (plan.warning) return manualFallback(plan, `Cannot run ${JSON.stringify(plan.argv[0])}: ${plan.warning}`);
+    if (!plan.executable) return manualFallback(plan, missingExecutableReason(plan.argv[0], plan.action));
     let result;
     try {
       result = await runner(plan.executable, plan.argv.slice(1), {
@@ -439,7 +441,10 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     } catch (error) {
       const code = (error as NodeJS.ErrnoException | null)?.code;
       if (!code || !["ENOENT", "EACCES", "ENOEXEC", "EPERM"].includes(code)) throw error;
-      return manualFallback(plan, error instanceof Error ? error.message : String(error));
+      const detail = error instanceof Error ? error.message : String(error);
+      return manualFallback(plan, code === "ENOENT"
+        ? `${missingExecutableReason(plan.argv[0], plan.action)} (${detail})`
+        : `Cannot run ${JSON.stringify(plan.argv[0])} for ${plan.action} (${code}): ${detail}. Check the executable's permissions and runtime.`);
     }
     if (result.code !== 0 || result.signal || result.outputTooLarge) {
       const reason = result.outputTooLarge ? `output exceeded ${APP_OUTPUT_LIMIT} bytes`
@@ -460,7 +465,14 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  async function manualFallback(plan: AppLifecyclePlan, reason = "Executable unavailable"): Promise<AppLifecycleResult> {
+  function missingExecutableReason(executable: string, action: AppLifecyclePlan["action"]): string {
+    const guidance = executable === "brew"
+      ? "Install Homebrew and make sure brew is on the PATH used by Agent Depot, then retry."
+      : `Install the required executable or make it available on the PATH used by Agent Depot, then retry.`;
+    return `Required executable ${JSON.stringify(executable)} for ${action} was not found or could not be started. ${guidance}`;
+  }
+
+  async function manualFallback(plan: AppLifecyclePlan, reason: string): Promise<AppLifecycleResult> {
     if (plan.action === "update" && plan.manual) {
       await mkdir(pendingUpdates, { recursive: true, mode: 0o700 });
       await chmod(pendingUpdates, 0o700);

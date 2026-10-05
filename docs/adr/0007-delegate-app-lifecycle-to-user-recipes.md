@@ -98,14 +98,35 @@ are deferred rather than inspecting or inventing App artifact records.
 
 ### Ticket 11 recipe management in Sources
 
-Sources hosts an App recipes section below Git Sources, not a new tab. Recipes
-remain user-owned files, not Source resources. Tab switches section focus so Git
-Source navigation and keys retain their behavior. Listing/reload parse recipes
-and check approval only; they never run version/latest commands. Recipe load
-errors degrade to a section-local error line. Enter uses shared-core preview
-and approval with the existing y/n panel; changed content requires renewed approval.
+Sources hosts App recipes alongside Skill Sources, not in a new tab. Recipes
+remain user-owned files, not Source resources. The original Tab-based section
+focus is superseded by one windowed list and cursor: j/k and arrows traverse
+both kinds. The KIND column is `skills` for Git Sources and `app` for recipes;
+this is a UI resource label, not a change to the persisted Git Source schema.
+The footer follows the selected row. Enter opens a Skill Source's Catalog or
+previews/approves an App recipe; n adds a Source or guides recipe creation;
+r refreshes Skill Sources or reloads recipe status. Marks apply only to Skill
+Sources. Listing/reload parse recipes and check approval only; they never run
+version/latest commands. Recipe load errors stay local. Changed recipe content
+requires renewed approval.
+
+The explicit d removal action may run an approved version check. If an App is
+installed or still tracked, ask whether to uninstall first using the existing
+lifecycle plan/execution/manual-completion core. Declining cancels removal;
+a failed uninstall retains the recipe. Recipe deletion has a separate exact-path
+preview and confirmation, rechecks content and file identity, and verifies the
+App is no longer installed or tracked. A version command that never ran proves
+nothing about the App, so an unresolvable or blocked version executable fails
+the removal closed; a recipe for another platform cannot have its installed
+state checked here and stays removable. It unlinks only the recipe (a symlink's
+target survives), never App data or Host configuration. Unapproved recipes must
+be approved before commands run; invalid recipes must be repaired before removal
+can verify their App state. Approval receipts are left unchanged; later content
+still needs its matching approval.
 
 The add guide has exactly two routes: the built-in `agent-depot-apprecipe` Skill
 (install if missing through the existing Catalog flow, then show an agent prompt),
 or manual JSON authoring in the displayed `apps/` directory using
-`agent-depot app schema`. Lifecycle actions stay in Installations and Updates.
+`agent-depot app schema`. Lifecycle actions otherwise stay in Installations and
+Updates; the optional uninstall prerequisite for recipe removal reuses that same
+core without silently uninstalling an App.

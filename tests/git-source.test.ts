@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { clearTimeout as clearRealTimeout, setTimeout as setRealTimeout } from "node:timers";
@@ -7,6 +7,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import {
+  canonicalizeGitSourceUrl,
   defaultGitSourceCachePath,
   GitSourceAccessAdapter,
   GitSourceAccessError,
@@ -16,6 +17,8 @@ import {
   type GitCommandRunner,
   type GitSnapshotCommandRunner,
 } from "../src/git-source.js";
+
+import { runProcess } from "../src/process-runner.js";
 
 class FakeSnapshotRunner {
   readonly calls: Array<{ command: string; args: readonly string[] }> = [];
@@ -506,4 +509,103 @@ test("rejects malformed, unsafe, excessive, and incomplete selected Skill trees"
       /safe total size limit/i,
     );
   });
+});
+
+
+test("GitHub directory Sources clone and fetch the repository without changing their identity", async () => {
+  await withCache(async (cachePath, runner) => {
+    const url = "https://github.com/cursor/plugins/tree/main/pstack";
+    const source = { id: sourceIdForUrl(url), kind: "git" as const, url };
+    const access = new GitSourceAccessAdapter({ cachePath, runner });
+    await access.refresh(source);
+    await access.refresh(source);
+    assert.deepEqual(runner.calls[0].args.slice(0, 3), ["clone", "--mirror", "https://github.com/cursor/plugins"]);
+    assert.equal(runner.calls[1].args[5], "https://github.com/cursor/plugins");
+    assert.equal(source.id, "git:b57692b69684810f79f95478");
+  });
+});
+
+test("GitHub directory discovery uses the URL ref and excludes sibling directories", async () => {
+  await withCache(async (cachePath) => {
+    const url = "https://github.com/cursor/plugins/tree/release%2Fstable/pstack";
+    const source = { id: sourceIdForUrl(url), kind: "git" as const, url };
+    await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
+    const runner = new FakeSelectedSnapshotRunner([
+      "100644 blob one\tpstack/skills/good/SKILL.md\0",
+      "100644 blob two\tpstack-other/SKILL.md\0",
+      "100644 blob three\tother/SKILL.md\0",
+    ].join(""), new Map());
+    // Discovery reads manifests via show; selected tree reads still use cat-file.
+    const run = runner.run.bind(runner);
+    runner.run = async (command, args) => args.includes("show") ? "manifest" : run(command, args);
+    const access = new GitSourceSnapshotAccess({ cachePath, runner });
+    assert.deepEqual(await access.readSnapshot(source), [{ path: "pstack/skills/good/SKILL.md", content: "manifest" }]);
+    assert.equal(runner.calls[0].args.at(-1), "release/stable^{commit}");
+    assert.deepEqual(runner.calls[1].args.slice(-2), ["--", "pstack"]);
+    await assert.rejects(access.readSkillTreeSnapshot(source, "other"), /outside the Git Source directory/u);
+    await access.readResolvedCommit({ ...source, ref: "refs/tags/v1" });
+    assert.equal(runner.calls.at(-1)?.args.at(-1), "refs/tags/v1^{commit}");
+  });
+});
+
+test("validates GitHub directory URL refs and paths before registration", () => {
+  for (const url of [
+    "https://github.com/cursor/plugins/tree",
+    "https://github.com/cursor/plugins/tree/-main/pstack",
+    "https://github.com/cursor/plugins/tree/main/pstack%2F..%2Fother",
+    "https://github.com/cursor/plugins/tree/main/pstack%5Cother",
+    "https://github.com/cursor/plugins/tree/main/%00",
+    "https://github.com/cursor/plugins/tree/main/%zz",
+  ]) assert.throws(() => canonicalizeGitSourceUrl(url));
+  assert.equal(canonicalizeGitSourceUrl("https://github.com/cursor/plugins/tree/main/pstack/"),
+    "https://github.com/cursor/plugins/tree/main/pstack");
+});
+
+
+test("directory Sources read and install the selected branch from a real Git mirror", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-depot-directory-source-"));
+  const repository = path.join(root, "repository");
+  const cachePath = path.join(root, "cache");
+  const git = async (args: readonly string[]) => {
+    const result = await runProcess("git", args);
+    assert.equal(result.code, 0, result.stderr);
+  };
+  try {
+    await mkdir(repository);
+    await git(["init", "--initial-branch=main", repository]);
+    for (const directory of ["pstack/skills/example", "sibling"]) {
+      await mkdir(path.join(repository, directory), { recursive: true });
+      await writeFile(path.join(repository, directory, "SKILL.md"), "main manifest");
+    }
+    await git(["-C", repository, "add", "."]);
+    await git(["-C", repository, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "main"]);
+    await git(["-C", repository, "checkout", "-b", "selected"]);
+    await writeFile(path.join(repository, "pstack/skills/example/SKILL.md"), "selected manifest");
+    await writeFile(path.join(repository, "pstack/skills/example/notes.txt"), "supporting file");
+    await git(["-C", repository, "add", "."]);
+    await git(["-C", repository, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "selected"]);
+    await git(["-C", repository, "checkout", "main"]);
+    const url = "https://github.com/cursor/plugins/tree/selected/pstack";
+    const source = { id: sourceIdForUrl(url), kind: "git" as const, url };
+    // Replace only the remote transport; all mirror and snapshot commands use real Git.
+    const access = new GitSourceAccessAdapter({ cachePath, runner: {
+      async run(command, args) {
+        assert.equal(command, "git");
+        await git(args.map((arg) => arg === "https://github.com/cursor/plugins" ? repository : arg));
+      },
+    } });
+    await access.refresh(source);
+    const snapshots = new GitSourceSnapshotAccess({ cachePath });
+    assert.deepEqual(await snapshots.readSnapshot(source), [{ path: "pstack/skills/example/SKILL.md", content: "selected manifest" }]);
+    const tree = await snapshots.readSkillTreeSnapshot(source, "pstack/skills/example");
+    assert.deepEqual(tree.files.map((file) => [file.path, Buffer.from(file.content).toString()]), [
+      ["pstack/skills/example/SKILL.md", "selected manifest"],
+      ["pstack/skills/example/notes.txt", "supporting file"],
+    ]);
+    assert.match(tree.resolvedVersion, /^[0-9a-f]{40,64}$/u);
+    assert.equal((await snapshots.readSnapshot({ ...source, ref: "main" }))[0].content, "main manifest");
+    await access.refresh(source);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

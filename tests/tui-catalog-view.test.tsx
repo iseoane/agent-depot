@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { render } from "ink-testing-library";
+import { renderExpanded } from "./render-expanded.js";
 
 import { parseProjectManifest, ProjectManifestStore, type ProjectSkillSelection } from "../src/project-manifest.js";
 import type { SkillCandidate } from "../src/skill-discovery.js";
@@ -90,7 +91,7 @@ test("CatalogView shows a loading state", () => {
 
 test("CatalogView lists skills as a tree under their source, with the installable count on the source", async () => {
   const requested: (readonly string[])[] = [];
-  const { lastFrame, unmount } = render(
+  const { lastFrame, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async (ids) => {
         requested.push(ids);
@@ -116,13 +117,13 @@ test("CatalogView hides installed skills (user-global or project) and sources le
     ...operationsFor(async () => skills),
     listUserGlobalInstallations: async () => [installedSelection("builtin:agent-depot", "skills/alpha")],
   };
-  const { lastFrame, stdin, unmount } = render(
+  const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={manifestWith(installedSelection("builtin:agent-depot", "skills/beta"))} operations={operations} sourceId="s" />,
   );
   const frame = await waitForFrame(lastFrame, /1 of 1/);
   assert.ok(!frame.includes("alpha") && !frame.includes("beta"), "installed skills are not listed");
   assert.ok(!frame.includes("builtin:agent-depot"), "a source with no installable skills is hidden");
-  assert.match(frame, /git:1234567890abcdef12345678 \(1\)/);
+  assert.match(frame, /x\/y \(1\)/);
   stdin.write(DOWN);
   stdin.write(RIGHT);
   await waitForFrame(lastFrame, /gamma/);
@@ -134,7 +135,7 @@ test("CatalogView says so when every skill is installed", async () => {
     ...operationsFor(async () => skills.slice(0, 1)),
     listUserGlobalInstallations: async () => [installedSelection("builtin:agent-depot", "skills/alpha")],
   };
-  const { lastFrame, unmount } = render(<CatalogView environment={NO_MANIFEST} operations={operations} sourceId="s" />);
+  const { lastFrame, unmount } = await renderExpanded(<CatalogView environment={NO_MANIFEST} operations={operations} sourceId="s" />);
   const frame = await waitForFrame(lastFrame, /All skills are installed/);
   assert.ok(!frame.includes("alpha"));
   unmount();
@@ -142,7 +143,7 @@ test("CatalogView says so when every skill is installed", async () => {
 
 test("CatalogView truncates long descriptions", async () => {
   const long = { ...skills[0], description: "x".repeat(200) };
-  const { lastFrame, stdin, unmount } = render(
+  const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => [long])} sourceId="builtin:agent-depot" />,
   );
   await waitForFrame(lastFrame, /1 of 1/);
@@ -154,11 +155,11 @@ test("CatalogView truncates long descriptions", async () => {
 });
 
 test("CatalogView shows empty, error and unsupported states", async () => {
-  const empty = render(<CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => [])} sourceId="s" />);
+  const empty = await renderExpanded(<CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => [])} sourceId="s" />);
   await waitForFrame(empty.lastFrame, /No skills/);
   empty.unmount();
 
-  const failing = render(
+  const failing = await renderExpanded(
     <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async () => {
         throw new Error("boom");
@@ -166,16 +167,17 @@ test("CatalogView shows empty, error and unsupported states", async () => {
       sourceId="s"
     />,
   );
-  await waitForFrame(failing.lastFrame, /Error: boom/);
+  await waitForFrame(failing.lastFrame, /Source s unavailable: boom/);
+  assert.match(failing.lastFrame() ?? "", /refresh it with r/);
   failing.unmount();
 
-  const unsupported = render(<CatalogView environment={NO_MANIFEST} operations={operationsFor()} sourceId="s" />);
+  const unsupported = await renderExpanded(<CatalogView environment={NO_MANIFEST} operations={operationsFor()} sourceId="s" />);
   await waitForFrame(unsupported.lastFrame, /not supported/);
   unsupported.unmount();
 });
 
 test("CatalogView navigates the tree with j/k and arrows, clamped, and expands or collapses sources", async () => {
-  const { lastFrame, stdin, unmount } = render(
+  const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} sourceId="builtin:agent-depot" />,
   );
   const selects = (name: RegExp) => waitForFrame(lastFrame, (frame) => name.test(selectedLine(frame) ?? ""));
@@ -187,14 +189,14 @@ test("CatalogView navigates the tree with j/k and arrows, clamped, and expands o
   stdin.write(DOWN);
   await selects(/beta/);
   stdin.write(DOWN);
-  await selects(/git:1234567890abcdef12345678/);
+  await selects(/x\/y/);
   assert.ok(!(lastFrame() ?? "").includes("gamma"), "the second source starts collapsed");
   stdin.write(RIGHT);
   await waitForFrame(lastFrame, /gamma/);
   stdin.write("j");
   await selects(/gamma/);
   stdin.write(LEFT);
-  await selects(/git:1234567890abcdef12345678/);
+  await selects(/x\/y/);
   stdin.write(LEFT);
   await waitForFrame(lastFrame, (frame) => !frame.includes("gamma"));
   stdin.write("\r");
@@ -203,7 +205,7 @@ test("CatalogView navigates the tree with j/k and arrows, clamped, and expands o
 });
 
 test("CatalogView filter keeps pasted text that starts like an escape remnant", async () => {
-  const { lastFrame, stdin, unmount } = render(<CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} sourceId="s" />);
+  const { lastFrame, stdin, unmount } = await renderExpanded(<CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} sourceId="s" />);
   await waitForFrame(lastFrame, /3 of 3/);
   stdin.write("/");
   await waitForFrame(lastFrame, /Filter: _/);
@@ -214,7 +216,7 @@ test("CatalogView filter keeps pasted text that starts like an escape remnant", 
 
 test("CatalogView filters leaves case-insensitively, keeps their sources and shows an n of m count", async () => {
   const capturing: boolean[] = [];
-  const { lastFrame, stdin, unmount } = render(
+  const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async () => skills)}
       sourceId="s"
@@ -227,7 +229,7 @@ test("CatalogView filters leaves case-insensitively, keeps their sources and sho
   assert.equal(capturing.at(-1), true);
   stdin.write("gamma");
   const filtered = await waitForFrame(lastFrame, (frame) => /Filter: gamma/.test(frame) && /1 of 3/.test(frame));
-  assert.match(filtered, /git:1234567890abcdef12345678 \(1\)/, "the parent of a match stays visible and opens");
+  assert.match(filtered, /x\/y \(1\)/, "the parent of a match stays visible and opens");
   assert.match(filtered, /gamma/);
   assert.ok(!filtered.includes("alpha") && !filtered.includes("builtin:agent-depot"));
   stdin.write("\r");
@@ -244,7 +246,7 @@ test("CatalogView filters leaves case-insensitively, keeps their sources and sho
 });
 
 test("CatalogView matches descriptions and shows no matches", async () => {
-  const { lastFrame, stdin, unmount } = render(
+  const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} sourceId="s" />,
   );
   await waitForFrame(lastFrame, /3 of 3/);
@@ -259,7 +261,7 @@ test("CatalogView matches descriptions and shows no matches", async () => {
 
 test("CatalogView toggles all sources with s", async () => {
   const requested: (readonly string[])[] = [];
-  const { lastFrame, stdin, unmount } = render(
+  const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async (ids) => {
         requested.push(ids);
@@ -280,7 +282,7 @@ test("CatalogView toggles all sources with s", async () => {
 
 test("CatalogView starts on all sources when no source is given", async () => {
   const requested: (readonly string[])[] = [];
-  const { lastFrame, unmount } = render(
+  const { lastFrame, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST}
       operations={operationsFor(async (ids) => {
         requested.push(ids);
@@ -318,7 +320,7 @@ class ReceiverBoundOperations implements SourceOperations {
 }
 
 test("CatalogView calls discoverSkills with its receiver", async () => {
-  const { lastFrame, unmount } = render(
+  const { lastFrame, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST} operations={new ReceiverBoundOperations()} sourceId="builtin:agent-depot" />,
   );
   const frame = await waitForFrame(lastFrame, /alpha|Cannot read properties/);
@@ -334,7 +336,7 @@ test("CatalogView windows a long tree around the highlight and pages with PgUp/P
     name: `skill${String(n).padStart(2, "0")}`,
     description: "d",
   }));
-  const { lastFrame, stdin, unmount } = render(
+  const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => many)} sourceId="builtin:agent-depot" listHeight={6} />,
   );
   const top = await waitForFrame(lastFrame, /1–6 of 41/);
@@ -346,4 +348,66 @@ test("CatalogView windows a long tree around the highlight and pages with PgUp/P
   stdin.write("\u001B[5~");
   await waitForFrame(lastFrame, (frame) => /builtin:agent-depot/.test(selectedLine(frame) ?? ""));
   unmount();
+});
+
+
+test("CatalogView keeps healthy Sources browsable when a Git mirror is unavailable", async () => {
+  let refreshes = 0;
+  const missingId = "git:1234567890abcdef12345678";
+  const operations: SourceOperations = {
+    ...operationsFor(async (ids) => {
+      if (ids.includes(missingId)) throw new Error("Git Source mirror is not available: /cache/missing");
+      return skills.slice(0, 2);
+    }),
+    async refreshSource() { refreshes++; throw new Error("must not refresh automatically"); },
+  };
+  const { lastFrame, stdin, unmount } = await renderExpanded(<CatalogView environment={NO_MANIFEST} operations={operations} />);
+  try {
+    const frame = await waitForFrame(lastFrame, /2 of 2/);
+    assert.match(frame, /mirror is not available/);
+    assert.match(frame, /refresh it with r/);
+    assert.match(frame, /alpha/);
+    assert.match(frame, /beta/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (value) => /alpha/.test(selectedLine(value) ?? ""));
+    assert.equal(refreshes, 0);
+  } finally { unmount(); }
+});
+
+
+test("CatalogView shows repository names rather than Git IDs", async () => {
+  const source = { id: "git:1234567890abcdef12345678", kind: "git" as const, url: "https://github.com/cursor/plugins/tree/main/pstack" };
+  const operations: SourceOperations = {
+    ...operationsFor(async () => [skills[2]]),
+    async listSources() { return [source]; },
+  };
+  const { lastFrame, unmount } = await renderExpanded(<CatalogView environment={NO_MANIFEST} operations={operations} />);
+  try {
+    const frame = await waitForFrame(lastFrame, /cursor\/plugins · pstack @ main \(1\)/);
+    assert.ok(!frame.includes(source.id));
+  } finally { unmount(); }
+});
+
+
+test("CatalogView starts collapsed, expands on demand, and opens filter matches", async () => {
+  const operations = operationsFor(async () => skills);
+  const { lastFrame, stdin, unmount } = render(<CatalogView environment={NO_MANIFEST} operations={operations} />);
+  try {
+    const frame = await waitForFrame(lastFrame, /3 of 3/);
+    assert.match(frame, /▸ builtin:agent-depot \(2\)/);
+    assert.match(frame, /▸ x\/y \(1\)/);
+    assert.doesNotMatch(frame, /alpha|beta|gamma/);
+    stdin.write("\r");
+    await waitForFrame(lastFrame, /alpha/);
+    stdin.write("\r");
+    await waitForFrame(lastFrame, (text) => !text.includes("alpha"));
+    stdin.write("/");
+    await waitForFrame(lastFrame, /Filter: _/);
+    stdin.write("gamma");
+    const filtered = await waitForFrame(lastFrame, /▾ x\/y \(1\)/);
+    assert.match(filtered, /gamma.*Something else/);
+    stdin.write(ESC);
+    const reset = await waitForFrame(lastFrame, /3 of 3/);
+    assert.doesNotMatch(reset, /alpha|beta|gamma/);
+  } finally { unmount(); }
 });

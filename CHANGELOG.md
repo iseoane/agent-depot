@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Sources shows Skill Sources and App recipes in one windowed list, with `skills`/`app` kinds, one cursor and contextual action hints; Tab section switching is removed. Adding a first App recipe is available through `n`.
+- App recipe removal previews the exact recipe path, refuses while the App is installed, tracked, or its installed state cannot be verified, offers the existing uninstall flow, and requires a separate deletion confirmation. Declining or failing uninstall retains the recipe.
+- Catalog Source groups show repository names (and GitHub directory/ref scope) instead of opaque Git IDs; internal identities are unchanged.
+- Catalog and Installations start with every group collapsed. Enter/right arrow opens groups; Catalog filters still expand matching Sources automatically.
+
+### Fixed
+
+- App lifecycle failures identify the missing executable and action, suggest installing Homebrew when `brew` is unavailable, and distinguish manual-only steps and blocked Windows executables. TUI previews name missing commands instead of just saying "unavailable".
+- GitHub `tree/<ref>/<directory>` Source URLs clone and fetch the repository URL, use the selected ref, and restrict Skill discovery and reads to the directory without changing existing Source identities.
+- The TUI Catalog keeps available Sources browsable when another Source has no mirror or cannot be read, and shows an individual warning with refresh guidance instead of failing the whole view.
+
 ## [0.4.1] - 2026-10-01
 
 ### Changed

@@ -108,6 +108,22 @@ agent-depot tui
 agent-depot --version
 ```
 
+GitHub directory URLs such as `https://github.com/cursor/plugins/tree/main/pstack`
+are also supported: Agent Depot clones the repository, reads the URL's ref, and
+only discovers Skills inside that directory. Skill paths stay repository-relative.
+The full URL remains the Source identity, so an already registered directory URL
+can simply be refreshed. The ref occupies one URL segment; encode any `/` in a
+branch name as `%2F` (for example `tree/release%2Fstable/pstack`). An explicit
+fixed-version ref overrides the URL ref while keeping the directory scope.
+
+Catalog groups show repository names instead of opaque Git IDs. Catalog and
+Installations start with all groups collapsed; use Enter or the right arrow to
+open a group. A Catalog filter automatically expands matching Sources.
+
+The TUI Catalog reports unavailable Sources individually and keeps other Sources
+browsable. To create a missing mirror, go to Sources (`1`) and refresh with `r`;
+opening the Catalog does not initiate network access.
+
 Refresh first prints the registered URL as a preview. It requires explicit
 `--yes` confirmation before any network access and otherwise fails closed. The
 package-owned `builtin:agent-depot` Source is listed as read-only and cannot be
@@ -414,7 +430,7 @@ taller than the terminal. `j`/`k` or the arrow keys move.
 
 | View | Purpose |
 | --- | --- |
-| 1 Sources | Where skills come from: the fixed built-in Source plus registered Git Sources. |
+| 1 Sources | Skill Sources and user-owned App recipes in one list, with `skills`/`app` kinds and contextual actions. |
 | 2 Catalog | Skills that can be installed: those not installed yet, as Source, then Skills. |
 | 3 Installations | What is on disk: managed installations (user-global and project) and unmanaged user-global skills. |
 | 4 Updates | Managed skills with a newer version available, for user-global and project scope. |
@@ -424,11 +440,18 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 
 | View | Keys |
 | --- | --- |
-| Sources | `space` mark, `a` mark all, `Enter` open the Source in the Catalog, `n` add a Git Source, `r` refresh the marked (or highlighted) Sources, `d` remove |
+| Sources | `j`/`k` move through Skill Sources and App recipes (no Tab section switch). `Enter` opens the Catalog for a Skill Source or previews/approves an App recipe. `n` adds a Source or guides recipe authoring; `r` refreshes Sources or reloads recipe status; `d` removes. `space`/`a` mark Skill Sources only. |
 | Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marks (or the highlighted skill), `/` filter, `s` toggle one Source or all (when opened from a Source) |
 | Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill, `space` marks a leaf and `a` marks all visible leaves: with marks, `u` and `h` act on all of them with one combined preview and one confirmation (project installations are skipped with a reason) |
 | Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot assess" line |
 | Import/Export | `e` export, `i` import; enter a file path, `space` toggle choices, `a` toggle all, `Enter` preview, `y` apply; `j`/`k` scroll previews and results |
+
+Removing an App recipe checks its approved version command and tracked state.
+If the App is installed or tracked, the TUI offers the existing uninstall flow;
+`n` cancels removal and a failed uninstall keeps the recipe. After verified
+uninstall (or when not installed), a separate preview confirms deletion of only
+the recipe file or symlink. App data and Host configuration are not implicitly
+deleted. Invalid recipes must be repaired before their App state can be checked.
 
 Safety model:
 

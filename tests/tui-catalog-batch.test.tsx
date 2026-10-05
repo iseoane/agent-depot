@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { render } from "ink-testing-library";
+import { renderExpanded } from "./render-expanded.js";
 
 import { defaultProjectManifestPath, ProjectManifestStore, AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import type { SkillCandidate, SkillTreeFile } from "../src/skill-discovery.js";
@@ -61,8 +62,8 @@ type View = ReturnType<typeof render>;
 const selectedLine = (frame: string) => frame.split("\n").find((line) => line.startsWith("> ")) ?? "";
 const exists = (candidate: string) => lstat(candidate).then(() => true, () => false);
 
-function mount(f: Fixture): View {
-  return render(<CatalogView operations={f.operations} sourceId={BUILT_IN_SOURCE.id} environment={f.environment} />);
+function mount(f: Fixture): Promise<View> {
+  return renderExpanded(<CatalogView operations={f.operations} sourceId={BUILT_IN_SOURCE.id} environment={f.environment} />);
 }
 
 /** Presses a key and waits until the frame changes, so keys never race the renderer. */
@@ -102,7 +103,7 @@ test("marks a skill that has an unmanaged copy on disk and keeps it installable"
   await writeFile(path.join(dev, "SKILL.md"), "---\nname: beta\ndescription: Beta\n---\n", "utf8");
   await mkdir(path.join(f.home, ".claude", "skills"), { recursive: true });
   await symlink(dev, path.join(f.home, ".claude", "skills", "beta"), "dir");
-  const view = mount(f);
+  const view = await mount(f);
   const frame = await waitForFrame(view.lastFrame, /alpha skill/);
   const line = (name: string) => frame.split("\n").find((candidate) => candidate.includes(`${name} skill`)) ?? "";
   assert.match(line("alpha"), /on disk, unmanaged · adopt it from Installations/);
@@ -119,7 +120,7 @@ test("an unmanaged copy with different content is decided by the install collisi
   const existing = path.join(f.home, ".agents", "skills", "alpha");
   await mkdir(existing, { recursive: true });
   await writeFile(path.join(existing, "SKILL.md"), "---\nname: alpha\ndescription: Alpha\n---\nlocal\n", "utf8");
-  const view = mount(f);
+  const view = await mount(f);
   await highlight(view, "alpha");
   view.stdin.write("i");
   await choose(view, ["1"], "2", "1");
@@ -131,7 +132,7 @@ test("an unmanaged copy with different content is decided by the install collisi
 
 test("space marks skills, a marks every visible skill and a again clears them", async (t) => {
   const f = await fixture(t);
-  const view = mount(f);
+  const view = await mount(f);
   await highlight(view, "alpha");
   const marked = await step(view, " ");
   assert.match(marked, /\[x\] alpha/);
@@ -147,7 +148,7 @@ test("space marks skills, a marks every visible skill and a again clears them", 
 
 test("space on a source row explains that skills are marked", async (t) => {
   const f = await fixture(t);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /alpha skill/);
   view.stdin.write(" ");
   await waitForFrame(view.lastFrame, /Mark skills, not source rows/);
@@ -158,7 +159,7 @@ test("space on a source row explains that skills are marked", async (t) => {
 
 test("i installs the marked skills with one host, scope and version choice and one combined preview", async (t) => {
   const f = await fixture(t);
-  const view = mount(f);
+  const view = await mount(f);
   await highlight(view, "alpha");
   await step(view, " ");
   await highlight(view, "gamma");
@@ -184,7 +185,7 @@ test("i installs the marked skills with one host, scope and version choice and o
 
 test("a project batch records every skill in the manifest", async (t) => {
   const f = await fixture(t);
-  const view = mount(f);
+  const view = await mount(f);
   await highlight(view, "alpha");
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
@@ -200,7 +201,7 @@ test("a project batch records every skill in the manifest", async (t) => {
 
 test("a skill that cannot be prepared is shown in the preview and skipped while the others install", async (t) => {
   const f = await fixture(t, ["beta"]);
-  const view = mount(f);
+  const view = await mount(f);
   await highlight(view, "alpha");
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
@@ -226,7 +227,7 @@ test("one item failing while installing does not stop the others", async (t) => 
       return real.addUserGlobalInstallation!(record);
     },
   };
-  const view = mount({ ...f, operations });
+  const view = await mount({ ...f, operations });
   await highlight(view, "alpha");
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
@@ -251,7 +252,7 @@ test("one additional-host confirmation covers the items that need it; n installs
   const canonical = path.join(f.project, ".agents", "skills", "alpha");
   await mkdir(canonical, { recursive: true });
   await writeFile(path.join(canonical, "SKILL.md"), "## alpha");
-  const view = mount(f);
+  const view = await mount(f);
   await highlight(view, "alpha");
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
@@ -271,7 +272,7 @@ test("one additional-host confirmation covers the items that need it; n installs
 
 test("i on the highlighted skill without marks installs just that skill", async (t) => {
   const f = await fixture(t);
-  const view = mount(f);
+  const view = await mount(f);
   await highlight(view, "beta");
   view.stdin.write("i");
   const host = await waitForFrame(view.lastFrame, /Host \(space/);
@@ -281,7 +282,7 @@ test("i on the highlighted skill without marks installs just that skill", async 
 
 test("keys sent in one burst move and mark against the latest state", async (t) => {
   const f = await fixture(t);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /alpha skill/);
   for (const data of ["j", "j", " ", "j", " "]) view.stdin.write(data);
   const frame = await waitForFrame(view.lastFrame, /2 selected/);
@@ -294,7 +295,7 @@ test("keys sent in one burst move and mark against the latest state", async (t) 
 
 test("a then i in one burst opens the install steps for every listed skill", async (t) => {
   const f = await fixture(t);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /alpha skill/);
   view.stdin.write("j");
   view.stdin.write("a");
@@ -306,7 +307,7 @@ test("a then i in one burst opens the install steps for every listed skill", asy
 
 test("several keys delivered in a single write are handled one by one", async (t) => {
   const f = await fixture(t);
-  const view = mount(f);
+  const view = await mount(f);
   await waitForFrame(view.lastFrame, /alpha skill/);
   view.stdin.write("jj ");
   const frame = await waitForFrame(view.lastFrame, /1 selected/);

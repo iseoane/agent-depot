@@ -54,7 +54,7 @@ export function appStepLines(step: {
   readonly warning?: string;
 }): string[] {
   return [
-    ...(step.argv ? [`argv: ${JSON.stringify(step.argv)}`, `Executable: ${step.executable ?? "unavailable"}`] : []),
+    ...(step.argv ? [`argv: ${JSON.stringify(step.argv)}`, `Executable: ${step.executable ?? `${JSON.stringify(step.argv[0])} not found in PATH`}`] : []),
     ...(step.manual ? [`Manual: ${step.manual}`] : []),
     `Working directory: ${step.cwd}`,
     ...(step.warning ? [step.warning] : []),

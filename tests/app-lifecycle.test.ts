@@ -259,3 +259,31 @@ test("Host manual completion checks version and approval without claiming wiring
     assert.deepEqual(await f.apps.trackedApps(), []);
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
+
+
+test("missing Homebrew identifies the installation prerequisite without running or tracking", async () => {
+  const f = await fixture(async () => assert.fail("must not run without brew"), {
+    ...recipe, name: "engram", install: { argv: ["brew", "install", "engram"] },
+  });
+  try {
+    const apps = createAppOperations({ ...f.environment, resolveExecutable: async () => undefined });
+    const outcome = await apps.executeLifecycle(await apps.planLifecycle(f.entry, "install"), true);
+    assert.equal(outcome.status, "failed");
+    assert.match(outcome.reason!, /"brew" for install/u);
+    assert.match(outcome.reason!, /Install Homebrew/u);
+    assert.match(outcome.reason!, /PATH used by Agent Depot/u);
+    assert.deepEqual(await apps.trackedApps(), []);
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("manual-only steps explain manual completion rather than a missing executable", async () => {
+  const f = await fixture(async () => assert.fail("manual step must not run"), {
+    ...recipe, install: { manual: "Install CodeGraph yourself, then check its version" },
+  });
+  try {
+    const outcome = await f.apps.executeLifecycle(await f.apps.planLifecycle(f.entry, "install"), true);
+    assert.equal(outcome.status, "manual required");
+    assert.match(outcome.reason!, /install step requires manual completion/u);
+    assert.equal(outcome.manual, "Install CodeGraph yourself, then check its version");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
