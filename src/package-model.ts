@@ -105,7 +105,7 @@ export interface PackageLifecyclePlan {
   readonly action: PackageAction;
   readonly descriptor: BundleDescriptor;
   readonly commands: readonly PackageCommand[];
-  /** Every recorded coordinate this action may change. Pi update is host-wide. */
+  /** Every recorded coordinate this action may change. V1 actions are all scoped. */
   readonly affects: readonly PackageCoordinates[];
   readonly warnings: readonly string[];
   readonly cwd: string;
