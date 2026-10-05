@@ -110,6 +110,25 @@ agent-depot tui
 agent-depot --version
 ```
 
+También se admiten URLs de directorios de GitHub, como
+`https://github.com/cursor/plugins/tree/main/pstack`: Agent Depot clona el
+repositorio, lee la referencia de la URL y solo descubre Skills dentro de ese
+directorio. Las rutas de los Skills siguen siendo relativas al repositorio.
+La URL completa conserva la identidad de la Source; si ya está registrada,
+basta con refrescarla. La referencia ocupa un segmento de la URL: codifica los
+`/` del nombre de una rama como `%2F` (por ejemplo `tree/release%2Fstable/pstack`).
+Una referencia explícita de versión fija sustituye la de la URL, pero mantiene
+el directorio seleccionado.
+
+Los grupos del Catálogo muestran nombres de repositorios en lugar de IDs Git.
+Catálogo e Installations empiezan con todos los grupos contraídos; usa Enter o
+la flecha derecha para abrirlos. Un filtro del Catálogo expande automáticamente
+las Sources con coincidencias.
+
+El Catálogo de la TUI avisa por cada Source no disponible y permite seguir
+navegando por las demás. Para crear una caché ausente, ve a Sources (`1`) y
+refresca con `r`; abrir el Catálogo no inicia acceso a la red.
+
 `refresh` primero muestra como previsualización la URL registrada. Requiere
 confirmación explícita con `--yes` antes de cualquier acceso a la red y, en caso
 contrario, falla de forma cerrada. La Source `builtin:agent-depot`, propiedad del
@@ -455,7 +474,7 @@ selección.
 
 | Vista | Propósito |
 | --- | --- |
-| 1 Sources | De dónde provienen los skills: la Source integrada fija más las Sources Git registradas. |
+| 1 Sources | Sources de Skills y recetas App del usuario en una sola lista, con tipos `skills`/`app` y acciones contextuales. |
 | 2 Catalog | Skills que se pueden instalar: los que aún no están instalados, como Source y luego Skills. |
 | 3 Installations | Lo que hay en disco: instalaciones gestionadas (globales de usuario y de proyecto) y skills globales de usuario no gestionados. |
 | 4 Updates | Skills gestionados con una versión más reciente disponible, para el ámbito global de usuario y de proyecto. |
@@ -466,11 +485,19 @@ confirmar):
 
 | Vista | Teclas |
 | --- | --- |
-| Sources | `space` marcar, `a` marcar todo, `Enter` abrir la Source en el Catalog, `n` añadir una Source Git, `r` refrescar las Sources marcadas (o la resaltada), `d` eliminar |
+| Sources | `j`/`k` recorren Sources de Skills y recetas App, sin cambiar de sección con Tab. `Enter` abre el Catálogo de una Source o previsualiza/aprueba una receta. `n` añade una Source o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Skills. |
 | Catalog | `Enter`/flechas expandir y contraer, `space` marcar, `a` marcar todos los listados, `i` instalar las marcas (o el skill resaltado), `/` filtrar, `s` alternar entre una Source o todas (cuando se abre desde una Source) |
 | Installations | `Enter`/flechas expandir y contraer, `u` desinstalar (todos los Hosts o los Hosts elegidos) o eliminar un skill no gestionado, `h` o `i` añadir Hosts a una instalación, `A` o `Enter` adoptar un skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo) |
 | Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualizar las marcas, `r` comprobar de nuevo, las flechas pliegan la línea "cannot assess" |
 | Import/Export | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
+
+Al eliminar una receta App se comprueban su comando de versión aprobado y su
+seguimiento. Si la App está instalada o sigue registrada, la TUI ofrece el flujo
+existente de desinstalación: `n` cancela la eliminación y un fallo conserva la
+receta. Tras verificar la desinstalación —o si no está instalada— se confirma por
+separado el borrado exclusivo del archivo o enlace de la receta. No se eliminan
+implícitamente datos de la App ni configuración de Hosts. Las recetas inválidas
+deben repararse antes de poder comprobar el estado de su App.
 
 Modelo de seguridad:
 
