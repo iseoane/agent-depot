@@ -558,3 +558,46 @@ installability concept to filter on.
 `tests/package-owned-skills.test.ts`. `pnpm audit:dead-code` reports one boundary
 coverage issue, `src/package-owned-skills.ts:1 no matching boundary zone`; the
 zone line is deliberately left to a separate commit.
+
+Issue 08, the flow, plus the integration of issues 04, 05 and 07, accepted and
+pinned the following.
+
+**Accepted.** The flow reads a Source through `SourceContentAccess.readSnapshot`,
+not through `PackageSourceView`. Discovery consumes path-and-content snapshots,
+and issue 09 already made that pass carry the bundle manifests, so the flow, the
+guard, and Skill discovery share one read instead of the flow maintaining a
+second bridge that reads every file to fill in contents. `PackageContentAccess`
+stays the host-facing origin port, with its own tests, for the CLI wave that
+needs to hand a host a repository URL.
+
+**Accepted.** `approve` and `approvalStatus` take an optional action, defaulting
+to `install`. `PackageDeclaration.argv` is one action's exact ordered argv, and
+the install, update and uninstall argvs differ, so a single action-less receipt
+could never approve an update. The digest still binds source, ref, coordinates,
+manifest digest and the ordered argv.
+
+**Accepted.** `planHostSteps` refuses a fixed-version Claude selection for
+install and update. `claude plugin install <plugin>@<marketplace>` has no pin
+slot, so the alternative is to install whatever the marketplace points at while
+the record claims the pin. See issue 15.
+
+**Accepted.** `hostInstallId` joins `planHostSteps` in the host-grammar module,
+and both derive from one `stepTemplateInput`, so the record's `installId` is the
+same token the argv carries rather than a second spelling of it.
+
+**Accepted.** `sourceBundleScope` gives the flow and the owned-Skill guard the
+same directory scope for a scoped GitHub tree Source. Without it a Pi bundle
+below the scope root was invisible to both.
+
+**Accepted.** `recordOutcome` drops the selection record after a confirmed
+uninstall and on `forget`, and writes it for install, select, and update. The
+record is the selection, not the install, so a confirmed removal has nothing
+left to select.
+
+**Verified.** `pnpm typecheck`, `pnpm lint`, `pnpm audit:dead-code` and
+`git diff --check` are clean, and `pnpm test` passes 858 tests, which includes
+the 16 in `tests/package-flow.test.ts` covering the completed install, the
+frozen plan, the manifest and commit recheck, the unapproved fail-closed path,
+the hand-installed interop, the failed install, the honest `unknown`, the
+unchanged-version update, the batch isolation, the Claude argv order, the blocked
+WSL executable, and the absent Skill-engine import edge.
