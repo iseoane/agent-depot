@@ -6,6 +6,7 @@ import {
   affectedBy,
   assertValidHostArgv,
   classifyUpdate,
+  hostInstallId,
   HOST_STEP_TEMPLATES,
   packageApprovalDigest,
   PackagePlanError,
@@ -300,4 +301,22 @@ test("classifyUpdate compares like evidence and reports a mixed pair unknown", (
   assert.equal(classifyUpdate({ kind: "absent" }, { ...bundle, version: "1.0.0" }), "unknown");
   assert.equal(classifyUpdate({ kind: "unknown", reason: "drifted" }, { ...bundle, version: "1.0.0" }), "unknown");
   assert.equal(classifyUpdate({ kind: "installed", version: "1.0.0" }, undefined), "unknown");
+});
+
+test("a fixed-version Claude selection is refused instead of silently ignoring the pin", () => {
+  const pinned: PackageSelection = { ...claudeSelection(), version: { policy: "fixed", version: "1.0.0" } };
+  for (const action of ["install", "update"] as const) {
+    assert.throws(
+      () => planHostSteps(action, claudeDescriptor(), pinned, knownMarketplaceView()),
+      (error: unknown) => error instanceof PackagePlanError && /cannot carry the pin/.test(error.message),
+    );
+  }
+  assert.deepEqual(planHostSteps("uninstall", claudeDescriptor(), pinned, knownMarketplaceView()), [
+    ["claude", "plugin", "uninstall", "pstack@pstack-claude"],
+  ]);
+});
+
+test("the install identity is the host's own token for the selection", () => {
+  assert.equal(hostInstallId(claudeDescriptor(), claudeSelection(), knownMarketplaceView()), "pstack@pstack-claude");
+  assert.equal(hostInstallId(piDescriptor(), piSelection(), emptyView()), "git:github.com/michael-denyer/pstack-claude");
 });

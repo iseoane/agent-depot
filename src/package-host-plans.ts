@@ -114,21 +114,62 @@ export function planHostSteps(
   state: HostInstallView,
   resolution: HostPlanResolution = {},
 ): readonly (readonly string[])[] {
+  assertHostCommand(action, descriptor, selection);
+  const input = stepTemplateInput(descriptor, selection, state, resolution);
+
+  const steps = HOST_STEP_TEMPLATES[descriptor.host][action](input);
+  return Object.freeze(steps.map((argv, index) =>
+    assertValidHostArgv(argv, `${descriptor.host} ${action} step ${index + 1}`),
+  ));
+}
+
+/**
+ * The host's own identity for one selection: `<plugin>@<marketplace>` for Claude
+ * and the Pi Source identity for Pi. The same value the argv templates carry, so
+ * a record can never name an identity the host was not given.
+ */
+export function hostInstallId(
+  descriptor: BundleDescriptor,
+  selection: PackageSelection,
+  state: HostInstallView,
+  resolution: HostPlanResolution = {},
+): string {
+  const input = stepTemplateInput(descriptor, selection, state, resolution);
+  return descriptor.host === "claude" ? claudeInstallId(input) : input.source;
+}
+
+function assertHostCommand(action: PackageAction, descriptor: BundleDescriptor, selection: PackageSelection): void {
   if (descriptor.host !== selection.host) {
     throw new PackagePlanError(
       `The bundle descriptor host ${JSON.stringify(descriptor.host)} does not match the selection host ${JSON.stringify(selection.host)}`,
     );
   }
-  if (runsHostCommand(action) && !isInstallable(descriptor)) {
+  if (!runsHostCommand(action)) {
+    return;
+  }
+  if (!isInstallable(descriptor)) {
     throw new PackagePlanError(
       `The bundle ${JSON.stringify(descriptor.name)} is not installable (${descriptor.warnings.join("; ")})`,
     );
   }
+  if (descriptor.host === "claude" && action !== "uninstall" && selection.version.policy === "fixed") {
+    throw new PackagePlanError(
+      `A fixed-version Claude selection cannot be delegated: claude plugin install takes <plugin>@<marketplace> and cannot carry the pin ${JSON.stringify(selection.version.version)}`,
+    );
+  }
+}
 
+/** The one place that reads the host state and the selection into a template input. */
+function stepTemplateInput(
+  descriptor: BundleDescriptor,
+  selection: PackageSelection,
+  state: HostInstallView,
+  resolution: HostPlanResolution,
+): StepTemplateInput {
   const source = hostSource(selection);
   const marketplace = descriptor.host === "claude" ? resolveClaudeMarketplace(state, selection) : undefined;
   const marketplaceName = resolution.marketplaceName ?? marketplace?.name;
-  const input: StepTemplateInput = Object.freeze({
+  return Object.freeze({
     descriptor,
     selection,
     source,
@@ -136,11 +177,6 @@ export function planHostSteps(
     ...(marketplaceName === undefined ? {} : { marketplaceName }),
     marketplaceKnown: marketplace?.known === true,
   });
-
-  const steps = HOST_STEP_TEMPLATES[descriptor.host][action](input);
-  return Object.freeze(steps.map((argv, index) =>
-    assertValidHostArgv(argv, `${descriptor.host} ${action} step ${index + 1}`),
-  ));
 }
 
 /**
