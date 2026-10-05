@@ -12,6 +12,7 @@
     ".atl/**",
     ".fallow/**",
     "coverage/**",
+    "tests/fixtures/**",
     "skills/doctor-md-skill/assets/pierre-diffs.js"
   ],
   "boundaries": {
@@ -63,7 +64,8 @@
           "src/skill-discovery.ts",
           "src/project-manifest.ts",
           "src/app-version.ts",
-          "src/package-model.ts"
+          "src/package-model.ts",
+          "src/package-bundles.ts"
         ]
       },
       {
