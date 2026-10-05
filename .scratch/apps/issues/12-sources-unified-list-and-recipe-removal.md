@@ -46,10 +46,17 @@ they still asserted the pre-change behaviour, and ADR 0007 records the
 fail-closed rule.
 
 Findings recorded but not fixed, each judged out of scope for this change:
-`render-expanded.ts` walks rendered glyphs to open the first group, which couples
-unrelated action tests to display strings across roughly ten test files;
-`sources-recipes.tsx` `handleKey` is a long `kind` cascade that a handler table
-could reduce, as `sources-mode.ts` already does; and `app-flow.ts`
+`AppInspection` has no `unverified` status, so a version command that fails to
+start (`src/app-flow.ts`, the catch around the version run) returns
+`not installed` with a resolved executable and no reason, and the removal guard
+cannot tell it from a verified absence. The guard therefore catches only an
+unresolved or blocked executable. A distinct status would delete the guard, and
+that is the follow-up. `useCatalogSkills` keeps its per-Source discovery fallback
+inline, where a named function would carry the never-refresh rule; `renderExpanded`
+walks rendered glyphs to open the first group, which couples unrelated action
+tests to display strings across roughly ten test files and reads as a vague name;
+and `sources-recipes.tsx` `handleKey` is a long `kind` cascade that a handler
+table could reduce, as `sources-mode.ts` already does. `app-flow.ts`
 `missingExecutableReason` hardcodes Homebrew guidance inside a
 package-manager-agnostic module. The CLI also builds its App-owned Skill filter
 from the ambient state directory in the install path (`src/skill-install.ts`
@@ -57,6 +64,14 @@ through the install context) and in `update check`'s unmanaged inventory, so an
 embedder that injects `appOperations` with a different recipes directory still
 sees the ambient one in those paths. In production both resolve identically, so
 this is a testability seam rather than a user-visible defect.
+
+A comment pass over the diff (comment-sicko) reported 13 comment deletions and
+four structural flags. Accepted: the recipe identity recheck now runs through one
+named helper instead of a repeated comparison with an explanatory comment, and
+three long comments were cut to one sentence each. Rejected: deletions of comments
+that state a precedence or never-refresh constraint, and deletions of test-intent
+comments, since those carry intent the assertions alone do not show. Two
+structural flags stay open with the rest of this list.
 
 `skills/agent-depot-apprecipe/SKILL.md` grew an Installer Preflight and a
 Homebrew checklist (version 1.1) that no CHANGELOG bullet requested, which is
