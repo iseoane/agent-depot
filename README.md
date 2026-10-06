@@ -668,12 +668,15 @@ never change installed-App tracking.
 ## Packages
 
 A Package is a host-native bundle discovered inside a registered Source: a Pi
-package (a `package.json` with a `pi` key, or the conventional `extensions/`,
-`skills/`, `prompts/` and `themes/` directories) or a Claude Code plugin (a
+package (a `package.json` with a `pi` key, or a `pi-package` keyword or a
+Pi-specific `extensions/` or `prompts/` directory) or a Claude Code plugin (a
 `.claude-plugin/plugin.json` bound by an in-repo `.claude-plugin/marketplace.json`).
-One repository can be both, as `pstack-claude` is. V1 supports the Pi and Claude
-Code Hosts only; Codex and OpenCode packaging, npm-sourced Pi packages and
-project-scoped Packages are deferred.
+Because `skills/` and `themes/` are also Claude Code default locations, a
+conventional Pi package needs a Pi-specific directory, so an ordinary repository
+of shared skills is not read as a Pi package. One repository can be both, as
+`pstack-claude` is. V1 supports the Pi and Claude Code Hosts only; Codex and
+OpenCode packaging, npm-sourced Pi packages and project-scoped Packages are
+deferred.
 
 Agent Depot does not copy a bundle's contents. It reads the bundle manifest into a
 typed component inventory, derives the Host's own commands from that declaration,

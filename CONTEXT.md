@@ -35,7 +35,7 @@ A user-owned declaration of an App's lifecycle commands and version signals, opt
 _Avoid_: Installation method (for the whole App recipe)
 
 **Package**:
-A host-native bundle discovered inside a registered Source: a Pi package with a `pi` manifest key or conventional directories, or a Claude Code plugin with a `.claude-plugin/plugin.json` bound by an in-repo marketplace. Its lifecycle is delegated to the host CLI, and its installed state is read from the host's own state files, never written by Agent Depot.
+A host-native bundle discovered inside a registered Source: a Pi package that declares a `pi` manifest key, a `pi-package` keyword, or a Pi-specific conventional resource directory, or a Claude Code plugin with a `.claude-plugin/plugin.json` bound by an in-repo marketplace. Its lifecycle is delegated to the host CLI, and its installed state is read from the host's own state files, never written by Agent Depot.
 _Avoid_: npm package (unless it specifically means the npm distribution channel)
 
 **Bundle**:
