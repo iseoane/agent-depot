@@ -22,10 +22,46 @@ const profile = {
     version: { policy: "latest" }, hosts: ["pi", "claude"],
     methods: { update: { kind: "command", argv: ["tool", "update"] } } }],
   apps: [recipe],
+  packages: [],
 };
+const piPackage = { host: "pi", root: "plugins/demo",
+  source: { kind: "external", url: "https://example.test/demo.git" }, version: { policy: "latest" } };
+const claudePackage = { host: "claude", marketplaceRoot: "plugins/demo", pluginName: "demo",
+  source: { kind: "builtin", id: "builtin:agent-depot" }, version: { policy: "fixed", version: "0.3.0" } };
 
 test("portable profile round-trips Sources, selections and full cross-platform recipes", () => {
   assert.deepEqual(parseProfile(JSON.parse(serializeProfile(parseProfile(profile)))), profile);
+});
+
+test("Package declarations round-trip canonically and an older profile parses as an empty list", () => {
+  const parsed = parseProfile({ ...profile, packages: [piPackage, claudePackage] });
+  assert.deepEqual(parsed.packages, [claudePackage, piPackage]);
+  assert.equal(serializeProfile(parseProfile({ ...profile, packages: [claudePackage, piPackage] })),
+    serializeProfile(parseProfile({ ...profile, packages: [piPackage, claudePackage] })));
+  assert.equal(serializeProfile(parsed), serializeProfile(parseProfile(JSON.parse(serializeProfile(parsed)))));
+  const older = { ...profile } as Partial<typeof profile>;
+  delete older.packages;
+  assert.deepEqual(parseProfile(older), { ...profile, packages: [] });
+});
+
+test("Package declarations refuse receipts, machine paths and non-canonical coordinates", () => {
+  const value = (packageValue: unknown) => ({ ...profile, packages: [packageValue] });
+  for (const [entry, reason] of [
+    [{ ...piPackage, installId: "host-install-id" }, /packages\[0\]\.installId: unsupported profile field/],
+    [{ ...piPackage, verifiedAt: "2026-01-01T00:00:00.000Z" }, /packages\[0\]\.verifiedAt/],
+    [{ ...piPackage, approval: "approved" }, /packages\[0\]\.approval/],
+    [{ ...piPackage, host: "codex" }, /packages\[0\]\.host: expected/],
+    [{ ...piPackage, root: "/plugins/demo" }, /packages\[0\]\.root: expected a canonical/],
+    [{ ...piPackage, root: "plugins/../demo" }, /packages\[0\]\.root: expected a canonical/],
+    [{ ...piPackage, root: "C:/plugins/demo" }, /packages\[0\]\.root: absolute local paths are not portable/],
+    [{ ...claudePackage, pluginName: "demo/nested" }, /packages\[0\]\.pluginName: expected one plugin name/],
+    [{ ...claudePackage, pluginName: undefined }, /packages\[0\]\.pluginName: expected a plugin name/],
+    [{ ...piPackage, source: { kind: "external", url: "/home/user/repo" } }, /packages\[0\]\.source\.url/],
+    [{ ...piPackage, source: { kind: "external", url: "https://user:secret@example.test/demo.git" } }, /packages\[0\]\.source\.url/],
+    [{ ...piPackage, version: { policy: "fixed", version: "C:/tool" } }, /packages\[0\]\.version\.version/],
+  ] as const) assert.throws(() => parseProfile(value(entry)), reason);
+  assert.throws(() => parseProfile({ ...profile, packages: [piPackage, piPackage] }), /packages\[1\]: duplicate identity/);
+  assert.equal(parseProfile({ ...profile, packages: [piPackage, { ...piPackage, source: { kind: "builtin", id: "builtin:agent-depot" } }] }).packages.length, 2);
 });
 
 test("profile rejects unknown fields, versions and nonportable content with field paths", () => {
