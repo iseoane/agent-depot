@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import path from "node:path";
 
 import { sameAppVersion } from "./app-version.js";
 import { createPortableExecutableResolver } from "./executable-resolution.js";
@@ -16,6 +17,7 @@ import {
 import { findInstalledBundle, readHostInstallView, type HostInstallView } from "./package-host-state.js";
 import {
   activeBundles as classifyActiveBundles,
+  portableSkillConflicts,
   type ActiveBundle,
   type DiscoveredBundle,
 } from "./package-owned-skills.js";
@@ -44,6 +46,7 @@ import {
   type PackageApprovalStatus,
 } from "./package-state.js";
 import { runProcess } from "./process-runner.js";
+import { SourceStateStore } from "./source-state.js";
 import { createSourceContentAccess, type SourceContentAccess, type SourceContentFile } from "./skill-discovery.js";
 import {
   createSourceOperations,
@@ -51,7 +54,7 @@ import {
   type Source,
   type SourceOperations,
 } from "./sources.js";
-import type { ProjectSource } from "./project-manifest.js";
+import type { ProjectSkillSelection, ProjectSource } from "./project-manifest.js";
 
 const PACKAGE_OUTPUT_LIMIT = 1024 * 1024;
 const DIAGNOSTIC_BYTES = 4096;
@@ -64,6 +67,8 @@ export interface PackageEnvironment {
   readonly isWsl?: boolean;
   readonly wslMountRoot?: string;
   readonly stateDirectory?: string;
+  /** The portable user-global Skill state. Defaults to `sources.json` beside the Package state. */
+  readonly sourceStatePath?: string;
   readonly runner?: typeof runProcess;
   readonly resolveExecutable?: (name: string) => Promise<string | undefined>;
   readonly sourceOperations?: SourceOperations;
@@ -129,6 +134,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
   );
   const stateDirectory = environment.stateDirectory ?? defaultPackageStateDirectory(process.env, platform, home);
   const state = new PackageStateStore(stateDirectory);
+  const sourceStatePath = environment.sourceStatePath ?? path.join(stateDirectory, "sources.json");
   const runner = environment.runner ?? runProcess;
   const contentAccess = environment.sourceContentAccess ?? createSourceContentAccess();
   const sourceOperations = environment.sourceOperations ?? createSourceOperations({
@@ -234,6 +240,38 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
     });
   }
 
+  /**
+   * Refuses an activation whose bundle owns a Skill already managed as a
+   * portable user-global installation. The portable copy is never removed or
+   * replaced; the user forgets it first. No path is changed here.
+   */
+  async function assertNoPortableSkillConflicts(
+    descriptor: BundleDescriptor,
+    source: ProjectSource,
+    action: PackageAction,
+  ): Promise<void> {
+    if (action !== "install" && action !== "select") {
+      return;
+    }
+    let installations: readonly ProjectSkillSelection[];
+    try {
+      installations = (await new SourceStateStore(sourceStatePath).load()).userGlobalInstallations;
+    } catch (error) {
+      throw new PackagePlanError(
+        `The portable Skill state at ${JSON.stringify(sourceStatePath)} could not be read, so the ${action} cannot be checked for duplicate Skills: ${reasonOf(error)}`,
+      );
+    }
+    const conflicts = portableSkillConflicts(descriptor, source, installations);
+    if (conflicts.length === 0) {
+      return;
+    }
+    throw new PackagePlanError(
+      `The ${descriptor.host} Package ${JSON.stringify(descriptor.name)} would duplicate ${conflicts.length === 1 ? "a Skill" : "Skills"} ` +
+      `already managed as portable installations (${conflicts.map(conflict => JSON.stringify(conflict.path)).join(", ")}); ` +
+      "forget those installations first. No path was changed.",
+    );
+  }
+
   async function derivePlan(
     selection: PackageSelection,
     action: PackageAction,
@@ -241,6 +279,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
   ): Promise<DerivedPlan> {
     const source = refresh ? await refreshSourceFor(selection) : await resolveSourceFor(selection.source);
     const bundle = await deriveBundle(selection, source);
+    await assertNoPortableSkillConflicts(bundle.descriptor, selection.source, action);
     return await planFromBundle(selection, action, bundle, await readHostView());
   }
 

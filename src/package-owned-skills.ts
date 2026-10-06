@@ -15,7 +15,7 @@ import {
 } from "./package-model.js";
 import { sourceBundleScope } from "./package-content.js";
 import { defaultPackageStateDirectory, PackageStateStore } from "./package-state.js";
-import type { ProjectSource } from "./project-manifest.js";
+import type { ProjectSkillSelection, ProjectSource } from "./project-manifest.js";
 import { createSourceContentAccess, type SourceContentAccess } from "./skill-discovery.js";
 import { createSourceOperations, projectSourceOf, type Source } from "./sources.js";
 
@@ -153,6 +153,28 @@ async function loadHostView(options: PackageOwnedSkillOptions): Promise<HostInst
   return options.hostView ?? await readHostInstallView({
     ...(options.homeDirectory === undefined ? {} : { homeDirectory: options.homeDirectory }),
   });
+}
+
+/**
+ * The recorded portable user-global installations a bundle's own
+ * `skill-category` components would duplicate, matched by Source and by
+ * Source-relative Skill path or bare Skill name. Empty when nothing overlaps.
+ * A caller refuses the Package lifecycle on any conflict instead of silently
+ * replacing or removing the portable copy.
+ */
+export function portableSkillConflicts(
+  descriptor: BundleDescriptor,
+  source: ProjectSource,
+  installations: readonly ProjectSkillSelection[],
+): readonly ProjectSkillSelection[] {
+  const owned = packageOwnedSkillMatcher([descriptor]);
+  return Object.freeze(installations.filter((installation) =>
+    sameSource(installation.source, source) && owned(installation.path) !== undefined,
+  ));
+}
+
+function sameSource(left: ProjectSource, right: ProjectSource): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 /** Refuses a bundle-owned Skill path or name, naming the Package and its Host. */

@@ -8,7 +8,9 @@ import { createPackageOperations, type PackageOperations } from "../src/package-
 import type { GitSource } from "../src/git-source.js";
 import type { PackageLifecyclePlan, PackageSelection } from "../src/package-model.js";
 import type { ProcessRunOptions, ProcessRunResult } from "../src/process-runner.js";
+import type { ProjectSkillSelection } from "../src/project-manifest.js";
 import type { SourceContentAccess, SourceContentFile } from "../src/skill-discovery.js";
+import { SourceStateStore } from "../src/source-state.js";
 import type { SourceOperations } from "../src/sources.js";
 
 const PI_URL = "https://github.com/example/demo-bundle";
@@ -38,6 +40,7 @@ interface Harness {
   setPiPackages(entries: readonly unknown[]): void;
   setClaudePlugins(value: unknown): void;
   setClaudeMarketplaces(value: unknown): void;
+  setPortableInstallations(items: readonly ProjectSkillSelection[]): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -167,6 +170,13 @@ async function createHarness(options: {
     },
     setClaudeMarketplaces: (value) => {
       hostFiles.set(path.join(home, ".claude", "plugins", "known_marketplaces.json"), JSON.stringify(value));
+    },
+    setPortableInstallations: async (items) => {
+      await new SourceStateStore(path.join(stateDirectory, "sources.json")).save({
+        version: 1,
+        gitSources: [],
+        userGlobalInstallations: [...items],
+      });
     },
     close: async () => {
       await rm(home, { recursive: true, force: true });
@@ -645,4 +655,39 @@ test("no package module reaches the Skill install engine", async () => {
       }
     }
   }
+});
+
+test("install and select refuse a Package that would duplicate a managed portable Skill", async () => {
+  await withHarness({}, async (harness) => {
+    await harness.setPortableInstallations([{
+      source: hostSource,
+      path: "skills/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    }]);
+
+    await assert.rejects(
+      harness.operations.planLifecycle(piSelection(), "install"),
+      /would duplicate a Skill already managed as portable installations \("skills\/demo"\); forget those installations first\. No path was changed\./,
+    );
+    await assert.rejects(harness.operations.planLifecycle(piSelection(), "select"), /would duplicate a Skill/);
+    assert.equal(harness.calls.length, 0);
+  });
+});
+
+test("install plans normally when the portable installations belong to another Source", async () => {
+  await withHarness({}, async (harness) => {
+    await harness.setPortableInstallations([{
+      source: { kind: "external", url: "https://github.com/other/repo" },
+      path: "skills/demo",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    }]);
+
+    const plan = await harness.operations.planLifecycle(piSelection(), "install");
+    assert.equal(plan.action, "install");
+    assert.equal(harness.calls.length, 0);
+  });
 });
