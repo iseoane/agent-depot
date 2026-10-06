@@ -617,3 +617,32 @@ frozen plan, the tampered plan, the manifest and commit recheck, the unapproved
 fail-closed path, the hand-installed interop, the failed install, the honest
 `unknown`, the unchanged-version update, the batch isolation, the Claude argv
 order, the blocked WSL executable, and the absent Skill-engine import edge.
+
+Issue 21, the Matt skills discovery defect, accepted and pinned the following.
+
+**Accepted.** A conventional Pi bundle requires evidence of Pi intent, because
+Pi's conventional `skills/` and `themes/` directories are also Claude Code's
+default locations. `discoverBundlesInSnapshot` recognizes a bundle with no `pi`
+key only when `package.json` declares the `pi-package` keyword, or the snapshot
+holds a file under an `extensions/` or `prompts/` directory. A `pi` key is
+unchanged. This narrows design 4.1's "or the conventional directories": a
+`package.json` with only a shared `skills/` directory is an ordinary skill
+repository. The conventional-Pi verifiable-unit fixture keeps its `extensions/`
+directory, so that unit still holds.
+
+**Accepted.** `resolveMarketplaceSource` treats a `"."` or `"./"` source as the
+marketplace root, so the root plugin binds in repo. Claude accepts both forms
+(`claude plugin validate` reports `success: true` on the real repository), and
+without the change the entry fell to `external`, producing a versionless
+marketplace-only descriptor plus the root plugin as a second unbound descriptor.
+
+**Pinned after review.** The owned-Skill guard is unchanged. A bundle the user
+has not selected, and a bundle that is not installable, still own their declared
+Skills, per ADR 0009. Whether either should stop blocking the same Skill as a
+portable install is a domain fork, recorded in issue 21 rather than decided here.
+
+**Verified.** `pnpm typecheck`, `pnpm lint`, and `git diff --check` are clean,
+and `pnpm test` passes 956 tests, which includes the six new in
+`tests/package-bundles.test.ts`. The real `https://github.com/mattpocock/skills`
+mirror yields one Claude descriptor at 1.3.1, and the guard attributes `tdd` and
+`teach` to that bundle.
