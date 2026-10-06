@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { render } from "ink-testing-library";
 
 import { AGENT_DEPOT_PACKAGE_VERSION, ProjectManifestStore } from "../src/project-manifest.js";
-import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
+import { BUILT_IN_SOURCE, createSourceOperations, type Source, type SourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
@@ -47,6 +47,29 @@ test("App renders the header and the Sources view", async () => {
   assert.match(frame, /Agent Depot/);
   assert.match(frame, /Sources/);
   unmount();
+});
+
+test("App fills its startup screen and tracks terminal resize while Sources is loading", async () => {
+  let finishLoading: ((sources: readonly Source[]) => void) | undefined;
+  const loadingOperations: SourceOperations = {
+    ...operations,
+    listSources: () => new Promise((resolve) => { finishLoading = resolve; }),
+  };
+  const { lastFrame, stdout, unmount } = render(<App operations={loadingOperations} />);
+  try {
+    const initial = await waitForFrame(lastFrame, /Loading sources/);
+    assert.equal(initial.split("\n").length, 24, "the loading screen occupies Ink's default 24-row viewport");
+    Object.defineProperty(stdout, "rows", { configurable: true, value: 12 });
+    Object.defineProperty(stdout, "columns", { configurable: true, value: 40 });
+    stdout.emit("resize");
+    const resized = await waitForFrame(lastFrame, (frame) => frame.split("\n").length === 12);
+    assert.equal(resized.split("\n").find((line) => line.includes("═"))?.trim().length, 40);
+    finishLoading?.([BUILT_IN_SOURCE]);
+    const ready = await waitForFrame(lastFrame, /builtin:agent-depot/);
+    assert.equal(ready.split("\n").length, 12, "the loaded view keeps filling the resized viewport");
+  } finally {
+    unmount();
+  }
 });
 
 test("App shows the package version in the header", async () => {

@@ -59,9 +59,16 @@ export function CatalogRowLine({ row, selected, marked, installed }: {
 }
 
 /** Full Package ownership reason for the highlighted Skill, outside the one-line row. */
-export function CatalogSelectionHelp({ row }: { readonly row: VisibleRow<NodeData> | undefined }) {
+export function CatalogSelectionHelp({ row, height }: {
+  readonly row: VisibleRow<NodeData> | undefined;
+  readonly height: number;
+}) {
   const owner = row?.node.data.kind === "skill" ? row.node.data.ownedBy : undefined;
-  return owner === undefined ? null : <Text color={theme.marker}>{packageOwnedSkillNotice(owner)}</Text>;
+  return (
+    <Box flexDirection="column" minHeight={height}>
+      {owner === undefined ? null : <Text color={theme.marker}>{packageOwnedSkillNotice(owner)}</Text>}
+    </Box>
+  );
 }
 
 /** The prompt of the install flow; browsing shows nothing. */

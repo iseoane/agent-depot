@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { Box } from "ink";
+import { Box, Text } from "ink";
 import { render } from "ink-testing-library";
 import { Children, isValidElement, type ReactNode } from "react";
 import { renderExpanded } from "./render-expanded.js";
@@ -11,7 +11,7 @@ import type { BundleDescriptor } from "../src/package-model.js";
 import type { SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { NO_INSTALLED } from "../src/tui/catalog-installs.js";
-import { CatalogRowLine } from "../src/tui/catalog-panel.js";
+import { CatalogRowLine, CatalogSelectionHelp } from "../src/tui/catalog-panel.js";
 import type { NodeData } from "../src/tui/catalog-tree.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
@@ -230,6 +230,45 @@ test("CatalogRowLine remains one line after a narrow resize with unicode and unm
     view.rerender(<Box width={40}><CatalogRowLine row={unicode} selected={false} marked={false} installed={installed} /></Box>);
     const narrow = await waitForFrame(view.lastFrame, /超级长技能/);
     assert.equal(narrow.split("\n").length, 1, `narrow row wrapped:\n${narrow}`);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("Catalog ownership details keep a fixed Ink panel height across loose and long Unicode owners", async () => {
+  const pi = packageDescriptor("pi", "pstack-界🚀", "plugins/pi/skills");
+  const claude = packageDescriptor("claude", "claude-owner-with-a-long-name", "plugins/claude/skills");
+  const rows = [
+    ownedSkillRow({}, pi),
+    ownedSkillRow({}, claude),
+    { ...ownedSkillRow(), node: { id: "skill:loose", data: { kind: "skill" as const, skill: { sourceId: "s", path: "loose", name: "loose", description: "Loose Skill" } } } },
+  ];
+  const renderPanel = (index: number) => render(
+    <Box flexDirection="column" width={40}>
+      <Text>1–5 of 30</Text>
+      {Array.from({ length: 5 }, (_, row) => <Text key={row}>{row === 2 ? "> selected" : `  row ${row}`}</Text>)}
+      <CatalogSelectionHelp row={rows[index]} height={6} />
+      <Text>footer</Text>
+    </Box>,
+  );
+  const view = renderPanel(0);
+  try {
+    const baseline = await waitForFrame(view.lastFrame, /footer/);
+    for (const index of [1, 2]) {
+      view.rerender(
+        <Box flexDirection="column" width={40}>
+          <Text>1–5 of 30</Text>
+          {Array.from({ length: 5 }, (_, row) => <Text key={row}>{row === 2 ? "> selected" : `  row ${row}`}</Text>)}
+          <CatalogSelectionHelp row={rows[index]} height={6} />
+          <Text>footer</Text>
+        </Box>,
+      );
+      const frame = await waitForFrame(view.lastFrame, /footer/);
+      assert.equal(frame.split("\n").length, baseline.split("\n").length);
+      assert.equal(frame.split("\n").indexOf("1–5 of 30"), baseline.split("\n").indexOf("1–5 of 30"));
+      assert.equal(frame.split("\n").indexOf("footer"), baseline.split("\n").indexOf("footer"));
+    }
+    assert.match(baseline, /Package-owned Skill: provided by the pi[\s\S]*pstack-界🚀/);
   } finally {
     view.unmount();
   }

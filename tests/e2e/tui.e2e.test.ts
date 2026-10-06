@@ -80,6 +80,10 @@ class TuiSession {
     return this.output.replace(ANSI, "");
   }
 
+  get terminalOutput(): string {
+    return this.output;
+  }
+
   /** Clears the capture buffer, sends keys, and waits for the expected output to appear. */
   async send(keys: string, expected: RegExp): Promise<string> {
     this.output = "";
@@ -143,6 +147,9 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
   const session = new TuiSession();
   try {
     await session.waitFor(/Agent Depot[\s\S]*n add ·/u);
+    assert.ok(session.terminalOutput.includes("\u001B[?1049h"), "the TUI starts in Ink's alternate screen");
+    const initialFrame = session.screen.slice(session.screen.lastIndexOf("Agent Depot"));
+    assert.ok(initialFrame.split("\n").length >= 40, `startup did not fill the 40-row PTY:\n${initialFrame}`);
 
     const catalog = await session.send("2", /▸ builtin:agent-depot \(3\)/u);
     assert.match(catalog, /Scope: all sources/u);
@@ -179,6 +186,7 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
 
     session.press("q");
     assert.equal(await session.exitCode(), 0);
+    assert.ok(session.terminalOutput.includes("\u001B[?1049l"), "Ink restores the primary screen when the TUI exits");
   } finally {
     session.kill();
   }
@@ -255,6 +263,8 @@ test("active Pi and Claude Package owners stay readable in a narrow real termina
     session.resize(80, 24);
     const claude = await session.send("j", /Package-owned Skill: provided by the claude[\s\S]*?force-wrapping/u);
     assert.match(claude, /j\/k move/u);
+    const resizedFrame = claude.slice(claude.lastIndexOf("Agent Depot"));
+    assert.ok(resizedFrame.split("\n").length >= 24, `resize did not fill the 24-row PTY:\n${resizedFrame}`);
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally {

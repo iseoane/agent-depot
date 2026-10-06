@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
@@ -54,7 +54,7 @@ export interface CatalogViewProps {
 }
 
 export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight }: CatalogViewProps) {
-  const { stdout } = useStdout();
+  const { columns } = useWindowSize();
   const env = environment ?? NO_ENVIRONMENT;
   const [all, setAll] = useState(sourceId === undefined);
   const mounted = useMounted();
@@ -90,9 +90,9 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const { restart } = navigation;
   useEffect(restart, [operations, sourceId, all, restart]);
   const { rows, index } = navigation;
-  const selected = rows[index];
-  const owner = selected?.node.data.kind === "skill" ? selected.node.data.ownedBy : undefined;
-  const helpLines = owner === undefined ? 1 : wrappedLineCount(packageOwnedSkillNotice(owner), Math.max(stdout.columns ?? 80, 1));
+  const helpLines = state.status === "ready"
+    ? Math.max(1, ...state.activeBundles.map((owner) => wrappedLineCount(packageOwnedSkillNotice(owner), Math.max(columns, 1))))
+    : 1;
   const height = useListHeight(listHeight, 6 + helpLines);
 
   const flow: CatalogFlowContext = {
@@ -157,7 +157,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       {rows.slice(window.start, window.end).map((row, offset) => (
         <CatalogRowLine key={row.node.id} row={row} selected={window.start + offset === index} marked={marks.marked.has(row.node.id)} installed={installed} />
       ))}
-      <CatalogSelectionHelp row={rows[index]} />
+      <CatalogSelectionHelp row={rows[index]} height={helpLines} />
       <ListFooter indicator={window.indicator} selectedCount={selectedCount} message={message} />
       <ActionPanel mode={action} />
     </Box>

@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useStdout } from "ink";
+import { Box, Text, useApp, useWindowSize } from "ink";
 import { useCallback, useRef, useState } from "react";
 
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../project-manifest.js";
@@ -47,7 +47,7 @@ function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boo
 
 export function App({ operations, environment, onExit }: AppProps) {
   const { exit } = useApp();
-  const { stdout } = useStdout();
+  const { columns, rows } = useWindowSize();
   const [capturing, setCapturing] = useState(false);
   // Updated synchronously by the views so keys in the same burst never see a stale capturing state.
   const capturingRef = useRef(false);
@@ -73,7 +73,7 @@ export function App({ operations, environment, onExit }: AppProps) {
   });
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={rows}>
       <Text bold color={theme.accent}>Agent Depot{AGENT_DEPOT_PACKAGE_VERSION === undefined ? "" : ` v${AGENT_DEPOT_PACKAGE_VERSION}`}</Text>
       <Text>
         {TABS.map(([name, label], position) => (
@@ -82,36 +82,38 @@ export function App({ operations, environment, onExit }: AppProps) {
           </Text>
         ))}
       </Text>
-      <Text color={theme.muted}>{separatorLine(stdout.columns)}</Text>
-      {view === "sources" ? (
-        <SourcesView
-          operations={operations}
-          environment={environment}
-          onCapturingChange={onCapturingChange}
-          onHintsChange={setSourcesHints}
-          onOpenCatalog={(source) => {
-            setCatalogSourceId(source.id);
-            setView("catalog");
-          }}
-        />
-      ) : view === "installations" ? (
-        <InstallationsView
-          operations={operations}
-          environment={environment}
-          onCapturingChange={onCapturingChange}
-        />
-      ) : view === "profile" ? (
-        <ProfileView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
-      ) : view === "updates" ? (
-        <UpdatesView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
-      ) : (
-        <CatalogView
-          operations={operations}
-          sourceId={catalogSourceId}
-          environment={environment}
-          onCapturingChange={onCapturingChange}
-        />
-      )}
+      <Text color={theme.muted}>{separatorLine(columns)}</Text>
+      <Box flexDirection="column" flexGrow={1}>
+        {view === "sources" ? (
+          <SourcesView
+            operations={operations}
+            environment={environment}
+            onCapturingChange={onCapturingChange}
+            onHintsChange={setSourcesHints}
+            onOpenCatalog={(source) => {
+              setCatalogSourceId(source.id);
+              setView("catalog");
+            }}
+          />
+        ) : view === "installations" ? (
+          <InstallationsView
+            operations={operations}
+            environment={environment}
+            onCapturingChange={onCapturingChange}
+          />
+        ) : view === "profile" ? (
+          <ProfileView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
+        ) : view === "updates" ? (
+          <UpdatesView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
+        ) : (
+          <CatalogView
+            operations={operations}
+            sourceId={catalogSourceId}
+            environment={environment}
+            onCapturingChange={onCapturingChange}
+          />
+        )}
+      </Box>
       <Text color={theme.muted}>{capturing ? "Enter submit · Esc cancel · y/n confirm · space toggle" : view === "sources" ? sourcesHints : hintsOf(view, catalogSourceId !== undefined)}</Text>
     </Box>
   );
