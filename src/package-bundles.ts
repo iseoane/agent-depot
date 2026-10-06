@@ -138,7 +138,9 @@ export function buildComponentInventory(host: PackageHost, manifest: unknown): r
  * one Pi descriptor and one Claude descriptor over the same skills directory.
  * Refusals are warnings, not throws: a scoped Source URL refuses a Pi package,
  * a Pi manifest below the scope root is not a bundle, and a Claude plugin with
- * no in-repo marketplace binding is reported but not installable.
+ * no in-repo marketplace binding is reported but not installable. A
+ * conventional Pi bundle must show Pi intent, because `skills/` and `themes/`
+ * are also other Hosts' default locations; see `conventionalPiBundle`.
  */
 export function discoverBundlesInSnapshot(
   files: readonly SourceContentFile[],
@@ -149,18 +151,13 @@ export function discoverBundlesInSnapshot(
 
   const rootPackage = files.find((file) => file.path === manifestPathFor(scopeRoot, "package.json"));
   if (rootPackage !== undefined) {
-    const descriptor = parsePiPackageManifest(rootPackage.content, scopeRoot);
-    if (hasPiManifestKey(rootPackage.content)) {
+    const bundle = hasPiManifestKey(rootPackage.content)
+      ? parsePiPackageManifest(rootPackage.content, scopeRoot)
+      : conventionalPiBundle(rootPackage.content, scopeRoot, files);
+    if (bundle !== undefined) {
       descriptors.push(scope.directory === undefined
-        ? descriptor
-        : withWarnings(descriptor, ["Pi packages are not installable from a scoped Source; register the repository root"]));
-    } else {
-      const pruned = pruneConventionalComponents(descriptor, files);
-      if (pruned.components.length > 0) {
-        descriptors.push(scope.directory === undefined
-          ? pruned
-          : withWarnings(pruned, ["Pi packages are not installable from a scoped Source; register the repository root"]));
-      }
+        ? bundle
+        : withWarnings(bundle, ["Pi packages are not installable from a scoped Source; register the repository root"]));
     }
   }
 
@@ -286,6 +283,14 @@ const COMPONENT_EFFECTS: Readonly<Record<PackageComponentKind, PackageComponentE
   workflows: "instruction",
   monitors: "executable",
 });
+
+/**
+ * Conventional directories that show Pi intent on their own. `skills/` and
+ * `themes/` are also Claude Code default locations, so neither is evidence of
+ * Pi packaging by itself. `extensions/` and `prompts/` have no other Host's
+ * conventional meaning at a package root.
+ */
+const PI_INTENT_COMPONENT_KINDS: ReadonlySet<PackageComponentKind> = new Set(["extensions", "prompts"]);
 
 const PI_COMPONENT_KEYS = Object.freeze([
   ["skills", "skills"],
@@ -445,9 +450,12 @@ function resolveMarketplaceSource(
   metadataPluginRoot: string,
 ): MarketplaceSourceResolution {
   if (typeof source === "string") {
-    if (source.startsWith("./")) {
+    if (source.startsWith("./") || source === ".") {
+      // `"."` and `"./"` name the marketplace root, so the plugin is the repository itself.
       const relative = normalizeComponentPath(source);
-      return relative === "" ? { kind: "external" } : { kind: "in-repo", pluginRoot: resolveBundlePath(marketplaceRoot, relative) };
+      return relative === ""
+        ? { kind: "in-repo", pluginRoot: marketplaceRoot }
+        : { kind: "in-repo", pluginRoot: resolveBundlePath(marketplaceRoot, relative) };
     }
     const bare = normalizeComponentPath(source);
     if (bare !== "" && metadataPluginRoot !== "") {
@@ -470,6 +478,32 @@ function resolveComponentPaths(root: string, components: readonly PackageCompone
     ...component,
     paths: Object.freeze(component.paths.map((entry) => `${base}/${entry}`)),
   })));
+}
+
+/**
+ * A Pi bundle with no `pi` key is recognized only when the repository shows Pi
+ * intent: the `pi-package` keyword, or a Pi-native `extensions/` or `prompts/`
+ * directory that holds files in the snapshot. Returns undefined when the only
+ * conventional directory is shared with another Host, so an ordinary skill
+ * repository with a `package.json` is not reported as a Pi package.
+ */
+function conventionalPiBundle(
+  raw: string,
+  root: string,
+  files: readonly SourceContentFile[],
+): BundleDescriptor | undefined {
+  const pruned = pruneConventionalComponents(parsePiPackageManifest(raw, root), files);
+  if (pruned.components.length === 0) {
+    return undefined;
+  }
+  const intended = hasPiPackageKeyword(raw)
+    || pruned.components.some((component) => PI_INTENT_COMPONENT_KINDS.has(component.kind));
+  return intended ? pruned : undefined;
+}
+
+function hasPiPackageKeyword(raw: string): boolean {
+  const keywords = parseJsonObject(raw).keywords;
+  return Array.isArray(keywords) && keywords.some((keyword) => keyword === "pi-package");
 }
 
 function pruneConventionalComponents(descriptor: BundleDescriptor, files: readonly SourceContentFile[]): BundleDescriptor {
