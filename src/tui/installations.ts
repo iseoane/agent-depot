@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import { createAppOperations, type AppEntry, type AppInspection, type AppOperations } from "../app-flow.js";
+import type { PackageOperations } from "../package-flow.js";
 import {
   defaultProjectManifestPath,
   ProjectManifestStore,
@@ -22,7 +23,8 @@ import {
 import type { Source, SourceOperations } from "../sources.js";
 import { errorText } from "./batch.js";
 import { prepareInstall, type PreparedInstall } from "./catalog-installs.js";
-import type { TuiEnvironment } from "./environment.js";
+import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
+import { packageRow, type PackageRow } from "./package-rows.js";
 
 /** One installation as the Installations view shows it. */
 export interface InstallationRow {
@@ -94,6 +96,8 @@ export interface AppRow {
 export interface InstallationsData {
   readonly apps?: readonly AppRow[];
   readonly appsError?: string;
+  readonly packages?: readonly PackageRow[];
+  readonly packagesError?: string;
   readonly unmanagedWarnings?: readonly string[];
   /** Undefined when the configured operations cannot read user-global state. */
   readonly global?: readonly InstallationRow[];
@@ -151,6 +155,7 @@ export async function loadInstallations(
   operations: SourceOperations,
   environment: TuiEnvironment,
   appOperations: AppOperations = createAppOperations({ homeDirectory: homeOf(environment), ...environment.appEnvironment }),
+  packageOperations: PackageOperations = packageOperationsOf(environment),
 ): Promise<InstallationsData> {
   const home = homeOf(environment);
   let apps: readonly AppRow[] = [];
@@ -166,6 +171,14 @@ export async function loadInstallations(
     })));
   } catch (error) {
     appsError = errorText(error);
+  }
+  let packages: readonly PackageRow[] = [];
+  let packagesError: string | undefined;
+  try {
+    packages = await Promise.all((await packageOperations.list()).map(async record =>
+      packageRow(record, await packageOperations.inspect(record.selection))));
+  } catch (error) {
+    packagesError = errorText(error);
   }
   const globalRecords = operations.listUserGlobalInstallations
     ? await operations.listUserGlobalInstallations()
@@ -201,7 +214,7 @@ export async function loadInstallations(
       }))
     : [];
   const sources = await operations.listSources().catch(() => []);
-  return { unmanagedWarnings, global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps, ...(appsError === undefined ? {} : { appsError }) };
+  return { unmanagedWarnings, global, project, ...(projectError === undefined ? {} : { projectError }), unmanaged, sources, apps, ...(appsError === undefined ? {} : { appsError }), packages, ...(packagesError === undefined ? {} : { packagesError }) };
 }
 
 /** Source id of an installation's Source, when that Source is still registered. */

@@ -3,9 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createAppOperations } from "../app-flow.js";
 import { handleAppKey, isAppMode, startAppAction } from "./app-actions.js";
+import { handlePackageKey, isPackageMode } from "./package-actions.js";
 import type { SourceOperations } from "../sources.js";
 import type { InstalledSkills } from "./catalog-installs.js";
-import type { TuiEnvironment } from "./environment.js";
+import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 import { loadInstallations, type InstallationsData } from "./installations.js";
 import { BROWSE, type InstallationsMode } from "./installations-mode.js";
 import { errorText } from "./batch.js";
@@ -45,6 +46,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
   const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
+  const packages = useMemo(() => packageOperationsOf(env), [env]);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [mode, setModeState] = useState<InstallationsMode>(BROWSE);
   // Mirrors the mode synchronously so later keystrokes and the shell never see stale state.
@@ -63,12 +65,12 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const reload = useCallback(async () => {
     const generation = ++loadGeneration.current;
     try {
-      const data = await loadInstallations(operations, env, apps);
+      const data = await loadInstallations(operations, env, apps, packages);
       if (mounted.current && generation === loadGeneration.current) setState({ status: "ready", data });
     } catch (error) {
       if (mounted.current && generation === loadGeneration.current) setState({ status: "error", message: errorText(error) });
     }
-  }, [operations, env, apps, mounted]);
+  }, [operations, env, apps, packages, mounted]);
 
   useEffect(() => {
     void reload();
@@ -148,6 +150,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     marks,
     data,
     manage,
+    packages,
     startAdoption: (group) => void startAdoption(adoption, group),
     setMessage,
     startApps: (entries, input) => void startAppAction({ apps, manage }, entries, input),
@@ -156,6 +159,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   useKeys((input, key) => {
     const current = modeRef.current;
     if (current.kind === "browse") handleBrowseKey(browse, input, key);
+    else if (isPackageMode(current)) handlePackageKey({ packages, manage }, current, input, key);
     else if (isAppMode(current)) handleAppKey({ apps, manage }, current, input, key);
     else if (!handleManageKey(manage, current, input, key)) handleAdoptionKey(adoption, current, input, key);
   });

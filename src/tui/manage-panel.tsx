@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 
 import { AppPanel } from "./app-actions.js";
+import { PackagePanel } from "./package-actions.js";
 import type { BulkHostPlan, BulkUninstallPlan, SkippedTarget } from "./bulk-actions.js";
 import type { ManageMode } from "./manage-actions.js";
 import { ChecklistLines, HostChecklist, PreviewConfirm, PreviewLines } from "./panel-parts.js";
@@ -66,6 +67,10 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
     case "app-confirm":
     case "app-manual":
       return <AppPanel mode={mode} />;
+    case "package-approve":
+    case "package-confirm":
+    case "package-forget":
+      return <PackagePanel mode={mode} />;
     case "remove-scope":
       return <Text>Uninstall {mode.skill.name} (hosts: {mode.hosts.join(", ")}): 1 all hosts  2 choose hosts  (Esc cancel)</Text>;
     case "hosts-add":
