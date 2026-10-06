@@ -44,6 +44,7 @@
           "src/unmanaged-removal.ts",
           "src/update-flow.ts",
           "src/app-cli.ts",
+          "src/package-cli.ts",
           "src/app-flow.ts",
           "src/app-recipe-removal.ts",
           "src/app-latest.ts",
