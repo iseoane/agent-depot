@@ -11,7 +11,6 @@ import type { GitSource } from "../src/git-source.js";
 import { createPackageOperations, type PackageOperations } from "../src/package-flow.js";
 import type { SourceContentAccess } from "../src/skill-discovery.js";
 import type { SourceOperations } from "../src/sources.js";
-import type { ProfilePackageOperations } from "../src/profile.js";
 
 export const piPackage: PackageSelection = Object.freeze({
   host: "pi",
@@ -59,15 +58,24 @@ export function fakePackageOperations(options: {
   readonly recorded?: readonly InstalledPackage[];
   readonly commands?: readonly PackageCommand[];
   readonly result?: PackageLifecycleResult;
-} = {}): { readonly operations: ProfilePackageOperations; readonly evidence: PackagePortEvidence } {
+} = {}): { readonly operations: PackageOperations; readonly evidence: PackagePortEvidence } {
   const approvals: PackageAction[] = [];
   const plans: PackageAction[] = [];
   const executions: { action: PackageAction; confirmed: boolean }[] = [];
   const evidence = { approvals, plans, executions, listed: 0 };
-  const operations: ProfilePackageOperations = {
+  const operations: PackageOperations = {
     async list() {
       evidence.listed += 1;
       return options.recorded ?? [];
+    },
+    async discover() {
+      throw new Error("The profile port never discovers bundles");
+    },
+    async inspect() {
+      throw new Error("The profile port never inspects bundles");
+    },
+    async approvalStatus() {
+      throw new Error("The profile port never reads approval status");
     },
     async approve(_selection, action = "install") {
       approvals.push(action);
@@ -79,6 +87,12 @@ export function fakePackageOperations(options: {
     async executeLifecycle(plan, confirmed) {
       executions.push({ action: plan.action, confirmed });
       return options.result ?? { status: "selected" };
+    },
+    async forget() {
+      throw new Error("The profile port never forgets selections");
+    },
+    async checkUpdates() {
+      throw new Error("The profile port never checks updates");
     },
   };
   return { operations, evidence };

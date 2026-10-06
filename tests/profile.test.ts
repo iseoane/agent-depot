@@ -170,10 +170,15 @@ test("CLI Package filters parse on export and import and need Package operations
   const stdout: string[] = [], stderr: string[] = [];
   const dependencies = { homeDirectory: home, operations, appOperations: apps,
     stdout: (line: string) => stdout.push(line), stderr: (line: string) => stderr.push(line) };
-  assert.equal(await runCli(["export", "--package", "demo", "--skill", "doctor-md-agents"], dependencies), 1);
-  assert.match(stderr.at(-1)!, /Profile export requires Package operations to select Packages/);
-  assert.equal(await runCli(["export", "--no-packages", "--skill", "doctor-md-agents"], dependencies), 0);
+  assert.equal(await runCli(["export", "--package", "demo", "--skill", "doctor-md-agents"],
+    { ...dependencies, packageOperations }), 0);
+  assert.deepEqual(parseProfile(JSON.parse(stdout.join("\n"))).packages, [piPackage]);
+  stdout.length = 0;
+  assert.equal(await runCli(["export", "--no-packages", "--skill", "doctor-md-agents"],
+    { ...dependencies, packageOperations }), 0);
   assert.deepEqual(parseProfile(JSON.parse(stdout.join("\n"))).packages, []);
+  await assert.rejects(runProfileExport(["--package", "plugins/demo"], operations, apps, () => {}, () => {}, home),
+    /Profile export requires Package operations to select Packages/);
   stdout.length = 0;
   assert.equal(await runProfileExport(["--package", "plugins/demo"], operations, apps, line => stdout.push(line),
     line => stderr.push(line), home, packageOperations), 0);

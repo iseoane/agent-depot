@@ -102,8 +102,8 @@ test("Profile files carry a Package selection through the real state layout with
     assert.doesNotMatch(text, new RegExp(receiptContent.digest));
     const state = JSON.parse(Buffer.from(stateFiles["agent-depot/packages.json"]!.content, "base64").toString("utf8"));
     assert.deepEqual(state.packages.map((record: { selection: unknown }) => record.selection), [hostedSelection]);
-    // The destination re-observed its own snapshot (2.0.0), not the exporter's 1.0.0.
-    assert.deepEqual(state.packages[0].verified, { kind: "manifest-version", version: "2.0.0", declaredBy: "bundle" });
+    // Select runs no host command and observes no host evidence, so the record carries no verified version.
+    assert.equal(state.packages[0].verified, undefined);
     assert.doesNotMatch(text, /1\.0\.0/);
 
     const after = await profileFiles(b.root);
