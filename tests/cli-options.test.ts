@@ -71,7 +71,7 @@ test("update option parsing handles --confirm-path", async () => {
   const cases: ReadonlyArray<readonly [readonly string[], string]> = [
     [["update", "apply", "--scope", "project", "--all", "--confirm-path"], "Error: Missing value for --confirm-path"],
     [["update", "apply", "--scope", "project", "--all", "--confirm-path", "--yes"], "Error: Missing value for --confirm-path"],
-    [["update", "check", "--scope", "project", "--confirm-path", "a"], "Error: update check only accepts --scope; use update apply to select and apply updates"],
+    [["update", "check", "--scope", "project", "--confirm-path", "a"], "Error: update check only accepts --scope and optional --package filters; use update apply to select and apply updates"],
     [["update", "apply", "--scope", "user-global", "--all", "--confirm-path", "a"], "Error: --confirm-path only applies to --scope project"],
   ];
   for (const [argv, expected] of cases) {
@@ -80,7 +80,7 @@ test("update option parsing handles --confirm-path", async () => {
 });
 
 test("usage text documents update apply --confirm-path", async () => {
-  assert.match(await failure(["bogus"]), /agent-depot update apply --scope <project\|user-global> \(--all \| --skill <id\|path>\.\.\. \| --app <name>\.\.\.\) \[--yes\] \[--confirm-path <relative-path>\.\.\.\]/u);
+  assert.match(await failure(["bogus"]), /agent-depot update apply --scope <project\|user-global> \(--all \| --skill <id\|path>\.\.\. \| --app <name>\.\.\. \| --package <selection>\.\.\.\) \[--yes\] \[--confirm-path <relative-path>\.\.\.\]/u);
 });
 
 test("package subcommand parsing reports precise usage errors", async () => {
@@ -107,6 +107,6 @@ test("package subcommand parsing reports precise usage errors", async () => {
 test("help explains App batch execution order and project-scope exclusion", async () => {
   const lines: string[] = [];
   assert.equal(await runCli(["--help"], { stdout: line => lines.push(line) }), 0);
-  assert.match(lines.join("\n"), /Apps run after Skills/u);
-  assert.match(lines.join("\n"), /--all --scope project skips Apps/u);
+  assert.match(lines.join("\n"), /Apps and Packages run after Skills/u);
+  assert.match(lines.join("\n"), /--all --scope project skips Apps and Packages/u);
 });
