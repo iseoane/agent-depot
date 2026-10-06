@@ -9,6 +9,7 @@ import type { SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
+import { fakePackageOperations } from "./fake-package-operations.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const DOWN = "\u001B[B";
@@ -27,7 +28,8 @@ class EmptyManifestStore extends ProjectManifestStore {
     return parseProjectManifest({ version: 1, skills: [] });
   }
 }
-const NO_MANIFEST: TuiEnvironment = { projectManifestStore: new EmptyManifestStore() };
+const NO_PACKAGES = fakePackageOperations();
+const NO_MANIFEST: TuiEnvironment = { projectManifestStore: new EmptyManifestStore(), packages: NO_PACKAGES };
 
 const skills: readonly SkillCandidate[] = [
   { sourceId: "builtin:agent-depot", path: "skills/alpha", name: "alpha", description: "Does Alpha things" },
@@ -74,7 +76,7 @@ function manifestWith(...skills: ProjectSkillSelection[]): TuiEnvironment {
       return parseProjectManifest({ version: 1, skills });
     }
   }
-  return { projectManifestStore: new Store() };
+  return { projectManifestStore: new Store(), packages: NO_PACKAGES };
 }
 
 function selectedLine(frame: string | undefined): string | undefined {
