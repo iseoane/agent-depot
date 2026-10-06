@@ -107,6 +107,7 @@ function fixture(options: { readonly approved?: boolean; readonly recorded?: rea
       ? Object.freeze([PI_DESCRIPTOR, CLAUDE_DESCRIPTOR])
       : Object.freeze([]),
     list: async () => options.recorded ?? Object.freeze([record(PI)]),
+    activeBundles: async () => Object.freeze([]),
     inspect: async (selection) => { resolved.push(selection); return inspection(selection); },
     approvalStatus: async (selection) => { resolved.push(selection); return approvedStatus; },
     approve: async (selection, action = "install") => { resolved.push(selection); approved.push(action); },

@@ -153,6 +153,14 @@ export interface PackageDeclaration {
 /** A host install token that has already passed a host-identity validator. */
 export type HostInstallSpec = string & { readonly __hostInstallSpec: unique symbol };
 
+/** The portable selection a discovered bundle stands for: its coordinates, `latest`, and the Source it came from. */
+export function packageSelectionFor(descriptor: BundleDescriptor, source: ProjectSource): PackageSelection {
+  const coordinates = descriptor.coordinates;
+  return coordinates.host === "pi"
+    ? { host: "pi", root: coordinates.root, source, version: { policy: "latest" } }
+    : { host: "claude", marketplaceRoot: coordinates.marketplaceRoot, pluginName: coordinates.pluginName, source, version: { policy: "latest" } };
+}
+
 /** The POSIX directory identifying where a bundle lives within its Source. */
 export function bundleRoot(coordinates: PackageCoordinates): string {
   return coordinates.host === "pi" ? coordinates.root : coordinates.marketplaceRoot;

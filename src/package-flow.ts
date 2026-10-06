@@ -15,6 +15,11 @@ import {
 } from "./package-host-plans.js";
 import { findInstalledBundle, readHostInstallView, type HostInstallView } from "./package-host-state.js";
 import {
+  activeBundles as classifyActiveBundles,
+  type ActiveBundle,
+  type DiscoveredBundle,
+} from "./package-owned-skills.js";
+import {
   bundleRoot,
   describeCoordinates,
   selectionKey,
@@ -72,6 +77,8 @@ export interface PackageOperations {
   discover(sourceIds: readonly string[]): Promise<readonly BundleDescriptor[]>;
   /** Recorded selections, in selection-key order. */
   list(): Promise<readonly InstalledPackage[]>;
+  /** Which of these already-discovered bundles own their Skills: selected by the user or proven installed by a host. */
+  activeBundles(bundles: readonly DiscoveredBundle[]): Promise<readonly ActiveBundle[]>;
   /** One selection against the live Source. Runs no host command. */
   inspect(selection: PackageSelection): Promise<PackageInspection>;
   /** The receipt status for one action's derived declaration. */
@@ -419,6 +426,11 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
 
     async list(): Promise<readonly InstalledPackage[]> {
       return await state.list();
+    },
+
+    async activeBundles(bundles: readonly DiscoveredBundle[]): Promise<readonly ActiveBundle[]> {
+      const records = await state.list();
+      return classifyActiveBundles(bundles, records.map(record => record.selection), await readHostView());
     },
 
     inspect,

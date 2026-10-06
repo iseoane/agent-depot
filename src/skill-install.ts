@@ -603,7 +603,11 @@ async function assertInstallNotPackageOwned(
 ): Promise<void> {
   const owned = await loadPackageOwnedSkillFilter({
     sources: [source],
+    homeDirectory: context.root,
     ...(context.environment.sourceContentAccess === undefined ? {} : { sourceContentAccess: context.environment.sourceContentAccess }),
+    ...(context.environment.selections === undefined ? {} : { selections: context.environment.selections }),
+    ...(context.environment.hostView === undefined ? {} : { hostView: context.environment.hostView }),
+    ...(context.environment.stateDirectory === undefined ? {} : { stateDirectory: context.environment.stateDirectory }),
     ...(context.environment.reportWarning === undefined ? {} : { reportWarning: context.environment.reportWarning }),
   });
   assertSkillNotPackageOwned(selection.path, owned);

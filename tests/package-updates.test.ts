@@ -94,6 +94,7 @@ function fakePackageOperations(options: {
   const packages: PackageOperations = {
     discover: async () => Object.freeze([]),
     list: async () => records,
+    activeBundles: async () => Object.freeze([]),
     inspect: async () => { throw new Error("unexpected package inspect"); },
     approvalStatus: async () => options.approved === false ? "needs approval" as const : "approved" as const,
     approve: async () => undefined,

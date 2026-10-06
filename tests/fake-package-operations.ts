@@ -8,6 +8,7 @@ export function fakePackageOperations(overrides: Partial<PackageOperations> = {}
   return {
     discover: async () => [],
     list: async () => [],
+    activeBundles: async () => [],
     inspect: unscripted("inspect"),
     approvalStatus: async () => "needs approval",
     approve: unscripted("approve"),

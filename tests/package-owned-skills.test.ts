@@ -7,15 +7,18 @@ import { test } from "node:test";
 import { runCli } from "../src/cli.js";
 import { GitSourceAccessAdapter, defaultGitSourceCachePath, sourceIdForUrl } from "../src/git-source.js";
 import { bundleOwnedSkillMatcher, bundleOwnedSkillNameMatcher, discoverBundlesInSnapshot } from "../src/package-bundles.js";
+import type { HostInstallView } from "../src/package-host-state.js";
+import { packageSelectionFor, type PackageSelection } from "../src/package-model.js";
 import {
   assertSkillNotPackageOwned,
   loadPackageOwnedSkillFilter,
   packageOwnedSkillMatcher,
 } from "../src/package-owned-skills.js";
+import { PackageStateStore } from "../src/package-state.js";
 import { runProcess } from "../src/process-runner.js";
 import { NodeSourceContentAccess, type SourceContentAccess, type SourceContentFile } from "../src/skill-discovery.js";
 import { executeSingleInstall, planSingleInstall, type InstallEnvironment } from "../src/skill-install.js";
-import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
+import { BUILT_IN_SOURCE, createSourceOperations, projectSourceOf, type Source, type SourceOperations } from "../src/sources.js";
 import {
   inspectUserGlobalSkillRemoval,
   inspectUserGlobalSymlinkRemoval,
@@ -30,6 +33,13 @@ const LOOSE_PATH = "loose/loose-skill";
 /** No Source content: the state before the bundle exists. */
 const emptyAccess: SourceContentAccess = { readSnapshot: async () => [] };
 
+/** A host that has written none of its state files. */
+const EMPTY_HOST_VIEW: HostInstallView = Object.freeze({
+  pi: Object.freeze({ id: "pi-settings", path: "", present: false, records: Object.freeze([]) }),
+  claudePlugins: Object.freeze({ id: "claude-installed-plugins", path: "", present: false, records: Object.freeze([]) }),
+  claudeMarketplaces: Object.freeze({ id: "claude-known-marketplaces", path: "", present: false, records: Object.freeze([]) }),
+});
+
 async function git(args: readonly string[]): Promise<void> {
   const result = await runProcess("git", args);
   assert.equal(result.code, 0, result.stderr);
@@ -38,6 +48,40 @@ async function git(args: readonly string[]): Promise<void> {
 async function writeSkill(directory: string, name: string): Promise<void> {
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: ${name} fixture Skill\n---\n`);
+}
+
+/** The portable selections the fixtures' descriptors stand for, as if the user had selected every bundle. */
+function selectionsFor(files: readonly SourceContentFile[], source: Source = BUILT_IN_SOURCE): readonly PackageSelection[] {
+  const projectSource = projectSourceOf(source);
+  return discoverBundlesInSnapshot(files, {}).map((descriptor) => packageSelectionFor(descriptor, projectSource));
+}
+
+function cliDependencies(home: string, operations: SourceOperations, access: NodeSourceContentAccess): Parameters<typeof runCli>[1] & { readonly errors: string[] } {
+  const errors: string[] = [];
+  return {
+    homeDirectory: home,
+    operations,
+    sourceAccess: access,
+    sourceContentAccess: access,
+    stdout: () => undefined,
+    stderr: (line: string) => errors.push(line),
+    errors,
+  };
+}
+
+function cliInstall(dependencies: Parameters<typeof runCli>[1], skillPath: string): Promise<number> {
+  return runCli([
+    "install", "--scope", "user-global", "--source", "builtin:agent-depot", "--skill", skillPath,
+    "--host", "pi", "--version", "latest", "--portable-v1", "--yes",
+  ], dependencies);
+}
+
+/** Writes the recorded selections to the default Package state store under this home. */
+async function recordSelections(home: string, selections: readonly PackageSelection[]): Promise<void> {
+  const store = new PackageStateStore(path.join(home, ".local", "state", "agent-depot"));
+  for (const selection of selections) {
+    await store.upsert({ selection, installId: "test-selection" });
+  }
 }
 
 interface SourceFixture {
@@ -79,8 +123,8 @@ test("the Source snapshot carries the bundle manifests beside the Skill files", 
   });
 });
 
-test("a registered Git Source yields bundle ownership from its own snapshot", async () => {
-  await withFixture("ad-pkg-owned-git-", async ({ root }) => {
+test("a registered Git Source yields bundle ownership only for a selected bundle", async () => {
+  await withFixture("ad-pkg-owned-git-", async ({ root, files }) => {
     const cachePath = path.join(path.dirname(root), "cache");
     const url = "https://github.com/example/pstack.git";
     await git(["init", "--initial-branch=main", root]);
@@ -97,13 +141,19 @@ test("a registered Git Source yields bundle ownership from its own snapshot", as
     });
     const source = { id: sourceIdForUrl(url), kind: "git" as const, url };
     await adapter.refresh(source);
+    const contentAccess = new NodeSourceContentAccess({ gitCachePath: cachePath });
 
-    const owned = await loadPackageOwnedSkillFilter({
+    const unselected = await loadPackageOwnedSkillFilter({ sources: [source], selections: [], hostView: EMPTY_HOST_VIEW, sourceContentAccess: contentAccess });
+    assert.equal(unselected(BUNDLE_OWNED_PATH), undefined);
+
+    const selected = await loadPackageOwnedSkillFilter({
       sources: [source],
-      sourceContentAccess: new NodeSourceContentAccess({ gitCachePath: cachePath }),
+      selections: selectionsFor(files, source),
+      hostView: EMPTY_HOST_VIEW,
+      sourceContentAccess: contentAccess,
     });
-    assert.equal(owned(BUNDLE_OWNED_PATH)?.name, "pstack");
-    assert.equal(owned(LOOSE_PATH), undefined);
+    assert.equal(selected(BUNDLE_OWNED_PATH)?.name, "pstack");
+    assert.equal(selected(LOOSE_PATH), undefined);
   });
 });
 
@@ -138,7 +188,12 @@ test("bundle ownership comes from one snapshot read per Source and matches disco
         return await access.readSnapshot(source);
       },
     };
-    const owned = await loadPackageOwnedSkillFilter({ sources: [BUILT_IN_SOURCE], sourceContentAccess: counting });
+    const owned = await loadPackageOwnedSkillFilter({
+      sources: [BUILT_IN_SOURCE],
+      selections: selectionsFor(files),
+      hostView: EMPTY_HOST_VIEW,
+      sourceContentAccess: counting,
+    });
     assert.equal(reads, 1);
 
     const direct = packageOwnedSkillMatcher(discoverBundlesInSnapshot(files, {}));
@@ -163,6 +218,7 @@ test("a Source that cannot be read produces no exclusions and does not hide Skil
       managedInstallations: [],
       sources: [BUILT_IN_SOURCE],
       sourceContentAccess: failing,
+      hostView: EMPTY_HOST_VIEW,
       reportWarning: warning => warnings.push(warning),
     });
     assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["poteto-mode"]);
@@ -171,23 +227,35 @@ test("a Source that cannot be read produces no exclusions and does not hide Skil
   });
 });
 
-test("the unmanaged inventory hides bundle-owned Skills and keeps a loose one", async () => {
-  await withFixture("ad-pkg-owned-scan-", async ({ home, access }) => {
+test("the unmanaged inventory hides bundle-owned Skills only when the Package is active", async () => {
+  await withFixture("ad-pkg-owned-scan-", async ({ home, access, files }) => {
     await writeSkill(path.join(home, ".agents", "skills", "poteto-mode"), "poteto-mode");
     await writeSkill(path.join(home, ".agents", "skills", "loose-skill"), "loose-skill");
 
-    const inventory = await scanUserGlobalSkillInventory({
+    const unselected = await scanUserGlobalSkillInventory({
       homeDirectory: home,
       managedInstallations: [],
       sources: [BUILT_IN_SOURCE],
       sourceContentAccess: access,
+      selections: [],
+      hostView: EMPTY_HOST_VIEW,
     });
-    assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["loose-skill"]);
+    assert.deepEqual(unselected.unmanaged.map(entry => entry.name), ["loose-skill", "poteto-mode"]);
+
+    const active = await scanUserGlobalSkillInventory({
+      homeDirectory: home,
+      managedInstallations: [],
+      sources: [BUILT_IN_SOURCE],
+      sourceContentAccess: access,
+      selections: selectionsFor(files),
+      hostView: EMPTY_HOST_VIEW,
+    });
+    assert.deepEqual(active.unmanaged.map(entry => entry.name), ["loose-skill"]);
   });
 });
 
 test("removing a bundle-owned unmanaged Skill or link is refused and changes nothing", async () => {
-  await withFixture("ad-pkg-owned-remove-", async ({ home, access }) => {
+  await withFixture("ad-pkg-owned-remove-", async ({ home, access, files }) => {
     const skill = path.join(home, ".agents", "skills", "poteto-mode");
     await writeSkill(skill, "poteto-mode");
     const link = path.join(home, ".claude", "skills", "how");
@@ -199,6 +267,8 @@ test("removing a bundle-owned unmanaged Skill or link is refused and changes not
       managedInstallations: [],
       sources: [BUILT_IN_SOURCE],
       sourceContentAccess: access,
+      selections: selectionsFor(files),
+      hostView: EMPTY_HOST_VIEW,
     };
     await assert.rejects(inspectUserGlobalSkillRemoval(skill, options), /Package-owned Skill "poteto-mode"/);
     await assert.rejects(inspectUserGlobalSymlinkRemoval(link, options), /Package-owned Skill "how"/);
@@ -212,7 +282,7 @@ test("removing a bundle-owned unmanaged Skill or link is refused and changes not
 });
 
 test("the CLI uninstall refuses a bundle-owned unmanaged path through the registered Source", async () => {
-  await withFixture("ad-pkg-owned-uninstall-", async ({ home, root }) => {
+  await withFixture("ad-pkg-owned-uninstall-", async ({ home, root, files }) => {
     const url = "https://github.com/example/pstack.git";
     await git(["init", "--initial-branch=main", root]);
     await git(["-C", root, "add", "."]);
@@ -234,6 +304,7 @@ test("the CLI uninstall refuses a bundle-owned unmanaged path through the regist
       }).refresh(source);
       const operations = createSourceOperations({ homeDirectory: home });
       await operations.addGitSource(url);
+      await recordSelections(home, selectionsFor(files, source));
       const skill = path.join(home, ".agents", "skills", "poteto-mode");
       await writeSkill(skill, "poteto-mode");
 
@@ -249,37 +320,35 @@ test("the CLI uninstall refuses a bundle-owned unmanaged path through the regist
   });
 });
 
-test("a CLI install refuses a bundle-owned Skill path and still installs a loose one", async () => {
-  await withFixture("ad-pkg-owned-cli-", async ({ home, access, operations }) => {
-    const output: string[] = [];
-    const errors: string[] = [];
-    const dependencies = {
-      homeDirectory: home,
-      operations,
-      sourceAccess: access,
-      sourceContentAccess: access,
-      stdout: (line: string) => output.push(line),
-      stderr: (line: string) => errors.push(line),
-    };
-    const install = async (skillPath: string): Promise<number> => runCli([
-      "install", "--scope", "user-global", "--source", "builtin:agent-depot", "--skill", skillPath,
-      "--host", "pi", "--version", "latest", "--portable-v1", "--yes",
-    ], dependencies);
+test("a CLI install allows a bundle-owned Skill while its Package is unselected", async () => {
+  await withFixture("ad-pkg-owned-cli-open-", async ({ home, access, operations }) => {
+    const dependencies = cliDependencies(home, operations, access);
+    assert.equal(await cliInstall(dependencies, BUNDLE_OWNED_PATH), 0);
+    assert.equal((await lstat(path.join(home, ".agents", "skills", "poteto-mode"))).isDirectory(), true);
+  });
+});
 
-    assert.equal(await install(BUNDLE_OWNED_PATH), 1);
-    assert.match(errors.join("\n"), /Package-owned Skill "plugins\/pstack\/skills\/poteto-mode" is provided by the pi Package "pstack"/);
+test("a CLI install refuses a bundle-owned Skill once the Package is selected", async () => {
+  await withFixture("ad-pkg-owned-cli-selected-", async ({ home, access, operations, files }) => {
+    await recordSelections(home, selectionsFor(files));
+    const dependencies = cliDependencies(home, operations, access);
+
+    assert.equal(await cliInstall(dependencies, BUNDLE_OWNED_PATH), 1);
+    assert.match(dependencies.errors.join("\n"), /Package-owned Skill "plugins\/pstack\/skills\/poteto-mode" is provided by the (pi|claude) Package "pstack"/);
     await assert.rejects(lstat(path.join(home, ".agents", "skills", "poteto-mode")), /ENOENT/);
 
-    assert.equal(await install(LOOSE_PATH), 0);
+    assert.equal(await cliInstall(dependencies, LOOSE_PATH), 0);
     assert.equal((await lstat(path.join(home, ".agents", "skills", "loose-skill"))).isDirectory(), true);
   });
 });
 
-test("a bundle discovered after the install preview blocks execution and persists no record", async () => {
-  await withFixture("ad-pkg-owned-recheck-", async ({ home, access, operations }) => {
+test("a selected Package discovered after the install preview blocks execution and persists no record", async () => {
+  await withFixture("ad-pkg-owned-recheck-", async ({ home, access, operations, files }) => {
     const environment: InstallEnvironment & { sourceContentAccess?: SourceContentAccess } = {
       homeDirectory: home,
       sourceContentAccess: emptyAccess,
+      selections: selectionsFor(files),
+      hostView: EMPTY_HOST_VIEW,
     };
     const plan = await planSingleInstall({
       scope: "user-global",

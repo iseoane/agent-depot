@@ -68,6 +68,9 @@ export function fakePackageOperations(options: {
       evidence.listed += 1;
       return options.recorded ?? [];
     },
+    async activeBundles() {
+      return [];
+    },
     async discover() {
       throw new Error("The profile port never discovers bundles");
     },
