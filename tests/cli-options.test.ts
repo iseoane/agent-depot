@@ -83,6 +83,27 @@ test("usage text documents update apply --confirm-path", async () => {
   assert.match(await failure(["bogus"]), /agent-depot update apply --scope <project\|user-global> \(--all \| --skill <id\|path>\.\.\. \| --app <name>\.\.\.\) \[--yes\] \[--confirm-path <relative-path>\.\.\.\]/u);
 });
 
+test("package subcommand parsing reports precise usage errors", async () => {
+  const usage = /^Error: Usage: agent-depot package list; package discover <source-id>/u;
+  const cases: ReadonlyArray<readonly [readonly string[], RegExp]> = [
+    [["package"], usage],
+    [["package", "bogus"], usage],
+    [["package", "list", "extra"], /^Error: Usage: agent-depot package list$/u],
+    [["package", "discover"], usage],
+    [["package", "discover", "a", "b"], usage],
+    [["package", "inspect", "git:demo::."], /^Error: Package selection needs --host pi or --host claude unless the selection is host-qualified$/u],
+    [["package", "inspect", "git:demo::.", "--host", "codex"], /^Error: Unsupported Package Host "codex"; expected pi or claude$/u],
+    [["package", "inspect", "git:demo::.", "--host"], /^Error: Missing value for --host$/u],
+    [["package", "inspect", "git:demo::.", "--host", "pi", "--yes"], usage],
+    [["package", "approve", "git:demo::.", "--host", "pi", "--action", "select"], /^Error: Package approval action must be install, update, or uninstall$/u],
+    [["package", "install", "git:demo::.", "--host", "pi", "--action", "install"], usage],
+    [["package", "install", "git:demo::.", "--host", "pi", "--yes", "--bogus"], usage],
+  ];
+  for (const [argv, expected] of cases) {
+    assert.match(await failure(argv), expected, argv.join(" "));
+  }
+});
+
 test("help explains App batch execution order and project-scope exclusion", async () => {
   const lines: string[] = [];
   assert.equal(await runCli(["--help"], { stdout: line => lines.push(line) }), 0);

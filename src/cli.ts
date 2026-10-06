@@ -7,6 +7,8 @@ import path from "node:path";
 
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck } from "./app-flow.js";
 import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
+import { createPackageOperations, type PackageOperations } from "./package-flow.js";
+import { runPackageCommand } from "./package-cli.js";
 import { EXPORT_USAGE, IMPORT_USAGE, runProfileExport, runProfileImport } from "./profile-cli.js";
 import { pathsOverlap } from "./path-safety.js";
 import { skillTreeBaseline, type SkillCandidate, type SourceContentAccess } from "./skill-discovery.js";
@@ -107,6 +109,8 @@ export interface CliDependencies {
   readonly projectManifestStore?: ProjectManifestStore;
   /** Home directory used by user-global installation; injectable for tests. */
   readonly homeDirectory?: string;
+  /** Test/embedding seam for Package operations. */
+  readonly packageOperations?: PackageOperations;
   /** Test/embedding seam for the interactive TUI; defaults to the Ink renderer. */
   readonly renderTui?: (operations: SourceOperations, environment?: TuiEnvironment) => Promise<void>;
   /** Test seam: whether stdin supports raw-mode keyboard input; defaults to the real stdin. */
@@ -135,6 +139,12 @@ const USAGE = [
   "  agent-depot app approve <name> [--yes]",
   "  agent-depot app install|update|uninstall <name> [--yes] [--manual-done]",
   "  agent-depot app uninstall <name> --forget [--yes]",
+  "  agent-depot package list",
+  "  agent-depot package discover <source-id>",
+  "  agent-depot package inspect <selection> --host <host>",
+  "  agent-depot package approve <selection> --host <host> [--action <install|update|uninstall>]",
+  "  agent-depot package install|update|uninstall <selection> --host <host> [--yes]",
+  "  agent-depot package forget <selection> --host <host> --yes",
   `  ${EXPORT_USAGE}`,
   `  ${IMPORT_USAGE}`,
   "  agent-depot tui",
@@ -174,6 +184,14 @@ const SOURCE_SUBCOMMANDS = new Map<string, SourceSubcommandHandler>([
   ["migrate", (values, { operations, dependencies, output }) => runSourceMigration(values, operations, dependencies, output)],
 ]);
 
+function packageOperationsFor(dependencies: CliDependencies, operations: SourceOperations): PackageOperations {
+  return dependencies.packageOperations ?? createPackageOperations({
+    ...(dependencies.homeDirectory === undefined ? {} : { homeDirectory: dependencies.homeDirectory }),
+    sourceOperations: operations,
+    ...(dependencies.sourceContentAccess === undefined ? {} : { sourceContentAccess: dependencies.sourceContentAccess }),
+  });
+}
+
 const COMMANDS = new Map<string, CommandHandler>([
   ["import", (values, { operations, dependencies, output }) => runProfileImport(values, operations,
     dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output, dependencies)],
@@ -181,6 +199,7 @@ const COMMANDS = new Map<string, CommandHandler>([
     dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }),
     output, dependencies.stderr ?? (line => console.error(line)), dependencies.homeDirectory)],
   ["app", (values, { dependencies, output }) => runAppCommand(values, dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output)],
+  ["package", (values, { operations, dependencies, output }) => runPackageCommand(values, packageOperationsFor(dependencies, operations), operations, output)],
   ["install", async (values, { operations, dependencies, output }) => {
     await runInstall(values, operations, dependencies, output);
     return 0;
