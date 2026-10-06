@@ -16,6 +16,7 @@ export function CheckStatus({ data, now }: { readonly data: UpdatesData; readonl
         <Text key={failure.source} color={theme.warning}>refresh failed for {failure.source}: {failure.reason}</Text>
       ))}
       {data.appError ? <Text color={theme.error}>Error (Apps): {data.appError}</Text> : null}
+      {data.packageError ? <Text color={theme.error}>Error (Packages): {data.packageError}</Text> : null}
       {errors.map((result) => <Text key={result.scope} color={theme.error}>Error ({result.scope}): {result.error}</Text>)}
     </>
   );
@@ -98,6 +99,7 @@ export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
         <Box flexDirection="column">
           <PreviewLines lines={mode.prepared.lines} />
           <PreviewLines lines={mode.prepared.appFailures} />
+          <PreviewLines lines={mode.prepared.packageFailures} />
           {mode.prepared.failures.map(({ item, message }) => (
             <Text key={item.id} color={theme.error}>Preview failed for {JSON.stringify(item.id)}: {message}</Text>
           ))}

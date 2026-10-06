@@ -15,11 +15,13 @@ import {
   type ProjectSkillSelection,
 } from "../src/project-manifest.js";
 import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
+import type { BundleDescriptor, InstalledPackage, PackageLifecyclePlan, PackageSelection } from "../src/package-model.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { formatAgo, loadUpdateRows, prepareUpdates, runUpdates } from "../src/tui/updates.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
+import { fakePackageOperations } from "./fake-package-operations.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const ESC = "\u001B";
@@ -906,4 +908,117 @@ test("App inventory failure leaves user-global Skill updates available", async t
   await waitForFrame(view.lastFrame, /Apply 1 update/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Update summary: 1 updated, 0 failed/);
+});
+
+const packageSelection: PackageSelection = {
+  host: "pi",
+  root: "plugins/pstack",
+  source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+  version: { policy: "latest" },
+};
+
+const packageDescriptor: BundleDescriptor = {
+  host: "pi",
+  coordinates: { host: "pi", root: "plugins/pstack" },
+  name: "pstack",
+  version: { kind: "manifest-version", version: "1.1.0", declaredBy: "bundle" },
+  components: [
+    { kind: "skills", ownership: "skill-category", effect: "instruction", paths: ["plugins/pstack/skills"], skillNames: ["how"] },
+    { kind: "extensions", ownership: "host-only", effect: "executable", paths: ["plugins/pstack/extensions/index.ts"] },
+  ],
+  warnings: [],
+  manifestDigest: "c".repeat(64),
+};
+
+const packageRecord: InstalledPackage = {
+  selection: packageSelection,
+  installId: "pi:github.com/iseoane/pstack",
+  verified: { kind: "manifest-version", version: "1.0.0", declaredBy: "bundle" },
+  verifiedAt: "2026-01-01T00:00:00.000Z",
+};
+
+const packagePlan: PackageLifecyclePlan = {
+  selection: packageSelection,
+  action: "update",
+  descriptor: packageDescriptor,
+  commands: [{
+    purpose: "apply",
+    executable: "pi",
+    resolvedPath: "/usr/bin/pi",
+    args: ["update", "github.com/iseoane/pstack"],
+    summary: "pi update",
+  }],
+  affects: [{ host: "pi", root: "plugins/pstack" }],
+  warnings: [],
+  cwd: "/home/user",
+  environment: "linux",
+  origin: { manifestDigest: packageDescriptor.manifestDigest, installId: packageRecord.installId },
+};
+
+test("a recorded Package joins the batch, previews its frozen plan and approves before updating", async t => {
+  const f = await fixture(t);
+  const calls: string[] = [];
+  const packages = fakePackageOperations({
+    checkUpdates: async () => [{
+      installed: packageRecord,
+      status: "update available",
+      available: { kind: "git-commit", commit: "abcdef1234567890" },
+    }],
+    planLifecycle: async (_selection, action) => {
+      calls.push(`plan:${action}`);
+      return packagePlan;
+    },
+    approvalStatus: async (_selection, action = "install") => {
+      calls.push(`approval:${action}`);
+      return "needs approval";
+    },
+    approve: async (_selection, action = "install") => {
+      calls.push(`approve:${action}`);
+    },
+    executeLifecycle: async (plan) => {
+      calls.push(`execute:${plan.action}`);
+      return { status: "updated", previous: { kind: "installed", version: "1.0.0" }, verified: { kind: "installed", version: "1.1.0" } };
+    },
+  });
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
+  t.after(() => { view.unmount(); view.cleanup(); });
+  const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
+  assert.match(listed, /1\.0\.0 -> abcdef1/);
+  press(view.stdin, "a");
+  await waitForFrame(view.lastFrame, /1 selected/);
+  press(view.stdin, ENTER);
+  const preview = await waitForFrame(view.lastFrame, /Apply 1 update\? y\/n/);
+  assert.match(preview, /Step 1 \(apply\): \["pi","update","github\.com\/iseoane\/pstack"\]/);
+  assert.match(preview, /Approval: needs approval/);
+  assert.match(preview, /runs a host process/);
+  assert.match(preview, /This apply approves the declaration above\./);
+  assert.deepEqual(calls, ["plan:update", "approval:update"]);
+  press(view.stdin, "y");
+  await waitForFrame(view.lastFrame, /Updated Package: pstack \(pi\): installed 1\.0\.0 -> installed 1\.1\.0/);
+  assert.deepEqual(calls, ["plan:update", "approval:update", "approve:update", "execute:update"]);
+});
+
+test("an unknown Package is folded with its reason and is never offered as an update", async t => {
+  const f = await fixture(t);
+  const calls: string[] = [];
+  const packages = fakePackageOperations({
+    checkUpdates: async () => [{
+      installed: packageRecord,
+      status: "unknown",
+      reason: "the host reports no usable version evidence",
+    }],
+    planLifecycle: async () => {
+      calls.push("plan");
+      return packagePlan;
+    },
+  });
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
+  t.after(() => { view.unmount(); view.cleanup(); });
+  const folded = await waitForFrame(view.lastFrame, /1 cannot be checked/);
+  assert.ok(!folded.includes("Package: pi plugins/pstack"), "an unknown Package is never offered as an update");
+  press(view.stdin, ENTER);
+  const open = await waitForFrame(view.lastFrame, /the host reports no usable version evidence/);
+  assert.match(open, /Package: pi plugins\/pstack/);
+  assert.ok(!open.includes("1 selected"));
+  assert.deepEqual(calls, []);
 });

@@ -1,20 +1,34 @@
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { Source } from "../sources.js";
 import { githubTreeLocation } from "../git-source.js";
+import { bundleRoot, type BundleDescriptor } from "../package-model.js";
+import { packageOwnedSkillMatcher } from "../package-owned-skills.js";
+import { packageVersionLabel } from "./package-rows.js";
 import { defaultExpanded, type Expanded, type TreeNode, type VisibleRow } from "./tree.js";
 
 const DESCRIPTION_LIMIT = 60;
 
-/** A source group or an installable Skill. */
+/** A bundle of one Source, as the Catalog groups it under that Source. */
+export interface BundleEntry {
+  readonly sourceId: string;
+  readonly descriptor: BundleDescriptor;
+}
+
+/** A Source, a Packages group, a bundle or an installable Skill. */
 export type NodeData =
   | { readonly kind: "source"; readonly sourceId: string; readonly label: string; readonly count: number }
-  | { readonly kind: "skill"; readonly skill: SkillCandidate };
+  | { readonly kind: "group"; readonly label: string }
+  | { readonly kind: "bundle"; readonly entry: BundleEntry }
+  | { readonly kind: "skill"; readonly skill: SkillCandidate; readonly ownedBy?: BundleDescriptor };
 
 export type CatalogNode = TreeNode<NodeData>;
 
 export const UNMANAGED_MARKER = "on disk, unmanaged · adopt it from Installations";
 
 export const skillKey = (skill: SkillCandidate): string => `skill:${skill.sourceId}:${skill.path}`;
+
+export const bundleKey = (entry: BundleEntry): string =>
+  `bundle:${entry.sourceId}:${entry.descriptor.host}:${bundleRoot(entry.descriptor.coordinates)}`;
 
 function truncate(text: string): string {
   return text.length > DESCRIPTION_LIMIT ? `${text.slice(0, DESCRIPTION_LIMIT - 3)}...` : text;
@@ -32,16 +46,37 @@ export function sourceLabel(source: Source): string {
   return url.hostname === "github.com" ? repository : `${url.host}/${repository}`;
 }
 
-/** Skills grouped by Source in first-seen order; a Source with no Skills never appears. */
-export function buildTree(skills: readonly SkillCandidate[], sources: readonly Source[] = []): readonly CatalogNode[] {
+/** Skills and their Source's Packages, in first-seen order; a Source with neither never appears. */
+export function buildTree(
+  skills: readonly SkillCandidate[],
+  sources: readonly Source[] = [],
+  bundles: readonly BundleEntry[] = [],
+): readonly CatalogNode[] {
   const labels = new Map(sources.map((source) => [source.id, sourceLabel(source)]));
+  const owned = packageOwnedSkillMatcher(bundles.map((bundle) => bundle.descriptor));
   const bySource = new Map<string, SkillCandidate[]>();
   for (const skill of skills) bySource.set(skill.sourceId, [...(bySource.get(skill.sourceId) ?? []), skill]);
-  return [...bySource].map(([sourceId, members]): CatalogNode => ({
-    id: `source:${sourceId}`,
-    data: { kind: "source", sourceId, label: labels.get(sourceId) ?? sourceId, count: members.length },
-    children: members.map((skill): CatalogNode => ({ id: skillKey(skill), data: { kind: "skill", skill } })),
-  }));
+  const bundlesBySource = new Map<string, BundleEntry[]>();
+  for (const bundle of bundles) bundlesBySource.set(bundle.sourceId, [...(bundlesBySource.get(bundle.sourceId) ?? []), bundle]);
+  return [...new Set([...bySource.keys(), ...bundlesBySource.keys()])].map((sourceId): CatalogNode => {
+    const members = bySource.get(sourceId) ?? [];
+    const sourceBundles = bundlesBySource.get(sourceId) ?? [];
+    return {
+      id: `source:${sourceId}`,
+      data: { kind: "source", sourceId, label: labels.get(sourceId) ?? sourceId, count: members.length },
+      children: [
+        ...(sourceBundles.length === 0 ? [] : [{
+          id: `packages:${sourceId}`,
+          data: { kind: "group" as const, label: `Packages (${sourceBundles.length})` },
+          children: sourceBundles.map((entry): CatalogNode => ({ id: bundleKey(entry), data: { kind: "bundle", entry } })),
+        }]),
+        ...members.map((skill): CatalogNode => {
+          const ownedBy = owned(skill.path);
+          return { id: skillKey(skill), data: { kind: "skill", skill, ...(ownedBy === undefined ? {} : { ownedBy }) } };
+        }),
+      ],
+    };
+  });
 }
 
 function allSourceIds(roots: readonly CatalogNode[]): Expanded {
@@ -56,6 +91,10 @@ export function openByDefault(nodes: readonly CatalogNode[], query: string): Exp
 export function describeRow(row: VisibleRow<NodeData>): string {
   const { data } = row.node;
   if (data.kind === "source") return `${row.expanded ? "▾" : "▸"} ${data.label} (${data.count})`;
+  if (data.kind === "group") return `${row.expanded ? "▾" : "▸"} ${data.label}`;
+  if (data.kind === "bundle") {
+    return `Package ${data.entry.descriptor.name} (${data.entry.descriptor.host})  ${packageVersionLabel(data.entry.descriptor.version)}`;
+  }
   return `${data.skill.name}  ${truncate(data.skill.description)}`;
 }
 

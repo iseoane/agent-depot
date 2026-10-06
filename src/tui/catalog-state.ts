@@ -6,16 +6,16 @@ import type { Source, SourceOperations } from "../sources.js";
 import type { ActionMode } from "./catalog-actions.js";
 import { filterReducer, initialFilter, type FilterEvent, type FilterState } from "./catalog-filter.js";
 import { loadInstalledSkills, NO_INSTALLED, type InstalledSkills } from "./catalog-installs.js";
-import { sourceLabel } from "./catalog-tree.js";
-import type { TuiEnvironment } from "./environment.js";
+import { sourceLabel, type BundleEntry } from "./catalog-tree.js";
+import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 
 export type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly message: string }
-  | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly warnings: readonly string[]; readonly sources: readonly Source[] };
+  | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly bundles: readonly BundleEntry[]; readonly warnings: readonly string[]; readonly sources: readonly Source[] };
 
 /** Discovers the Skills of one Source, or of all of them, and again whenever those inputs change. */
-export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean): LoadState {
+export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean, env: TuiEnvironment): LoadState {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   useEffect(() => {
     let cancelled = false;
@@ -30,13 +30,14 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
         const ids = all || sourceId === undefined
           ? sources.map((source) => source.id)
           : [sourceId];
+        const labels = new Map(sources.map((source) => [source.id, sourceLabel(source)]));
         const skills: SkillCandidate[] = [];
+        const bundles: BundleEntry[] = [];
         const warnings: string[] = [];
         try {
           skills.push(...await operations.discoverSkills!(ids));
         } catch {
           // Discovery is read-only: isolate failures without silently refreshing Sources.
-          const labels = new Map(sources.map((source) => [source.id, sourceLabel(source)]));
           for (const id of ids) {
             try {
               skills.push(...await operations.discoverSkills!([id]));
@@ -46,7 +47,17 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
             }
           }
         }
-        if (!cancelled) setState({ status: "ready", skills, warnings, sources });
+        // Bundles read the same snapshots and group under their Source; one failure never hides the Skills.
+        const packages = packageOperationsOf(env);
+        for (const id of ids) {
+          try {
+            for (const descriptor of await packages.discover([id])) bundles.push({ sourceId: id, descriptor });
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            warnings.push(`Source ${labels.get(id) ?? id} Packages unavailable: ${detail}`);
+          }
+        }
+        if (!cancelled) setState({ status: "ready", skills, bundles, warnings, sources });
       } catch (error) {
         if (!cancelled) setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
       }
@@ -54,7 +65,7 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
     return () => {
       cancelled = true;
     };
-  }, [operations, sourceId, all]);
+  }, [operations, sourceId, all, env]);
   return state;
 }
 

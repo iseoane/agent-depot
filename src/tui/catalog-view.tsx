@@ -43,7 +43,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   // Mirrors the action mode synchronously, like the filter, so later keystrokes and the shell never see stale state.
   const actionRef = useRef<ActionMode>(BROWSE);
   const filter = useCatalogFilter(actionRef, onCapturingChange);
-  const state = useCatalogSkills(operations, sourceId, all);
+  const state = useCatalogSkills(operations, sourceId, all, env);
   const { installed, installedReady, reloadInstalled } = useInstalledSkills(operations, env, mounted);
 
   const setAction = (next: ActionMode) => {
@@ -55,7 +55,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const skills = state.status === "ready" ? state.skills : [];
   const installable = useMemo(() => skills.filter((skill) => !isInstalled(skill, installed)), [state, installed]);
   const visible = useMemo(() => filterSkills(installable, filter.filter.query), [installable, filter.filter.query]);
-  const roots = useMemo(() => buildTree(visible, state.status === "ready" ? state.sources : []), [visible, state]);
+  const roots = useMemo(() => buildTree(visible, state.status === "ready" ? state.sources : [], state.status === "ready" ? state.bundles : []), [visible, state]);
   const navigation = useTreeNavigation<NodeData>(roots, (nodes) => openByDefault(nodes, filter.queryRef.current));
   // Discovering again starts the list over.
   const { restart } = navigation;
