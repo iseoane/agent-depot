@@ -35,3 +35,18 @@ V1 hosts are Pi and Claude Code. V1 bundle sources are a Git repository scoped t
 - Agent Depot cannot verify installed state for an unversioned Pi git package and reports `unknown` instead of guessing; a bundle already installed by hand through an App recipe is recognized from the host's state files and runs no host command.
 - The Package category adds explicit logic and frozen argv tables, not a generic plugin framework, keeping the DESIGN.md veto in force.
 - Deferred scope is unchanged in kind: agent definitions and MCP servers as independently managed categories, Codex and OpenCode packaging, npm-sourced Pi packages, Pi per-resource narrowing, project-scoped Packages, and external Claude marketplace sources.
+
+## Amendment: ownership is active-only (2026-10-06)
+
+The original decision read ownership structurally, so every discovered descriptor owned its declared Skills whether or not the user selected it and whether or not it was installable. Issue 21 surfaced the cost on `mattpocock/skills`, an ordinary skill repository that also declares a Claude plugin. Its 27 declared Skills were dimmed and refused as portable installs even though no one had chosen the bundle. The user settled the fork in favor of the reported reading.
+
+A Package now owns its declared Skills only while it is **active**:
+
+- the user selected it, so a record in `packages.json` names it, or
+- a host state file proves it installed, with `findInstalledBundle` returning `installed`.
+
+The Source, host, and coordinates must all agree, so a selection or install for another Source is not ownership. A descriptor that is not installable never owns. A host state file that cannot be read, or a record whose shape cannot be decoded, yields `unknown`, which is not `installed`, so it never falsely reserves a Skill; the user's own selection still does. The descriptor's installability is now a typed field rather than text parsed out of a warning.
+
+The complementary direction is a refusal. Selecting or installing a Package whose declared Skills already exist as managed portable user-global installations fails with an actionable conflict naming the portable paths. Nothing is uninstalled, replaced, or written; the user forgets the portable installations first.
+
+`activeBundles` in `src/package-owned-skills.ts` is the one classifier. It reuses the descriptors from the snapshot pass the guard already reads, so there is no second walk. The guard, the unmanaged inventory, the CLI install and uninstall paths, and the Catalog tree all consume its output.

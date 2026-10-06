@@ -38,6 +38,10 @@ _Avoid_: Installation method (for the whole App recipe)
 A host-native bundle discovered inside a registered Source: a Pi package that declares a `pi` manifest key, a `pi-package` keyword, or a Pi-specific conventional resource directory, or a Claude Code plugin with a `.claude-plugin/plugin.json` bound by an in-repo marketplace. Its lifecycle is delegated to the host CLI, and its installed state is read from the host's own state files, never written by Agent Depot.
 _Avoid_: npm package (unless it specifically means the npm distribution channel)
 
+**Package ownership**:
+The condition under which a Package's declared Skills are reserved against a loose install. A Package owns its Skills only while it is active. It is active when the user selected it, or when a host state file proves it installed, with the Source, host, and coordinates agreeing. A reported but unselected, absent, noninstallable, or host-state-unknown bundle owns nothing, so its Skills stay portable.
+_Avoid_: Structural ownership (a discovered descriptor alone does not reserve a Skill)
+
 **Bundle**:
 The unit a Package manages: a manifest plus its declared components and version, discovered as one descriptor per host format. A dual-format repository such as pstack-claude yields one Pi descriptor and one Claude descriptor over the same skills directory.
 

@@ -646,3 +646,31 @@ and `pnpm test` passes 956 tests, which includes the six new in
 `tests/package-bundles.test.ts`. The real `https://github.com/mattpocock/skills`
 mirror yields one Claude descriptor at 1.3.1, and the guard attributes `tdd` and
 `teach` to that bundle.
+
+Issue 22, the selection-gated ownership ruling, accepted and pinned the
+following. It supersedes design 4.5's structural reading, which issue 21 left
+open and ADR 0009 now amends.
+
+**Accepted.** Ownership is active-only. A discovered descriptor owns its Skills
+only while the user selected it (a record in `packages.json`) or a host state
+file proves it installed, with Source, host, and coordinates agreeing. An
+unselected and absent bundle, an unrelated Source or host, a noninstallable
+descriptor, and an unreadable host state all own nothing. `activeBundles` in
+`src/package-owned-skills.ts` is the one classifier, and it reuses the one
+snapshot pass the guard already reads. Installability moved from warning text to
+the typed `BundleDescriptor.installable` field.
+
+**Accepted.** Selecting or installing a Package whose declared Skills already
+exist as managed portable user-global installations fails with an actionable
+conflict naming those paths. `derivePlan` refuses before any host command or
+recorded change, so nothing is uninstalled, replaced, or written.
+
+**Accepted.** The Catalog derives a Skill's owner from the active set, so a
+loose Matt Skill renders normally until its Claude bundle is chosen.
+
+**Verified.** `pnpm typecheck`, `pnpm lint`, `pnpm audit:dead-code`, and
+`git diff --check` are clean, and `pnpm test` passes 971 tests, including the
+gating matrix in `tests/package-ownership.test.ts`, the selection-gated call-site
+behavior in `tests/package-owned-skills.test.ts`, the portable-duplicate refusal
+in `tests/package-flow.test.ts`, and the Catalog ownership test in
+`tests/tui-catalog-labels.test.ts`.

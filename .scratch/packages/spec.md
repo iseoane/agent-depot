@@ -62,7 +62,11 @@ bundle.
 A bundle's own skills never become a second managed copy. The canonical
 `~/.agents/skills` location and the Claude symlink stay under the Skill engine,
 and no `package-*` module imports that engine. A test asserts the import edge is
-absent.
+absent. Ownership is active-only: a bundle reserves its declared Skills only
+while the user selected it or a host state file proves it installed, so an
+unselected or absent bundle leaves its Skills portable, and selecting or
+installing a bundle that would duplicate a managed portable Skill fails with an
+actionable conflict instead of replacing it.
 
 V1 hosts are Pi and Claude Code. V1 bundle sources are a Git repository scoped to
 its root for Pi and a marketplace bound inside the same repository for Claude. A
@@ -171,7 +175,10 @@ that chose it is in `.scratch/packages/arena/synthesis.md`.
 - Pi update blast radius asserts that `plan.affects` names every recorded Pi
   coordinate and that `recordOutcome` re-observes each.
 - The owned-skill guard refuses a bundle-owned path with a Package pointer while a
-  loose skill in the same source still installs.
+  loose skill in the same source still installs, and owns nothing while the bundle
+  is unselected and absent.
+- Selecting or installing a bundle that would duplicate a managed portable Skill
+  fails before any host command, and no path is changed.
 - An import-graph assertion proves no `package-*` module reaches the Skill install
   engine.
 - The Profile round trip exports the `packages` block declaration-only, with no

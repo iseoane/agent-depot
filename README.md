@@ -23,7 +23,9 @@ What it does:
   user-written App recipes that must be approved before they run.
 - **Packages**: install, update and uninstall host-native bundles (Pi packages and
   Claude Code plugins) by delegating the lifecycle to each Host's own CLI and
-  reading the installed version from the Host's own state files.
+  reading the installed version from the Host's own state files. A bundle reserves
+  its Skills only while you have selected it or a Host proves it installed, so an
+  unselected bundle's Skills stay installable on their own.
 - **Profiles**: export your user-global Sources, Skill selections, App recipes and
   Package selections to a portable file and import them, add-only, on another
   machine.

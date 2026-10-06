@@ -49,22 +49,18 @@ for `mattpocock/skills`, at version 1.3.1, with no Pi bundle and no duplicate.
   `source: "./"` in the marketplace entry bound to the root `plugin.json`, so the
   relative root source is a genuine format rather than a guess.
 
-## Domain fork not settled here
+## Domain fork settled in issue 22
 
-`mattpocock/skills` names all 27 skills in its plugin manifest, so the Claude
-bundle owns them and the guard still refuses to install `tdd` or `teach` as
-portable skills. Two readings exist:
+`mattpocock/skills` names all 27 skills in its plugin manifest, so under a
+structural reading the Claude bundle would own them and the guard would refuse to
+install `tdd` or `teach` as portable skills with no bundle chosen. This change
+left that reading in place and recorded the fork.
 
-- Structural (current, ADR 0009): a discovered descriptor owns its skills
-  whether or not the user selected it and whether or not it is installable, so a
-  bundle's skills never become a second managed copy.
-- Selection-gated (reported): a Package the user has not selected, or one that is
-  not installable, should not block the same skill as a portable install.
-
-The two readings produce different user-visible behavior for a repository the
-user wants for its skills alone. This is a domain decision, not a defect in this
-change, so the guard is left as designed and the fork is recorded for an
-ADR-level ruling.
+The user settled the fork in favor of selection-gated ownership. A discovered
+descriptor owns its Skills only while the user selected the Package or a host
+state file proves it installed; the full rule, the portable-duplicate refusal,
+and the Catalog behavior are in issue 22. ADR 0009 carries an amendment that
+supersedes the structural reading here.
 
 ## Limitations
 

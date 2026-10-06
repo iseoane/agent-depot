@@ -24,7 +24,10 @@ Qué hace:
   App recipes escritas por el usuario que deben aprobarse antes de ejecutarse.
 - **Packages**: instala, actualiza y desinstala bundles nativos del Host (paquetes de
   Pi y plugins de Claude Code) delegando el ciclo de vida en la CLI de cada Host y
-  leyendo la versión instalada de los propios archivos de estado del Host.
+  leyendo la versión instalada de los propios archivos de estado del Host. Un bundle
+  reserva sus Skills solo mientras lo hayas seleccionado o un Host demuestre que está
+  instalado, así que los Skills de un bundle no seleccionado siguen siendo instalables
+  por separado.
 - **Profiles**: exporta tus Sources, selecciones de Skills, App recipes y selecciones
   de Packages globales de usuario a un archivo portable e impórtalos, solo añadiendo,
   en otra máquina.
