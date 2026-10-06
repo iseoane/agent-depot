@@ -100,9 +100,11 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
       result = { kind: "error", lines: [errorText(error)] };
     }
     if (!mounted.current) return;
-    setMessage(result);
     // The sources were fetched for the check that was just applied; only the installations changed.
+    // The summary lands with the refreshed list, so no check is still writing when the view reports done.
     await load(false);
+    if (!mounted.current) return;
+    setMessage(result);
   };
 
   return { state, load, startPreview, apply };

@@ -35,8 +35,10 @@ export function installedEvidenceLabel(evidence: InstalledBundleEvidence): strin
 }
 
 /** The shared update vocabulary; the Updates list prints `up to date`, not `current`. */
-export function packageStatusLabel(status: "unknown" | "current" | "update available"): string {
-  return status === "current" ? "up to date" : status === "unknown" ? "cannot assess" : status;
+export function packageStatusLabel(status: "unknown" | "current" | "update available"): "cannot assess" | "up to date" | "update available" {
+  if (status === "current") return "up to date";
+  if (status === "unknown") return "cannot assess";
+  return status;
 }
 
 /** What a selection record itself remembers, for lists that do not read host evidence. */
