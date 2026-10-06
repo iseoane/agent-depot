@@ -450,7 +450,7 @@ taller than the terminal. `j`/`k` or the arrow keys move.
 
 | View | Purpose |
 | --- | --- |
-| 1 Sources | Skill Sources and user-owned App recipes in one list, with `skills`/`app` kinds and contextual actions. |
+| 1 Sources | Git Sources (their skills and Packages) and user-owned App recipes in one list, with `skills`/`app` kinds and contextual actions. |
 | 2 Catalog | Skills that can be installed: those not installed yet, as Source, then Skills. Each Source also shows a Packages group, and the Skills a bundle owns are marked and dimmed. |
 | 3 Installations | What is on disk: managed installations (user-global and project), Package selections and unmanaged user-global skills. |
 | 4 Updates | Managed skills and Packages with a newer version available, for user-global and project scope. |
@@ -460,9 +460,9 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 
 | View | Keys |
 | --- | --- |
-| Sources | `j`/`k` move through Skill Sources and App recipes (no Tab section switch). `Enter` opens the Catalog for a Skill Source or previews/approves an App recipe. `n` adds a Source or guides recipe authoring; `r` refreshes Sources or reloads recipe status; `d` removes. `space`/`a` mark Skill Sources only. |
-| Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marks (or the highlighted skill), `/` filter, `s` toggle one Source or all (when opened from a Source) |
-| Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill, `space` marks a leaf and `a` marks all visible leaves: with marks, `u` and `h` act on all of them with one combined preview and one confirmation (project installations are skipped with a reason). On a Package row: `i` or `Enter` approve the install declaration, `U` update, `u` uninstall, `f` forget the selection record. Package rows are not markable for bulk actions. |
+| Sources | `j`/`k` move through Git Sources and App recipes (no Tab section switch). `Enter` opens the Catalog for a Git Source (its skills and Packages) or previews/approves an App recipe. `n` adds a reusable Git Source or guides recipe authoring; `r` refreshes Sources or reloads recipe status; `d` removes. `space`/`a` mark Git Sources only. |
+| Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marked Skills (or the highlighted skill) or preview the highlighted Package bundle, `/` filter, `s` toggle one Source or all (when opened from a Source) |
+| Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill, `space` marks a leaf and `a` marks all visible leaves: with marks, `u` and `h` act on all of them with one combined preview and one confirmation (project installations are skipped with a reason). On a Package row: `i` previews the frozen install plan and runs it, approving the receipt first when it is missing, `Enter` approves the install declaration only, `U` update, `u` uninstall, `f` forget the selection record. Package rows are not markable for bulk actions. |
 | Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot assess" line. A marked Package joins the batch and is approved before its update runs. |
 | Import/Export | `e` export, `i` import; enter a file path, `space` toggle choices, `a` toggle all, `Enter` preview, `y` apply; `j`/`k` scroll previews and results |
 
@@ -481,9 +481,10 @@ Safety model:
   confirm is the content that is applied. The Updates view refreshes
   the Git Sources in use when you enter it and on `r`.
 - A Package action previews the frozen declaration and the exact Host commands.
-  `y` approves that action's receipt before the Host command runs; `n` or `Esc`
-  cancels without approving or running anything. Listing and reloading Packages
-  never run a Host command.
+  When the action's receipt is missing, the first `y` approves it and a second `y`
+  runs the Host command; an already approved action runs on the first `y`. `n` or
+  `Esc` at either gate cancels without approving or running anything. Listing and
+  reloading Packages never run a Host command.
 - The built-in Source is fixed: it is shown as an unselectable row and cannot be
   refreshed or removed.
 - Removal is user-global only. Project installations are listed, but project

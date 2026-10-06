@@ -495,7 +495,7 @@ selección.
 
 | Vista | Propósito |
 | --- | --- |
-| 1 Sources | Sources de Skills y recetas App del usuario en una sola lista, con tipos `skills`/`app` y acciones contextuales. |
+| 1 Sources | Sources de Git (sus skills y Packages) y recetas App del usuario en una sola lista, con tipos `skills`/`app` y acciones contextuales. |
 | 2 Catalog | Skills que se pueden instalar: los que aún no están instalados, como Source y luego Skills. Cada Source muestra además un grupo Packages, y los Skills que posee un bundle se marcan y se atenúan. |
 | 3 Installations | Lo que hay en disco: instalaciones gestionadas (globales de usuario y de proyecto), selecciones de Packages y skills globales de usuario no gestionados. |
 | 4 Updates | Skills y Packages gestionados con una versión más reciente disponible, para el ámbito global de usuario y de proyecto. |
@@ -506,9 +506,9 @@ confirmar):
 
 | Vista | Teclas |
 | --- | --- |
-| Sources | `j`/`k` recorren Sources de Skills y recetas App, sin cambiar de sección con Tab. `Enter` abre el Catálogo de una Source o previsualiza/aprueba una receta. `n` añade una Source o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Skills. |
-| Catalog | `Enter`/flechas expandir y contraer, `space` marcar, `a` marcar todos los listados, `i` instalar las marcas (o el skill resaltado), `/` filtrar, `s` alternar entre una Source o todas (cuando se abre desde una Source) |
-| Installations | `Enter`/flechas expandir y contraer, `u` desinstalar (todos los Hosts o los Hosts elegidos) o eliminar un skill no gestionado, `h` o `i` añadir Hosts a una instalación, `A` o `Enter` adoptar un skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo). En una fila de Package: `i` o `Enter` aprueba la declaración de instalación, `U` actualiza, `u` desinstala, `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
+| Sources | `j`/`k` recorren Sources de Git y recetas App, sin cambiar de sección con Tab. `Enter` abre el Catálogo de una Source de Git (sus skills y Packages) o previsualiza/aprueba una receta. `n` añade una Source de Git reutilizable o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Git. |
+| Catalog | `Enter`/flechas expandir y contraer, `space` marcar, `a` marcar todos los listados, `i` instalar las Skills marcadas (o el skill resaltado) o previsualizar el bundle de Package resaltado, `/` filtrar, `s` alternar entre una Source o todas (cuando se abre desde una Source) |
+| Installations | `Enter`/flechas expandir y contraer, `u` desinstalar (todos los Hosts o los Hosts elegidos) o eliminar un skill no gestionado, `h` o `i` añadir Hosts a una instalación, `A` o `Enter` adoptar un skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo). En una fila de Package: `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala, `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
 | Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualizar las marcas, `r` comprobar de nuevo, las flechas pliegan la línea "cannot assess". Un Package marcado se une al lote y se aprueba antes de ejecutar su actualización. |
 | Import/Export | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
 
@@ -529,9 +529,10 @@ Modelo de seguridad:
   contenido que confirmas es el contenido que se aplica. La vista Updates refresca
   las Sources Git en uso cuando entras en ella y con `r`.
 - Una acción de Package previsualiza la declaración congelada y los comandos exactos
-  del Host. `y` aprueba el recibo de esa acción antes de ejecutar el comando del Host;
-  `n` o `Esc` cancela sin aprobar ni ejecutar nada. Listar y recargar Packages nunca
-  ejecuta un comando del Host.
+  del Host. Si falta el recibo de la acción, el primer `y` lo aprueba y un segundo `y`
+  ejecuta el comando del Host; una acción ya aprobada se ejecuta con el primer `y`.
+  `n` o `Esc` en cualquiera de las dos puertas cancela sin aprobar ni ejecutar nada.
+  Listar y recargar Packages nunca ejecuta un comando del Host.
 - La Source integrada es fija: se muestra como una fila no seleccionable y no puede
   refrescarse ni eliminarse.
 - La eliminación es solo global de usuario. Las instalaciones de proyecto se listan,

@@ -340,7 +340,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
 }
 
 function Prompt({ mode }: { readonly mode: Mode }) {
-  if (mode.kind === "add-kind") return <Text>Add: 1 Skill Source · 2 App recipe (Esc cancel)</Text>;
+  if (mode.kind === "add-kind") return <Text>Add: 1 Git Source (skills + Packages) · 2 App recipe (Esc cancel)</Text>;
   if (mode.kind === "input") return <Text>URL: {mode.value}</Text>;
   if (mode.kind === "busy") return <Text>Working...</Text>;
   if (mode.kind === "confirm") {
