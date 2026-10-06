@@ -92,6 +92,7 @@ async function createHarness(options: {
   readonly commit?: string;
   readonly isWsl?: boolean;
   readonly resolveExecutable?: (name: string) => Promise<string | undefined>;
+  readonly readHostStateFile?: (filePath: string, hostFiles: Map<string, string>) => Promise<string>;
 } = {}): Promise<Harness> {
   const home = await mkdtemp(path.join(tmpdir(), "ad-package-flow-"));
   const stateDirectory = path.join(home, "state");
@@ -129,6 +130,9 @@ async function createHarness(options: {
       return await run(command, args, runOptions);
     },
     readHostStateFile: async (filePath) => {
+      if (options.readHostStateFile !== undefined) {
+        return await options.readHostStateFile(filePath, hostFiles);
+      }
       const contents = hostFiles.get(filePath);
       if (contents === undefined) {
         throw notFound(filePath);
@@ -304,6 +308,96 @@ test("a host state that already satisfies install sets skipExecution and runs no
   });
 });
 
+test("a fixed Pi pin does not adopt a different installed pin", async () => {
+  await withHarness({ files: piFiles() }, async (harness) => {
+    const selection: PackageSelection = {
+      host: "pi",
+      root: "",
+      source: { ...hostSource, ref: COMMIT },
+      version: { policy: "fixed", version: COMMIT },
+    };
+    harness.setPiPackages([`${PI_IDENTITY}@${NEXT_COMMIT}`]);
+    const plan = await harness.operations.planLifecycle(selection, "install");
+    assert.equal(plan.skipExecution, undefined);
+    assert.deepEqual(plan.commands.map((command) => [command.executable, ...command.args]), [
+      ["pi", "install", `${PI_IDENTITY}@${COMMIT}`],
+    ]);
+
+    harness.setRunner(async () => {
+      harness.setPiPackages([`${PI_IDENTITY}@${COMMIT}`]);
+      return okResult();
+    });
+    await harness.operations.approve(selection, "install");
+    const result = await harness.operations.executeLifecycle(plan, true);
+    assert.equal(result.status, "installed");
+    assert.deepEqual(harness.calls, [{ command: "/usr/bin/pi", args: ["install", `${PI_IDENTITY}@${COMMIT}`], cwd: harness.home }]);
+  });
+});
+
+test("a fixed Pi pin whose install leaves a different pin fails and writes no record", async () => {
+  await withHarness({ files: piFiles() }, async (harness) => {
+    const selection: PackageSelection = {
+      host: "pi",
+      root: "",
+      source: { ...hostSource, ref: COMMIT },
+      version: { policy: "fixed", version: COMMIT },
+    };
+    harness.setRunner(async () => {
+      harness.setPiPackages([`${PI_IDENTITY}@${NEXT_COMMIT}`]);
+      return okResult();
+    });
+    const plan = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    const result = await harness.operations.executeLifecycle(plan, true);
+    assert.equal(result.status, "failed");
+    assert.match(result.reason, /contradicts the fixed pin/u);
+    assert.equal(harness.calls.length, 1);
+    assert.equal((await harness.operations.list()).length, 0);
+  });
+});
+
+// The live recheck is the fifth read of the Pi settings file: the shown plan, the
+// approval, the fresh plan, the previous observation, then the recheck itself.
+const PI_RECHECK_READ = 5;
+
+for (const finalState of ["absent", "unknown"] as const) {
+  test(`a skipped install fails if the live recheck is ${finalState}`, async () => {
+    let piReads = 0;
+    await withHarness({
+      readHostStateFile: async (filePath, hostFiles) => {
+        const piSettings = filePath.endsWith(path.join(".pi", "agent", "settings.json"));
+        if (piSettings) {
+          piReads += 1;
+          if (piReads >= PI_RECHECK_READ) {
+            if (finalState === "absent") {
+              throw notFound(filePath);
+            }
+            // An undecodable entry degrades every lookup that section answers to unknown.
+            return JSON.stringify({ packages: [{}] });
+          }
+        }
+        const contents = hostFiles.get(filePath);
+        if (contents === undefined) {
+          throw notFound(filePath);
+        }
+        return contents;
+      },
+    }, async (harness) => {
+      const selection = piSelection();
+      harness.setPiPackages([`${PI_IDENTITY}@${COMMIT}`]);
+      const plan = await harness.operations.planLifecycle(selection, "install");
+      assert.equal(plan.skipExecution, true);
+
+      await harness.operations.approve(selection, "install");
+      const result = await harness.operations.executeLifecycle(plan, true);
+      assert.equal(result.status, "failed");
+      assert.match(result.reason, /does not report|cannot be verified/u);
+      assert.equal(harness.calls.length, 0);
+      assert.equal((await harness.operations.list()).length, 0);
+    });
+  });
+}
+
 test("an install whose host state stays absent fails and writes no record", async () => {
   await withHarness({}, async (harness) => {
     const selection = piSelection();
@@ -330,6 +424,77 @@ test("an unversioned Pi git package reports unknown, never current", async () =>
     assert.equal(checks[0]!.status, "unknown");
     assert.notEqual(checks[0]!.status, "current");
     assert.equal(harness.calls.length, 0);
+  });
+});
+
+test("an update with unknown observed version evidence fails and leaves the record untouched", async () => {
+  await withHarness({ files: piFiles() }, async (harness) => {
+    const selection = piSelection();
+    harness.setPiPackages([PI_IDENTITY]);
+    const install = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    await harness.operations.executeLifecycle(install, true);
+    const before = (await harness.operations.list())[0]!;
+
+    const update = await harness.operations.planLifecycle(selection, "update");
+    await harness.operations.approve(selection, "update");
+    const result = await harness.operations.executeLifecycle(update, true);
+    assert.equal(result.status, "failed");
+    assert.match(result.reason, /version.*changed|change.*version|cannot verify/u);
+    assert.deepEqual((await harness.operations.list())[0], before);
+    assert.equal(harness.calls.length, 1);
+  });
+});
+
+test("an update that installs where the host reported nothing is recorded as updated", async () => {
+  await withHarness({ files: piFiles() }, async (harness) => {
+    const selection = piSelection();
+    harness.setPiPackages([`${PI_IDENTITY}@${COMMIT}`]);
+    const install = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    assert.equal((await harness.operations.executeLifecycle(install, true)).status, "installed");
+
+    harness.setPiPackages([]);
+    const update = await harness.operations.planLifecycle(selection, "update");
+    await harness.operations.approve(selection, "update");
+    harness.setRunner(async () => {
+      harness.setPiPackages([`${PI_IDENTITY}@${NEXT_COMMIT}`]);
+      return okResult();
+    });
+    const result = await harness.operations.executeLifecycle(update, true);
+    assert.equal(result.status, "updated");
+    assert.deepEqual(result.previous, { kind: "absent" });
+    assert.deepEqual((await harness.operations.list())[0]!.verified, { kind: "git-commit", commit: NEXT_COMMIT });
+  });
+});
+
+test("records persist the observed host version evidence", async () => {
+  await withHarness({ files: piFiles() }, async (harness) => {
+    const selection = piSelection();
+    harness.setRunner(async () => {
+      harness.setPiPackages([`${PI_IDENTITY}@${NEXT_COMMIT}`]);
+      return okResult();
+    });
+
+    const plan = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    const result = await harness.operations.executeLifecycle(plan, true);
+    assert.equal(result.status, "installed");
+    assert.deepEqual((await harness.operations.list())[0]!.verified, { kind: "git-commit", commit: NEXT_COMMIT });
+  });
+});
+
+test("an unverifiable host observation writes no verified evidence", async () => {
+  await withHarness({ files: piFiles() }, async (harness) => {
+    const selection = piSelection();
+    harness.setRunner(async () => {
+      harness.setPiPackages([PI_IDENTITY]);
+      return okResult();
+    });
+    const plan = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    assert.equal((await harness.operations.executeLifecycle(plan, true)).status, "installed");
+    assert.equal((await harness.operations.list())[0]!.verified, undefined);
   });
 });
 

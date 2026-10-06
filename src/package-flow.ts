@@ -210,7 +210,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
       cwd: home,
       environment: isWsl ? "linux (WSL)" : platform,
       origin,
-      ...(actionSatisfied(action, installed) ? { skipExecution: true } : {}),
+      ...(actionSatisfied(action, selection, installed) ? { skipExecution: true } : {}),
     });
     const declaration = declarationFor(selection, bundle.descriptor, commands);
     return Object.freeze({
@@ -287,12 +287,16 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
     }
   }
 
-  async function writeSelection(context: OutcomeContext): Promise<void> {
+  async function writeSelection(
+    context: OutcomeContext,
+    observed?: InstalledBundleEvidence,
+  ): Promise<void> {
+    const verified = observed === undefined ? undefined : verifiedEvidence(observed, context.available);
     await state.upsert({
       selection: context.selection,
       installId: context.origin.installId,
       ...(context.origin.resolvedCommit === undefined ? {} : { lastDelegatedCommit: context.origin.resolvedCommit }),
-      ...(context.available === undefined ? {} : { verified: context.available }),
+      ...(verified === undefined ? {} : { verified }),
     });
   }
 
@@ -305,20 +309,35 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
         if (observed.kind !== "installed") {
           return { status: "failed", reason: `The host does not report ${describeCoordinates(context.selection)} installed (${describeEvidence(observed)})` };
         }
-        await writeSelection(context);
+        const contradiction = pinContradiction(context.selection, observed);
+        if (contradiction !== undefined) {
+          return { status: "failed", reason: `${contradiction}; the selection record was left untouched` };
+        }
+        await writeSelection(context, observed);
         return Object.freeze({ status: "installed", verified: observed });
       }
       case "update": {
         if (observed.kind !== "installed") {
           return { status: "failed", reason: `The update left no installed ${describeCoordinates(context.selection)} (${describeEvidence(observed)})` };
         }
-        if (context.previous !== undefined && sameInstalledEvidence(context.previous, observed)) {
+        const contradiction = pinContradiction(context.selection, observed);
+        if (contradiction !== undefined) {
+          return { status: "failed", reason: `${contradiction}; the selection record was left untouched` };
+        }
+        const change = installedEvidenceChange(context.previous, observed);
+        if (change === "unknown") {
+          return {
+            status: "failed",
+            reason: `The observed version change cannot be verified (${describeEvidence(context.previous ?? Object.freeze({ kind: "absent" as const }))} -> ${describeEvidence(observed)}); the selection record was left untouched`,
+          };
+        }
+        if (change === "unchanged") {
           return {
             status: "failed",
             reason: `The observed version did not change (${describeEvidence(observed)}); the selection record was left untouched`,
           };
         }
-        await writeSelection(context);
+        await writeSelection(context, observed);
         return Object.freeze({
           status: "updated",
           previous: context.previous ?? Object.freeze({ kind: "absent" as const }),
@@ -361,12 +380,10 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
   async function completeSkipped(context: OutcomeContext): Promise<PackageLifecycleResult> {
     switch (context.action) {
       case "install": {
-        await writeSelection(context);
-        const view = await readHostView();
-        return Object.freeze({
-          status: "installed",
-          verified: findInstalledBundle(view, context.descriptor, context.selection),
-        });
+        return await recordOutcome(
+          context,
+          findInstalledBundle(await readHostView(), context.descriptor, context.selection),
+        );
       }
       case "select": {
         await writeSelection(context);
@@ -593,10 +610,18 @@ function commandPurpose(action: PackageAction, executable: string, args: readonl
   return executable === "claude" && args[0] === "plugin" && args[1] === "marketplace" ? "register" : "apply";
 }
 
-function actionSatisfied(action: PackageAction, installed: InstalledBundleEvidence): boolean {
+function actionSatisfied(
+  action: PackageAction,
+  selection: PackageSelection,
+  installed: InstalledBundleEvidence,
+): boolean {
   switch (action) {
     case "install": {
-      return installed.kind === "installed";
+      if (installed.kind !== "installed") {
+        return false;
+      }
+      const verdict = fixedPiPinVerdict(selection, installed);
+      return verdict.kind === "satisfied" || verdict.kind === "not-pinned";
     }
     case "uninstall": {
       return installed.kind === "absent";
@@ -636,17 +661,121 @@ function planDifference(plan: PackageLifecyclePlan, fresh: DerivedPlan): string 
   return undefined;
 }
 
-function sameInstalledEvidence(left: InstalledBundleEvidence, right: InstalledBundleEvidence): boolean {
-  if (left.kind !== "installed" || right.kind !== "installed") {
-    return false;
+type InstalledEvidenceChange = "changed" | "unchanged" | "unknown";
+
+/**
+ * Three outcomes, not two. `unknown` means the two observations carry no
+ * comparable evidence, and an update must not report that as a success. A host
+ * that had nothing installed and now reports an install has changed.
+ */
+function installedEvidenceChange(
+  previous: InstalledBundleEvidence | undefined,
+  observed: InstalledBundleEvidence,
+): InstalledEvidenceChange {
+  if (observed.kind !== "installed" || previous === undefined || previous.kind === "unknown") {
+    return "unknown";
   }
-  if (left.version !== undefined && right.version !== undefined) {
-    return sameAppVersion(left.version, right.version);
+  if (previous.kind === "absent") {
+    return "changed";
   }
-  if (left.commit !== undefined && right.commit !== undefined) {
-    return left.commit.trim().toLowerCase() === right.commit.trim().toLowerCase();
+  if (previous.version !== undefined && observed.version !== undefined) {
+    return sameAppVersion(previous.version, observed.version) ? "unchanged" : "changed";
   }
-  return false;
+  const previousCommit = previous.commit === undefined ? undefined : gitCommitId(previous.commit);
+  const observedCommit = observed.commit === undefined ? undefined : gitCommitId(observed.commit);
+  if (previousCommit !== undefined && observedCommit !== undefined) {
+    return previousCommit === observedCommit ? "unchanged" : "changed";
+  }
+  return "unknown";
+}
+
+type FixedPiPinVerdict =
+  | { readonly kind: "not-pinned" }
+  | { readonly kind: "satisfied" }
+  | { readonly kind: "contradicted"; readonly pin: string }
+  | { readonly kind: "unverifiable"; readonly pin: string };
+
+/**
+ * Whether host evidence settles a fixed Pi pin. Two hexadecimal refs must agree;
+ * a version pin compares through `sameAppVersion`. Evidence the pin cannot be
+ * read from is `unverifiable`, so it never satisfies a skip and never counts as
+ * a contradiction.
+ */
+function fixedPiPinVerdict(selection: PackageSelection, observed: InstalledBundleEvidence): FixedPiPinVerdict {
+  if (selection.host !== "pi" || selection.version.policy !== "fixed" || selection.version.version === "") {
+    return { kind: "not-pinned" };
+  }
+  const pin = selection.version.version;
+  if (observed.kind !== "installed") {
+    return { kind: "unverifiable", pin };
+  }
+  const pinCommit = gitCommitId(pin);
+  const observedCommit = observed.commit === undefined ? undefined : gitCommitId(observed.commit);
+  if (pinCommit !== undefined && observedCommit !== undefined) {
+    return pinCommit === observedCommit ? { kind: "satisfied" } : { kind: "contradicted", pin };
+  }
+  if (observed.version !== undefined && sameAppVersion(observed.version, pin)) {
+    return { kind: "satisfied" };
+  }
+  return { kind: "unverifiable", pin };
+}
+
+/** A fixed Pi pin the host positively contradicts. Unverifiable evidence is not a contradiction. */
+function pinContradiction(selection: PackageSelection, observed: InstalledBundleEvidence): string | undefined {
+  const verdict = fixedPiPinVerdict(selection, observed);
+  if (verdict.kind !== "contradicted") {
+    return undefined;
+  }
+  return `The host reports ${describeCoordinates(selection)} ${describeEvidence(observed)}, which contradicts the fixed pin ${JSON.stringify(verdict.pin)}`;
+}
+
+/**
+ * The record's `verified` field is a claim about the host, so it derives from the
+ * host observation alone. A version is recorded only when it agrees with the one
+ * the Source declares, because `declaredBy` names that declaration. Evidence that
+ * cannot be attested leaves the field absent.
+ */
+function verifiedEvidence(
+  observed: InstalledBundleEvidence,
+  available: PackageVersionEvidence | undefined,
+): PackageVersionEvidence | undefined {
+  if (observed.kind !== "installed") {
+    return undefined;
+  }
+  if (observed.commit !== undefined) {
+    const commit = storableCommit(observed.commit);
+    return commit === undefined ? undefined : Object.freeze({ kind: "git-commit", commit });
+  }
+  if (
+    observed.version === undefined
+    || available?.kind !== "manifest-version"
+    || !storableVersion(observed.version)
+    || !sameAppVersion(observed.version, available.version)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({ kind: "manifest-version", version: observed.version, declaredBy: available.declaredBy });
+}
+
+/** A hexadecimal git ref, normalized, or `undefined` for any other spelling. */
+function gitCommitId(ref: string): string | undefined {
+  const normalized = ref.trim().toLowerCase();
+  return /^[0-9a-f]{7,64}$/u.test(normalized) ? normalized : undefined;
+}
+
+/** The state store reads back only a 40- or 64-character lowercase commit ID. */
+function storableCommit(commit: string): string | undefined {
+  const normalized = gitCommitId(commit);
+  return normalized !== undefined && (normalized.length === 40 || normalized.length === 64) ? normalized : undefined;
+}
+
+/** The state store reads back only a value without surrounding or unsafe whitespace. */
+function storableVersion(version: string): boolean {
+  return version !== "" && version.trim() === version && !/\s/u.test(version) && !hasControlCharacter(version);
+}
+
+function hasControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => (character.codePointAt(0) ?? 0) <= 0x1f || character.codePointAt(0) === 0x7f);
 }
 
 function describeEvidence(evidence: InstalledBundleEvidence): string {
