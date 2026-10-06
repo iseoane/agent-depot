@@ -56,7 +56,7 @@ export function buildTree(
   activeDescriptors: readonly BundleDescriptor[] = [],
 ): readonly CatalogNode[] {
   const labels = new Map(sources.map((source) => [source.id, sourceLabel(source)]));
-  const owned = packageOwnedSkillMatcher(activeDescriptors);
+  const active = new Set(activeDescriptors);
   const bySource = new Map<string, SkillCandidate[]>();
   for (const skill of skills) bySource.set(skill.sourceId, [...(bySource.get(skill.sourceId) ?? []), skill]);
   const bundlesBySource = new Map<string, BundleEntry[]>();
@@ -64,6 +64,7 @@ export function buildTree(
   return [...new Set([...bySource.keys(), ...bundlesBySource.keys()])].map((sourceId): CatalogNode => {
     const members = bySource.get(sourceId) ?? [];
     const sourceBundles = bundlesBySource.get(sourceId) ?? [];
+    const owned = packageOwnedSkillMatcher(sourceBundles.map((entry) => entry.descriptor).filter((descriptor) => active.has(descriptor)));
     return {
       id: `source:${sourceId}`,
       data: { kind: "source", sourceId, label: labels.get(sourceId) ?? sourceId, count: members.length },

@@ -40,7 +40,9 @@ portable paths; nothing is uninstalled, replaced, or copied.
   removal paths, the CLI install and uninstall, and the recheck after preview.
 - `tests/package-flow.test.ts` covers the portable-duplicate refusal and the
   unrelated-Source control.
-- `tests/tui-catalog-labels.test.ts` covers the Catalog owner.
+- `tests/tui-catalog-labels.test.ts` covers the Catalog owner and an unrelated
+  Source with the same Skill path. Parent review reproduced a false owner on that
+  unrelated Source, then scoped the matcher to each Source's active bundles.
 - `pnpm typecheck`, `pnpm lint`, `pnpm audit:dead-code`, `pnpm test` (971 tests),
   and `git diff --check` are clean.
 

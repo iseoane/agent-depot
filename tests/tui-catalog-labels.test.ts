@@ -46,6 +46,12 @@ test("a Catalog Skill carries its owner only when the Package is active", () => 
   const unselectedSkill = unselected[0]?.children?.find((node) => node.data.kind === "skill");
   assert.equal(unselectedSkill?.data.kind === "skill" ? unselectedSkill.data.ownedBy : undefined, undefined);
 
+  const otherSource = gitSource("https://github.com/other/skills");
+  const otherSkill = { ...skill, sourceId: otherSource.id };
+  const mixed = buildTree([skill, otherSkill], [source, otherSource], [entry], [descriptor]);
+  const unrelated = mixed.find((node) => node.id === `source:${otherSource.id}`)?.children?.find((node) => node.data.kind === "skill");
+  assert.equal(unrelated?.data.kind === "skill" ? unrelated.data.ownedBy : undefined, undefined);
+
   const active = buildTree([skill], [source], [entry], [descriptor]);
   const activeSkill = active[0]?.children?.find((node) => node.data.kind === "skill");
   assert.equal(activeSkill?.data.kind === "skill" ? activeSkill.data.ownedBy?.name : undefined, "mattpocock-skills");
