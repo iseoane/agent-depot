@@ -6,6 +6,7 @@ import { runCli } from "../src/cli.js";
 import { createAppOperations } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { buildProfileExport, requireProfileExportSelection, writeProfileExport } from "../src/profile-export.js";
+import { runProfileExport, runProfileImport } from "../src/profile-cli.js";
 import { test } from "node:test";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
@@ -149,6 +150,41 @@ test("export reports a recorded Package whose coordinates are not portable inste
   assert.deepEqual(result.exclusions.filter(item => item.block === "packages"), [{ block: "packages", label: "Package pi /abs/bundle (latest)",
     reason: "not portable (packages[0].root: expected a canonical Source-relative directory)" }]);
   assert.throws(() => requireProfileExportSelection(result.profile), /Nothing selected; nothing written/);
+});
+
+test("CLI Package filters parse on export and import and need Package operations to select", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-package-cli-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  await operations.addUserGlobalInstallation!({
+    source: { kind: "builtin", id: "builtin:agent-depot" }, path: "doctor-md-agents",
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: ".agents/skills/doctor-md-agents", adopted: false },
+  });
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const { operations: packageOperations } = fakePackageOperations({ recorded: [installedPackage] });
+  const stdout: string[] = [], stderr: string[] = [];
+  const dependencies = { homeDirectory: home, operations, appOperations: apps,
+    stdout: (line: string) => stdout.push(line), stderr: (line: string) => stderr.push(line) };
+  assert.equal(await runCli(["export", "--package", "demo", "--skill", "doctor-md-agents"], dependencies), 1);
+  assert.match(stderr.at(-1)!, /Profile export requires Package operations to select Packages/);
+  assert.equal(await runCli(["export", "--no-packages", "--skill", "doctor-md-agents"], dependencies), 0);
+  assert.deepEqual(parseProfile(JSON.parse(stdout.join("\n"))).packages, []);
+  stdout.length = 0;
+  assert.equal(await runProfileExport(["--package", "plugins/demo"], operations, apps, line => stdout.push(line),
+    line => stderr.push(line), home, packageOperations), 0);
+  assert.deepEqual(parseProfile(JSON.parse(stdout.join("\n"))).packages, [piPackage]);
+  await assert.rejects(runProfileExport(["--package", "plugins/demo", "--package", "plugins/demo"], operations, apps,
+    () => {}, () => {}, home, packageOperations), /Duplicate --package/);
+  const file = path.join(home, "package-profile.json");
+  await writeFile(file, JSON.stringify({ ...profile, sources: [], skills: [], apps: [], packages: [piPackage] }));
+  const { operations: importOperations } = fakePackageOperations({});
+  const imported: string[] = [];
+  assert.equal(await runProfileImport([file, "--yes"], operations, apps, line => imported.push(line),
+    { homeDirectory: home, packageOperations: importOperations }), 0);
+  assert.deepEqual(imported.filter(line => /^(?:added|skipped|failed):/u.test(line)), ["added: Package pi plugins/demo (latest)"]);
+  await assert.rejects(runProfileImport([file], operations, apps, () => {}, { homeDirectory: home }),
+    /Profile import requires Package operations/);
 });
 
 test("CLI export keeps stdout JSON-only, previews on stderr, and supports file output and filters", async t => {

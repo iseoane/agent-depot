@@ -96,6 +96,9 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
   const entries = selectProfileItems(await apps.load(), options.apps, options.noApps,
     entry => [entry.recipe?.name ?? path.basename(entry.file)], "apps");
   const packageRecords = options.packageOperations === undefined ? [] : await options.packageOperations.list();
+  if (options.packageOperations === undefined && options.packages?.length) {
+    throw new Error("Profile export requires Package operations to select Packages");
+  }
   const selectedPackages = selectProfileItems(packageRecords, options.packages, options.noPackages,
     record => packageFilterNames(record.selection), "packages");
   const owned = await loadAppOwnedSkillFilter({ appEnvironment: { recipesDirectory: apps.directory },

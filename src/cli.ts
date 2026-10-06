@@ -195,10 +195,12 @@ function packageOperationsFor(dependencies: CliDependencies, operations: SourceO
 
 const COMMANDS = new Map<string, CommandHandler>([
   ["import", (values, { operations, dependencies, output }) => runProfileImport(values, operations,
-    dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output, dependencies)],
+    dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output,
+    { ...dependencies, packageOperations: packageOperationsFor(dependencies, operations) })],
   ["export", (values, { operations, dependencies, output }) => runProfileExport(values, operations,
     dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }),
-    output, dependencies.stderr ?? (line => console.error(line)), dependencies.homeDirectory)],
+    output, dependencies.stderr ?? (line => console.error(line)), dependencies.homeDirectory,
+    packageOperationsFor(dependencies, operations))],
   ["app", (values, { dependencies, output }) => runAppCommand(values, dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output)],
   ["package", (values, { operations, dependencies, output }) => runPackageCommand(values, packageOperationsFor(dependencies, operations), operations, output)],
   ["install", async (values, { operations, dependencies, output }) => {
