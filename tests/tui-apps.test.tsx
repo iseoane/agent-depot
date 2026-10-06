@@ -200,6 +200,7 @@ test("focusing a tracked App records the live version when the binary moved ahea
     { homeDirectory: home, projectRoot: home, appEnvironment },
   );
   assert.equal(reloaded.apps?.[0]?.inspection.installedVersion, "2.0.0");
+  assert.equal(reloaded.apps?.[0]?.inspection.evidence, "recorded");
   assert.deepEqual(commands, ["version"]);
 });
 

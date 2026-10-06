@@ -89,6 +89,7 @@ test("a live version probe reconciles only the tracked record for the same recip
     assert.equal(live.status, "installed");
     assert.equal(live.installedVersion, "1.2.3");
     assert.equal(live.executable, "/usr/bin/example");
+    assert.equal(live.evidence, "verified");
     assert.deepEqual(await apps.trackedApps(), []);
 
     // A record for another recipe file is a different installation.
@@ -125,6 +126,7 @@ test("a live version probe reconciles only the tracked record for the same recip
     }).inspect(entry!, { installedVersion: "1.0.0" });
     assert.equal(cached.status, "installed");
     assert.equal(cached.installedVersion, "1.0.0");
+    assert.equal(cached.evidence, "recorded");
     assert.equal(calls, 0);
     assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.0.0");
   } finally {
