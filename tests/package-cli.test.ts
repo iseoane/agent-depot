@@ -33,6 +33,7 @@ const PI_DESCRIPTOR: BundleDescriptor = Object.freeze({
     Object.freeze({ kind: "prompts" as const, ownership: "host-only" as const, effect: "data" as const, paths: Object.freeze(["prompts/demo.md"]) }),
   ]),
   warnings: Object.freeze([]),
+  installable: true,
   manifestDigest: "a".repeat(64),
 });
 

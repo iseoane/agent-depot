@@ -49,6 +49,12 @@ export interface BundleDescriptor {
   readonly version?: PackageVersionEvidence;
   readonly components: readonly PackageComponent[];
   readonly warnings: readonly string[];
+  /**
+   * Whether Agent Depot can delegate this bundle's lifecycle. A scoped-out Pi
+   * package, an unbound Claude plugin, and a marketplace entry Agent Depot will
+   * not run are reported but never installed, so they never own their Skills.
+   */
+  readonly installable: boolean;
   /** Keys the approval receipt. sha256 over the bundle's raw manifest bytes, sorted by path. */
   readonly manifestDigest: string;
 }

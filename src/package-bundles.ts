@@ -41,6 +41,7 @@ export function parsePiPackageManifest(raw: string, root: string): BundleDescrip
     ...(version === undefined ? {} : { version }),
     components,
     warnings: Object.freeze([]),
+    installable: true,
     manifestDigest: manifestDigest([{ path: manifestPathFor(packageRoot, "package.json"), content: raw }]),
   });
 }
@@ -64,6 +65,7 @@ export function parseClaudePluginManifest(raw: string, root: string): BundleDesc
     ...(version === undefined ? {} : { version }),
     components,
     warnings: Object.freeze([]),
+    installable: true,
     manifestDigest: manifestDigest([{ path: manifestPathFor(pluginRoot, ".claude-plugin/plugin.json"), content: raw }]),
   });
 }
@@ -157,7 +159,7 @@ export function discoverBundlesInSnapshot(
     if (bundle !== undefined) {
       descriptors.push(scope.directory === undefined
         ? bundle
-        : withWarnings(bundle, ["Pi packages are not installable from a scoped Source; register the repository root"]));
+        : { ...withWarnings(bundle, ["Pi packages are not installable from a scoped Source; register the repository root"]), installable: false });
     }
   }
 
@@ -188,9 +190,9 @@ export function discoverBundlesInSnapshot(
       continue;
     }
     const descriptor = parseClaudePluginManifest(raw, pluginRoot);
-    descriptors.push(withWarnings(descriptor, [
+    descriptors.push({ ...withWarnings(descriptor, [
       `Claude plugin ${JSON.stringify(pluginRoot)} has no in-repo marketplace binding; it is not installable`,
-    ]));
+    ]), installable: false });
   }
 
   return Object.freeze(descriptors.map((descriptor) => populateSkillNames(descriptor, files)));
@@ -367,6 +369,7 @@ interface MarketplaceDescriptorParts {
   readonly marketplaceRoot: string;
   readonly marketplaceRaw: string;
   readonly warnings: readonly string[];
+  readonly installable: boolean;
 }
 
 function buildMarketplaceDescriptor(
@@ -387,12 +390,14 @@ function buildMarketplaceDescriptor(
     return marketplaceOnlyDescriptor({
       entry, entryName, marketplaceRoot, marketplaceRaw,
       warnings: [`marketplace entry ${JSON.stringify(entryName)} uses a command source, which Agent Depot will not run; it is not installable`],
+      installable: false,
     });
   }
   if (resolution.kind === "external") {
     return marketplaceOnlyDescriptor({
       entry, entryName, marketplaceRoot, marketplaceRaw,
       warnings: [`marketplace entry ${JSON.stringify(entryName)} points outside the registered repository; it is not installable`],
+      installable: false,
     });
   }
 
@@ -402,6 +407,7 @@ function buildMarketplaceDescriptor(
     return marketplaceOnlyDescriptor({
       entry, entryName, marketplaceRoot, marketplaceRaw,
       warnings: [`marketplace entry ${JSON.stringify(entryName)} has no plugin manifest at ${manifestPathFor(pluginRoot, ".claude-plugin/plugin.json")}`],
+      installable: true,
     });
   }
 
@@ -419,6 +425,7 @@ function buildMarketplaceDescriptor(
     ...(version === undefined ? {} : { version }),
     components: plugin.components,
     warnings: Object.freeze(warnings),
+    installable: true,
     manifestDigest: manifestDigest([
       { path: manifestPathFor(marketplaceRoot, ".claude-plugin/marketplace.json"), content: marketplaceRaw },
       { path: manifestPathFor(pluginRoot, ".claude-plugin/plugin.json"), content: pluginRaw },
@@ -435,6 +442,7 @@ function marketplaceOnlyDescriptor(parts: MarketplaceDescriptorParts): BundleDes
     ...(version === undefined ? {} : { version }),
     components: resolveComponentPaths(parts.marketplaceRoot, buildComponentInventory("claude", parts.entry)),
     warnings: Object.freeze(parts.warnings),
+    installable: parts.installable,
     manifestDigest: manifestDigest([{ path: manifestPathFor(parts.marketplaceRoot, ".claude-plugin/marketplace.json"), content: parts.marketplaceRaw }]),
   });
 }

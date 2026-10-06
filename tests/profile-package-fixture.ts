@@ -48,7 +48,7 @@ function fakePlan(selection: PackageSelection, action: PackageAction, commands: 
     ? { host: "pi" as const, root: selection.root }
     : { host: "claude" as const, marketplaceRoot: selection.marketplaceRoot, pluginName: selection.pluginName };
   const descriptor: BundleDescriptor = { host: selection.host, coordinates, name: "demo",
-    components: [], warnings: [], manifestDigest: "a".repeat(64) };
+    components: [], warnings: [], installable: true, manifestDigest: "a".repeat(64) };
   return { selection, action, descriptor, commands, affects: [], warnings: [], cwd: "/tmp", environment: "linux",
     origin: { manifestDigest: descriptor.manifestDigest, installId: "pi:demo" } };
 }

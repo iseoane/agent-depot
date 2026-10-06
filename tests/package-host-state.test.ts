@@ -29,6 +29,7 @@ function piDescriptor(name = "pstack-claude"): BundleDescriptor {
     name,
     components: [],
     warnings: [],
+    installable: true,
     manifestDigest: "a".repeat(64),
   };
 }
@@ -40,6 +41,7 @@ function claudeDescriptor(name = "pstack"): BundleDescriptor {
     name,
     components: [],
     warnings: [],
+    installable: true,
     manifestDigest: "b".repeat(64),
   };
 }

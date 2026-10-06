@@ -41,6 +41,7 @@ const descriptor: BundleDescriptor = {
     { kind: "extensions", ownership: "host-only", effect: "executable", paths: ["plugins/pstack/extensions/index.ts"] },
   ],
   warnings: [],
+  installable: true,
   manifestDigest: "a".repeat(64),
 };
 

@@ -282,7 +282,7 @@ function resolveClaudeMarketplace(
 }
 
 function isInstallable(descriptor: BundleDescriptor): boolean {
-  return !descriptor.warnings.some((warning) => warning.includes("not installable"));
+  return descriptor.installable;
 }
 
 function runsHostCommand(action: PackageAction): boolean {

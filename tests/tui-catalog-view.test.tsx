@@ -405,6 +405,7 @@ test("CatalogView lists a Source's bundles and dims the Skills they own", async 
       paths: ["plugins/pstack/skills"], skillNames: ["how"],
     }],
     warnings: [],
+    installable: true,
     manifestDigest: "a".repeat(64),
   };
   const claude: BundleDescriptor = {

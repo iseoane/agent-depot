@@ -27,6 +27,7 @@ function descriptor(selection: PackageSelection): BundleDescriptor {
     name: selection.host === "pi" ? "pi-demo" : selection.pluginName,
     components: Object.freeze([]),
     warnings: Object.freeze([]),
+    installable: true,
     manifestDigest: "c".repeat(64),
   });
 }

@@ -192,6 +192,7 @@ test("a Claude plugin with no in-repo marketplace binding is reported but not in
   assert.equal(descriptors.length, 1);
   assert.equal(descriptors[0].host, "claude");
   assert.ok(descriptors[0].warnings.some((warning) => warning.includes("no in-repo marketplace binding")));
+  assert.equal(descriptors[0].installable, false);
 });
 
 test("a bundle-declared command marketplace source yields a warning", () => {
@@ -199,12 +200,28 @@ test("a bundle-declared command marketplace source yields a warning", () => {
   const descriptors = parseClaudeMarketplace(marketplaceRaw, "", () => undefined);
   assert.equal(descriptors.length, 1);
   assert.ok(descriptors[0].warnings.some((warning) => warning.includes("command source")));
+  assert.equal(descriptors[0].installable, false);
 });
 
 test("a marketplace source outside the repository yields a warning", () => {
   const marketplaceRaw = JSON.stringify({ name: "m", plugins: [{ name: "p", source: { github: { repo: "owner/repo" } } }] });
   const descriptors = parseClaudeMarketplace(marketplaceRaw, "", () => undefined);
   assert.ok(descriptors[0].warnings.some((warning) => warning.includes("outside the registered repository")));
+  assert.equal(descriptors[0].installable, false);
+});
+
+test("installability is a descriptor field, not parsed from warning text", async () => {
+  const matt = discoverBundlesInSnapshot(await readFixtureFiles("matt-skills"), {})[0];
+  assert.equal(matt?.installable, true);
+  const conventional = discoverBundlesInSnapshot(await readFixtureFiles("pi-conventional"), {});
+  assert.equal(conventional[0]?.installable, true);
+  const scopedFiles: readonly SourceContentFile[] = [
+    { path: "nested/package.json", content: JSON.stringify({ name: "p", pi: { skills: ["./skills"] } }) },
+    { path: "nested/skills/foo/SKILL.md", content: "---\nname: foo\ndescription: foo\n---\n" },
+  ];
+  const scopedRefused = discoverBundlesInSnapshot(scopedFiles, { directory: "nested" });
+  assert.equal(scopedRefused.length, 1);
+  assert.equal(scopedRefused[0]?.installable, false);
 });
 
 test("the marketplace entry version overrides the plugin manifest version", () => {
