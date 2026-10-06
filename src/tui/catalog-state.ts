@@ -14,8 +14,8 @@ export type LoadState =
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly bundles: readonly BundleEntry[]; readonly warnings: readonly string[]; readonly sources: readonly Source[] };
 
-/** Discovers the Skills of one Source, or of all of them, and again whenever those inputs change. */
-export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean, env: TuiEnvironment): LoadState {
+/** Discovers the Skills of one Source, or of all of them, and again whenever those inputs or `reloadKey` change. */
+export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean, env: TuiEnvironment, reloadKey = 0): LoadState {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +69,7 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
     return () => {
       cancelled = true;
     };
-  }, [operations, sourceId, all, env]);
+  }, [operations, sourceId, all, env, reloadKey]);
   return state;
 }
 

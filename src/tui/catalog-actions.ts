@@ -1,5 +1,6 @@
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import type { SkillCandidate } from "../skill-discovery.js";
+import type { PackageMode } from "./package-actions.js";
 import type {
   InstallScope,
   PreparedInstall,
@@ -36,6 +37,8 @@ export type ActionMode =
     }
   | { readonly kind: "confirm-install"; readonly items: readonly BatchItem[] }
   | { readonly kind: "confirm-exposure"; readonly items: readonly BatchItem[] }
+  /** A Package bundle action reuses the shared Package modes and preview. */
+  | PackageMode
   /** A step is running (refreshing, installing); keys are ignored until it ends. */
   | { readonly kind: "busy"; readonly label: string };
 

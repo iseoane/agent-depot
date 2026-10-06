@@ -207,7 +207,7 @@ test("n and Esc at either Catalog bundle gate write and run nothing", async (t) 
   f.view.stdin.write(ESC);
   await waitForFrame(f.view.lastFrame, /Package action cancelled/);
   assert.ok(!f.calls.some((call) => call.startsWith("execute")), "Esc must not execute");
-  assert.ok(!f.calls.some((call) => call.startsWith("approve")), "Esc after approval must not approve again");
+  assert.equal(f.calls.filter((call) => call.startsWith("approve")).length, 1, "Esc after approval must not approve again");
 });
 
 test("a stale Catalog bundle plan is reported and never executed again", async (t) => {

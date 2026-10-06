@@ -5,6 +5,7 @@ import { skillKey } from "./catalog-tree.js";
 import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
 import type { FilterState } from "./catalog-filter.js";
 import { describeRow, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
+import { isPackageMode, PackagePanel } from "./package-actions.js";
 import { HostChecklist, PreviewLines } from "./panel-parts.js";
 import { rowStyle } from "./theme.js";
 import type { VisibleRow } from "./tree.js";
@@ -56,6 +57,7 @@ export function CatalogRowLine({ row, selected, marked, installed }: {
 
 /** The prompt of the install flow; browsing shows nothing. */
 export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
+  if (isPackageMode(mode)) return <PackagePanel mode={mode} />;
   switch (mode.kind) {
     case "browse":
       return null;

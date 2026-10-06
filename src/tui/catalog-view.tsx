@@ -8,10 +8,11 @@ import { filterSkills } from "./catalog-filter.js";
 import { handleCatalogActionKey, type CatalogFlowContext } from "./catalog-flow.js";
 import { isInstalled } from "./catalog-installs.js";
 import { ActionPanel, CatalogHeader, CatalogRowLine } from "./catalog-panel.js";
+import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
+import { handlePackageKey, isPackageMode, startPackageAction, type PackageActionHost, type PackageContext } from "./package-actions.js";
 import { ListFooter } from "./panel-parts.js";
 import { useCatalogFilter, useCatalogSkills, useInstalledSkills } from "./catalog-state.js";
 import { buildTree, leavesOf, openByDefault, skillKey, type NodeData } from "./catalog-tree.js";
-import type { TuiEnvironment } from "./environment.js";
 import { theme } from "./theme.js";
 import { useTreeNavigation } from "./tree-navigation.js";
 import { useMarks, useMounted, type ViewMessage } from "./view-state.js";
@@ -40,10 +41,13 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const marks = useMarks();
   const [message, setMessage] = useState<ViewMessage | undefined>();
   const [action, setActionState] = useState<ActionMode>(BROWSE);
+  // Bumped after a Package action so discovery re-reads the refreshed Source.
+  const [reloadKey, setReloadKey] = useState(0);
   // Mirrors the action mode synchronously, like the filter, so later keystrokes and the shell never see stale state.
   const actionRef = useRef<ActionMode>(BROWSE);
   const filter = useCatalogFilter(actionRef, onCapturingChange);
-  const state = useCatalogSkills(operations, sourceId, all, env);
+  const state = useCatalogSkills(operations, sourceId, all, env, reloadKey);
+  const packages = useMemo(() => packageOperationsOf(env), [env]);
   const { installed, installedReady, reloadInstalled } = useInstalledSkills(operations, env, mounted);
 
   const setAction = (next: ActionMode) => {
@@ -76,6 +80,20 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       setAction(BROWSE);
     },
   };
+  const packageHost: PackageActionHost = {
+    setMode: setAction,
+    browse: () => setAction(BROWSE),
+    setMessage,
+    isMounted: () => mounted.current,
+    finish: async (result) => {
+      await reloadInstalled();
+      if (!mounted.current) return;
+      setReloadKey((value) => value + 1);
+      setMessage(result);
+      setAction(BROWSE);
+    },
+  };
+  const packageContext: PackageContext = { packages, manage: packageHost };
   const browse: CatalogBrowseContext = {
     navigation,
     height,
@@ -84,13 +102,15 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     canWiden: sourceId !== undefined,
     ready: state.status === "ready",
     toggleAll: () => setAll((value) => !value),
+    startPackage: (target) => void startPackageAction(packageContext, target, "i"),
     setMessage,
     setAction,
   };
 
   useKeys((input, key) => {
     const mode = actionRef.current;
-    if (mode.kind !== "browse") handleCatalogActionKey(flow, mode, input, key);
+    if (isPackageMode(mode)) handlePackageKey(packageContext, mode, input, key);
+    else if (mode.kind !== "browse") handleCatalogActionKey(flow, mode, input, key);
     else if (filter.filterRef.current.editing) filter.handleEditKey(input, key, navigation.restart);
     else handleCatalogBrowseKey(browse, input, key);
   });

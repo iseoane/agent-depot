@@ -4,10 +4,10 @@ import { describeCoordinates, type PackageAction, type PackageLifecyclePlan, typ
 import type { PackageOperations } from "../package-flow.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { errorText } from "./batch.js";
-import type { ManageContext } from "./manage-actions.js";
 import { answerYesNo } from "./mode-keys.js";
 import { installedEvidenceLabel, packagePlanLines } from "./package-rows.js";
 import { PreviewConfirm } from "./panel-parts.js";
+import type { ViewMessage } from "./view-state.js";
 
 /** A Package row the Installations view can act on. */
 export interface PackageTarget {
@@ -31,6 +31,17 @@ export type PackageMode =
 
 export const PACKAGE_KINDS: readonly PackageMode["kind"][] = ["package-approve", "package-confirm", "package-forget"];
 
+/** Narrower than ManageContext so the Catalog and the Installations view both host a Package action. */
+export interface PackageActionHost {
+  setMode(mode: PackageMode | { readonly kind: "busy"; readonly label: string }): void;
+  /** Returns the view to browsing. */
+  browse(): void;
+  setMessage(message: ViewMessage | undefined): void;
+  isMounted(): boolean;
+  /** Reports the result and reloads the view's listings. */
+  finish(result: ViewMessage): Promise<void>;
+}
+
 /** Narrows the view's mode without asserting a partial mode is a Package mode. */
 export function isPackageMode(mode: { readonly kind: string }): mode is PackageMode {
   return PACKAGE_KINDS.some(kind => kind === mode.kind);
@@ -38,7 +49,7 @@ export function isPackageMode(mode: { readonly kind: string }): mode is PackageM
 
 export interface PackageContext {
   readonly packages: PackageOperations;
-  readonly manage: ManageContext;
+  readonly manage: PackageActionHost;
 }
 
 /** `install`, `update`, `uninstall` and `forget` plan a step; `approve` writes the install receipt. */
