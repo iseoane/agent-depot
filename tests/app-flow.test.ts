@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { mkdtemp, writeFile, rm, mkdir, chmod, symlink, stat, readdir } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, mkdir, chmod, symlink, stat, readdir, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createAppOperations } from "../src/app-flow.js";
@@ -55,6 +56,79 @@ test("approval permits version checks, but changed content never runs", async ()
       recursive: true,
       force: true
     });
+  }
+});
+
+test("a live version probe reconciles only the tracked record for the same recipe file", async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "app-reconcile-"));
+  const root = path.join(fixture, "workspace");
+  const installations = path.join(fixture, "app-installations");
+  await mkdir(root);
+  await mkdir(installations);
+  const recordPath = path.join(installations, `${createHash("sha256").update("example").digest("hex")}.json`);
+  const writeRecord = (recipeFile: string, installedVersion: string) =>
+    writeFile(recordPath, JSON.stringify({ name: "example", recipeFile, installedVersion }));
+  try {
+    const file = path.join(root, "example.json");
+    await writeFile(file, JSON.stringify(recipe));
+    const canonical = await realpath(file);
+    let code = 0;
+    const apps = createAppOperations({
+      recipesDirectory: root,
+      homeDirectory: root,
+      resolveExecutable: async () => "/usr/bin/example",
+      runner: async () => ({
+        code, signal: null, stdout: Buffer.from("example 1.2.3"), stderr: "", outputTooLarge: false,
+      }),
+    });
+    const [entry] = await apps.load();
+    await apps.approve(entry!);
+
+    // Nothing tracked: a live probe reads a version but creates no record.
+    const live = await apps.inspect(entry!);
+    assert.equal(live.status, "installed");
+    assert.equal(live.installedVersion, "1.2.3");
+    assert.equal(live.executable, "/usr/bin/example");
+    assert.deepEqual(await apps.trackedApps(), []);
+
+    // A record for another recipe file is a different installation.
+    await writeRecord("/other/example.json", "1.0.0");
+    await apps.inspect(entry!);
+    assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.0.0");
+
+    // The matching record moves forward to the version the probe verified.
+    await writeRecord(canonical, "1.0.0");
+    await apps.inspect(entry!);
+    assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.2.3");
+
+    // A record ahead of the probe is never downgraded.
+    await writeRecord(canonical, "9.9.9");
+    await apps.inspect(entry!);
+    assert.equal((await apps.trackedApps())[0]?.installedVersion, "9.9.9");
+
+    // A failed probe writes nothing.
+    await writeRecord(canonical, "1.0.0");
+    code = 1;
+    assert.equal((await apps.inspect(entry!)).status, "not installed");
+    assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.0.0");
+
+    // A cached inspection stays command-free and never reconciles.
+    let calls = 0;
+    const cached = await createAppOperations({
+      recipesDirectory: root,
+      homeDirectory: root,
+      resolveExecutable: async () => "/usr/bin/example",
+      runner: async () => {
+        calls++;
+        return { code: 0, signal: null, stdout: Buffer.from("example 1.2.3"), stderr: "", outputTooLarge: false };
+      },
+    }).inspect(entry!, { installedVersion: "1.0.0" });
+    assert.equal(cached.status, "installed");
+    assert.equal(cached.installedVersion, "1.0.0");
+    assert.equal(calls, 0);
+    assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.0.0");
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
   }
 });
 

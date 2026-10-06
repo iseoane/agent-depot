@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -42,6 +43,24 @@ test("approved GitHub latest check offers an update and execution records verifi
     assert.equal((await f.apps.checkUpdate(f.entry)).status, "update available");
     assert.equal((await f.apps.executeLifecycle(await f.apps.planLifecycle(f.entry, "update"), true)).status, "installed");
     assert.equal((await f.apps.trackedApps())[0]?.installedVersion, "2.0.0");
+  } finally { await rm(f.home, { recursive: true, force: true }); }
+});
+
+test("an update check reconciles a tracked version that moved outside Agent Depot", async () => {
+  const f = await fixture({ npm: "example" }, async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })));
+  try {
+    await f.apps.approve(f.entry);
+    const record = path.join(f.home, "app-installations", `${createHash("sha256").update("example").digest("hex")}.json`);
+    await mkdir(path.join(f.home, "app-installations"), { recursive: true, mode: 0o700 });
+    await writeFile(record, JSON.stringify({ name: "example", recipeFile: f.entry.canonicalFile!, installedVersion: "1.0.0" }));
+    // The binary was upgraded by hand; the record still names 1.0.0.
+    const upgraded = createAppOperations({ ...f.environment, runner: async () => ({
+      code: 0, signal: null, stdout: Buffer.from("2.0.0"), stderr: "", outputTooLarge: false,
+    }) });
+    const check = await upgraded.checkUpdate(f.entry);
+    assert.equal(check.status, "current");
+    assert.equal(check.installedVersion, "2.0.0");
+    assert.equal((await upgraded.trackedApps())[0]?.installedVersion, "2.0.0");
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
 

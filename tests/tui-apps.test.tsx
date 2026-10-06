@@ -7,6 +7,7 @@ import { render } from "ink-testing-library";
 import { renderExpanded } from "./render-expanded.js";
 import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
+import { loadInstallations } from "../src/tui/installations.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
@@ -15,6 +16,8 @@ interface FixtureSetup {
   readonly apps: ReturnType<typeof createAppOperations>;
   readonly appEnvironment: AppEnvironment;
   readonly commands: string[];
+  /** Changes what the installed binary reports, as an upgrade outside Agent Depot would. */
+  setVersion(version: string): void;
 }
 
 async function fixture(
@@ -32,7 +35,9 @@ async function fixture(
     latest: { npm: "demo" }, setup: { pi: { argv: ["demo", "setup"] } }, teardown: { pi: { manual: "demo teardown manually" } },
   }));
   let installed = false;
+  let reportedVersion = "1.0.0";
   const commands: string[] = [];
+  const setVersion = (version: string) => { reportedVersion = version; };
   const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory,
     resolveExecutable,
     fetch: async () => { throw new Error("Latest must not run in Installations"); },
@@ -42,15 +47,15 @@ async function fixture(
       if (args[0] === "install" && failure === "exit") return { code: 1, signal: null, stdout: Buffer.from("failed installer"), stderr: "", outputTooLarge: false };
       if (args[0] === "install") installed = true;
       if (args[0] === "uninstall") installed = false;
-      return { code: args[0] === "version" && !installed ? 1 : 0, signal: null, stdout: Buffer.from("1.0.0"), stderr: "", outputTooLarge: false };
+      return { code: args[0] === "version" && !installed ? 1 : 0, signal: null, stdout: Buffer.from(reportedVersion), stderr: "", outputTooLarge: false };
     },
   };
   const apps = createAppOperations(appEnvironment);
-  await beforeRender?.({ home, apps, appEnvironment, commands });
+  await beforeRender?.({ home, apps, appEnvironment, commands, setVersion });
   const view = await renderExpanded(<InstallationsView operations={createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") })}
     environment={{ homeDirectory: home, projectRoot: home, appEnvironment }} listHeight={20} />);
   t.after(async () => { view.unmount(); await rm(home, { recursive: true, force: true, maxRetries: 3 }); });
-  return { view, apps, commands, home, installedManually: () => { installed = true; } };
+  return { view, apps, commands, home, appEnvironment, setVersion, installedManually: () => { installed = true; } };
 }
 
 test("Apps are visible without running unapproved commands or startup latest lookups", async t => {
@@ -167,6 +172,34 @@ test("approved Apps stay cached at startup and version checks are lazy on focus"
   assert.deepEqual(commands, ["version"]);
   view.stdin.write("kj");
   await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("> ") && line.includes("demo")));
+  assert.deepEqual(commands, ["version"]);
+});
+
+test("focusing a tracked App records the live version when the binary moved ahead", async t => {
+  const { view, apps, commands, home, appEnvironment } = await fixture(t, undefined, async ({ apps, commands, setVersion }) => {
+    const [entry] = await apps.load();
+    await apps.approve(entry!);
+    await apps.executeLifecycle(await apps.planLifecycle(entry!, "install"), true);
+    setVersion("2.0.0");
+    commands.length = 0;
+  });
+  const listed = await waitForFrame(view.lastFrame, frame => frame.includes("demo  1.0.0 (recorded)"));
+  assert.ok(listed.includes("demo  1.0.0 (recorded)"), "the cached row does not say the version is recorded");
+  assert.deepEqual(commands, []);
+  assert.equal((await apps.trackedApps())[0]?.installedVersion, "1.0.0");
+
+  await selectDemo(view);
+  const probed = await waitForFrame(view.lastFrame, frame => frame.includes("demo  2.0.0") && !frame.includes("(recorded)"));
+  assert.ok(probed.includes("demo  2.0.0"));
+  assert.deepEqual(commands, ["version"]);
+  assert.equal((await apps.trackedApps())[0]?.installedVersion, "2.0.0");
+
+  // A reload reads the reconciled record, so the corrected version survives the view.
+  const reloaded = await loadInstallations(
+    createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") }),
+    { homeDirectory: home, projectRoot: home, appEnvironment },
+  );
+  assert.equal(reloaded.apps?.[0]?.inspection.installedVersion, "2.0.0");
   assert.deepEqual(commands, ["version"]);
 });
 
