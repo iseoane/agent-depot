@@ -4,7 +4,7 @@ description: "Trigger: App recipe creation or repair. Research an App's actual i
 license: MIT
 metadata:
   author: "iseoane"
-  version: "1.1"
+  version: "1.2"
 ---
 
 ## Activation Contract
@@ -47,7 +47,7 @@ Check installation **and** update, uninstall, version/latest and each Host setup
 
 ### Homebrew checklist
 
-Inspect `brew --version`, `brew help install`, `brew help upgrade`, `brew help uninstall`, `brew tap` and `brew list --versions`. Resolve `brew` from Agent Depot's PATH. Check the actual tap formula/cask and its release rather than trusting a possibly stale README. Use supported non-interactive flags for install/update and `--formula` or `--cask` when names conflict. Do not assume `brew install owner/tap/name` registers a missing tap automatically.
+Inspect `brew --version`, `brew help install`, `brew help upgrade`, `brew help uninstall`, `brew tap` and `brew list --versions`. Resolve `brew` from Agent Depot's PATH. Check the actual tap formula/cask and its release rather than trusting a possibly stale README. Homebrew auto-updates taps only for `install`, `outdated`, `upgrade`, `bundle`, `release` and `tap <name>`, never `info`, so `brew info --json=v2 <tap>/<formula>` reports the local clone's last refresh and lags a published release. When the tap mirrors a GitHub release, declare `latest` as `{"github": "owner/repo"}`; install and upgrade refresh the tap themselves. Use supported non-interactive flags for install/update and `--formula` or `--cask` when names conflict. Do not assume `brew install owner/tap/name` registers a missing tap automatically.
 
 For example, Homebrew 7.0.8 encountered during recipe research required an explicit `brew tap gentleman-programming/tap`; its install help documented ask-by-default and `--yes`. This is version-specific evidence, not a universal flag or a claim about when the behavior changed. Recheck the user's installed version.
 
