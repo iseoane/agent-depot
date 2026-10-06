@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   buildComponentInventory,
   bundleOwnedSkillMatcher,
+  bundleOwnedSkillNameMatcher,
   claudeMarketplaceName,
   discoverBundlesInSnapshot,
   PackageManifestError,
@@ -86,6 +87,69 @@ test("a Pi package with no pi key discovers the same inventory as the explicit m
     paths: ["skills"],
     skillNames: ["foo"],
   });
+});
+
+test("a shared skill repository with a plain package.json is one Claude bundle, not a Pi bundle or a duplicate", async () => {
+  const descriptors = discoverBundlesInSnapshot(await readFixtureFiles("matt-skills"), {});
+  assert.equal(descriptors.length, 1);
+  const claude = descriptors[0];
+  assert.equal(claude.host, "claude");
+  assert.deepEqual(claude.coordinates, { host: "claude", marketplaceRoot: "", pluginName: "mattpocock-skills" });
+  assert.deepEqual(claude.version, { kind: "manifest-version", version: "1.3.1", declaredBy: "bundle" });
+  assert.deepEqual(claude.warnings, []);
+  assert.equal(descriptors.some((descriptor) => descriptor.host === "pi"), false);
+  const skills = claude.components.find((component) => component.kind === "skills");
+  assert.deepEqual(skills?.skillNames, ["tdd", "teach"]);
+});
+
+test("the guard attributes a shared skill to the one bound Claude bundle", async () => {
+  const descriptors = discoverBundlesInSnapshot(await readFixtureFiles("matt-skills"), {});
+  const ownedByPath = bundleOwnedSkillMatcher(descriptors);
+  const ownedByName = bundleOwnedSkillNameMatcher(descriptors);
+  assert.equal(ownedByPath("skills/engineering/tdd")?.host, "claude");
+  assert.equal(ownedByName("tdd")?.host, "claude");
+});
+
+test("a root package.json with only a shared skills directory is not a Pi package", () => {
+  const files: readonly SourceContentFile[] = [
+    { path: "package.json", content: JSON.stringify({ name: "skills-repo", version: "1.0.0" }) },
+    { path: "skills/foo/SKILL.md", content: "---\nname: foo\ndescription: foo\n---\n" },
+  ];
+  assert.deepEqual(discoverBundlesInSnapshot(files, {}), []);
+});
+
+test("the pi-package keyword makes a skills-only conventional package a Pi bundle", () => {
+  const files: readonly SourceContentFile[] = [
+    { path: "package.json", content: JSON.stringify({ name: "pi-skills", keywords: ["pi-package"], version: "1.0.0" }) },
+    { path: "skills/foo/SKILL.md", content: "---\nname: foo\ndescription: foo\n---\n" },
+  ];
+  const descriptors = discoverBundlesInSnapshot(files, {});
+  assert.equal(descriptors.length, 1);
+  assert.equal(descriptors[0].host, "pi");
+  assert.equal(descriptors[0].name, "pi-skills");
+});
+
+test("a Pi-native extensions directory alone is enough to recognize a conventional Pi bundle", () => {
+  const files: readonly SourceContentFile[] = [
+    { path: "package.json", content: JSON.stringify({ name: "pi-ext", version: "1.0.0" }) },
+    { path: "extensions/index.ts", content: "export default {};\n" },
+  ];
+  const descriptors = discoverBundlesInSnapshot(files, {});
+  assert.equal(descriptors.length, 1);
+  assert.equal(descriptors[0].host, "pi");
+  assert.deepEqual(descriptors[0].components.map((component) => component.kind), ["extensions"]);
+});
+
+test("a marketplace source of the root binds the root plugin once", () => {
+  const pluginRaw = JSON.stringify({ name: "p", version: "1.3.1", skills: ["./skills/tdd"] });
+  for (const source of [".", "./"]) {
+    const marketplaceRaw = JSON.stringify({ name: "m", plugins: [{ name: "p", source }] });
+    const descriptors = parseClaudeMarketplace(marketplaceRaw, "", (root) => root === "" ? pluginRaw : undefined);
+    assert.equal(descriptors.length, 1, `source ${source}`);
+    assert.deepEqual(descriptors[0].coordinates, { host: "claude", marketplaceRoot: "", pluginName: "p" });
+    assert.deepEqual(descriptors[0].version, { kind: "manifest-version", version: "1.3.1", declaredBy: "bundle" });
+    assert.deepEqual(descriptors[0].warnings, []);
+  }
 });
 
 test("manifestDigest changes when any manifest byte changes and is stable across a rebuild", async () => {
