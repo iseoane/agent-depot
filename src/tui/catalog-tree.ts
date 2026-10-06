@@ -1,7 +1,8 @@
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { Source } from "../sources.js";
 import { githubTreeLocation } from "../git-source.js";
-import { bundleRoot, type BundleDescriptor } from "../package-model.js";
+import { bundleRoot, type BundleDescriptor, type PackageSelection } from "../package-model.js";
+import type { ProjectSource } from "../project-manifest.js";
 import { packageOwnedSkillMatcher } from "../package-owned-skills.js";
 import { packageVersionLabel } from "./package-rows.js";
 import { defaultExpanded, type Expanded, type TreeNode, type VisibleRow } from "./tree.js";
@@ -11,7 +12,17 @@ const DESCRIPTION_LIMIT = 60;
 /** A bundle of one Source, as the Catalog groups it under that Source. */
 export interface BundleEntry {
   readonly sourceId: string;
+  /** The portable selection the Package lifecycle takes: the descriptor's coordinates, `latest`, and the registered Source. */
+  readonly selection: PackageSelection;
   readonly descriptor: BundleDescriptor;
+}
+
+/** The package selection of a discovered descriptor, bound to the Source it was discovered in. */
+export function bundleSelection(descriptor: BundleDescriptor, source: ProjectSource): PackageSelection {
+  const coordinates = descriptor.coordinates;
+  return coordinates.host === "pi"
+    ? { host: "pi", root: coordinates.root, source, version: { policy: "latest" } }
+    : { host: "claude", marketplaceRoot: coordinates.marketplaceRoot, pluginName: coordinates.pluginName, source, version: { policy: "latest" } };
 }
 
 /** A Source, a Packages group, a bundle or an installable Skill. */

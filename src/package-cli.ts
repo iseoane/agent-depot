@@ -2,7 +2,7 @@ import { sourceIdForUrl } from "./git-source.js";
 import { PACKAGE_HOSTS, bundleRoot, describeCoordinates, selectionKey, type BundleDescriptor, type InstalledBundleEvidence, type InstalledPackage, type PackageAction, type PackageComponent, type PackageComponentEffect, type PackageCoordinates, type PackageHost, type PackageInspection, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection, type PackageUpdateCheck, type PackageVersionEvidence } from "./package-model.js";
 import type { PackageOperations } from "./package-flow.js";
 import type { ProjectSource } from "./project-manifest.js";
-import type { Source, SourceOperations } from "./sources.js";
+import { projectSourceOf, type Source, type SourceOperations } from "./sources.js";
 import { CliUsageError } from "./usage-error.js";
 
 export const PACKAGE_USAGE = "Usage: agent-depot package list; package discover <source-id>; package inspect <selection> --host <host>; package approve <selection> --host <host> [--action <install|update|uninstall>]; package install|update|uninstall <selection> --host <host> [--yes]; package forget <selection> --host <host> --yes";
@@ -343,25 +343,14 @@ async function resolveSource(sources: SourceOperations, token: string): Promise<
       : `Source token ${JSON.stringify(token)} matches more than one Source`);
   }
   const source = matches[0]!;
-  return Object.freeze({ source, projectSource: sourceToProjectSource(source) });
+  return Object.freeze({ source, projectSource: projectSourceOf(source) });
 }
 
 function sourceMatchesToken(source: Source, token: string): boolean {
   if (source.id === token) {
     return true;
   }
-  return source.kind === "git" && (source.url === token || sourceToken(sourceToProjectSource(source)) === token);
-}
-
-function sourceToProjectSource(source: Source): ProjectSource {
-  if (source.kind === "builtin") {
-    return Object.freeze({ kind: "builtin" as const, id: source.id });
-  }
-  return Object.freeze({
-    kind: "external" as const,
-    url: source.url,
-    ...(source.ref === undefined ? {} : { ref: source.ref }),
-  });
+  return source.kind === "git" && (source.url === token || sourceToken(projectSourceOf(source)) === token);
 }
 
 function sourceToken(source: ProjectSource): string {

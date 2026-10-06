@@ -2,11 +2,11 @@ import type { Key } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState, type MutableRefObject } from "react";
 
 import type { SkillCandidate } from "../skill-discovery.js";
-import type { Source, SourceOperations } from "../sources.js";
+import { projectSourceOf, type Source, type SourceOperations } from "../sources.js";
 import type { ActionMode } from "./catalog-actions.js";
 import { filterReducer, initialFilter, type FilterEvent, type FilterState } from "./catalog-filter.js";
 import { loadInstalledSkills, NO_INSTALLED, type InstalledSkills } from "./catalog-installs.js";
-import { sourceLabel, type BundleEntry } from "./catalog-tree.js";
+import { sourceLabel, bundleSelection, type BundleEntry } from "./catalog-tree.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 
 export type LoadState =
@@ -50,8 +50,12 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
         // Bundles read the same snapshots and group under their Source; one failure never hides the Skills.
         const packages = packageOperationsOf(env);
         for (const id of ids) {
+          const source = sources.find((candidate) => candidate.id === id);
+          if (source === undefined) continue;
           try {
-            for (const descriptor of await packages.discover([id])) bundles.push({ sourceId: id, descriptor });
+            for (const descriptor of await packages.discover([id])) {
+              bundles.push({ sourceId: id, selection: bundleSelection(descriptor, projectSourceOf(source)), descriptor });
+            }
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
             warnings.push(`Source ${labels.get(id) ?? id} Packages unavailable: ${detail}`);
