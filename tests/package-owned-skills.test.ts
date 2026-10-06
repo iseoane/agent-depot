@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+// Isolates the process even when this module runs without the `--import` flag,
+// which is how a direct `node --test` or `tsx --test` invocation escapes a
+// shell's XDG_STATE_HOME into the developer's real user state.
+import "./isolated-env.js";
+
 import { runCli } from "../src/cli.js";
 import { GitSourceAccessAdapter, defaultGitSourceCachePath, sourceIdForUrl } from "../src/git-source.js";
 import { bundleOwnedSkillMatcher, bundleOwnedSkillNameMatcher, discoverBundlesInSnapshot } from "../src/package-bundles.js";
@@ -76,9 +81,14 @@ function cliInstall(dependencies: Parameters<typeof runCli>[1], skillPath: strin
   ], dependencies);
 }
 
+/** The user-state directory the default Source and Package resolvers pick under a fixture home. */
+function fixtureStateDirectory(home: string): string {
+  return path.join(home, ".local", "state", "agent-depot");
+}
+
 /** Writes the recorded selections to the default Package state store under this home. */
 async function recordSelections(home: string, selections: readonly PackageSelection[]): Promise<void> {
-  const store = new PackageStateStore(path.join(home, ".local", "state", "agent-depot"));
+  const store = new PackageStateStore(fixtureStateDirectory(home));
   for (const selection of selections) {
     await store.upsert({ selection, installId: "test-selection" });
   }
@@ -302,7 +312,7 @@ test("the CLI uninstall refuses a bundle-owned unmanaged path through the regist
           },
         },
       }).refresh(source);
-      const operations = createSourceOperations({ homeDirectory: home });
+      const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(fixtureStateDirectory(home), "sources.json") });
       await operations.addGitSource(url);
       await recordSelections(home, selectionsFor(files, source));
       const skill = path.join(home, ".agents", "skills", "poteto-mode");
