@@ -64,3 +64,12 @@ repository does not change the reporter's recipe; it stays their file.
   lagging-tap latest expectation, which the recipe repair owns.
 - `pnpm test` passes 953/953. `pnpm typecheck`, `pnpm lint` and
   `pnpm audit:dead-code` pass.
+
+### Commits
+
+- `5b7c5af` reproduces the stale tracked version and the missed update, with the harness and the
+  recorded runs.
+- `f025d8c` adds the regression tests. All three fail at that commit, one in each of
+  `tests/app-flow.test.ts`, `tests/app-updates.test.ts` and `tests/tui-apps.test.tsx`.
+- `d3a25cb` reconciles the tracked record after a live probe and marks a recorded version.
+- `6c7521c` records the Homebrew `info` freshness rule in the recipe skill.
