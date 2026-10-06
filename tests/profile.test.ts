@@ -44,6 +44,10 @@ test("Package declarations round-trip canonically and an older profile parses as
   const older = { ...profile } as Partial<typeof profile>;
   delete older.packages;
   assert.deepEqual(parseProfile(older), { ...profile, packages: [] });
+  assert.deepEqual(Object.keys(JSON.parse(serializeProfile(parseProfile(older)))),
+    ["format", "agentDepotVersion", "sources", "skills", "apps"]);
+  assert.deepEqual(Object.keys(JSON.parse(serializeProfile(parsed))),
+    ["format", "agentDepotVersion", "sources", "skills", "apps", "packages"]);
 });
 
 test("Package declarations refuse receipts, machine paths and non-canonical coordinates", () => {

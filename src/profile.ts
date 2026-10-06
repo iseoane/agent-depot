@@ -202,6 +202,12 @@ export function parseProfile(value: unknown): Profile {
   return { format: PROFILE_FORMAT, agentDepotVersion: root.agentDepotVersion, sources, skills: sortedSkills, apps, packages };
 }
 
+/**
+ * An empty Package block is omitted, so an export with no Packages stays readable
+ * by an Agent Depot version that predates the block.
+ */
 export function serializeProfile(profile: Profile): string {
-  return `${JSON.stringify(parseProfile(profile), null, 2)}\n`;
+  const parsed = parseProfile(profile);
+  const { packages, ...rest } = parsed;
+  return `${JSON.stringify(packages.length === 0 ? rest : parsed, null, 2)}\n`;
 }
