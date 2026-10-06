@@ -5,6 +5,7 @@ import { render } from "ink-testing-library";
 import { renderExpanded } from "./render-expanded.js";
 
 import { parseProjectManifest, ProjectManifestStore, type ProjectSkillSelection } from "../src/project-manifest.js";
+import type { BundleDescriptor } from "../src/package-model.js";
 import type { SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
@@ -17,6 +18,7 @@ const RIGHT = "\u001B[C";
 const LEFT = "\u001B[D";
 const UP = "\u001B[A";
 const ESC = "\u001B";
+const ENTER = "\r";
 
 /** Serves an empty project manifest so these tests never read the real cwd manifest. */
 class EmptyManifestStore extends ProjectManifestStore {
@@ -388,6 +390,53 @@ test("CatalogView shows repository names rather than Git IDs", async () => {
     const frame = await waitForFrame(lastFrame, /cursor\/plugins · pstack @ main \(1\)/);
     assert.ok(!frame.includes(source.id));
   } finally { unmount(); }
+});
+
+
+test("CatalogView lists a Source's bundles and dims the Skills they own", async () => {
+  const source = { id: "git:1234567890abcdef12345678", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
+  const pi: BundleDescriptor = {
+    host: "pi",
+    coordinates: { host: "pi", root: "plugins/pstack" },
+    name: "pstack",
+    version: { kind: "manifest-version", version: "1.2.0", declaredBy: "bundle" },
+    components: [{
+      kind: "skills", ownership: "skill-category", effect: "instruction",
+      paths: ["plugins/pstack/skills"], skillNames: ["how"],
+    }],
+    warnings: [],
+    manifestDigest: "a".repeat(64),
+  };
+  const claude: BundleDescriptor = {
+    ...pi,
+    host: "claude",
+    coordinates: { host: "claude", marketplaceRoot: "plugins/pstack", pluginName: "pstack" },
+    version: undefined,
+  };
+  const operations: SourceOperations = {
+    ...operationsFor(async () => [
+      { sourceId: source.id, path: "plugins/pstack/skills/how", name: "how", description: "How skill" },
+      { sourceId: source.id, path: "plugins/loose/loose", name: "loose", description: "Loose skill" },
+    ]),
+    async listSources() { return [source]; },
+  };
+  const packages = fakePackageOperations({ discover: async () => [pi, claude] });
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /iseoane\/pstack \(2\)/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => frame.split("\n").some((line) => line.startsWith("> ") && line.includes("Packages (2)")));
+    stdin.write(ENTER);
+    const frame = await waitForFrame(lastFrame, /Package pstack \(pi\) {2}1\.2\.0/);
+    assert.match(frame, /Package pstack \(pi\) {2}1\.2\.0/);
+    assert.match(frame, /Package pstack \(claude\) {2}unknown/);
+    const looseLine = frame.split("\n").find((line) => line.includes("loose")) ?? "";
+    assert.ok(!looseLine.includes("provided by"), "a loose Skill is never dimmed as bundle-owned");
+  } finally {
+    unmount();
+  }
 });
 
 
