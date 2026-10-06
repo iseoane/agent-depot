@@ -10,6 +10,7 @@ import { GitSourceAccessAdapter } from "../src/git-source.js";
 import { createSourceOperations, type SourceOperationsOptions } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import { ProfileView } from "../src/tui/profile-view.js";
+import { fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
@@ -161,6 +162,49 @@ test("export renders real group headers and plain exclusions rather than synthet
   assert.match(frame, /\[x\].*Sources: https:\/\/example.com\/skills.git/);
   assert.match(frame, /\[x\].*Skills: demo/);
   assert.doesNotMatch(frame, /\[ \].*Excluded built-in/);
+});
+
+test("Packages appear in the export checklist and import previews the recorded selection", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "profile-tui-packages-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const { operations: exporter } = fakePackageOperations({ recorded: [installedPackage] });
+  const view = render(<ProfileView operations={operations} environment={{ homeDirectory: home, packages: exporter }} />);
+  t.after(() => view.unmount());
+  view.stdin.write("e");
+  const checklist = await waitForFrame(view.lastFrame, /Packages: Package pi plugins\/demo/);
+  assert.match(checklist, /\[x\].*Packages: Package pi plugins\/demo \(latest\)/);
+  view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Profile path:/);
+  const file = path.join(home, "out.json");
+  view.stdin.write(file);
+  await waitForFrame(view.lastFrame, frame => frame.includes(file));
+  view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Apply Profile/);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Exported profile to/);
+  const exported = JSON.parse(await readFile(file, "utf8"));
+  assert.deepEqual(parseProfile(exported).packages, [piPackage]);
+
+  const input = path.join(home, "in.json");
+  await writeFile(input, JSON.stringify({ ...exported, sources: [], skills: [], apps: [] }));
+  const { operations: importer, evidence } = fakePackageOperations({});
+  const importing = render(<ProfileView operations={operations} environment={{ homeDirectory: home, packages: importer }} />);
+  t.after(() => importing.unmount());
+  importing.stdin.write("i");
+  await waitForFrame(importing.lastFrame, /Profile path:/);
+  importing.stdin.write(input);
+  await waitForFrame(importing.lastFrame, frame => frame.includes(input));
+  importing.stdin.write("\r");
+  await waitForFrame(importing.lastFrame, /add: Package pi plugins\/demo/);
+  importing.stdin.write("\r");
+  const preview = await waitForFrame(importing.lastFrame, /Apply Profile/);
+  assert.match(preview, /select records the choice; it runs no host command/);
+  importing.stdin.write("y");
+  await waitForFrame(importing.lastFrame, /added: Package pi plugins\/demo/);
+  assert.deepEqual(evidence.plans, ["select"]);
+  assert.deepEqual(evidence.approvals, ["select"]);
+  assert.deepEqual(evidence.executions, [{ action: "select", confirmed: true }]);
 });
 
 test("space and all toggle export choices; an empty selection stops before the file prompt", async t => {
