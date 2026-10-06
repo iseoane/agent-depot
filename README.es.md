@@ -272,7 +272,7 @@ registrado y `update apply` acepta `--package <selection>` repetible o incluye l
 Packages actualizables con `--all`. Un Package con estado de versión `unknown`
 nunca se ofrece como actualización. Los Packages se ejecutan después de los Skills
 y las Apps, cada Package seleccionado previsualiza su plan congelado y se aprueba
-primero el recibo de actualización que falte. El ámbito de proyecto nunca lee ni
+mediante `package approve --action update` el recibo de actualización que falte antes de ejecutar desde la CLI. El ámbito de proyecto nunca lee ni
 selecciona un Package.
 
 Un Skill registrado en una ruta de proyecto no canónica (fuera de
@@ -748,7 +748,7 @@ declaración, los ejecuta mediante el ejecutor de comandos sin shell tras la apr
 y lee la versión instalada de los archivos de estado del Host. El Host posee lo que
 está instalado. Agent Depot posee el registro de selección y el recibo de lo que
 delegó. Los Skills propios de un bundle nunca se ofrecen para adopción ni se instalan
-por segunda vez, porque permanecen en las ubicaciones canónicas del motor de Skills.
+por segunda vez, porque el Host posee sus archivos y ubicaciones.
 
 ### Añadir una Source y descubrir sus bundles
 
@@ -768,7 +768,7 @@ un bundle de Claude desde su marketplace dentro del repositorio:
 
 ```text
 Package git:<source-id>::pi:.: pstack
-Package git:<source-id>::claude:plugins/pstack#pstack: pstack
+Package git:<source-id>::claude:.#pstack: pstack
 ```
 
 Cada línea de componente indica un tipo, una propiedad (`skill-category` o
@@ -795,16 +795,16 @@ agent-depot package approve git:<source-id>::pi:. --host pi --action install
 agent-depot package install git:<source-id>::pi:. --host pi --yes
 
 # Plugin de Claude Code desde el marketplace dentro del repositorio
-agent-depot package inspect git:<source-id>::claude:plugins/pstack#pstack --host claude
-agent-depot package approve git:<source-id>::claude:plugins/pstack#pstack --host claude --action install
-agent-depot package install git:<source-id>::claude:plugins/pstack#pstack --host claude --yes
+agent-depot package inspect git:<source-id>::claude:.#pstack --host claude
+agent-depot package approve git:<source-id>::claude:.#pstack --host claude --action install
+agent-depot package install git:<source-id>::claude:.#pstack --host claude --yes
 ```
 
 Los comandos `install`, `update` y `uninstall` imprimen la previsualización completa y
 después terminan con código distinto de cero hasta que exista el recibo de la acción
 y se indique `--yes`. La previsualización muestra el origen y el commit resueltos, el
 descriptor, el inventario de componentes con su propiedad y efecto, cada comando del
-Host con su ejecutable resuelto, las coordenadas registradas que la acción puede
+Host con el nombre de su ejecutable, las coordenadas registradas que la acción puede
 cambiar (`affects`), el directorio de trabajo, el entorno y cualquier advertencia.
 Inmediatamente antes de la ejecución, Agent Depot vuelve a derivar la declaración y se
 detiene con `stale plan` si el manifiesto, el commit, la identidad de instalación o
@@ -871,7 +871,7 @@ agent-depot export > profile.json
 agent-depot export --out profile.json
 agent-depot export --no-apps --source <source-id> --skill doctor-md-agents
 agent-depot export --no-sources --no-skills --app my-tool --app another-tool
-agent-depot export --no-packages --package git:<source-id>::pi:.
+agent-depot export --package git:<source-id>::pi:.
 ```
 
 Todo lo portable se selecciona por defecto. `--no-sources`, `--no-skills`,

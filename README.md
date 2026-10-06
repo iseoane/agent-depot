@@ -249,7 +249,7 @@ For `--scope user-global` only, the check also assesses every recorded Package a
 `update apply` accepts repeatable `--package <selection>` or includes updateable
 Packages under `--all`. A Package with `unknown` version status is never offered as
 an update. Packages run after Skills and Apps, each selected Package previews its
-frozen plan, and a Package whose update receipt is missing is approved first. Project
+frozen plan, and a Package whose update receipt is missing requires a separate `package approve --action update` before CLI execution. Project
 scope never reads or selects a Package.
 
 A Skill tracked at a non-canonical project path (outside `.agents/skills/<name>` and
@@ -680,7 +680,7 @@ runs them through the no-shell command runner after approval, and reads the
 installed version back from the Host's state files. The Host owns what is
 installed. Agent Depot owns the selection record and the receipt for what it
 delegated. A bundle's own Skills are never offered for adoption or installed a
-second time, because they stay under the Skill engine's canonical locations.
+second time, because the Host owns their files and locations.
 
 ### Add a Source and discover its bundles
 
@@ -700,7 +700,7 @@ bundle from its in-repo marketplace:
 
 ```text
 Package git:<source-id>::pi:.: pstack
-Package git:<source-id>::claude:plugins/pstack#pstack: pstack
+Package git:<source-id>::claude:.#pstack: pstack
 ```
 
 Each component line names a kind, an ownership (`skill-category` or `host-only`),
@@ -727,15 +727,15 @@ agent-depot package approve git:<source-id>::pi:. --host pi --action install
 agent-depot package install git:<source-id>::pi:. --host pi --yes
 
 # Claude Code plugin from the in-repo marketplace
-agent-depot package inspect git:<source-id>::claude:plugins/pstack#pstack --host claude
-agent-depot package approve git:<source-id>::claude:plugins/pstack#pstack --host claude --action install
-agent-depot package install git:<source-id>::claude:plugins/pstack#pstack --host claude --yes
+agent-depot package inspect git:<source-id>::claude:.#pstack --host claude
+agent-depot package approve git:<source-id>::claude:.#pstack --host claude --action install
+agent-depot package install git:<source-id>::claude:.#pstack --host claude --yes
 ```
 
 The `install`, `update` and `uninstall` commands print the full preview, then exit
 non-zero until both the action's receipt exists and `--yes` is given. The preview
 shows the resolved origin and commit, the descriptor, the component inventory with
-ownership and effect, every Host command with its resolved executable, the
+ownership and effect, every Host command with its executable name, the
 recorded coordinates the action can change (`affects`), the working directory, the
 environment, and any warning. Immediately before execution, Agent Depot re-derives
 the declaration and stops with `stale plan` if the manifest, commit, install
@@ -799,7 +799,7 @@ agent-depot export > profile.json
 agent-depot export --out profile.json
 agent-depot export --no-apps --source <source-id> --skill doctor-md-agents
 agent-depot export --no-sources --no-skills --app my-tool --app another-tool
-agent-depot export --no-packages --package git:<source-id>::pi:.
+agent-depot export --package git:<source-id>::pi:.
 ```
 
 Everything portable is selected by default. `--no-sources`, `--no-skills`,
