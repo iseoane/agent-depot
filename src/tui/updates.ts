@@ -66,7 +66,7 @@ export interface PackageUpdateRow {
   readonly scope: "user-global";
   readonly check: PackageUpdateCheck;
   readonly path: string;
-  readonly policy: "latest";
+  readonly policy: string;
   readonly installed: string;
   readonly available: string;
   readonly status: SkillUpdateRow["status"];
@@ -268,7 +268,7 @@ export async function loadUpdateRows(
       scope: "user-global",
       check,
       path: `Package: ${describeCoordinates(check.installed.selection)}`,
-      policy: "latest",
+      policy: formatVersionPolicy(check.installed.selection.version),
       installed: recordedVersionLabel(check.installed),
       available: check.available === undefined ? "?" : packageVersionLabel(check.available),
       status: packageStatusLabel(check.status),
