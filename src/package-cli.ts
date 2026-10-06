@@ -92,7 +92,7 @@ export async function runPackageCommand(
   }
   if (command === "forget") {
     const parsed = parseSelectionArgs(args, { allowConfirmation: true });
-    const selection = await resolveSelection(parsed, packages, sources, true);
+    const selection = await resolveSelection(parsed, packages, sources);
     output(`Package forget preview: ${formatPackageSelection(selection)}`);
     output("  Host commands: none; only Agent Depot's Package selection record is removed");
     if (!parsed.confirmed) {
@@ -204,12 +204,12 @@ async function resolveSelection(
   args: SelectionArgs,
   packages: PackageOperations,
   sources: SourceOperations,
-  preferRecorded = false,
 ): Promise<PackageSelection> {
   const token = parseSelectionToken(args.selection);
   const host = resolveHost(token, args.host);
+  // The record is the user's selection, version pin included; discovery only supplies one for a bundle not recorded yet.
   const recorded = await matchRecordedSelection(packages, args.selection, token, host);
-  if (preferRecorded && recorded !== undefined) {
+  if (recorded !== undefined) {
     return recorded;
   }
   const source = await resolveSource(sources, token.sourceToken);
@@ -229,7 +229,7 @@ async function matchRecordedSelection(
   if (direct !== undefined) {
     return direct.selection;
   }
-  return records.find((record) => {
+  const candidates = records.filter((record) => {
     if (record.selection.host !== host) {
       return false;
     }
@@ -241,7 +241,9 @@ async function matchRecordedSelection(
     }
     return record.selection.marketplaceRoot === token.root &&
       (token.pluginName === undefined || record.selection.pluginName === token.pluginName);
-  })?.selection;
+  });
+  // A token that omits the plugin name is ambiguous across plugins; discovery reports it instead of guessing.
+  return candidates.length === 1 ? candidates[0]!.selection : undefined;
 }
 
 function resolveDescriptor(
