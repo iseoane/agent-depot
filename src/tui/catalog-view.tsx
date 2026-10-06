@@ -59,7 +59,12 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const skills = state.status === "ready" ? state.skills : [];
   const installable = useMemo(() => skills.filter((skill) => !isInstalled(skill, installed)), [state, installed]);
   const visible = useMemo(() => filterSkills(installable, filter.filter.query), [installable, filter.filter.query]);
-  const roots = useMemo(() => buildTree(visible, state.status === "ready" ? state.sources : [], state.status === "ready" ? state.bundles : []), [visible, state]);
+  const roots = useMemo(() => buildTree(
+    visible,
+    state.status === "ready" ? state.sources : [],
+    state.status === "ready" ? state.bundles : [],
+    state.status === "ready" ? state.activeBundles : [],
+  ), [visible, state]);
   const navigation = useTreeNavigation<NodeData>(roots, (nodes) => openByDefault(nodes, filter.queryRef.current));
   // Discovering again starts the list over.
   const { restart } = navigation;

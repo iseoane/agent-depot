@@ -1,18 +1,20 @@
 import type { Key } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState, type MutableRefObject } from "react";
 
+import { packageSelectionFor, type BundleDescriptor } from "../package-model.js";
+import type { DiscoveredBundle } from "../package-owned-skills.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import { projectSourceOf, type Source, type SourceOperations } from "../sources.js";
 import type { ActionMode } from "./catalog-actions.js";
 import { filterReducer, initialFilter, type FilterEvent, type FilterState } from "./catalog-filter.js";
 import { loadInstalledSkills, NO_INSTALLED, type InstalledSkills } from "./catalog-installs.js";
-import { sourceLabel, bundleSelection, type BundleEntry } from "./catalog-tree.js";
+import { sourceLabel, type BundleEntry } from "./catalog-tree.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 
 export type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly message: string }
-  | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly bundles: readonly BundleEntry[]; readonly warnings: readonly string[]; readonly sources: readonly Source[] };
+  | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly bundles: readonly BundleEntry[]; readonly activeBundles: readonly BundleDescriptor[]; readonly warnings: readonly string[]; readonly sources: readonly Source[] };
 
 /** Discovers the Skills of one Source, or of all of them, and again whenever those inputs or `reloadKey` change. */
 export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean, env: TuiEnvironment, reloadKey = 0): LoadState {
@@ -33,6 +35,7 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
         const labels = new Map(sources.map((source) => [source.id, sourceLabel(source)]));
         const skills: SkillCandidate[] = [];
         const bundles: BundleEntry[] = [];
+        const discovered: DiscoveredBundle[] = [];
         const warnings: string[] = [];
         try {
           skills.push(...await operations.discoverSkills!(ids));
@@ -53,15 +56,25 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
           const source = sources.find((candidate) => candidate.id === id);
           if (source === undefined) continue;
           try {
+            const projectSource = projectSourceOf(source);
             for (const descriptor of await packages.discover([id])) {
-              bundles.push({ sourceId: id, selection: bundleSelection(descriptor, projectSourceOf(source)), descriptor });
+              bundles.push({ sourceId: id, selection: packageSelectionFor(descriptor, projectSource), descriptor });
+              discovered.push({ source: projectSource, descriptor });
             }
           } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
             warnings.push(`Source ${labels.get(id) ?? id} Packages unavailable: ${detail}`);
           }
         }
-        if (!cancelled) setState({ status: "ready", skills, bundles, warnings, sources });
+        // Ownership is selection- or host-gated, so a loose Skill stays normal until its Package is active.
+        let activeBundles: readonly BundleDescriptor[] = [];
+        try {
+          activeBundles = (await packages.activeBundles(discovered)).map(bundle => bundle.descriptor);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          warnings.push(`Package ownership unavailable: ${detail}`);
+        }
+        if (!cancelled) setState({ status: "ready", skills, bundles, activeBundles, warnings, sources });
       } catch (error) {
         if (!cancelled) setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
       }
