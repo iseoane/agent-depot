@@ -2,7 +2,8 @@ import type { Key } from "ink";
 
 import type { SkillCandidate } from "../skill-discovery.js";
 import { type ActionMode } from "./catalog-actions.js";
-import { leavesOf, skillKey, type NodeData } from "./catalog-tree.js";
+import { packageOwnedSkillAction } from "./catalog-ownership.js";
+import { looseLeavesOf, skillKey, type NodeData } from "./catalog-tree.js";
 import type { CatalogFilterControls } from "./catalog-state.js";
 import type { PackageTarget } from "./package-actions.js";
 import { navigateTree, type TreeNavigation } from "./tree-navigation.js";
@@ -34,6 +35,10 @@ function markRow(context: CatalogBrowseContext, row: Row): void {
     context.setMessage({ kind: "error", text: "Mark skills, not source rows" });
     return;
   }
+  if (row.node.data.ownedBy !== undefined) {
+    context.setMessage({ kind: "error", text: `Package-owned Skills cannot be marked. ${packageOwnedSkillAction(row.node.data.ownedBy)}` });
+    return;
+  }
   context.setMessage(undefined);
   context.marks.setMarked(toggledMark(context.marks.markedRef.current, row.node.id));
 }
@@ -41,9 +46,9 @@ function markRow(context: CatalogBrowseContext, row: Row): void {
 /** `a`: marks every listed Skill, or clears the marks when they are all marked already. */
 function markAllListed(context: CatalogBrowseContext): void {
   const { markedRef, setMarked } = context.marks;
-  const leaves = leavesOf(context.navigation.latestRoots());
+  const leaves = looseLeavesOf(context.navigation.latestRoots());
   if (leaves.length === 0) {
-    context.setMessage({ kind: "error", text: "There are no skills to select" });
+    context.setMessage({ kind: "error", text: "There are no loose skills to select" });
     return;
   }
   context.setMessage(undefined);
@@ -60,8 +65,12 @@ function chooseHosts(context: CatalogBrowseContext, row: Row): void {
     return;
   }
   // Only what is listed installs: marks on Skills hidden by the filter are ignored.
-  const marked = leavesOf(context.navigation.latestRoots())
+  const marked = looseLeavesOf(context.navigation.latestRoots())
     .filter((skill) => context.marks.markedRef.current.has(skillKey(skill)));
+  if (marked.length === 0 && data.kind === "skill" && data.ownedBy !== undefined) {
+    context.setMessage({ kind: "error", text: packageOwnedSkillAction(data.ownedBy) });
+    return;
+  }
   const highlighted: readonly SkillCandidate[] = data.kind === "skill" ? [data.skill] : [];
   const chosen = marked.length > 0 ? marked : highlighted;
   if (chosen.length === 0) {

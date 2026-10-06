@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { Box } from "ink";
 import { render } from "ink-testing-library";
-import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
+import { Children, isValidElement, type ReactNode } from "react";
 import { renderExpanded } from "./render-expanded.js";
 
 import { parseProjectManifest, ProjectManifestStore, type ProjectSkillSelection } from "../src/project-manifest.js";
@@ -121,6 +121,13 @@ function packageDescriptor(host: "pi" | "claude", name: string, pathPrefix: stri
   };
 }
 
+function hasTextColor(node: ReactNode, color: string): boolean {
+  return Children.toArray(node).some((child) => {
+    if (!isValidElement<{ readonly color?: string; readonly children?: ReactNode }>(child)) return false;
+    return child.props.color === color || hasTextColor(child.props.children, color);
+  });
+}
+
 function ownedSkillRow(overrides: Partial<SkillCandidate> = {}, owner = packageDescriptor("pi", "pstack", "plugins/pstack/skills")): VisibleRow<NodeData> {
   const skill: SkillCandidate = {
     sourceId: "git:pstack",
@@ -232,10 +239,7 @@ test("Package-owned Catalog row text keeps readable contrast", () => {
   const element = CatalogRowLine({ row: ownedSkillRow(), selected: false, marked: false, installed: NO_INSTALLED });
   if (!isValidElement<{ readonly color?: string; readonly children?: ReactNode }>(element)) assert.fail("CatalogRowLine returned no Text element");
   assert.notEqual(element.props.color, theme.inactive);
-  const nested = Children.toArray(element.props.children).filter(
-    (child): child is ReactElement<{ readonly color?: string }> => isValidElement<{ readonly color?: string }>(child),
-  );
-  assert.ok(nested.some((child) => child.props.color === theme.marker), "the compact Package badge uses the marker colour");
+  assert.ok(hasTextColor(element.props.children, theme.marker), "the compact Package badge uses the marker colour");
 });
 
 test("CatalogView truncates long descriptions", async () => {
@@ -563,7 +567,7 @@ test("CatalogView keeps Package rows reachable and explains owned Skills without
     const owned = await waitForFrame(lastFrame, /provided by the pi Package pstack-pi/);
     assert.match(selectedLine(owned) ?? "", /create-verification-skill/);
     assert.doesNotMatch(selectedLine(owned) ?? "", /provided by the pi Package/);
-    assert.match(owned, /Install or update the Package from its Package row/);
+    assert.match(owned, /Install or update the Package from its\s+Package row/);
     stdin.write(" ");
     const markRefusal = await waitForFrame(lastFrame, /Package-owned Skills cannot be marked/);
     assert.doesNotMatch(markRefusal, /1 selected/);

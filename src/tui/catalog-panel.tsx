@@ -1,10 +1,11 @@
 import { Box, Text } from "ink";
 
 import { describeSkills, HOST_CHOICES, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
+import { packageOwnedSkillNotice, packageOwnerBadge } from "./catalog-ownership.js";
 import { skillKey } from "./catalog-tree.js";
 import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
 import type { FilterState } from "./catalog-filter.js";
-import { describeRow, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
+import { describeRow, truncateDescription, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
 import { isPackageMode, PackagePanel } from "./package-actions.js";
 import { HostChecklist, PreviewLines } from "./panel-parts.js";
 import { rowStyle } from "./theme.js";
@@ -45,14 +46,22 @@ export function CatalogRowLine({ row, selected, marked, installed }: {
   const isGroup = data.kind === "source" || data.kind === "group";
   const ownedBy = data.kind === "skill" ? data.ownedBy : undefined;
   return (
-    <Text {...rowStyle(selected)} color={isGroup ? theme.group : ownedBy === undefined ? undefined : theme.inactive}>
-      {selected ? "> " : "  "}{"  ".repeat(row.depth)}{data.kind === "skill" ? marked ? "[x] " : "[ ] " : ""}{describeRow(row)}
-      {ownedBy === undefined ? null : <Text color={theme.inactive}>{"  "}provided by the {ownedBy.host} Package {ownedBy.name}</Text>}
+    <Text {...rowStyle(selected)} color={isGroup ? theme.group : undefined} wrap="truncate-end">
+      {selected ? "> " : "  "}{"  ".repeat(row.depth)}{data.kind === "skill" ? marked ? "[x] " : "[ ] " : ""}
+      {data.kind === "skill" && ownedBy !== undefined
+        ? <>{data.skill.name}<Text color={theme.marker}>{"  "}[{packageOwnerBadge(ownedBy)}]</Text>{"  "}{truncateDescription(data.skill.description)}</>
+        : describeRow(row)}
       {data.kind === "skill" && hasUnmanagedCopy(data.skill, installed)
         ? <Text color={theme.marker}>{"  "}{UNMANAGED_MARKER}</Text>
         : null}
     </Text>
   );
+}
+
+/** Full Package ownership reason for the highlighted Skill, outside the one-line row. */
+export function CatalogSelectionHelp({ row }: { readonly row: VisibleRow<NodeData> | undefined }) {
+  const owner = row?.node.data.kind === "skill" ? row.node.data.ownedBy : undefined;
+  return owner === undefined ? null : <Text color={theme.marker}>{packageOwnedSkillNotice(owner)}</Text>;
 }
 
 /** The prompt of the install flow; browsing shows nothing. */

@@ -7,7 +7,7 @@ import { handleCatalogBrowseKey, type CatalogBrowseContext } from "./catalog-bro
 import { filterSkills } from "./catalog-filter.js";
 import { handleCatalogActionKey, type CatalogFlowContext } from "./catalog-flow.js";
 import { isInstalled } from "./catalog-installs.js";
-import { ActionPanel, CatalogHeader, CatalogRowLine } from "./catalog-panel.js";
+import { ActionPanel, CatalogHeader, CatalogRowLine, CatalogSelectionHelp } from "./catalog-panel.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 import { handlePackageKey, isPackageMode, startPackageAction, type PackageActionHost, type PackageContext } from "./package-actions.js";
 import { ListFooter } from "./panel-parts.js";
@@ -34,7 +34,7 @@ export interface CatalogViewProps {
 }
 
 export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight }: CatalogViewProps) {
-  const height = useListHeight(listHeight, 6);
+  const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
   const [all, setAll] = useState(sourceId === undefined);
   const mounted = useMounted();
@@ -133,6 +133,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       {rows.slice(window.start, window.end).map((row, offset) => (
         <CatalogRowLine key={row.node.id} row={row} selected={window.start + offset === index} marked={marks.marked.has(row.node.id)} installed={installed} />
       ))}
+      <CatalogSelectionHelp row={rows[index]} />
       <ListFooter indicator={window.indicator} selectedCount={selectedCount} message={message} />
       <ActionPanel mode={action} />
     </Box>

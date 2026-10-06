@@ -32,7 +32,7 @@ export const skillKey = (skill: SkillCandidate): string => `skill:${skill.source
 export const bundleKey = (entry: BundleEntry): string =>
   `bundle:${entry.sourceId}:${entry.descriptor.host}:${bundleRoot(entry.descriptor.coordinates)}`;
 
-function truncate(text: string): string {
+export function truncateDescription(text: string): string {
   return text.length > DESCRIPTION_LIMIT ? `${text.slice(0, DESCRIPTION_LIMIT - 3)}...` : text;
 }
 
@@ -99,10 +99,17 @@ export function describeRow(row: VisibleRow<NodeData>): string {
   if (data.kind === "bundle") {
     return `Package ${data.entry.descriptor.name} (${data.entry.descriptor.host})  ${packageVersionLabel(data.entry.descriptor.version)}`;
   }
-  return `${data.skill.name}  ${truncate(data.skill.description)}`;
+  return `${data.skill.name}  ${truncateDescription(data.skill.description)}`;
 }
 
 /** The Skills under the tree's Sources, in display order. */
 export function leavesOf(roots: readonly CatalogNode[]): readonly SkillCandidate[] {
   return roots.flatMap((root) => (root.children ?? []).flatMap((child) => child.data.kind === "skill" ? [child.data.skill] : []));
+}
+
+/** Skills that can still be installed as loose Skills, excluding active Package-owned rows. */
+export function looseLeavesOf(roots: readonly CatalogNode[]): readonly SkillCandidate[] {
+  return roots.flatMap((root) => (root.children ?? []).flatMap((child) =>
+    child.data.kind === "skill" && child.data.ownedBy === undefined ? [child.data.skill] : [],
+  ));
 }
