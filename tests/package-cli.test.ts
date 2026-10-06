@@ -79,6 +79,7 @@ function fakeSources(overrides: Partial<SourceOperations> = {}): SourceOperation
 
 interface Fixture {
   readonly packages: PackageOperations;
+  readonly resolved: PackageSelection[];
   readonly executed: readonly PackageAction[];
   readonly executedConfirmed: readonly boolean[];
   readonly approved: readonly PackageAction[];
@@ -87,6 +88,7 @@ interface Fixture {
 }
 
 function fixture(options: { readonly approved?: boolean; readonly recorded?: readonly InstalledPackage[] } = {}): Fixture {
+  const resolved: PackageSelection[] = [];
   const executed: PackageAction[] = [];
   const executedConfirmed: boolean[] = [];
   const approved: PackageAction[] = [];
@@ -104,10 +106,10 @@ function fixture(options: { readonly approved?: boolean; readonly recorded?: rea
       ? Object.freeze([PI_DESCRIPTOR, CLAUDE_DESCRIPTOR])
       : Object.freeze([]),
     list: async () => options.recorded ?? Object.freeze([record(PI)]),
-    inspect: async (selection) => inspection(selection),
-    approvalStatus: async () => approvedStatus,
-    approve: async (_selection, action = "install") => { approved.push(action); },
-    planLifecycle: async (selection, action) => plan(selection, action),
+    inspect: async (selection) => { resolved.push(selection); return inspection(selection); },
+    approvalStatus: async (selection) => { resolved.push(selection); return approvedStatus; },
+    approve: async (selection, action = "install") => { resolved.push(selection); approved.push(action); },
+    planLifecycle: async (selection, action) => { resolved.push(selection); return plan(selection, action); },
     executeLifecycle: async (packagePlan, confirmed): Promise<PackageLifecycleResult> => {
       executed.push(packagePlan.action);
       executedConfirmed.push(confirmed);
@@ -130,7 +132,7 @@ function fixture(options: { readonly approved?: boolean; readonly recorded?: rea
     },
     checkUpdates: async () => Object.freeze([]),
   };
-  return { packages, executed, executedConfirmed, approved, forgotten, lines };
+  return { packages, resolved, executed, executedConfirmed, approved, forgotten, lines };
 }
 
 async function run(f: Fixture, argv: readonly string[], sources = fakeSources()): Promise<number> {
@@ -256,6 +258,42 @@ test("package forget resolves a recorded selection without re-reading the Source
   assert.equal(f.forgotten.length, 1);
 });
 
+const PIN = Object.freeze({ policy: "fixed" as const, version: "c".repeat(40) });
+const PINNED_PI: PackageSelection = Object.freeze({ ...PI, version: PIN });
+
+test("every lifecycle verb resolves a recorded pin instead of rebuilding the latest selection", async () => {
+  const f = fixture({ recorded: Object.freeze([record(PINNED_PI)]) });
+  const sources = fakeSources({ listSources: async () => { throw new Error("a recorded selection must not re-read the Sources"); } });
+  const token = formatPackageSelection(PINNED_PI);
+  for (const argv of [
+    ["inspect", token, "--host", "pi"],
+    ["approve", token, "--host", "pi"],
+    ["install", token, "--host", "pi", "--yes"],
+    ["update", token, "--host", "pi", "--yes"],
+    ["uninstall", token, "--host", "pi", "--yes"],
+  ]) {
+    f.resolved.length = 0;
+    assert.equal(await run(f, argv, sources), 0, argv.join(" "));
+    assert.ok(f.resolved.length > 0, argv.join(" "));
+    for (const selection of f.resolved) assert.deepEqual(selection.version, PIN, argv.join(" "));
+  }
+});
+
+test("a Claude token without a plugin name is ambiguous across recorded plugins", async () => {
+  const other: InstalledPackage = Object.freeze({ ...record(CLAUDE),
+    selection: Object.freeze({ ...CLAUDE, pluginName: "other" }) });
+  const f = fixture({ recorded: Object.freeze([record(CLAUDE), other]) });
+  const otherDescriptor: BundleDescriptor = Object.freeze({ ...CLAUDE_DESCRIPTOR, name: "other",
+    coordinates: Object.freeze({ host: "claude" as const, marketplaceRoot: "", pluginName: "other" }) });
+  const packages: PackageOperations = { ...f.packages,
+    discover: async () => Object.freeze([CLAUDE_DESCRIPTOR, otherDescriptor]) };
+  await assert.rejects(
+    runPackageCommand(["inspect", "https://github.com/example/demo::claude:.", "--host", "claude"],
+      packages, fakeSources(), () => undefined),
+    /ambiguous for Host claude/u,
+  );
+});
+
 test("package selections accept a host-qualified token without --host", async () => {
   const f = fixture();
   assert.equal(await run(f, ["inspect", PI_TOKEN]), 0);
@@ -305,7 +343,8 @@ test("package selections refuse a path that is not Source-relative or not canoni
 test("package selections refuse a Source that is not registered or is ambiguous", async () => {
   const f = fixture();
   await assert.rejects(run(f, ["inspect", "missing::.", "--host", "pi"]), /Source is not registered: missing/u);
-  await assert.rejects(run(f, ["inspect", "https://github.com/example/demo::.", "--host", "pi"], fakeSources({
+  const unrecorded = fixture({ recorded: Object.freeze([]) });
+  await assert.rejects(run(unrecorded, ["inspect", "https://github.com/example/demo::.", "--host", "pi"], fakeSources({
     listSources: async () => Object.freeze([SOURCE as Source, { ...SOURCE, id: "git:other" } as Source]),
   })), /matches more than one Source/u);
 });
