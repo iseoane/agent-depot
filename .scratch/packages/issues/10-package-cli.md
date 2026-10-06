@@ -18,14 +18,18 @@ lives in `package-flow.ts`.
 
 **Blocked by:** 08.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Every subcommand parses, rejects an unknown host, and prints a preview before any execution.
-- [ ] A run without `--yes` runs nothing and exits non-zero.
-- [ ] An unapproved declaration prints the needs-approval state and runs nothing.
-- [ ] `forget` runs no host command.
-- [ ] The CLI and the future TUI call the same `PackageOperations`.
+- [x] Every subcommand parses, rejects an unknown host, and prints a preview before any execution.
+- [x] A run without `--yes` runs nothing and exits non-zero.
+- [x] An unapproved declaration prints the needs-approval state and runs nothing.
+- [x] `forget` runs no host command.
+- [x] The CLI and the future TUI call the same `PackageOperations`.
 
 ## Verification
 
 - `tests/package-cli.test.ts` over a fake `PackageOperations`, plus a `tests/cli-options.test.ts` case for the new subcommand family.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-cli.test.ts and tests/cli-options.test.ts.

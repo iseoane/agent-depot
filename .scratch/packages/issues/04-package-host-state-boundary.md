@@ -17,15 +17,19 @@ installed evidence, per section 4.1 of `.scratch/packages/design.md`.
 
 **Blocked by:** 02.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] The observed `settings.json` shapes from this machine parse into the expected records, including the `@commit` pin.
-- [ ] Drifted JSON produces `unknown` evidence and never throws.
-- [ ] A missing host state file produces an empty view, not an error.
-- [ ] An npm-shaped Pi record never matches a git bundle selection.
-- [ ] No module in this unit writes to any host state file.
+- [x] The observed `settings.json` shapes from this machine parse into the expected records, including the `@commit` pin.
+- [x] Drifted JSON produces `unknown` evidence and never throws.
+- [x] A missing host state file produces an empty view, not an error.
+- [x] An npm-shaped Pi record never matches a git bundle selection.
+- [x] No module in this unit writes to any host state file.
 
 ## Verification
 
 - `tests/package-host-state.test.ts` writes fixture host files into an isolated temporary home.
 - A read-only home test proves nothing is written.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-host-state.test.ts.

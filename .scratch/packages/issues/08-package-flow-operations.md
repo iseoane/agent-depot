@@ -23,17 +23,21 @@ shared-core discipline.
 
 **Blocked by:** 03, 04, 05, 06, 07.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Install runs the exact host argv once through the injected runner.
-- [ ] Mutating the fixture manifest between plan and execute returns `stale plan` and runs nothing.
-- [ ] A host state that already satisfies install sets `skipExecution` and runs nothing.
-- [ ] An install whose host state stays absent afterwards returns `failed`.
-- [ ] An unversioned Pi git package reports `unknown`, never `current`.
-- [ ] An update whose observed version is unchanged fails and leaves the record untouched.
-- [ ] One broken Package in a batch does not hide the other checks.
-- [ ] No `package-installations/` record is written, and no file under a Host skill root is touched.
+- [x] Install runs the exact host argv once through the injected runner.
+- [x] Mutating the fixture manifest between plan and execute returns `stale plan` and runs nothing.
+- [x] A host state that already satisfies install sets `skipExecution` and runs nothing.
+- [x] An install whose host state stays absent afterwards returns `failed`.
+- [x] An unversioned Pi git package reports `unknown`, never `current`.
+- [x] An update whose observed version is unchanged fails and leaves the record untouched.
+- [x] One broken Package in a batch does not hide the other checks.
+- [x] No `package-installations/` record is written, and no file under a Host skill root is touched.
 
 ## Verification
 
 - `tests/package-flow.test.ts` with a fake runner, a fake host-state reader, and an isolated state directory. No real `pi` or `claude` binary.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-flow.test.ts.

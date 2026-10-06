@@ -15,13 +15,17 @@
 
 **Blocked by:** 02.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] `createNodePackageContentAccess` reads a fixture repository's files at a resolved commit.
-- [ ] `origin` for a scoped GitHub tree Source carries the directory and never a local path.
-- [ ] A source that is not a directory URL still yields a view whose `origin` is the repository root.
-- [ ] The bare-mirror, symlink, and size guards in `git-source.ts` are unchanged and still cover the new methods.
+- [x] `createNodePackageContentAccess` reads a fixture repository's files at a resolved commit.
+- [x] `origin` for a scoped GitHub tree Source carries the directory and never a local path.
+- [x] A source that is not a directory URL still yields a view whose `origin` is the repository root.
+- [x] The bare-mirror, symlink, and size guards in `git-source.ts` are unchanged and still cover the new methods.
 
 ## Verification
 
 - `tests/package-content.test.ts` over a local fixture mirror, no network.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-content.test.ts.

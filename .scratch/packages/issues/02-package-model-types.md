@@ -21,14 +21,18 @@ section 3 of `.scratch/packages/design.md`. `src/package-model.ts` imports
 
 **Blocked by:** None. Can start immediately.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] The types match section 3 of the design, including the discriminated unions.
-- [ ] A Claude coordinate cannot be constructed without both marketplace fields, proven by a type-level test.
-- [ ] `DEFERRED_COMPONENT_KINDS` is exported from exactly one place and referenced nowhere else as a literal list.
-- [ ] `selectionKey` is stable across a bundle rename and changes when the source or coordinates change.
+- [x] The types match section 3 of the design, including the discriminated unions.
+- [x] A Claude coordinate cannot be constructed without both marketplace fields, proven by a type-level test.
+- [x] `DEFERRED_COMPONENT_KINDS` is exported from exactly one place and referenced nowhere else as a literal list.
+- [x] `selectionKey` is stable across a bundle rename and changes when the source or coordinates change.
 
 ## Verification
 
 - `tests/package-model.test.ts` covers the pure helpers and the key stability rule.
 - `pnpm typecheck` proves the union constraints, including a `@ts-expect-error` case for the missing marketplace field.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-model.test.ts.

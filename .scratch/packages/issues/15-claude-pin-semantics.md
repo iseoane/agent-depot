@@ -23,3 +23,7 @@ Until one is verified, the refusal stays.
 - [ ] Each candidate form is run against the installed Claude CLI and its actual behavior recorded in `host-cli-verbs.md`.
 - [ ] If a pin form exists, `HOST_STEP_TEMPLATES.claude.install` uses it and the refusal narrows to the forms that stay unencodable.
 - [ ] If none exists, `PackageSelection` for Claude rejects `fixed` at the boundary instead of at plan time.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): stays open. `planHostSteps` refuses a fixed-version Claude install and update, and no supported Claude pin form has been verified against the installed CLI, so the three candidates in this issue remain unverified.

@@ -13,15 +13,19 @@ a second managed copy, per section 4.5 of `.scratch/packages/design.md`.
 
 **Blocked by:** 03.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Installing a bundle-owned skill path throws with a Package pointer.
-- [ ] A loose skill in the same Source still installs.
-- [ ] Every unmanaged adopt, remove, and inventory path is guarded, verified by enumerating the call sites.
-- [ ] A Source that cannot be read produces no exclusions and does not hide skills.
-- [ ] The matcher is derived from discovery output, not from a second list.
+- [x] Installing a bundle-owned skill path throws with a Package pointer.
+- [x] A loose skill in the same Source still installs.
+- [x] Every unmanaged adopt, remove, and inventory path is guarded, verified by enumerating the call sites.
+- [x] A Source that cannot be read produces no exclusions and does not hide skills.
+- [x] The matcher is derived from discovery output, not from a second list.
 
 ## Verification
 
 - `tests/package-owned-skills.test.ts`, mirroring the `app-owned-skills` tests.
 - `pnpm typecheck` for the call-site wiring.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-owned-skills.test.ts.

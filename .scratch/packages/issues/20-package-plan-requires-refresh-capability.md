@@ -8,7 +8,7 @@
 
 **For the CLI and TUI waves:** `planLifecycle` now fails closed in an environment without refresh capability, so the caller that previews a lifecycle must surface that `PackagePlanError` instead of a plan. No such caller exists yet; `src/package-cli.ts` (issue 10) and the TUI Package action path (issue 12) own it.
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] External Package lifecycle planning fails closed when the environment cannot refresh project Sources.
 - [x] The built-in Source remains exempt from refresh.
@@ -17,3 +17,7 @@
 ## Verification
 
 - `tests/package-flow.test.ts`: `planning a lifecycle write fails closed when an external Source cannot be refreshed`.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-flow.test.ts.

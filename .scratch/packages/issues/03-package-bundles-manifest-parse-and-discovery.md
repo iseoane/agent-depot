@@ -24,15 +24,19 @@ for Pi, a Claude plugin with no in-repo marketplace binding, and a bundle-declar
 
 **Blocked by:** 02.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] The pstack-shaped fixture yields one Pi descriptor and one Claude descriptor over the shared `plugins/pstack/skills`.
-- [ ] The Claude descriptor reports twelve agents and the correct deferred kinds, and no skill is folded into the deferred list.
-- [ ] The Pi conventional fixture with no `pi` key discovers the same inventory as the explicit manifest.
-- [ ] `manifestDigest` changes when any bundle manifest byte changes, and is stable across a rebuild.
-- [ ] Each refusal above yields a warning or an installability reason rather than a throw.
-- [ ] The `EXCLUDED_LIFECYCLE_SEGMENTS` filter applies to discovered skill paths.
+- [x] The pstack-shaped fixture yields one Pi descriptor and one Claude descriptor over the shared `plugins/pstack/skills`.
+- [x] The Claude descriptor reports twelve agents and the correct deferred kinds, and no skill is folded into the deferred list.
+- [x] The Pi conventional fixture with no `pi` key discovers the same inventory as the explicit manifest.
+- [x] `manifestDigest` changes when any bundle manifest byte changes, and is stable across a rebuild.
+- [x] Each refusal above yields a warning or an installability reason rather than a throw.
+- [x] The `EXCLUDED_LIFECYCLE_SEGMENTS` filter applies to discovered skill paths.
 
 ## Verification
 
 - `tests/package-bundles.test.ts` over the fixture repositories, pure functions only, no seams.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-bundles.test.ts.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Packages**: host-native bundles managed as a category (ADR 0009). A Package is a Pi package (a `pi` manifest key or the conventional `extensions/`, `skills/`, `prompts/` and `themes/` directories) or a Claude Code plugin bound by an in-repo `.claude-plugin/marketplace.json`, both discovered inside a registered Source. Agent Depot reads the bundle manifest into a typed component inventory, derives the Host commands from the declared components, and delegates install, update and uninstall to the Host CLI through the no-shell runner after an action-specific approval receipt. Installed state is read from `~/.pi/agent/settings.json` and `~/.claude/plugins/installed_plugins.json` and never written, so an unversioned Pi git package reports `unknown` rather than `current`. A bundle's own Skills never become a second managed copy, and agents and MCP servers are reported as `host-only` and left to the Host. A fixed-version Claude selection is refused, because `claude plugin install` has no pin slot.
+- `agent-depot package list | discover <source-id> | inspect <selection> --host <host> | approve <selection> --host <host> [--action <install|update|uninstall>] | install|update|uninstall <selection> --host <host> [--yes] | forget <selection> --host <host> --yes`. Planning refreshes the Source first (ADR 0004), a changed declaration needs renewed approval, `--yes` never bypasses the receipt, and execution re-derives the declaration and fails closed with `stale plan` on any difference. Packages are user-global only.
+- Packages join the user-global update batch through `update check --package <selection>` and `update apply --package <selection>` or `--all`, after Skills and Apps. Project scope never selects a Package, and a Package with `unknown` version status is never offered as an update.
+- Profiles carry Package selections as a declaration-only `packages` block with `--no-packages` and `--package <selection>` filters. Import replays each selection through the flow's `select` action, which runs no Host command and never installs a bundle.
+- TUI: a Packages group in Catalog with bundle-owned Skills dimmed, Package rows in Installations with `i` or `Enter` to approve the install declaration, `U` to update, `u` to uninstall and `f` to forget, and Package rows in the Updates batch.
+
 ### Changed
 
 - Sources shows Skill Sources and App recipes in one windowed list, with `skills`/`app` kinds, one cursor and contextual action hints; Tab section switching is removed. Adding a first App recipe is available through `n`.

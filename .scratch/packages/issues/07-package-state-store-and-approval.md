@@ -14,14 +14,18 @@ section 5 of `.scratch/packages/design.md`.
 
 **Blocked by:** 02.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] A concurrent update from two processes converges and never corrupts `packages.json`.
-- [ ] A changed declaration digest invalidates approval, and restoring the bytes restores it.
-- [ ] Receipt files are mode 0600 inside a 0700 directory.
-- [ ] Deleting and recreating a selection file at the same path with identical content keeps the record resolvable.
-- [ ] No other module writes `packages.json` or the receipts directory.
+- [x] A concurrent update from two processes converges and never corrupts `packages.json`.
+- [x] A changed declaration digest invalidates approval, and restoring the bytes restores it.
+- [x] Receipt files are mode 0600 inside a 0700 directory.
+- [x] Deleting and recreating a receipt at the same digest path with identical bytes restores approval. The store keeps no per-selection file.
+- [x] No other module writes `packages.json` or the receipts directory.
 
 ## Verification
 
 - `tests/package-state.test.ts` with isolated temporary state directories, mirroring the `source-state` and `app-flow` approval tests.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-state.test.ts.

@@ -6,7 +6,7 @@
 
 **What ships now:** `installedEvidenceChange` returns `changed`, `unchanged`, or `unknown`. An update records only when the two observations agree on a version or a hexadecimal commit and differ, or when the host went from nothing installed to installed. Two installed observations with no comparable evidence return `failed` and leave the record untouched.
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] Update outcomes distinguish `changed`, `unchanged`, and `unknown` evidence.
 - [x] Unknown evidence returns `failed` and leaves the record untouched.
@@ -15,3 +15,7 @@
 ## Verification
 
 - `tests/package-flow.test.ts`: `an update with unknown observed version evidence fails and leaves the record untouched`.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-flow.test.ts.

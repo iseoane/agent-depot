@@ -6,7 +6,7 @@
 
 **What ships now:** `writeSelection` takes the host observation and derives `verified` from it alone, never from the Source's available evidence. A host commit is stored as `git-commit`, normalized, and only in a form the state store reads back. A host version is stored as `manifest-version` only when it agrees with the version the Source declares, because `declaredBy` names that declaration. Any other observation leaves `verified` absent.
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] Selection records derive `verified` from observed host evidence only.
 - [x] Unverifiable host evidence leaves `verified` absent instead of copying available evidence.
@@ -16,3 +16,7 @@
 
 - `tests/package-flow.test.ts`: `records persist the observed host version evidence`.
 - `tests/package-flow.test.ts`: `an unverifiable host observation writes no verified evidence`.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-flow.test.ts.

@@ -17,15 +17,19 @@ assertion that the canonical Skill constraint holds.
 
 **Blocked by:** 10, 11, 12, 13.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] One repository yields a Pi descriptor and a Claude descriptor over the same skills directory.
-- [ ] The full lifecycle for both hosts runs against the fake runner with asserted argv.
-- [ ] Installed evidence is read from the fixture host homes, and `unknown` appears for the unversioned case.
-- [ ] The import-graph assertion fails when a `package-*` module imports the Skill install engine.
-- [ ] No file under a fixture Host skill root is created, changed, or removed.
+- [x] One repository yields a Pi descriptor and a Claude descriptor over the same skills directory.
+- [x] The full lifecycle for both hosts runs against the fake runner with asserted argv.
+- [x] Installed evidence is read from the fixture host homes, and `unknown` appears for the unversioned case.
+- [x] The import-graph assertion fails when a `package-*` module imports the Skill install engine.
+- [x] No file under a fixture Host skill root is created, changed, or removed.
 
 ## Verification
 
 - `tests/e2e-packages.test.ts` and `tests/package-boundaries.test.ts`.
 - `pnpm test`, `pnpm typecheck`, and `git diff --check` pass.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/e2e-packages.test.ts and tests/package-boundaries.test.ts.

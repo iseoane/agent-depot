@@ -4,8 +4,9 @@
 
 Agent Depot es un gestor multiplataforma de los recursos reutilizables que usan los
 agentes de programación. Descubre Skills a partir de Sources de Git, las instala en
-uno o varios Hosts (Pi, Claude Code, Codex y OpenCode), registra lo que ha instalado
-y lo actualiza de forma segura, todo desde una CLI o una TUI interactiva.
+uno o varios Hosts (Pi, Claude Code, Codex y OpenCode), gestiona Apps globales de
+usuario y Packages nativos del Host, registra lo que ha instalado y lo actualiza de
+forma segura, todo desde una CLI o una TUI interactiva.
 
 Qué hace:
 
@@ -21,8 +22,12 @@ Qué hace:
   una ruta explícita.
 - **Apps**: instala, actualiza y desinstala aplicaciones globales de usuario mediante
   App recipes escritas por el usuario que deben aprobarse antes de ejecutarse.
-- **Profiles**: exporta tus Sources, selecciones de Skills y App recipes globales de
-  usuario a un archivo portable e impórtalos, solo añadiendo, en otra máquina.
+- **Packages**: instala, actualiza y desinstala bundles nativos del Host (paquetes de
+  Pi y plugins de Claude Code) delegando el ciclo de vida en la CLI de cada Host y
+  leyendo la versión instalada de los propios archivos de estado del Host.
+- **Profiles**: exporta tus Sources, selecciones de Skills, App recipes y selecciones
+  de Packages globales de usuario a un archivo portable e impórtalos, solo añadiendo,
+  en otra máquina.
 
 Agent Depot nunca sobrescribe ni elimina contenido sin una previsualización y una
 confirmación, y rechaza rutas y enlaces inseguros.
@@ -104,6 +109,13 @@ agent-depot uninstall --data --yes
 agent-depot app list
 agent-depot app approve <name> --yes
 agent-depot app install <name> --yes
+agent-depot package list
+agent-depot package discover <source-id>
+agent-depot package inspect <source-id>::<bundle-path> --host <host>
+agent-depot package approve <source-id>::<bundle-path> --host <host> --action install
+agent-depot package install <source-id>::<bundle-path> --host <host> --yes
+agent-depot package forget <source-id>::<bundle-path> --host <host> --yes
+agent-depot update check --scope user-global --package <selection>
 agent-depot export --out profile.json
 agent-depot import profile.json --yes
 agent-depot tui
@@ -252,7 +264,16 @@ actualización impreso, su índice numérico o una ruta de Skill inequívoca:
 ```sh
 agent-depot update apply --scope project --all --yes
 agent-depot update apply --scope user-global --skill 0 --yes
+agent-depot update apply --scope user-global --package git:<source-id>::pi:. --yes
 ```
+
+Solo para `--scope user-global`, la comprobación también evalúa cada Package
+registrado y `update apply` acepta `--package <selection>` repetible o incluye los
+Packages actualizables con `--all`. Un Package con estado de versión `unknown`
+nunca se ofrece como actualización. Los Packages se ejecutan después de los Skills
+y las Apps, cada Package seleccionado previsualiza su plan congelado y se aprueba
+primero el recibo de actualización que falte. El ámbito de proyecto nunca lee ni
+selecciona un Package.
 
 Un Skill registrado en una ruta de proyecto no canónica (fuera de
 `.agents/skills/<name>` y `.claude/skills/<name>`) está controlado por el
@@ -475,10 +496,10 @@ selección.
 | Vista | Propósito |
 | --- | --- |
 | 1 Sources | Sources de Skills y recetas App del usuario en una sola lista, con tipos `skills`/`app` y acciones contextuales. |
-| 2 Catalog | Skills que se pueden instalar: los que aún no están instalados, como Source y luego Skills. |
-| 3 Installations | Lo que hay en disco: instalaciones gestionadas (globales de usuario y de proyecto) y skills globales de usuario no gestionados. |
-| 4 Updates | Skills gestionados con una versión más reciente disponible, para el ámbito global de usuario y de proyecto. |
-| 5 Import/Export | Transferir las elecciones portables de Sources globales de usuario, las selecciones de Skills y las App recipes. |
+| 2 Catalog | Skills que se pueden instalar: los que aún no están instalados, como Source y luego Skills. Cada Source muestra además un grupo Packages, y los Skills que posee un bundle se marcan y se atenúan. |
+| 3 Installations | Lo que hay en disco: instalaciones gestionadas (globales de usuario y de proyecto), selecciones de Packages y skills globales de usuario no gestionados. |
+| 4 Updates | Skills y Packages gestionados con una versión más reciente disponible, para el ámbito global de usuario y de proyecto. |
+| 5 Import/Export | Transferir las elecciones portables de Sources globales de usuario, las selecciones de Skills, las App recipes y las selecciones de Packages. |
 
 Teclas por vista (los avisos también aceptan `Esc` para cancelar y `y`/`n` para
 confirmar):
@@ -487,8 +508,8 @@ confirmar):
 | --- | --- |
 | Sources | `j`/`k` recorren Sources de Skills y recetas App, sin cambiar de sección con Tab. `Enter` abre el Catálogo de una Source o previsualiza/aprueba una receta. `n` añade una Source o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Skills. |
 | Catalog | `Enter`/flechas expandir y contraer, `space` marcar, `a` marcar todos los listados, `i` instalar las marcas (o el skill resaltado), `/` filtrar, `s` alternar entre una Source o todas (cuando se abre desde una Source) |
-| Installations | `Enter`/flechas expandir y contraer, `u` desinstalar (todos los Hosts o los Hosts elegidos) o eliminar un skill no gestionado, `h` o `i` añadir Hosts a una instalación, `A` o `Enter` adoptar un skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo) |
-| Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualizar las marcas, `r` comprobar de nuevo, las flechas pliegan la línea "cannot assess" |
+| Installations | `Enter`/flechas expandir y contraer, `u` desinstalar (todos los Hosts o los Hosts elegidos) o eliminar un skill no gestionado, `h` o `i` añadir Hosts a una instalación, `A` o `Enter` adoptar un skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo). En una fila de Package: `i` o `Enter` aprueba la declaración de instalación, `U` actualiza, `u` desinstala, `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
+| Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualizar las marcas, `r` comprobar de nuevo, las flechas pliegan la línea "cannot assess". Un Package marcado se une al lote y se aprueba antes de ejecutar su actualización. |
 | Import/Export | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
 
 Al eliminar una receta App se comprueban su comando de versión aprobado y su
@@ -507,6 +528,10 @@ Modelo de seguridad:
 - Una instalación refresca su Source Git antes de la previsualización, de modo que el
   contenido que confirmas es el contenido que se aplica. La vista Updates refresca
   las Sources Git en uso cuando entras en ella y con `r`.
+- Una acción de Package previsualiza la declaración congelada y los comandos exactos
+  del Host. `y` aprueba el recibo de esa acción antes de ejecutar el comando del Host;
+  `n` o `Esc` cancela sin aprobar ni ejecutar nada. Listar y recargar Packages nunca
+  ejecuta un comando del Host.
 - La Source integrada es fija: se muestra como una fila no seleccionable y no puede
   refrescarse ni eliminarse.
 - La eliminación es solo global de usuario. Las instalaciones de proyecto se listan,
@@ -538,6 +563,11 @@ Los espejos Git se almacenan en caché por separado del catálogo:
 - Windows: `%LOCALAPPDATA%/Agent Depot/git-sources`.
 
 ## Limitaciones
+
+Los Packages están limitados a los Hosts Pi y Claude Code en V1. El empaquetado de
+Codex y OpenCode, los paquetes de Pi procedentes de npm, los Packages de ámbito de
+proyecto y los marketplace de Claude externos quedan aplazados, y una selección de
+Claude de versión fija se rechaza; consulta [Packages](#packages).
 
 Solo se aceptan URL de repositorios Git que usen `git:`, `http:`, `https:` o `ssh:`.
 `refresh` usa la URL registrada y ejecuta Git con matrices de argumentos, sin shell.
@@ -701,6 +731,137 @@ manual, vuelve a ejecutar el Host seleccionado con `--manual-done --yes`. Esto
 comprueba la versión de la App, no la integración con el Host. Las acciones de Host
 nunca cambian el seguimiento de Apps instaladas.
 
+## Packages
+
+Un Package es un bundle nativo del Host descubierto dentro de una Source registrada:
+un paquete de Pi (un `package.json` con una clave `pi`, o los directorios
+convencionales `extensions/`, `skills/`, `prompts/` y `themes/`) o un plugin de Claude
+Code (un `.claude-plugin/plugin.json` vinculado por un
+`.claude-plugin/marketplace.json` dentro del repositorio). Un mismo repositorio puede
+ser ambas cosas, como `pstack-claude`. V1 solo admite los Hosts Pi y Claude Code; el
+empaquetado de Codex y OpenCode, los paquetes de Pi procedentes de npm y los Packages
+de ámbito de proyecto quedan aplazados.
+
+Agent Depot no copia el contenido de un bundle. Lee el manifiesto del bundle en un
+inventario de componentes tipado, deriva los comandos propios del Host a partir de esa
+declaración, los ejecuta mediante el ejecutor de comandos sin shell tras la aprobación
+y lee la versión instalada de los archivos de estado del Host. El Host posee lo que
+está instalado. Agent Depot posee el registro de selección y el recibo de lo que
+delegó. Los Skills propios de un bundle nunca se ofrecen para adopción ni se instalan
+por segunda vez, porque permanecen en las ubicaciones canónicas del motor de Skills.
+
+### Añadir una Source y descubrir sus bundles
+
+El descubrimiento lee el espejo Git en caché y nunca lo refresca. El primer
+descubrimiento de una Source cuyo espejo falta falla hasta que refresques esa Source:
+
+```sh
+agent-depot source add https://github.com/michael-denyer/pstack-claude.git
+agent-depot source list
+agent-depot source refresh git:<source-id> --yes
+agent-depot package discover git:<source-id>
+```
+
+`package discover` imprime una línea por bundle de la Source junto con su inventario
+de componentes. `pstack-claude` produce un bundle de Pi en la raíz del repositorio y
+un bundle de Claude desde su marketplace dentro del repositorio:
+
+```text
+Package git:<source-id>::pi:.: pstack
+Package git:<source-id>::claude:plugins/pstack#pstack: pstack
+```
+
+Cada línea de componente indica un tipo, una propiedad (`skill-category` o
+`host-only`), un efecto y las rutas declaradas. Las definiciones de agente y los
+servidores MCP aparecen como `host-only`: Agent Depot los informa y los deja al Host.
+
+### Seleccionar, aprobar y ejecutar una acción de ciclo de vida
+
+Una selección es `<source-id>::<bundle-path>` más `--host`, o una selección
+cualificada por Host `<source-id>::<host>:<bundle-path>`. La ruta de un bundle de
+Claude termina en `#<plugin-name>` cuando la Source ofrece más de un plugin.
+
+`approve` es por acción. Escribe el recibo de la declaración exacta de esa única
+acción, por lo que aprobar `install` no autoriza `update`. `--yes` confirma la
+ejecución y nunca sustituye a la aprobación. Planificar una acción de ciclo de vida
+refresca primero la Source Git de la selección, de modo que el manifiesto
+previsualizado es el que usan los comandos.
+
+```sh
+# Paquete de Pi en la raíz del repositorio
+agent-depot package inspect git:<source-id>::pi:. --host pi
+agent-depot package install git:<source-id>::pi:. --host pi
+agent-depot package approve git:<source-id>::pi:. --host pi --action install
+agent-depot package install git:<source-id>::pi:. --host pi --yes
+
+# Plugin de Claude Code desde el marketplace dentro del repositorio
+agent-depot package inspect git:<source-id>::claude:plugins/pstack#pstack --host claude
+agent-depot package approve git:<source-id>::claude:plugins/pstack#pstack --host claude --action install
+agent-depot package install git:<source-id>::claude:plugins/pstack#pstack --host claude --yes
+```
+
+Los comandos `install`, `update` y `uninstall` imprimen la previsualización completa y
+después terminan con código distinto de cero hasta que exista el recibo de la acción
+y se indique `--yes`. La previsualización muestra el origen y el commit resueltos, el
+descriptor, el inventario de componentes con su propiedad y efecto, cada comando del
+Host con su ejecutable resuelto, las coordenadas registradas que la acción puede
+cambiar (`affects`), el directorio de trabajo, el entorno y cualquier advertencia.
+Inmediatamente antes de la ejecución, Agent Depot vuelve a derivar la declaración y se
+detiene con `stale plan` si el manifiesto, el commit, la identidad de instalación o
+los comandos ordenados cambiaron desde la previsualización. Cuando el Host ya informa
+del bundle como instalado, el plan no ejecuta ningún comando y solo registra la
+selección.
+
+Los comandos del Host para los dos Hosts de V1:
+
+| Host | Instalar | Actualizar | Desinstalar |
+| --- | --- | --- | --- |
+| Pi | `pi install <source>` | `pi update <source>` | `pi remove <source>` |
+| Claude Code | `claude plugin marketplace add <source>`, después `claude plugin install <plugin>@<marketplace>` | `claude plugin marketplace update <marketplace>`, después `claude plugin update <plugin>@<marketplace>` | `claude plugin uninstall <plugin>@<marketplace>` |
+
+Agent Depot omite el paso `marketplace add` cuando el Host ya conoce el marketplace y
+siempre nombra el marketplace en el verbo de actualización con ámbito. Cada acción de
+V1 afecta solo a su propia selección.
+
+### Estado instalado, versiones y eliminación
+
+`package list` muestra cada selección registrada con su ID de instalación y la
+evidencia de versión que Agent Depot registró. La evidencia en vivo procede de
+`~/.pi/agent/settings.json` y `~/.claude/plugins/installed_plugins.json`, que Agent
+Depot lee y nunca escribe. Un archivo de Host ausente es una vista vacía. Un archivo
+desviado o ilegible deja la búsqueda afectada en `unknown` y nunca lanza una
+excepción. Un paquete git de Pi sin versión se informa como `unknown`, nunca como
+`current`.
+
+Una actualización registra una versión nueva solo cuando el estado del Host cambió de
+una forma que Agent Depot puede verificar, es decir, cuando las dos observaciones
+coinciden en una versión o en un commit hexadecimal y difieren, o cuando el Host pasó
+de no tener nada instalado a instalado. Una actualización no verificable falla y deja
+el registro intacto. `uninstall` delega el comando del Host y después elimina el
+registro de selección:
+
+```sh
+agent-depot package approve git:<source-id>::pi:. --host pi --action uninstall
+agent-depot package uninstall git:<source-id>::pi:. --host pi --yes
+agent-depot package forget git:<source-id>::pi:. --host pi --yes
+```
+
+`forget` elimina solo el registro de selección de Agent Depot. No ejecuta ningún
+comando del Host y deja la instalación del Host tal cual.
+
+### Límites de los Packages
+
+- Una selección de Claude de versión fija no puede delegarse. `claude plugin install`
+  toma `<plugin>@<marketplace>` y no tiene hueco para un pin, así que planificar un
+  `install` o `update` de Claude con una política de versión `fixed` falla en cerrado
+  en lugar de reclamar un pin que el Host ignoraría. Usa `latest` para una selección
+  de Claude, o un pin fijo para una selección de Pi, hasta que se verifique una forma
+  de pin admitida por Claude.
+- Un plugin de Claude sin vinculación a un marketplace dentro del repositorio se
+  informa pero no es instalable.
+- Agent Depot no lee la salida en prosa de la CLI del Host, incluido `pi list`. La
+  evidencia instalada procede solo de los archivos de estado del Host.
+
 ## Exportar un Profile global de usuario
 
 Exporta las elecciones portables a otra máquina o guárdalas en git:
@@ -710,29 +871,34 @@ agent-depot export > profile.json
 agent-depot export --out profile.json
 agent-depot export --no-apps --source <source-id> --skill doctor-md-agents
 agent-depot export --no-sources --no-skills --app my-tool --app another-tool
+agent-depot export --no-packages --package git:<source-id>::pi:.
 ```
 
-Todo lo portable se selecciona por defecto. `--no-sources`, `--no-skills` y
-`--no-apps` excluyen bloques; `--source <id|url>`, `--skill <path|name>` y
-`--app <name>`, que son repetibles, restringen cada bloque de forma independiente.
-Las selecciones desconocidas y combinar el filtro de inclusión de un bloque con su
-indicador `--no-*` son errores.
+Todo lo portable se selecciona por defecto. `--no-sources`, `--no-skills`,
+`--no-apps` y `--no-packages` excluyen bloques; `--source <id|url>`,
+`--skill <path|name>`, `--app <name>` y `--package <selection>`, que son repetibles,
+restringen cada bloque de forma independiente. Las selecciones desconocidas y
+combinar el filtro de inclusión de un bloque con su indicador `--no-*` son errores.
 
 La salida estándar contiene solo JSON; stderr muestra la previsualización y los
 motivos de exclusión. `--out` requiere un archivo nuevo (los archivos existentes y
 los enlaces simbólicos no se reemplazan). Los Profiles contienen URL de Git
 canónicas con su inclusión en el descubrimiento, las políticas de versión/Hosts/
-métodos de usuario registrados de los Skills y recipes de App completas, incluidas
-las recipes de otras plataformas. La exportación por CLI siempre escribe
+métodos de usuario registrados de los Skills, recipes de App completas, incluidas
+las recipes de otras plataformas, y selecciones de Package solo como declaraciones:
+su Source, coordenadas de Host y política de versión. La exportación por CLI siempre
+escribe
 `included: true`; las elecciones de descubrimiento son transitorias, mientras que la
 TUI puede pasar elecciones de inclusión explícitas al núcleo de exportación
-compartido. La exportación no refresca Sources ni ejecuta comandos de Apps.
+compartido. La exportación no refresca Sources ni ejecuta comandos de Apps, y un
+recibo de Package nunca viaja en un Profile.
 
 Las rutas locales y las credenciales evidentes no son portables. Los elementos no
 portables o inválidos se excluyen con sus motivos, al igual que los Skills no
 gestionados, propiedad de Apps y de proyecto, las ubicaciones/evidencia de
-instalación, los recibos de aprobación, el estado de las Apps instaladas y las
-actualizaciones pendientes. Las comprobaciones de portabilidad del texto libre de las
+instalación, los recibos de aprobación, el estado de las Apps instaladas, las
+actualizaciones pendientes y los recibos/estado instalado de los Packages. Las
+comprobaciones de portabilidad del texto libre de las
 recipes son conservadoras; revisa los Profiles antes de compartirlos: los secretos
 arbitrarios no pueden detectarse automáticamente.
 
@@ -747,7 +913,8 @@ agent-depot import profile.json --no-apps --skill doctor-md-agents --yes
 ```
 
 La importación usa los mismos filtros independientes por bloque/nombre que la
-exportación. Informa de **add** (añadir), **same** (igual, omitido) y **conflict**
+exportación, incluidos `--no-packages` y `--package <selection>`. Informa de **add**
+(añadir), **same** (igual, omitido) y **conflict**
 (conflicto, con la diferencia mostrada, omitido). Sin `--yes` no se escribe nada. Las
 elecciones existentes y los archivos en conflicto nunca se reemplazan. Un Profile
 producido por una versión más reciente de Agent Depot genera una advertencia, no un
@@ -755,7 +922,8 @@ error.
 
 Las adiciones confirmadas se ejecutan en orden: registro de Sources, Skills globales
 de usuario mediante las previsualizaciones de instalación refrescadas y las
-comprobaciones de seguridad normales, y después las App recipes. Se conservan los
+comprobaciones de seguridad normales, después las App recipes y a continuación las
+selecciones de Packages. Se conservan los
 Hosts, las políticas de versión y los métodos de usuario registrados. Incluso sin
 `--yes`, la previsualización de cada Skill a añadir muestra su Source, Hosts,
 política de versión y el argv completo de cada método proporcionado por el usuario,
@@ -763,6 +931,11 @@ marcado como que se ejecuta solo tras la confirmación. La previsualización de
 instalación normal sigue apareciendo antes de la ejecución. Cada fallo se notifica
 de forma independiente y los elementos restantes continúan; cualquier elemento
 fallido hace que el comando termine con código distinto de cero.
+
+Una selección de Package es solo una selección. La importación la reproduce mediante
+la acción `select` del flujo, que escribe un recibo solo para esa acción, cuya
+declaración no contiene ningún argv. No autoriza ninguna instalación ni actualización
+y no ejecuta ningún comando del Host, así que la importación nunca instala un Package.
 
 Las recipes, incluidas las de otras plataformas, llegan **sin aprobar** a `apps/`.
 Una recipe de destino con el mismo nombre bloquea la importación solo cuando su
@@ -787,4 +960,6 @@ las mismas previsualizaciones del núcleo compartido que la CLI. Las exclusiones
 conflictos no pueden seleccionarse. La exportación solo crea un archivo nuevo; las
 exportaciones vacías no escriben nada (la CLI informa de un error). La importación
 añade las elecciones que faltan sin reemplazar las existentes. Las recipes importadas
-permanecen sin aprobar y la importación nunca instala Apps.
+permanecen sin aprobar y la importación nunca instala Apps. Las selecciones de Package
+importadas se registran sin instalar ningún bundle y sin ejecutar ningún comando del
+Host.

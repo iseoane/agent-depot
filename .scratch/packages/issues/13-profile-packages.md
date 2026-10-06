@@ -15,14 +15,18 @@ additive `packages` array, per section 5 of `.scratch/packages/design.md`.
 
 **Blocked by:** 07, 08.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] A round trip restores the selection and never installs a bundle.
-- [ ] Export contains no receipt and no installed state.
-- [ ] A profile with no `packages` key parses unchanged.
-- [ ] Import conflicts are skipped, matching the existing add-only rule.
-- [ ] The receipt digest is not part of the profile and does not travel.
+- [x] A round trip restores the selection and never installs a bundle.
+- [x] Export contains no receipt and no installed state.
+- [x] A profile with no `packages` key parses unchanged.
+- [x] Import conflicts are skipped, matching the existing add-only rule.
+- [x] The receipt digest is not part of the profile and does not travel.
 
 ## Verification
 
 - Extensions to `tests/profile.test.ts`, `tests/profile-import.test.ts`, and `tests/e2e-profile.test.ts`.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/profile.test.ts, tests/profile-import.test.ts, and tests/e2e-profile.test.ts.

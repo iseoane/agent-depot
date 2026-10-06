@@ -21,12 +21,12 @@
 
 **Blocked by:** None. Can start immediately.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] SPEC.md, CONTEXT.md, and DESIGN.md no longer list plugins or extensions as deferred, and they describe the Package scope and exclusions.
-- [ ] ADR 0009 exists and records the ownership boundary and the approval decision.
-- [ ] The research doc's recommended V1 interpretation names Package as a confirmed category.
-- [ ] Agent definitions and MCP servers remain explicitly deferred in all four documents.
+- [x] SPEC.md, CONTEXT.md, and DESIGN.md no longer list plugins or extensions as deferred, and they describe the Package scope and exclusions.
+- [x] ADR 0009 exists and records the ownership boundary and the approval decision.
+- [x] The research doc's recommended V1 interpretation names Package as a confirmed category.
+- [x] Agent definitions and MCP servers remain explicitly deferred in all four documents.
 
 ## Verification
 
@@ -34,3 +34,7 @@
 - `pnpm typecheck`, `pnpm test`, and `git diff --check` pass.
 - Code review against the starting HEAD, Standards and Spec reviewed separately.
 - Rollback boundary: revert the doc edits and delete ADR 0009. No runtime files are affected.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: docs inspection of SPEC.md, CONTEXT.md, DESIGN.md, docs/adr/0009-delegate-package-lifecycle-to-host-clis.md, and docs/research/host-resource-compatibility.md.

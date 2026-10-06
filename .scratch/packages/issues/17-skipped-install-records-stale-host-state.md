@@ -6,7 +6,7 @@
 
 **What ships now:** a skipped install routes through `recordOutcome`, which re-observes the host state before writing and records only when that observation reports the bundle installed. Absent or unknown evidence returns `failed` and leaves the selection record untouched.
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] Skipped installs re-observe the host state before writing a selection record.
 - [x] Unknown or absent evidence returns `failed` and leaves the record untouched.
@@ -16,3 +16,7 @@
 
 - `tests/package-flow.test.ts`: `a skipped install fails if the live recheck is absent`.
 - `tests/package-flow.test.ts`: `a skipped install fails if the live recheck is unknown`.
+
+## Comments
+
+- 2026-10-06 (docs closure, HEAD 414b005): completed. Evidence: tests/package-flow.test.ts.
