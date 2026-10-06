@@ -1,6 +1,6 @@
 # Fixture Source escaped test isolation
 
-Status: fixed in code, real-state cleanup awaiting user authorization.
+Status: fixed and verified. Authorized real-state cleanup completed.
 
 The user found `git:4adb644c0af552dcf61d79e0`, pointing to
 `https://github.com/example/pstack.git`, in the real Source catalog.
@@ -32,5 +32,8 @@ omits the preload and requires an inherited temporary user-state sentinel to
 remain empty. It also requires the focused tests to succeed.
 
 Parent independently verified 972 tests, type checking, lint, dead-code audit,
-whitespace checks, and the packed artifact smoke test. The real fixture Source
-has not been deleted. No npm publication or deployment has occurred.
+whitespace checks, and the packed artifact smoke test. After explicit user
+authorization, parent removed only the fixture Source with the CLI. A private
+backup was created and the parsed state was compared to confirm that all other
+Sources and installation records remained unchanged. No npm publication or
+deployment has occurred.

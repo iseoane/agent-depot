@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-06
+
 ### Added
 
-- **Packages**: host-native bundles managed as a category (ADR 0009). A Package is a Pi package (a `pi` manifest key or the conventional `extensions/`, `skills/`, `prompts/` and `themes/` directories) or a Claude Code plugin bound by an in-repo `.claude-plugin/marketplace.json`, both discovered inside a registered Source. Agent Depot reads the bundle manifest into a typed component inventory, derives the Host commands from the declared components, and delegates install, update and uninstall to the Host CLI through the no-shell runner after an action-specific approval receipt. Installed state is read from `~/.pi/agent/settings.json` and `~/.claude/plugins/installed_plugins.json` and never written, so an unversioned Pi git package reports `unknown` rather than `current`. A bundle's own Skills never become a second managed copy, and agents and MCP servers are reported as `host-only` and left to the Host. A fixed-version Claude selection is refused, because `claude plugin install` has no pin slot.
+- **Packages**: host-native bundles managed as a category (ADR 0009). A Package is a Pi package with explicit Pi intent or conventional extensions or prompts, or a Claude Code plugin bound by an in-repo `.claude-plugin/marketplace.json`, both discovered inside a registered Source. Agent Depot reads the bundle manifest into a typed component inventory, derives the Host commands from the declared components, and delegates install, update and uninstall to the Host CLI through the no-shell runner after an action-specific approval receipt. Installed state is read from `~/.pi/agent/settings.json` and `~/.claude/plugins/installed_plugins.json` and never written, so an unversioned Pi git package reports `unknown` rather than `current`. A bundle's own Skills never become a second managed copy, and agents and MCP servers are reported as `host-only` and left to the Host. A fixed-version Claude selection is refused, because `claude plugin install` has no pin slot.
 - `agent-depot package list | discover <source-id> | inspect <selection> --host <host> | approve <selection> --host <host> [--action <install|update|uninstall>] | install|update|uninstall <selection> --host <host> [--yes] | forget <selection> --host <host> --yes`. Planning refreshes the Source first (ADR 0004), a changed declaration needs renewed approval, `--yes` never bypasses the receipt, and execution re-derives the declaration and fails closed with `stale plan` on any difference. Packages are user-global only.
 - Packages join the user-global update batch through `update check --package <selection>` and `update apply --package <selection>` or `--all`, after Skills and Apps. Project scope never selects a Package, and a Package with `unknown` version status is never offered as an update.
 - Profiles carry Package selections as a declaration-only `packages` block with `--no-packages` and `--package <selection>` filters. Import replays each selection through the flow's `select` action, which runs no Host command and never installs a bundle.
-- TUI: a Packages group in Catalog with bundle-owned Skills dimmed; `i` on a bundle previews the frozen plan, approves the missing receipt and then runs it, and `Enter` on a Package row in Installations approves the install declaration only, with `i` to preview and run, `U` to update, `u` to uninstall and `f` to forget, and Package rows in the Updates batch.
+- TUI: a Packages group in Catalog with Skills dimmed only while their Package is selected or installed; `i` on a bundle previews the frozen plan, approves the missing receipt and then runs it, and `Enter` on a Package row in Installations approves the install declaration only, with `i` to preview and run, `U` to update, `u` to uninstall and `f` to forget, and Package rows in the Updates batch.
 
 ### Changed
 
@@ -24,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Approved live App version checks reconcile a newer observed version with the tracked record. Installations labels cached versions as recorded.
+- Skill-only repositories are not inferred as Pi packages. Root Claude marketplace bindings produce one plugin instead of duplicate rows.
+- Package ownership stays within its Source, and selecting or installing a Package refuses conflicting managed portable Skills.
+- Direct execution of the focused Package-owned Skill tests isolates user state even without the test-runner preload.
 - App lifecycle failures identify the missing executable and action, suggest installing Homebrew when `brew` is unavailable, and distinguish manual-only steps and blocked Windows executables. TUI previews name missing commands instead of just saying "unavailable".
 - GitHub `tree/<ref>/<directory>` Source URLs clone and fetch the repository URL, use the selected ref, and restrict Skill discovery and reads to the directory without changing existing Source identities.
 - The TUI Catalog keeps available Sources browsable when another Source has no mirror or cannot be read, and shows an individual warning with refresh guidance instead of failing the whole view.
