@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawn as spawnProcess } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFileSync, spawn as spawnProcess } from "node:child_process";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -11,6 +11,7 @@ import { profileSandbox, seedProfileSandbox } from "../profile-e2e-fixture.js";
 import { fakeAppFixture } from "../fake-app-fixture.js";
 
 import pty from "@homebridge/node-pty-prebuilt-multiarch";
+import { sourceIdForUrl } from "../../src/git-source.js";
 
 // Compiled location: dist/tests/e2e -> the built CLI is dist/src/cli.js.
 const CLI = fileURLToPath(new URL("../../src/cli.js", import.meta.url));
@@ -43,7 +44,7 @@ class TuiSession {
   private exit: { exitCode: number; signal?: number } | undefined;
   private rawLength = 0;
 
-  constructor(environment: NodeJS.ProcessEnv = {}) {
+  constructor(environment: NodeJS.ProcessEnv = {}, cols = 110, rows = 40) {
     // Ink renders only the final frame when it detects CI (`CI` / `CONTINUOUS_INTEGRATION`), which leaves an
     // interactive PTY blank. The session is a real terminal, so hide the CI markers from the child.
     const inherited = { ...process.env };
@@ -51,8 +52,8 @@ class TuiSession {
     delete inherited.CONTINUOUS_INTEGRATION;
     this.terminal = pty.spawn(process.execPath, [CLI, "tui"], {
       name: "xterm-256color",
-      cols: 110,
-      rows: 40,
+      cols,
+      rows,
       cwd: projectRoot,
       env: {
         ...inherited, TERM: "xterm-256color", HOME: homeDirectory, USERPROFILE: homeDirectory,
@@ -89,6 +90,10 @@ class TuiSession {
   /** Sends keys without waiting for output (used for the final quit). */
   press(keys: string): void {
     this.terminal.write(keys);
+  }
+
+  resize(cols: number, rows: number): void {
+    this.terminal.resize(cols, rows);
   }
 
   /** Child state for failure messages: exit code/signal and total raw chars received since spawn. */
@@ -171,6 +176,85 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
     assert.equal(await session.exitCode(), 0);
   } finally {
     session.kill();
+  }
+});
+
+test("active Pi and Claude Package owners stay readable in a narrow real terminal", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "depot-catalog-owners-"));
+  const home = path.join(root, "home");
+  const repository = path.join(root, "pstack");
+  const url = "https://example.test/packages/pstack.git";
+  const piOwnerName = "agent-depot-package-owner-name-that-is-deliberately-long-to-force-wrapping";
+  const claudeOwnerName = "claude-plugin-owner-name-that-is-deliberately-long-to-force-wrapping";
+  const gitConfig = path.join(root, "gitconfig");
+  await mkdir(home);
+  await cp(path.resolve("tests", "fixtures", "packages", "pstack"), repository, { recursive: true });
+  await writeFile(path.join(repository, "package.json"), `${JSON.stringify({
+    name: piOwnerName,
+    version: "0.9.69",
+    keywords: ["pi-package", "pstack", "poteto-mode"],
+    pi: { skills: ["./plugins/pi/skills"], extensions: ["./plugins/pstack/pi/index.ts"] },
+    peerDependencies: { "@earendil-works/pi-coding-agent": "*" },
+  }, null, 2)}\n`);
+  const marketplacePath = path.join(repository, ".claude-plugin", "marketplace.json");
+  await writeFile(marketplacePath, `${JSON.stringify({
+    name: "pstack-claude",
+    owner: { name: "Fixture" },
+    plugins: [{ name: claudeOwnerName, source: "./plugins/pstack", version: "0.9.69" }],
+  }, null, 2)}\n`);
+  await writeFile(path.join(repository, "plugins", "pstack", ".claude-plugin", "plugin.json"), `${JSON.stringify({ name: claudeOwnerName, version: "0.9.69", agents: [] }, null, 2)}\n`);
+  const piSkillDirectory = path.join(repository, "plugins", "pi", "skills", "pty-pi-owner");
+  await mkdir(piSkillDirectory, { recursive: true });
+  await writeFile(path.join(piSkillDirectory, "SKILL.md"), "---\nname: pty-pi-owner\ndescription: PTY fixture for Pi ownership\n---\n");
+  await writeFile(gitConfig, `[url "file://${repository}"]\n\tinsteadOf = ${url}\n[protocol "file"]\n\tallow = always\n[user]\n\tname = e2e\n\temail = e2e@example.test\n`);
+  for (const args of [["init", "-q", "-b", "main"], ["add", "."], ["commit", "-qm", "fixture"]]) {
+    execFileSync("git", args, { cwd: repository, stdio: "pipe" });
+  }
+  const env = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_STATE_HOME: path.join(home, ".local", "state"),
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+    XDG_CACHE_HOME: path.join(home, ".cache"),
+    GIT_CONFIG_GLOBAL: gitConfig,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+  };
+  execFileSync(process.execPath, [CLI, "source", "add", url], { cwd: projectRoot, env, stdio: "pipe" });
+  execFileSync(process.execPath, [CLI, "source", "refresh", sourceIdForUrl(url), "--yes"], { cwd: projectRoot, env, stdio: "pipe" });
+  const stateDirectory = path.join(env.XDG_STATE_HOME, "agent-depot");
+  await mkdir(stateDirectory, { recursive: true });
+  const source = { kind: "external", url };
+  await writeFile(path.join(stateDirectory, "packages.json"), `${JSON.stringify({
+    version: 1,
+    packages: [
+      { selection: { host: "pi", root: "", source, version: { policy: "latest" } }, installId: "fixture-pi", verifiedAt: "2026-01-01T00:00:00.000Z" },
+      { selection: { host: "claude", marketplaceRoot: "", pluginName: claudeOwnerName, source, version: { policy: "latest" } }, installId: "fixture-claude", verifiedAt: "2026-01-01T00:00:00.000Z" },
+    ],
+  }, null, 2)}\n`);
+
+  const session = new TuiSession(env, 40, 17);
+  try {
+    await session.waitFor(/n add ·/u);
+    await session.send("2", /example.test\/packages\/pstack \(3\)/u);
+    await session.send("j", /> ▸ example.test\/packages\/pstack/u);
+    await session.send("\r", /▾ example.test\/packages\/pstack/u);
+    await session.send("j", />\s+▸ Packages \(2\)/u);
+    await session.send("\r", /Package agent-depot-package/u);
+    const pi = await session.send("jjj", /Package-owned Skill: provided by the pi[\s\S]*?force-wrapping/u);
+    const piFrame = pi.split("Agent Depot").at(-1) ?? pi;
+    assert.ok(piFrame.split("\n").length <= 17, `40-column PTY frame exceeded 17 rows:\n${piFrame}`);
+    assert.match(pi, /\d+–\d+ of \d+/u);
+    assert.match(pi, /j\/k move/u);
+    session.resize(80, 24);
+    const claude = await session.send("j", /Package-owned Skill: provided by the claude[\s\S]*?force-wrapping/u);
+    assert.match(claude, /j\/k move/u);
+    session.press("q");
+    assert.equal(await session.exitCode(), 0);
+  } finally {
+    session.kill();
+    await rm(root, { recursive: true, force: true });
   }
 });
 

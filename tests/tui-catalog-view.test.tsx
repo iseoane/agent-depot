@@ -554,9 +554,12 @@ test("CatalogView keeps Package rows reachable and explains owned Skills without
     discover: async () => [pi, claude],
     activeBundles: async () => [{ descriptor: pi, reason: "selected" }, { descriptor: claude, reason: "installed" }],
   });
-  const { lastFrame, stdin, unmount } = await renderExpanded(
-    <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} listHeight={6} />,
-  );
+  const tree = <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />;
+  const view = await renderExpanded(tree);
+  const { lastFrame, stdin, stdout, unmount } = view;
+  Object.defineProperty(stdout, "columns", { configurable: true, value: 40 });
+  Object.defineProperty(stdout, "rows", { configurable: true, value: 16 });
+  view.rerender(tree);
   try {
     await moveToSelected(lastFrame, stdin, /Packages \(2\)/);
     stdin.write(ENTER);
@@ -564,15 +567,16 @@ test("CatalogView keeps Package rows reachable and explains owned Skills without
     await moveToSelected(lastFrame, stdin, /Package pstack-pi \(pi\)/);
     await moveToSelected(lastFrame, stdin, /Package pstack-claude \(claude\)/);
     await moveToSelected(lastFrame, stdin, /create-verification-skill/);
-    const owned = await waitForFrame(lastFrame, /provided by the pi Package pstack-pi/);
+    const owned = await waitForFrame(lastFrame, /provided by the pi\s+Package pstack-pi/);
+    assert.ok(owned.split("\n").length + 4 <= 15, `selection help exceeded the 16-row terminal with shell chrome:\n${owned}`);
     assert.match(selectedLine(owned) ?? "", /create-verification-skill/);
     assert.doesNotMatch(selectedLine(owned) ?? "", /provided by the pi Package/);
-    assert.match(owned, /Install or update the Package from its\s+Package row/);
+    assert.match(owned, /Install or update the\s+Package from its Package row/);
     stdin.write(" ");
     const markRefusal = await waitForFrame(lastFrame, /Package-owned Skills cannot be marked/);
     assert.doesNotMatch(markRefusal, /1 selected/);
     stdin.write("i");
-    const installRefusal = await waitForFrame(lastFrame, /Install or update the pi Package pstack-pi/);
+    const installRefusal = await waitForFrame(lastFrame, /Install or update the pi Package\s+pstack-pi/);
     assert.doesNotMatch(installRefusal, /Host \(space\/1-4 toggle/);
   } finally {
     unmount();
