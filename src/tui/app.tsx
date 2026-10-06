@@ -35,7 +35,7 @@ const TABS: readonly (readonly [ViewName, string])[] = [
 function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boolean): string {
   switch (view) {
     case "catalog":
-      return `j/k move · Enter expand · space mark · a all · i install · / filter${catalogFocusedOnSource ? " · s all sources" : ""} · q quit`;
+      return `j/k move · Enter expand · space mark · a repo · i install · / filter${catalogFocusedOnSource ? " · s all sources" : ""} · q quit`;
     case "installations":
       return "j/k move · Enter expand · space mark · a all · u uninstall · h add hosts · A adopt · q quit";
     case "profile":

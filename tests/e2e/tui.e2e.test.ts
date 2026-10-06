@@ -146,7 +146,12 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
 
     const catalog = await session.send("2", /▸ builtin:agent-depot \(3\)/u);
     assert.match(catalog, /Scope: all sources/u);
-    await session.send("\r", /doctor-md-skill/u);
+    assert.match(catalog, /a repo/u);
+    await session.send("a", /3 selected/u);
+    const marked = await session.send("\r", /doctor-md-skill/u);
+    assert.match(marked, /\[x\] doctor-md-skill/u);
+    const cleared = await session.send("a", /Scope: all sources/u);
+    assert.doesNotMatch(cleared, /\d+ selected/u);
 
     const installations = await session.send("3", /Managed \(user-global\) \(0\)/u);
     assert.match(installations, /Unmanaged \(user-global\)/u);

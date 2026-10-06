@@ -360,6 +360,127 @@ test("CatalogView matches descriptions and shows no matches", async () => {
   unmount();
 });
 
+test("CatalogView a toggles only the highlighted repository and preserves marks in other repositories", async () => {
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /3 of 3/);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /2 selected/);
+    const marked = lastFrame();
+    stdin.write("a");
+    await waitForFrame(lastFrame, (frame) => frame !== marked && !frame.includes("selected"));
+
+    stdin.write("a");
+    await waitForFrame(lastFrame, /2 selected/);
+    await moveToSelected(lastFrame, stdin, /x\/y/);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /3 selected/);
+    stdin.write("kkk");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("builtin:agent-depot") === true);
+    const firstRepository = lastFrame() ?? "";
+    assert.match(firstRepository, /alpha/);
+    assert.match(firstRepository.split("\n").find((line) => line.includes("alpha")) ?? "", /\[x\] alpha/);
+    assert.match(firstRepository.split("\n").find((line) => line.includes("beta")) ?? "", /\[x\] beta/);
+  } finally {
+    unmount();
+  }
+});
+
+test("CatalogView a leaves filtered-out marks alone", async () => {
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills.slice(0, 2))} sourceId="builtin:agent-depot" />,
+  );
+  try {
+    await waitForFrame(lastFrame, /2 of 2/);
+    await waitForFrame(lastFrame, /alpha/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("alpha") === true);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("beta") === true);
+    stdin.write(" ");
+    await waitForFrame(lastFrame, /1 selected/);
+
+    stdin.write("/");
+    await waitForFrame(lastFrame, /Filter: _/);
+    stdin.write("alpha");
+    await waitForFrame(lastFrame, /Filter: alpha/);
+    stdin.write("\r");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("builtin:agent-depot") === true);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /1 selected/);
+    stdin.write(ESC);
+    await waitForFrame(lastFrame, /2 of 2/);
+    stdin.write(ENTER);
+    const unfiltered = await waitForFrame(lastFrame, (frame) => frame.includes("alpha") && frame.includes("beta"));
+    assert.match(unfiltered.split("\n").find((line) => line.includes("alpha")) ?? "", /\[x\] alpha/);
+    assert.match(unfiltered.split("\n").find((line) => line.includes("beta")) ?? "", /\[x\] beta/);
+  } finally {
+    unmount();
+  }
+});
+
+test("CatalogView a resolves the repository from Source, group, Package, and Skill rows", async () => {
+  const source = { id: "git:pstack", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
+  const descriptor = packageDescriptor("pi", "pstack", "plugins/pstack/skills");
+  const operations: SourceOperations = {
+    ...operationsFor(async () => [{ sourceId: source.id, path: "loose/skill", name: "loose", description: "Loose skill" }]),
+    async listSources() { return [source]; },
+  };
+  const packages = fakePackageOperations({ discover: async () => [descriptor] });
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /iseoane\/pstack \(1\)/);
+    await waitForFrame(lastFrame, /Packages \(1\)/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Packages (1)") === true);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /1 selected/);
+    stdin.write(ENTER);
+    await waitForFrame(lastFrame, /Package pstack \(pi\)/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Package pstack") === true);
+    stdin.write("a");
+    await waitForFrame(lastFrame, (frame) => !frame.includes("1 selected"));
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("loose") === true);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /1 selected/);
+  } finally {
+    unmount();
+  }
+});
+
+test("CatalogView a excludes active Package-owned skills", async () => {
+  const source = { id: "git:pstack", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
+  const descriptor = packageDescriptor("pi", "pstack", "plugins/pstack/skills");
+  const owned = { sourceId: source.id, path: "plugins/pstack/skills/create-verification-skill", name: "create-verification-skill", description: "Owned" };
+  const loose = { sourceId: source.id, path: "loose/skill", name: "loose", description: "Loose" };
+  const operations: SourceOperations = {
+    ...operationsFor(async () => [owned, loose]),
+    async listSources() { return [source]; },
+  };
+  const packages = fakePackageOperations({
+    discover: async () => [descriptor],
+    activeBundles: async () => [{ descriptor, reason: "selected" }],
+  });
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /iseoane\/pstack \(2\)/);
+    stdin.write("a");
+    const marked = await waitForFrame(lastFrame, /1 selected/);
+    assert.match(marked.split("\n").find((line) => line.includes("loose")) ?? "", /\[x\] loose/);
+    assert.match(marked.split("\n").find((line) => line.includes("create-verification-skill")) ?? "", /\[ \] create-verification-skill/);
+  } finally {
+    unmount();
+  }
+});
+
 test("CatalogView toggles all sources with s", async () => {
   const requested: (readonly string[])[] = [];
   const { lastFrame, stdin, unmount } = await renderExpanded(

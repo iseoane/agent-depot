@@ -194,7 +194,7 @@ test("no footer repeats the view-switch hints the tab bar already shows, and eac
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
   const expected: [string | undefined, RegExp, RegExp][] = [
     [undefined, /\[1 Sources\]/, /space mark.*a all.*Enter catalog.*n add.*r refresh.*d remove/],
-    ["2", /\[2 Catalog\]/, /space mark.*a all.*i install.*\/ filter/],
+    ["2", /\[2 Catalog\]/, /space mark.*a repo.*i install.*\/ filter/],
     ["3", /\[3 Installations\]/, /space mark.*a all.*u uninstall.*h add hosts.*A adopt/],
     ["4", /\[4 Updates\]/, /space mark.*a all.*Enter preview.*r check again/],
   ];
