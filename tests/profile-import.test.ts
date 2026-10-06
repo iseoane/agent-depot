@@ -6,15 +6,12 @@ import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { test } from "node:test";
 import { createAppOperations } from "../src/app-flow.js";
-import type { GitSource } from "../src/git-source.js";
-import { createPackageOperations, type PackageOperations } from "../src/package-flow.js";
-import type { InstalledPackage, PackageSelection } from "../src/package-model.js";
+import type { InstalledPackage } from "../src/package-model.js";
 import { buildProfileExport } from "../src/profile-export.js";
-import { createSourceOperations, type SourceOperations } from "../src/sources.js";
+import { createSourceOperations } from "../src/sources.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
-import type { SourceContentAccess } from "../src/skill-discovery.js";
 import { buildProfileImport, applyProfileImport } from "../src/profile-import.js";
-import { claudePackage, fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
+import { claudePackage, createPackageSide, fakePackageOperations, hostedSelection, installedPackage, piPackage } from "./profile-package-fixture.js";
 
 const recipe = { name: "tool", platform: "windows", install: { manual: "Install tool" },
   update: { manual: "Update tool" }, uninstall: { manual: "Remove tool" },
@@ -107,57 +104,11 @@ test("import reports a Package select the flow did not complete and fails items 
   assert.match(unprovided[0]!.detail!, /Profile import requires Package operations/);
 });
 
-const PI_URL = "https://example.test/demo-bundle";
-const PI_COMMIT = "a".repeat(40);
-const hostedSource: GitSource = Object.freeze({ id: "git:example.test/demo-bundle", kind: "git", url: PI_URL });
-const hostedSelection: PackageSelection = Object.freeze({ host: "pi", root: "",
-  source: Object.freeze({ kind: "external", url: PI_URL }), version: Object.freeze({ policy: "latest" }) });
-
-/** One machine: its own state directory, host state and process runner, over one shared Source. */
-async function packageSide(root: string, home: string) {
-  const calls: string[][] = [];
-  const contentAccess: SourceContentAccess = {
-    readSnapshot: async () => Object.freeze([
-      Object.freeze({ path: "package.json", content: JSON.stringify({ name: "demo-bundle", version: "1.0.0", pi: { skills: "skills" } }) }),
-      Object.freeze({ path: "skills/demo/SKILL.md", content: "---\nname: demo\ndescription: demo fixture\n---\n" }),
-    ]),
-    readResolvedVersion: async () => Object.freeze({ kind: "git-commit" as const, commit: PI_COMMIT }),
-  };
-  const sourceOperations: SourceOperations = {
-    addGitSource: async () => hostedSource,
-    listSources: async () => Object.freeze([hostedSource]),
-    refreshSource: async () => hostedSource,
-    selectSources: async () => Object.freeze([hostedSource]),
-    resolveProjectSource: async () => hostedSource,
-    refreshProjectSource: async () => hostedSource,
-    listUserGlobalInstallations: async () => Object.freeze([]),
-  };
-  const operations: PackageOperations = createPackageOperations({
-    homeDirectory: home,
-    stateDirectory: path.join(root, "state"),
-    platform: "linux",
-    isWsl: false,
-    sourceOperations,
-    sourceContentAccess: contentAccess,
-    resolveExecutable: async name => `/usr/bin/${name}`,
-    runner: async (command, args) => {
-      calls.push([command, ...args]);
-      return { code: 0, signal: null, stdout: Buffer.alloc(0), stderr: "", outputTooLarge: false };
-    },
-    readHostStateFile: async filePath => {
-      const error = new Error(`ENOENT: no such file or directory, open ${JSON.stringify(filePath)}`) as NodeJS.ErrnoException;
-      error.code = "ENOENT";
-      throw error;
-    },
-  });
-  return { operations, sourceOperations, calls, state: path.join(root, "state") };
-}
-
 test("a Profile round trip restores a Package selection and never installs a bundle", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "ad-profile-package-roundtrip-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const a = await packageSide(path.join(root, "a"), path.join(root, "a-home"));
-  const b = await packageSide(path.join(root, "b"), path.join(root, "b-home"));
+  const a = await createPackageSide({ homeDirectory: path.join(root, "a-home"), stateDirectory: path.join(root, "a", "state") });
+  const b = await createPackageSide({ homeDirectory: path.join(root, "b-home"), stateDirectory: path.join(root, "b", "state") });
   const appsA = createAppOperations({ recipesDirectory: path.join(root, "a-apps") });
   const appsB = createAppOperations({ recipesDirectory: path.join(root, "b-apps") });
 
@@ -186,14 +137,14 @@ test("a Profile round trip restores a Package selection and never installs a bun
   assert.equal(await b.operations.approvalStatus(hostedSelection, "select"), "approved");
   assert.equal(await b.operations.approvalStatus(hostedSelection, "install"), "needs approval");
 
-  const stateBefore = (await readdir(b.state)).sort();
-  const bytesBefore = await readFile(path.join(b.state, "packages.json"), "utf8");
+  const stateBefore = (await readdir(b.stateDirectory)).sort();
+  const bytesBefore = await readFile(path.join(b.stateDirectory, "packages.json"), "utf8");
   const repeated = await applyProfileImport(
     await buildProfileImport(JSON.parse(serialized), b.sourceOperations, appsB, {}, b.operations),
     b.sourceOperations, appsB, true, () => {}, { homeDirectory: bHome, packageOperations: b.operations });
   assert.deepEqual(repeated.map(result => [result.status, result.detail]), [["skipped", undefined], ["skipped", undefined]]);
-  assert.deepEqual((await readdir(b.state)).sort(), stateBefore);
-  assert.equal(await readFile(path.join(b.state, "packages.json"), "utf8"), bytesBefore);
+  assert.deepEqual((await readdir(b.stateDirectory)).sort(), stateBefore);
+  assert.equal(await readFile(path.join(b.stateDirectory, "packages.json"), "utf8"), bytesBefore);
 });
 
 test("import plan classifies identical choices and shows conflicts without writing", async t => {
