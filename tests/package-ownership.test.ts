@@ -106,7 +106,10 @@ test("an install for an unrelated Source or an unreadable host file never claims
     await writeFile(path.join(home, ".claude", "plugins", "installed_plugins.json"), "{ not json");
     const unreadable = await readHostInstallView({ homeDirectory: home });
     assert.equal(unreadable.claudePlugins.issue !== undefined, true);
-    assert.deepEqual(activeBundles([{ source: projectSourceOf(source), descriptor }], [], unreadable), []);
+    const bundle = { source: projectSourceOf(source), descriptor };
+    assert.deepEqual(activeBundles([bundle], [], unreadable), []);
+    const selection = packageSelectionFor(descriptor, projectSourceOf(source));
+    assert.deepEqual(activeBundles([bundle], [selection], unreadable), [{ descriptor, reason: "selected" }]);
   });
 });
 
