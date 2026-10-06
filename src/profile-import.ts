@@ -5,20 +5,35 @@ import path from "node:path";
 import type { AppOperations } from "./app-flow.js";
 import { compareAppVersions } from "./app-version.js";
 import { canonicalizeGitSourceUrl, sourceIdForUrl } from "./git-source.js";
-import { selectProfileItems, type ProfileFilters } from "./profile-export.js";
-import { parseProfile, PROFILE_FORMAT, type Profile } from "./profile.js";
-import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "./project-manifest.js";
+import { selectionKey, type InstalledPackage, type PackageSelection } from "./package-model.js";
+import { describeProfilePackage, packageFilterNames, selectProfileItems, type ProfileFilters } from "./profile-export.js";
+import { parseProfile, PROFILE_FORMAT, type Profile, type ProfilePackageOperations } from "./profile.js";
+import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection, type ProjectSource } from "./project-manifest.js";
 import { defaultProjectSkillTreeAccess, executeSingleInstall, formatVersionPolicy, outputSingleInstallPreview, planSingleInstall,
   type InstallEnvironment } from "./skill-install.js";
 import { resolveProjectSource, type Source, type SourceOperations } from "./sources.js";
+
+interface ProfileImportStatus {
+  readonly status: "add" | "same" | "conflict";
+  readonly label: string;
+  readonly difference?: string;
+}
 
 export type ProfileImportItem = (
   { readonly block: "sources"; readonly value: Profile["sources"][number] } |
   { readonly block: "skills"; readonly value: Profile["skills"][number] } |
   { readonly block: "apps"; readonly value: Profile["apps"][number] }
-) & { readonly status: "add" | "same" | "conflict"; readonly label: string; readonly difference?: string };
+) & ProfileImportStatus;
+
+/** Package items travel beside the three original blocks, so a frontend that renders those keeps compiling. */
+export type ProfileImportPackageItem = { readonly block: "packages"; readonly value: Profile["packages"][number] } & ProfileImportStatus;
+
+/** Every classified item a plan can carry, across the four blocks. */
+export type ProfileImportEntry = ProfileImportItem | ProfileImportPackageItem;
+
 export interface ProfileImportPlan {
   readonly items: readonly ProfileImportItem[];
+  readonly packages: readonly ProfileImportPackageItem[];
   readonly preview: readonly string[];
 }
 
@@ -86,6 +101,12 @@ function classifySkill(value: Profile["skills"][number], skills: readonly Projec
   const existing = skills.find(skill => skillIdentity(skill) === skillIdentity(value));
   return { block: "skills", value, label: `Skill ${value.path}`, ...comparison(existing && skillChoices(existing), skillChoices(value)) };
 }
+/** Identity is the Source and coordinates; only the version policy is a portable choice. */
+function classifyPackage(value: Profile["packages"][number], recorded: readonly InstalledPackage[]): ProfileImportPackageItem {
+  const existing = recorded.find(record => selectionKey(record.selection) === selectionKey(value));
+  return { block: "packages", value, label: describeProfilePackage(value),
+    ...comparison(existing === undefined ? undefined : { version: existing.selection.version }, { version: value.version }) };
+}
 function classifyRecipe(value: Profile["apps"][number], recipes: Awaited<ReturnType<typeof loadImportRecipes>>): ProfileImportItem {
   const existing = recipes.filter(entry => entry.name === value.name &&
     (entry.platform === undefined || value.platform === undefined || entry.platform === value.platform));
@@ -100,29 +121,51 @@ function classifyRecipe(value: Profile["apps"][number], recipes: Awaited<ReturnT
       fieldDifferences(entry.content ?? {}, value).join("; ") || "content identical"}`).join("; ") } : {}) };
 }
 
+/** An external Source that no plan item registers is fetched but never added to Sources. */
+function fetchedSourceNote(source: ProjectSource, sources: readonly Source[], entries: readonly ProfileImportEntry[]): string | undefined {
+  if (source.kind !== "external" || !("url" in source)) return undefined;
+  const url = canonicalizeGitSourceUrl(source.url);
+  const registered = sources.some(registered => registered.kind === "git" && canonicalizeGitSourceUrl(registered.url) === url);
+  const planned = entries.some(candidate => candidate.block === "sources" && candidate.status === "add"
+    && canonicalizeGitSourceUrl(candidate.value.url) === url);
+  return registered || planned ? undefined : `  Source ${source.url} will be fetched but not registered`;
+}
+
 /** Load only this block; retained across skips and invalidated after every attempted write. */
-async function loadImportClassifier(block: ProfileImportItem["block"], operations: SourceOperations, apps: AppOperations) {
+async function loadImportClassifier(block: ProfileImportEntry["block"], operations: SourceOperations, apps: AppOperations,
+  packages: ProfilePackageOperations | undefined): Promise<(item: ProfileImportEntry) => ProfileImportEntry> {
   if (block === "sources") {
     const sources = await operations.listSources();
-    return (item: ProfileImportItem) => item.block === "sources" ? classifySource(item.value, sources) : item;
+    return (item: ProfileImportEntry) => item.block === "sources" ? classifySource(item.value, sources) : item;
   }
   if (block === "skills") {
     if (!operations.listUserGlobalInstallations) throw new Error("Profile import requires user-global installation listing");
     const skills = await operations.listUserGlobalInstallations();
-    return (item: ProfileImportItem) => item.block === "skills" ? classifySkill(item.value, skills) : item;
+    return (item: ProfileImportEntry) => item.block === "skills" ? classifySkill(item.value, skills) : item;
+  }
+  if (block === "packages") {
+    if (packages === undefined) throw new Error("Profile import requires Package operations to replay Package selections");
+    const recorded = await packages.list();
+    return (item: ProfileImportEntry) => item.block === "packages" ? classifyPackage(item.value, recorded) : item;
   }
   const recipes = await loadImportRecipes(apps);
-  return (item: ProfileImportItem) => item.block === "apps" ? classifyRecipe(item.value, recipes) : item;
+  return (item: ProfileImportEntry) => item.block === "apps" ? classifyRecipe(item.value, recipes) : item;
 }
 
 /** Read-only classification. Inclusion is a transient frontend choice, not persisted Source state. */
 export async function buildProfileImport(input: unknown, operations: SourceOperations, apps: AppOperations,
-  filters: ProfileFilters = {}): Promise<ProfileImportPlan> {
+  filters: ProfileFilters = {}, packageOperations?: ProfilePackageOperations): Promise<ProfileImportPlan> {
   const profile = parseProfile(input);
   if (!operations.listUserGlobalInstallations) throw new Error("Profile import requires user-global installation listing");
   const sources = await operations.listSources();
   const skills = await operations.listUserGlobalInstallations();
   const recipes = await loadImportRecipes(apps);
+  const packageValues = selectProfileItems(profile.packages, filters.packages, filters.noPackages,
+    selection => packageFilterNames(selection), "packages");
+  if (packageValues.length > 0 && packageOperations === undefined) {
+    throw new Error("Profile import requires Package operations to replay Package selections");
+  }
+  const recordedPackages = packageOperations === undefined ? [] : await packageOperations.list();
   const items: ProfileImportItem[] = [];
   for (const value of selectProfileItems(profile.sources, filters.sources, filters.noSources,
     source => [source.url, sourceIdForUrl(source.url)], "sources")) items.push(classifySource(value, sources));
@@ -131,7 +174,9 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   for (const value of selectProfileItems(profile.apps, filters.apps, filters.noApps, recipe => [recipe.name], "apps")) {
     items.push(classifyRecipe(value, recipes));
   }
-  const preview = ["Preview: import portable user-global profile", ...items.flatMap(item => {
+  const packages = packageValues.map(value => classifyPackage(value, recordedPackages));
+  const entries: readonly ProfileImportEntry[] = [...items, ...packages];
+  const preview = ["Preview: import portable user-global profile", ...entries.flatMap(item => {
     const status = item.block === "sources" && item.status === "same" && !item.value.included
       ? "same (discovery inclusion is not imported)" : item.status;
     const lines = [`${status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`];
@@ -142,12 +187,15 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
       for (const [action, method] of Object.entries(skill.methods ?? {})) {
         lines.push(`  ${action}: argv=${JSON.stringify(method.argv)} (user-provided method from the profile, runs only after --yes)`);
       }
-      const source = skill.source;
-      if (source.kind === "external" && "url" in source &&
-        !sources.some(registered => registered.kind === "git" && canonicalizeGitSourceUrl(registered.url) === canonicalizeGitSourceUrl(source.url)) &&
-        !items.some(candidate => candidate.block === "sources" && canonicalizeGitSourceUrl(candidate.value.url) === canonicalizeGitSourceUrl(source.url) && candidate.status === "add")) {
-        lines.push(`  Source ${source.url} will be fetched but not registered`);
-      }
+      const note = fetchedSourceNote(skill.source, sources, entries);
+      if (note !== undefined) lines.push(note);
+    }
+    if (item.block === "packages" && item.status === "add") {
+      const selection = item.value;
+      lines.push(`  Source ${canonical(selection.source)}`,
+        `  host ${selection.host}: select records the choice; it runs no host command and installs nothing`);
+      const note = fetchedSourceNote(selection.source, sources, entries);
+      if (note !== undefined) lines.push(note);
     }
     return lines;
   })];
@@ -157,14 +205,16 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   }
   preview.push("Existing choices are never replaced. Source inclusion is a transient discovery choice.",
     "Same-name App recipes conflict only when platforms overlap; disjoint platform recipes can both be added.");
-  return { items, preview };
+  return { items, packages, preview };
 }
 
 export interface ProfileImportEnvironment extends InstallEnvironment {
   readonly homeDirectory?: string;
+  /** Replays added Package selections through the flow's select action. Absent fails those items. */
+  readonly packageOperations?: ProfilePackageOperations;
 }
 export interface ProfileImportResult {
-  readonly item: ProfileImportItem;
+  readonly item: ProfileImportEntry;
   readonly status: "added" | "skipped" | "failed";
   readonly detail?: string;
 }
@@ -188,14 +238,21 @@ async function writeRecipe(directory: string, recipe: Profile["apps"][number]): 
 export async function applyProfileImport(plan: ProfileImportPlan, operations: SourceOperations, apps: AppOperations,
   confirmed: boolean, output: (line: string) => void, environment: ProfileImportEnvironment = {}): Promise<readonly ProfileImportResult[]> {
   const results: ProfileImportResult[] = [];
-  for (const block of ["sources", "skills", "apps"] as const) {
+  const packageOperations = environment.packageOperations;
+  const groups: readonly { readonly block: ProfileImportEntry["block"]; readonly entries: readonly ProfileImportEntry[] }[] = [
+    { block: "sources", entries: plan.items.filter(item => item.block === "sources") },
+    { block: "skills", entries: plan.items.filter(item => item.block === "skills") },
+    { block: "apps", entries: plan.items.filter(item => item.block === "apps") },
+    { block: "packages", entries: plan.packages },
+  ];
+  for (const group of groups) {
     let classify: Awaited<ReturnType<typeof loadImportClassifier>> | undefined;
-    for (const item of plan.items.filter(item => item.block === block)) {
+    for (const item of group.entries) {
       if (!confirmed || item.status !== "add") { results.push({ item, status: "skipped" }); continue; }
       try {
         parseProfile({ format: PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
-          sources: [], skills: [], apps: [], [block]: [item.value] });
-        classify ??= await loadImportClassifier(block, operations, apps);
+          sources: [], skills: [], apps: [], [group.block]: [item.value] });
+        classify ??= await loadImportClassifier(group.block, operations, apps, packageOperations);
         const recheck = classify(item);
         if (recheck.status !== "add") {
           results.push({ item, status: "skipped", detail: `${recheck.status}: ${recheck.label}${recheck.difference ? `; ${recheck.difference}` : ""}` }); continue;
@@ -204,9 +261,8 @@ export async function applyProfileImport(plan: ProfileImportPlan, operations: So
         classify = undefined;
         if (item.block === "sources") await operations.addGitSource(item.value.url);
         else if (item.block === "apps") await writeRecipe(apps.directory, item.value);
-        else {
-          await installImportedSkill(item.value, operations, apps, output, environment);
-        }
+        else if (item.block === "packages") await selectImportedPackage(item.value, packageOperations, output);
+        else await installImportedSkill(item.value, operations, apps, output, environment);
         results.push({ item, status: "added" });
       } catch (error) {
         results.push({ item, status: "failed", detail: error instanceof Error ? error.message : String(error) });
@@ -214,6 +270,28 @@ export async function applyProfileImport(plan: ProfileImportPlan, operations: So
     }
   }
   return results;
+}
+
+/**
+ * Replays one selection through the flow's select action. Approval is written for
+ * that action alone, whose declaration carries no argv, so no install or update
+ * authorization is created and no host command can run.
+ */
+async function selectImportedPackage(selection: PackageSelection, packages: ProfilePackageOperations | undefined,
+  output: (line: string) => void): Promise<void> {
+  if (packages === undefined) throw new Error("Package operations are required to replay a Package selection");
+  const plan = await packages.planLifecycle(selection, "select");
+  if (plan.commands.length > 0) {
+    throw new Error(`${describeProfilePackage(selection)} plan carries ${plan.commands.length} host steps; import runs no host command`);
+  }
+  await packages.approve(selection, "select");
+  const result = await packages.executeLifecycle(plan, true);
+  if (result.status !== "selected") {
+    const reason = result.status === "failed" || result.status === "stale plan" || result.status === "manual required"
+      ? `: ${result.reason}` : "";
+    throw new Error(`${describeProfilePackage(selection)} was not selected (${result.status}${reason})`);
+  }
+  output(`  selected ${describeProfilePackage(selection)}: no host command ran`);
 }
 
 async function installImportedSkill(selection: Profile["skills"][number], operations: SourceOperations, apps: AppOperations,

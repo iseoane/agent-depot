@@ -1,14 +1,20 @@
 import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { test } from "node:test";
 import { createAppOperations } from "../src/app-flow.js";
-import { createSourceOperations } from "../src/sources.js";
-import { parseProfile } from "../src/profile.js";
+import type { GitSource } from "../src/git-source.js";
+import { createPackageOperations, type PackageOperations } from "../src/package-flow.js";
+import type { InstalledPackage, PackageSelection } from "../src/package-model.js";
+import { buildProfileExport } from "../src/profile-export.js";
+import { createSourceOperations, type SourceOperations } from "../src/sources.js";
+import { parseProfile, serializeProfile } from "../src/profile.js";
+import type { SourceContentAccess } from "../src/skill-discovery.js";
 import { buildProfileImport, applyProfileImport } from "../src/profile-import.js";
+import { claudePackage, fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
 
 const recipe = { name: "tool", platform: "windows", install: { manual: "Install tool" },
   update: { manual: "Update tool" }, uninstall: { manual: "Remove tool" },
@@ -27,6 +33,168 @@ async function fixture(t: { after(fn: () => Promise<unknown>): void }) {
   } });
   return { home, operations, apps };
 }
+
+test("import classifies Package additions, identical records and version conflicts by selection identity", async t => {
+  const { home, operations, apps } = await fixture(t);
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [],
+    packages: [piPackage, claudePackage, { ...piPackage, root: "plugins/other-bundle" }] });
+  const recorded: readonly InstalledPackage[] = [
+    { ...installedPackage, selection: { ...piPackage, version: { policy: "fixed", version: "0.4.0" } } },
+    { ...installedPackage, selection: claudePackage },
+  ];
+  const { operations: packageOperations, evidence } = fakePackageOperations({ recorded });
+  const plan = await buildProfileImport(input, operations, apps, {}, packageOperations);
+  assert.deepEqual(Object.fromEntries(plan.packages.map(item => [item.label, item.status])), {
+    "Package claude other@plugins/other (fixed:0.3.0)": "same",
+    "Package pi plugins/demo (latest)": "conflict",
+    "Package pi plugins/other-bundle (latest)": "add",
+  });
+  const difference = plan.packages.find(item => item.status === "conflict")!.difference!;
+  assert.match(difference, /version: existing .*0\.4\.0.* -> incoming .*latest/);
+  assert.doesNotMatch(difference, /installId|verified|source:|root:/);
+  const preview = plan.preview.join("\n");
+  assert.match(preview, /add: Package pi plugins\/other-bundle \(latest\)/);
+  assert.match(preview, /host pi: select records the choice; it runs no host command and installs nothing/);
+  assert.match(preview, /Source https:\/\/example\.test\/demo\.git will be fetched but not registered/);
+  const unconfirmed = await applyProfileImport(plan, operations, apps, false, () => {}, { homeDirectory: home, packageOperations });
+  assert.deepEqual(unconfirmed.map(result => result.status), ["skipped", "skipped", "skipped"]);
+  assert.deepEqual([evidence.approvals, evidence.plans, evidence.executions], [[], [], []]);
+  assert.equal(evidence.listed, 1);
+});
+
+test("confirmed import selects an added Package and never approves install or update", async t => {
+  const { home, operations, apps } = await fixture(t);
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [], packages: [piPackage] });
+  const { operations: packageOperations, evidence } = fakePackageOperations({});
+  const plan = await buildProfileImport(input, operations, apps, {}, packageOperations);
+  const output: string[] = [];
+  const results = await applyProfileImport(plan, operations, apps, true, line => output.push(line), { homeDirectory: home, packageOperations });
+  assert.deepEqual(results.map(result => [result.item.block, result.status]), [["packages", "added"]]);
+  assert.deepEqual(evidence.approvals, ["select"]);
+  assert.deepEqual(evidence.plans, ["select"]);
+  assert.deepEqual(evidence.executions, [{ action: "select", confirmed: true }]);
+  assert.match(output.join("\n"), /no host command ran/);
+});
+
+test("import refuses a select plan that carries host steps instead of running them", async t => {
+  const { home, operations, apps } = await fixture(t);
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [], packages: [piPackage] });
+  const { operations: packageOperations, evidence } = fakePackageOperations({ commands: [
+    { purpose: "apply", executable: "pi", args: ["install", "demo"], summary: "pi install demo" },
+  ] });
+  const plan = await buildProfileImport(input, operations, apps, {}, packageOperations);
+  const results = await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home, packageOperations });
+  assert.deepEqual(results.map(result => result.status), ["failed"]);
+  assert.match(results[0]!.detail!, /plan carries 1 host steps; import runs no host command/);
+  assert.deepEqual([evidence.approvals, evidence.executions], [[], []]);
+});
+
+test("import reports a Package select the flow did not complete and fails items without Package operations", async t => {
+  const { home, operations, apps } = await fixture(t);
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [], packages: [piPackage] });
+  await assert.rejects(buildProfileImport(input, operations, apps), /requires Package operations/);
+  await assert.rejects(buildProfileImport(input, operations, apps, { packages: ["missing"] }),
+    /packages: unknown selection "missing"/);
+  assert.deepEqual((await buildProfileImport(input, operations, apps, { noPackages: true })).packages, []);
+  const unstarted = fakePackageOperations({ result: { status: "manual required", reason: "no host CLI" } });
+  const plan = await buildProfileImport(input, operations, apps, {}, unstarted.operations);
+  const results = await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home, packageOperations: unstarted.operations });
+  assert.deepEqual(results.map(result => result.status), ["failed"]);
+  assert.match(results[0]!.detail!, /was not selected \(manual required: no host CLI\)/);
+  assert.deepEqual(unstarted.evidence.approvals, ["select"]);
+  const unprovided = await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home });
+  assert.deepEqual(unprovided.map(result => result.status), ["failed"]);
+  assert.match(unprovided[0]!.detail!, /Profile import requires Package operations/);
+});
+
+const PI_URL = "https://example.test/demo-bundle";
+const PI_COMMIT = "a".repeat(40);
+const hostedSource: GitSource = Object.freeze({ id: "git:example.test/demo-bundle", kind: "git", url: PI_URL });
+const hostedSelection: PackageSelection = Object.freeze({ host: "pi", root: "",
+  source: Object.freeze({ kind: "external", url: PI_URL }), version: Object.freeze({ policy: "latest" }) });
+
+/** One machine: its own state directory, host state and process runner, over one shared Source. */
+async function packageSide(root: string, home: string) {
+  const calls: string[][] = [];
+  const contentAccess: SourceContentAccess = {
+    readSnapshot: async () => Object.freeze([
+      Object.freeze({ path: "package.json", content: JSON.stringify({ name: "demo-bundle", version: "1.0.0", pi: { skills: "skills" } }) }),
+      Object.freeze({ path: "skills/demo/SKILL.md", content: "---\nname: demo\ndescription: demo fixture\n---\n" }),
+    ]),
+    readResolvedVersion: async () => Object.freeze({ kind: "git-commit" as const, commit: PI_COMMIT }),
+  };
+  const sourceOperations: SourceOperations = {
+    addGitSource: async () => hostedSource,
+    listSources: async () => Object.freeze([hostedSource]),
+    refreshSource: async () => hostedSource,
+    selectSources: async () => Object.freeze([hostedSource]),
+    resolveProjectSource: async () => hostedSource,
+    refreshProjectSource: async () => hostedSource,
+    listUserGlobalInstallations: async () => Object.freeze([]),
+  };
+  const operations: PackageOperations = createPackageOperations({
+    homeDirectory: home,
+    stateDirectory: path.join(root, "state"),
+    platform: "linux",
+    isWsl: false,
+    sourceOperations,
+    sourceContentAccess: contentAccess,
+    resolveExecutable: async name => `/usr/bin/${name}`,
+    runner: async (command, args) => {
+      calls.push([command, ...args]);
+      return { code: 0, signal: null, stdout: Buffer.alloc(0), stderr: "", outputTooLarge: false };
+    },
+    readHostStateFile: async filePath => {
+      const error = new Error(`ENOENT: no such file or directory, open ${JSON.stringify(filePath)}`) as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    },
+  });
+  return { operations, sourceOperations, calls, state: path.join(root, "state") };
+}
+
+test("a Profile round trip restores a Package selection and never installs a bundle", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "ad-profile-package-roundtrip-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const a = await packageSide(path.join(root, "a"), path.join(root, "a-home"));
+  const b = await packageSide(path.join(root, "b"), path.join(root, "b-home"));
+  const appsA = createAppOperations({ recipesDirectory: path.join(root, "a-apps") });
+  const appsB = createAppOperations({ recipesDirectory: path.join(root, "b-apps") });
+
+  const plan = await a.operations.planLifecycle(hostedSelection, "select");
+  await a.operations.approve(hostedSelection, "select");
+  assert.equal((await a.operations.executeLifecycle(plan, true)).status, "selected");
+  assert.deepEqual(a.calls, []);
+
+  const exported = await buildProfileExport(a.sourceOperations, appsA, { homeDirectory: path.join(root, "a-home"),
+    packageOperations: a.operations });
+  assert.deepEqual(exported.profile.packages, [hostedSelection]);
+  const serialized = serializeProfile(exported.profile);
+  assert.doesNotMatch(serialized, /installId|verifiedAt|lastDelegatedCommit|manifestDigest|receipt|approvals/);
+
+  const bHome = path.join(root, "b-home");
+  const imported = await buildProfileImport(JSON.parse(serialized), b.sourceOperations, appsB, {}, b.operations);
+  assert.deepEqual(imported.packages.map(item => item.status), ["add"]);
+  assert.deepEqual(imported.items.map(item => [item.block, item.status]), [["sources", "same"]]);
+  const output: string[] = [];
+  const results = await applyProfileImport(imported, b.sourceOperations, appsB, true, line => output.push(line),
+    { homeDirectory: bHome, packageOperations: b.operations });
+  assert.deepEqual(results.map(result => [result.item.block, result.status]), [["sources", "skipped"], ["packages", "added"]]);
+  assert.deepEqual((await b.operations.list()).map(record => record.selection), [hostedSelection]);
+  assert.deepEqual(b.calls, []);
+  assert.match(output.join("\n"), /no host command ran/);
+  assert.equal(await b.operations.approvalStatus(hostedSelection, "select"), "approved");
+  assert.equal(await b.operations.approvalStatus(hostedSelection, "install"), "needs approval");
+
+  const stateBefore = (await readdir(b.state)).sort();
+  const bytesBefore = await readFile(path.join(b.state, "packages.json"), "utf8");
+  const repeated = await applyProfileImport(
+    await buildProfileImport(JSON.parse(serialized), b.sourceOperations, appsB, {}, b.operations),
+    b.sourceOperations, appsB, true, () => {}, { homeDirectory: bHome, packageOperations: b.operations });
+  assert.deepEqual(repeated.map(result => [result.status, result.detail]), [["skipped", undefined], ["skipped", undefined]]);
+  assert.deepEqual((await readdir(b.state)).sort(), stateBefore);
+  assert.equal(await readFile(path.join(b.state, "packages.json"), "utf8"), bytesBefore);
+});
 
 test("import plan classifies identical choices and shows conflicts without writing", async t => {
   const { home, operations, apps } = await fixture(t);
