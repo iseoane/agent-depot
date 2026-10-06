@@ -1,4 +1,7 @@
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck, type AppLifecyclePlan } from "../app-flow.js";
+import type { PackageOperations } from "../package-flow.js";
+import { describeCoordinates, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
+import type { PackageApprovalStatus } from "../package-state.js";
 import { formatVersionPolicy } from "../skill-install.js";
 import type { SourceOperations } from "../sources.js";
 import type { UpdateBatchAssessmentItem } from "../update-batch.js";
@@ -14,7 +17,9 @@ import {
   type UpdateScope,
 } from "../update-flow.js";
 import type { TuiEnvironment } from "./environment.js";
+import { packageOperationsOf } from "./environment.js";
 import { formatVersionEvidence } from "./installations.js";
+import { installedEvidenceLabel, packagePlanLines, packageStatusLabel, packageVersionLabel, recordedVersionLabel } from "./package-rows.js";
 
 export type { UpdateScope };
 
@@ -52,7 +57,21 @@ export interface AppUpdateRow {
   readonly status: SkillUpdateRow["status"];
   readonly reason: string;
 }
-export type UpdateRow = SkillUpdateRow | AppUpdateRow;
+export type UpdateRow = SkillUpdateRow | AppUpdateRow | PackageUpdateRow;
+
+/** One recorded Package as the user-global Updates list shows it. */
+export interface PackageUpdateRow {
+  readonly kind: "package";
+  readonly key: string;
+  readonly scope: "user-global";
+  readonly check: PackageUpdateCheck;
+  readonly path: string;
+  readonly policy: string;
+  readonly installed: string;
+  readonly available: string;
+  readonly status: SkillUpdateRow["status"];
+  readonly reason: string;
+}
 
 /** The assessment of one scope, or why it could not be read. */
 export interface ScopeResult {
@@ -88,11 +107,14 @@ export interface UpdatesData {
   readonly rows: readonly UpdateRow[];
   /** App inventory/check failures are independent of Skill scope errors. */
   readonly appError?: string;
+  /** Package check failures are independent of the Skill scopes and the App inventory. */
+  readonly packageError?: string;
   readonly refresh: RefreshReport;
   /** Milliseconds since the epoch when the assessment finished. */
   readonly checkedAt: number;
   /** Core operations bound to the environment used for this check. */
   readonly apps?: AppOperations;
+  readonly packages?: PackageOperations;
 }
 
 export type UpdatesPhase = "refreshing" | "checking";
@@ -177,6 +199,7 @@ export async function loadUpdateRows(
   options: LoadUpdatesOptions,
 ): Promise<UpdatesData> {
   const apps = createAppOperations({ homeDirectory: environment.homeDirectory, ...environment.appEnvironment });
+  const packages = packageOperationsOf(environment);
   let refresh: RefreshReport = { attempted: false, refreshed: [], failed: [], unreadable: [] };
   if (options.refresh) {
     options.onPhase?.("refreshing");
@@ -231,7 +254,28 @@ export async function loadUpdateRows(
       reason: check.reason ?? check.inspection.reason ?? check.inspection.status,
     });
   }
-  return { results, rows, refresh, apps, appError, checkedAt: (options.now ?? Date.now)() };
+  let packageChecks: readonly PackageUpdateCheck[] = [];
+  let packageError: string | undefined;
+  try {
+    packageChecks = await packages.checkUpdates();
+  } catch (error) {
+    packageError = errorText(error);
+  }
+  for (const check of packageChecks) {
+    rows.push({
+      kind: "package",
+      key: `package:${selectionKey(check.installed.selection)}`,
+      scope: "user-global",
+      check,
+      path: `Package: ${describeCoordinates(check.installed.selection)}`,
+      policy: formatVersionPolicy(check.installed.selection.version),
+      installed: recordedVersionLabel(check.installed),
+      available: check.available === undefined ? "?" : packageVersionLabel(check.available),
+      status: packageStatusLabel(check.status),
+      reason: check.reason ?? "the host reports no usable version evidence",
+    });
+  }
+  return { results, rows, refresh, apps, packages, appError, packageError, checkedAt: (options.now ?? Date.now)() };
 }
 
 /** `just now`, `42s ago`, `5 min ago`, `2 h ago`. */
@@ -256,6 +300,12 @@ export interface PreparedUpdateGroup {
   readonly overwriteShown: ReadonlySet<string>;
 }
 
+/** An update plan for one recorded Package, with the receipt state the preview must show. */
+export interface PreparedPackagePlan {
+  readonly plan: PackageLifecyclePlan;
+  readonly approval: PackageApprovalStatus;
+}
+
 export interface PreparedUpdates {
   readonly groups: readonly PreparedUpdateGroup[];
   /** Core used to execute the previewed App plans, absent for Skill-only data. */
@@ -264,10 +314,15 @@ export interface PreparedUpdates {
   readonly appPlans: readonly AppLifecyclePlan[];
   /** Independent App planning errors retained for the combined summary. */
   readonly appFailures: readonly string[];
+  /** Package operations bound to the check that produced the rows. */
+  readonly packages?: PackageOperations;
+  /** Package update plans, each with the state of its action-specific receipt. */
+  readonly packagePlans?: readonly PreparedPackagePlan[];
+  readonly packageFailures: readonly string[];
   /** The exact `update apply` preview of every candidate whose preview succeeded. */
   readonly lines: readonly string[];
   /** Items whose preview succeeded, across scopes; only these are applied. */
-  readonly applicable: readonly (UpdateBatchAssessmentItem | AppLifecyclePlan)[];
+  readonly applicable: readonly (UpdateBatchAssessmentItem | AppLifecyclePlan | PackageLifecyclePlan)[];
   readonly failures: readonly UpdatePreviewFailure[];
   /** Non-canonical locations, per scope, that need their own explicit confirmation. */
   readonly nonCanonicalPaths: readonly ScopedPath[];
@@ -281,10 +336,12 @@ export async function prepareUpdates(
   const groups: PreparedUpdateGroup[] = [];
   const appPlans: AppLifecyclePlan[] = [];
   const appFailures: string[] = [];
+  const packagePlans: PreparedPackagePlan[] = [];
+  const packageFailures: string[] = [];
   const lines: string[] = [];
   const failures: UpdatePreviewFailure[] = [];
   for (const { scope, loaded } of data.results) {
-    const items = selected.filter((row): row is SkillUpdateRow => row.kind !== "app" && row.scope === scope).map((row) => row.item);
+    const items = selected.filter((row): row is SkillUpdateRow => row.kind !== "app" && row.kind !== "package" && row.scope === scope).map((row) => row.item);
     if (!loaded || items.length === 0) continue;
     const { context } = loaded;
     const outcome = await previewUpdateCandidates(items, context);
@@ -316,10 +373,23 @@ export async function prepareUpdates(
       appFailures.push(`Failed ${row.path}: preview failed: ${errorText(error)}`);
     }
   }
+  for (const row of selected) {
+    if (row.kind !== "package" || !data.packages) continue;
+    try {
+      const plan = await data.packages.planLifecycle(row.check.installed.selection, "update");
+      const approval = await data.packages.approvalStatus(row.check.installed.selection, "update");
+      packagePlans.push({ plan, approval });
+      lines.push(...packagePlanLines(plan, approval));
+      if (approval === "needs approval") lines.push("This apply approves the declaration above.");
+    } catch (error) {
+      packageFailures.push(`Failed ${row.path}: preview failed: ${errorText(error)}`);
+    }
+  }
   return {
     groups, apps: data.apps, appPlans, appFailures,
+    packages: data.packages, packagePlans, packageFailures,
     lines,
-    applicable: [...groups.flatMap((group) => group.applicable), ...appPlans],
+    applicable: [...groups.flatMap((group) => group.applicable), ...appPlans, ...packagePlans.map(({ plan }) => plan)],
     failures,
     nonCanonicalPaths: groups.flatMap((group) => group.nonCanonicalPaths.map((location) => ({ scope: group.scope, path: location }))),
   };
@@ -377,7 +447,26 @@ export async function runUpdates(
       failedLines.push(`Failed ${name}: ${errorText(error)}`);
     }
   }
+  for (const { plan, approval } of prepared.packagePlans ?? []) {
+    const name = `Package: ${plan.descriptor.name} (${plan.selection.host})`;
+    try {
+      const packages = prepared.packages;
+      if (!packages) throw new Error("Package operations unavailable; check again");
+      if (approval === "needs approval") await packages.approve(plan.selection, plan.action);
+      const result = await packages.executeLifecycle(plan, true);
+      if (result.status === "updated") {
+        updated.push(`Updated ${name}: ${installedEvidenceLabel(result.previous)} -> ${installedEvidenceLabel(result.verified)}`);
+      } else if (result.status === "failed" || result.status === "stale plan" || result.status === "manual required") {
+        failedLines.push(`Failed ${name}: ${result.reason}`);
+      } else {
+        failedLines.push(`Failed ${name}: unexpected result ${JSON.stringify(result.status)}`);
+      }
+    } catch (error) {
+      failedLines.push(`Failed ${name}: ${errorText(error)}`);
+    }
+  }
   failedLines.push(...prepared.appFailures);
+  failedLines.push(...prepared.packageFailures);
   const previewFailed = prepared.failures.map(
     ({ item, message }) => `Failed ${item.selection.path}: preview failed: ${message}`,
   );

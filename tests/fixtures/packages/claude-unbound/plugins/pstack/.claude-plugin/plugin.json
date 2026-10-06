@@ -1,0 +1,4 @@
+{
+  "name": "pstack",
+  "agents": ["./agents/comment-sicko.md"]
+}

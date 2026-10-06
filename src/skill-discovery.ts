@@ -8,6 +8,7 @@ import path from "node:path";
 import {
   defaultGitSourceCachePath,
   GitSourceSnapshotAccess,
+  isSourceSnapshotFile,
   SKILL_TREE_LIMITS,
   validateSkillDirectoryPath,
   type GitSourceSkillTreeSnapshot,
@@ -460,7 +461,7 @@ async function walkDirectory(
       await walkDirectory(root, relativePath, files, readTextFile);
       continue;
     }
-    if (!entry.isFile() || entry.name !== "SKILL.md" || (await safePathKind(absolutePath)) !== "file") {
+    if (!entry.isFile() || !isSourceSnapshotFile(relativePath) || (await safePathKind(absolutePath)) !== "file") {
       continue;
     }
     files.push({

@@ -12,6 +12,7 @@
     ".atl/**",
     ".fallow/**",
     "coverage/**",
+    "tests/fixtures/**",
     "skills/doctor-md-skill/assets/pierre-diffs.js"
   ],
   "boundaries": {
@@ -43,6 +44,7 @@
           "src/unmanaged-removal.ts",
           "src/update-flow.ts",
           "src/app-cli.ts",
+          "src/package-cli.ts",
           "src/app-flow.ts",
           "src/app-recipe-removal.ts",
           "src/app-latest.ts",
@@ -62,7 +64,15 @@
           "src/source-state.ts",
           "src/skill-discovery.ts",
           "src/project-manifest.ts",
-          "src/app-version.ts"
+          "src/app-version.ts",
+          "src/package-model.ts",
+          "src/package-bundles.ts",
+          "src/package-content.ts",
+          "src/package-host-state.ts",
+          "src/package-host-plans.ts",
+          "src/package-owned-skills.ts",
+          "src/package-state.ts",
+          "src/package-flow.ts"
         ]
       },
       {
@@ -71,6 +81,7 @@
           "src/git-source.ts",
           "src/path-safety.ts",
           "src/process-runner.ts",
+          "src/executable-resolution.ts",
           "src/version.ts",
           "src/usage-error.ts",
           "src/atomic-file.ts"

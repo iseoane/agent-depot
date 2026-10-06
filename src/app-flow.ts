@@ -1,5 +1,4 @@
 import { access, chmod, mkdir, readFile, readdir, realpath, unlink } from "node:fs/promises";
-import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -8,6 +7,7 @@ import { compareAppVersions, sameAppVersion } from "./app-version.js";
 import { fetchAppLatest } from "./app-latest.js";
 import { writeFileAtomically } from "./atomic-file.js";
 import { parseAppRecipe, type AppRecipe, type AppStep } from "./app-recipes.js";
+import { createPortableExecutableResolver } from "./executable-resolution.js";
 import { type ProjectHost } from "./project-manifest.js";
 import { runProcess } from "./process-runner.js";
 import { defaultSourceStatePath } from "./source-state.js";
@@ -31,6 +31,8 @@ export interface AppInspection {
   readonly installedVersion?: string;
   readonly executable?: string;
   readonly reason?: string;
+  /** `recorded` copies tracked state, `verified` came from this run's version command; absent otherwise. */
+  readonly evidence?: "recorded" | "verified";
 }
 
 export interface AppUpdateCheck {
@@ -98,41 +100,12 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   const mountRoot = environment.wslMountRoot ?? "/mnt";
   const runner = environment.runner ?? runProcess;
 
-  function isWindowsExecutable(executable: string): boolean {
-    const relative = path.posix.relative(mountRoot, executable);
-    return isWsl && /^[a-z]\//iu.test(relative);
-  }
-
-  async function resolve(name: string) {
-    if (environment.resolveExecutable) {
-      const executable = await environment.resolveExecutable(name);
-      const target = executable ? await realpath(executable).catch(() => executable) : undefined;
-      return { executable, blocked: target !== undefined && isWindowsExecutable(target) };
-    }
-    let blockedExecutable: string | undefined;
-    const suffixes = platform === "win32"
-      ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")]
-      : [""];
-    for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-      if (!path.isAbsolute(dir)) continue;
-      for (const suffix of suffixes) {
-        const candidate = path.join(dir, name + suffix);
-        try {
-          await access(candidate, platform === "win32" ? constants.F_OK : constants.X_OK);
-          const target = await realpath(candidate);
-          if (isWindowsExecutable(target)) {
-            blockedExecutable ??= candidate;
-            continue;
-          }
-          // Preserve shim/multicall identity when spawning; realpath is only a safety check.
-          return { executable: candidate, blocked: false };
-        } catch {
-          // Try the next PATH entry.
-        }
-      }
-    }
-    return { executable: blockedExecutable, blocked: blockedExecutable !== undefined };
-  }
+  const resolve = createPortableExecutableResolver({
+    platform,
+    isWsl,
+    wslMountRoot: mountRoot,
+    ...(environment.resolveExecutable === undefined ? {} : { resolveExecutable: environment.resolveExecutable }),
+  });
 
   const receiptPath = (entry: AppEntry) => path.join(
     receipts, createHash("sha256").update(entry.canonicalFile!).digest("hex") + ".json",
@@ -256,24 +229,26 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     const approval = await approvalProblem(entry);
     if (approval) return approval;
     if (cached) return cached.installedVersion
-      ? { status: "installed", installedVersion: cached.installedVersion } : { status: "not installed" };
+      ? { status: "installed", installedVersion: cached.installedVersion, evidence: "recorded" }
+      : { status: "not installed" };
     const { executable, blocked } = await resolve(entry.recipe.version.argv[0]);
     if (!executable || blocked) {
       return { status: "not installed", executable, reason: blocked ? WINDOWS_EXECUTABLE_WARNING : undefined };
     }
+    let installedVersion: string | undefined;
     try {
       const result = await runner(executable, entry.recipe.version.argv.slice(1), {
         cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
       });
-      const installedVersion = result.code === 0 && !result.signal && !result.outputTooLarge
+      installedVersion = result.code === 0 && !result.signal && !result.outputTooLarge
         ? new RegExp(entry.recipe.version.pattern).exec(result.stdout.toString("utf8"))?.[1]
         : undefined;
-      return installedVersion
-        ? { status: "installed", executable, installedVersion }
-        : { status: "not installed", executable };
     } catch {
       return { status: "not installed", executable };
     }
+    if (!installedVersion) return { status: "not installed", executable };
+    await reconcileTracked(entry, installedVersion);
+    return { status: "installed", executable, installedVersion, evidence: "verified" };
   }
   async function checkUpdate(entry: AppEntry): Promise<AppUpdateCheck> {
     const inspection = await inspect(entry);
@@ -347,6 +322,27 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     return records;
   }
 
+  async function writeTracked(name: string, recipeFile: string, installedVersion: string): Promise<void> {
+    await mkdir(installations, { recursive: true, mode: 0o700 });
+    await chmod(installations, 0o700);
+    await writeFileAtomically(installationPath(name), JSON.stringify({ name, recipeFile, installedVersion }), { mode: 0o600 });
+  }
+
+  /**
+   * A live probe that verifies a version ahead of tracking rewrites that existing record,
+   * so a reload shows the version the App actually reports. Only a record whose recipe file
+   * matches is touched; an untracked App, an equal or older version and a failed probe write nothing.
+   */
+  async function reconcileTracked(entry: AppEntry, installedVersion: string): Promise<void> {
+    const name = entry.recipe?.name;
+    if (!name || !entry.canonicalFile) return;
+    const tracked = (await trackedApps(() => {})).find(
+      record => record.name === name && record.recipeFile === entry.canonicalFile,
+    );
+    if (!tracked || compareAppVersions(installedVersion, tracked.installedVersion) !== 1) return;
+    await writeTracked(name, entry.canonicalFile, installedVersion);
+  }
+
   async function previewForget(name: string): Promise<{ name: string; file: string }> {
     const file = installationPath(name);
     try { await access(file); }
@@ -409,11 +405,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       if (plan.action === "update" && (!plan.previousVersion || sameAppVersion(inspection.installedVersion!, plan.previousVersion))) {
         return { status: "failed", reason: `version unchanged (${plan.previousVersion ?? "unknown"}); expected ${plan.latestVersion ?? "unknown"}` };
       }
-      await mkdir(installations, { recursive: true, mode: 0o700 });
-      await chmod(installations, 0o700);
-      await writeFileAtomically(installationPath(name), JSON.stringify({
-        name, recipeFile: plan.entry.canonicalFile, installedVersion: inspection.installedVersion,
-      }), { mode: 0o600 });
+      await writeTracked(name, plan.entry.canonicalFile!, inspection.installedVersion!);
       if (plan.action === "update") await clearPendingUpdate(name);
       return { status: "installed", previousVersion: plan.previousVersion,
         installedVersion: inspection.installedVersion, latestVersion: plan.latestVersion };

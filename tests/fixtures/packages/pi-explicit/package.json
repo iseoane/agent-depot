@@ -1,0 +1,10 @@
+{
+  "name": "pi-explicit",
+  "version": "1.0.0",
+  "pi": {
+    "skills": ["./skills"],
+    "extensions": ["./extensions"],
+    "prompts": ["./prompts"],
+    "themes": ["./themes"]
+  }
+}

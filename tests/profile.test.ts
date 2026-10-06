@@ -5,10 +5,12 @@ import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { createAppOperations } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
-import { buildProfileExport, writeProfileExport } from "../src/profile-export.js";
+import { buildProfileExport, requireProfileExportSelection, writeProfileExport } from "../src/profile-export.js";
+import { runProfileExport, runProfileImport } from "../src/profile-cli.js";
 import { test } from "node:test";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
+import { claudePackage, fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
 
 const recipe = {
   name: "tool", platform: "windows", install: { manual: "Install tool" },
@@ -22,10 +24,50 @@ const profile = {
     version: { policy: "latest" }, hosts: ["pi", "claude"],
     methods: { update: { kind: "command", argv: ["tool", "update"] } } }],
   apps: [recipe],
+  packages: [],
 };
+const piDeclaration = { host: "pi", root: "plugins/demo",
+  source: { kind: "external", url: "https://example.test/demo.git" }, version: { policy: "latest" } };
+const claudeDeclaration = { host: "claude", marketplaceRoot: "plugins/demo", pluginName: "demo",
+  source: { kind: "builtin", id: "builtin:agent-depot" }, version: { policy: "fixed", version: "0.3.0" } };
 
 test("portable profile round-trips Sources, selections and full cross-platform recipes", () => {
   assert.deepEqual(parseProfile(JSON.parse(serializeProfile(parseProfile(profile)))), profile);
+});
+
+test("Package declarations round-trip canonically and an older profile parses as an empty list", () => {
+  const parsed = parseProfile({ ...profile, packages: [piDeclaration, claudeDeclaration] });
+  assert.deepEqual(parsed.packages, [claudeDeclaration, piDeclaration]);
+  assert.equal(serializeProfile(parseProfile({ ...profile, packages: [claudeDeclaration, piDeclaration] })),
+    serializeProfile(parseProfile({ ...profile, packages: [piDeclaration, claudeDeclaration] })));
+  assert.equal(serializeProfile(parsed), serializeProfile(parseProfile(JSON.parse(serializeProfile(parsed)))));
+  const older = { ...profile } as Partial<typeof profile>;
+  delete older.packages;
+  assert.deepEqual(parseProfile(older), { ...profile, packages: [] });
+  assert.deepEqual(Object.keys(JSON.parse(serializeProfile(parseProfile(older)))),
+    ["format", "agentDepotVersion", "sources", "skills", "apps"]);
+  assert.deepEqual(Object.keys(JSON.parse(serializeProfile(parsed))),
+    ["format", "agentDepotVersion", "sources", "skills", "apps", "packages"]);
+});
+
+test("Package declarations refuse receipts, machine paths and non-canonical coordinates", () => {
+  const value = (packageValue: unknown) => ({ ...profile, packages: [packageValue] });
+  for (const [entry, reason] of [
+    [{ ...piDeclaration, installId: "host-install-id" }, /packages\[0\]\.installId: unsupported profile field/],
+    [{ ...piDeclaration, verifiedAt: "2026-01-01T00:00:00.000Z" }, /packages\[0\]\.verifiedAt/],
+    [{ ...piDeclaration, approval: "approved" }, /packages\[0\]\.approval/],
+    [{ ...piDeclaration, host: "codex" }, /packages\[0\]\.host: expected/],
+    [{ ...piDeclaration, root: "/plugins/demo" }, /packages\[0\]\.root: expected a canonical/],
+    [{ ...piDeclaration, root: "plugins/../demo" }, /packages\[0\]\.root: expected a canonical/],
+    [{ ...piDeclaration, root: "C:/plugins/demo" }, /packages\[0\]\.root: absolute local paths are not portable/],
+    [{ ...claudeDeclaration, pluginName: "demo/nested" }, /packages\[0\]\.pluginName: expected one plugin name/],
+    [{ ...claudeDeclaration, pluginName: undefined }, /packages\[0\]\.pluginName: expected a plugin name/],
+    [{ ...piDeclaration, source: { kind: "external", url: "/home/user/repo" } }, /packages\[0\]\.source\.url/],
+    [{ ...piDeclaration, source: { kind: "external", url: "https://user:secret@example.test/demo.git" } }, /packages\[0\]\.source\.url/],
+    [{ ...piDeclaration, version: { policy: "fixed", version: "C:/tool" } }, /packages\[0\]\.version\.version/],
+  ] as const) assert.throws(() => parseProfile(value(entry)), reason);
+  assert.throws(() => parseProfile({ ...profile, packages: [piDeclaration, piDeclaration] }), /packages\[1\]: duplicate identity/);
+  assert.equal(parseProfile({ ...profile, packages: [piDeclaration, { ...piDeclaration, source: { kind: "builtin", id: "builtin:agent-depot" } }] }).packages.length, 2);
 });
 
 test("profile rejects unknown fields, versions and nonportable content with field paths", () => {
@@ -64,6 +106,94 @@ test("export includes only portable managed state and recipes without running co
   assert.deepEqual(result.profile.apps, [recipe]);
   assert.match(result.preview.join("\n"), /built-in Source.*always present/);
   assert.doesNotMatch(serializeProfile(result.profile), /installation|adopted|approvals/);
+});
+
+test("export writes Package declarations without receipts or installed state", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-packages-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const { operations: packageOperations, evidence } = fakePackageOperations({ recorded: [installedPackage] });
+  const result = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations });
+  assert.deepEqual(result.profile.packages, [piPackage]);
+  assert.doesNotMatch(serializeProfile(result.profile), /installId|lastDelegatedCommit|verified|receipt|approval/);
+  assert.match(result.preview.join("\n"), /Package pi plugins\/demo \(latest\); no receipt, no installed state/);
+  assert.deepEqual([evidence.listed, evidence.approvals.length, evidence.plans.length, evidence.executions.length], [1, 0, 0, 0]);
+});
+
+test("Package filters follow the Source and Skill filter conventions", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-package-filters-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const recorded = [installedPackage, { ...installedPackage, selection: claudePackage }];
+  const { operations: packageOperations } = fakePackageOperations({ recorded });
+  const byRoot = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations, packages: ["plugins/demo"] });
+  assert.deepEqual(byRoot.profile.packages, [piPackage]);
+  for (const name of ["plugins/other", "other", "claude other@plugins/other"]) {
+    const byName = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations, packages: [name] });
+    assert.deepEqual(byName.profile.packages, [claudePackage]);
+  }
+  const none = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations, noPackages: true });
+  assert.deepEqual(none.profile.packages, []);
+  await assert.rejects(buildProfileExport(operations, apps, { homeDirectory: home, packageOperations, packages: ["missing"] }),
+    /packages: unknown selection "missing"/);
+  await assert.rejects(buildProfileExport(operations, apps, { homeDirectory: home, packageOperations,
+    noPackages: true, packages: ["plugins/demo"] }), /packages: filters cannot be combined with --no-packages/);
+});
+
+test("export reports a recorded Package whose coordinates are not portable instead of writing it", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-package-local-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const local = { ...installedPackage, selection: { ...piPackage, root: "/abs/bundle" } };
+  const { operations: packageOperations } = fakePackageOperations({ recorded: [local] });
+  const result = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations });
+  assert.deepEqual(result.profile.packages, []);
+  assert.deepEqual(result.exclusions.filter(item => item.block === "packages"), [{ block: "packages", label: "Package pi /abs/bundle (latest)",
+    reason: "not portable (packages[0].root: expected a canonical Source-relative directory)" }]);
+  assert.throws(() => requireProfileExportSelection(result.profile), /Nothing selected; nothing written/);
+});
+
+test("CLI Package filters parse on export and import and need Package operations to select", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-package-cli-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  await operations.addUserGlobalInstallation!({
+    source: { kind: "builtin", id: "builtin:agent-depot" }, path: "doctor-md-agents",
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: ".agents/skills/doctor-md-agents", adopted: false },
+  });
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const { operations: packageOperations } = fakePackageOperations({ recorded: [installedPackage] });
+  const stdout: string[] = [], stderr: string[] = [];
+  const dependencies = { homeDirectory: home, operations, appOperations: apps,
+    stdout: (line: string) => stdout.push(line), stderr: (line: string) => stderr.push(line) };
+  assert.equal(await runCli(["export", "--package", "demo", "--skill", "doctor-md-agents"],
+    { ...dependencies, packageOperations }), 0);
+  assert.deepEqual(parseProfile(JSON.parse(stdout.join("\n"))).packages, [piPackage]);
+  stdout.length = 0;
+  assert.equal(await runCli(["export", "--no-packages", "--skill", "doctor-md-agents"],
+    { ...dependencies, packageOperations }), 0);
+  assert.deepEqual(parseProfile(JSON.parse(stdout.join("\n"))).packages, []);
+  await assert.rejects(runProfileExport(["--package", "plugins/demo"], operations, apps, () => {}, () => {}, home),
+    /Profile export requires Package operations to select Packages/);
+  stdout.length = 0;
+  assert.equal(await runProfileExport(["--package", "plugins/demo"], operations, apps, line => stdout.push(line),
+    line => stderr.push(line), home, packageOperations), 0);
+  assert.deepEqual(parseProfile(JSON.parse(stdout.join("\n"))).packages, [piPackage]);
+  await assert.rejects(runProfileExport(["--package", "plugins/demo", "--package", "plugins/demo"], operations, apps,
+    () => {}, () => {}, home, packageOperations), /Duplicate --package/);
+  const file = path.join(home, "package-profile.json");
+  await writeFile(file, JSON.stringify({ ...profile, sources: [], skills: [], apps: [], packages: [piPackage] }));
+  const { operations: importOperations } = fakePackageOperations({});
+  const imported: string[] = [];
+  assert.equal(await runProfileImport([file, "--yes"], operations, apps, line => imported.push(line),
+    { homeDirectory: home, packageOperations: importOperations }), 0);
+  assert.deepEqual(imported.filter(line => /^(?:added|skipped|failed):/u.test(line)), ["added: Package pi plugins/demo (latest)"]);
+  await assert.rejects(runProfileImport([file], operations, apps, () => {}, { homeDirectory: home }),
+    /Profile import requires Package operations/);
 });
 
 test("CLI export keeps stdout JSON-only, previews on stderr, and supports file output and filters", async t => {

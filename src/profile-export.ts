@@ -3,8 +3,10 @@ import path from "node:path";
 import type { AppOperations } from "./app-flow.js";
 import { loadAppOwnedSkillFilter } from "./app-owned-skills.js";
 import { sourceIdForUrl } from "./git-source.js";
+import { bundleRoot, describeCoordinates, type PackageSelection } from "./package-model.js";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "./project-manifest.js";
-import { parseProfile, PROFILE_FORMAT, serializeProfile, type Profile } from "./profile.js";
+import { parseProfile, PROFILE_FORMAT, serializeProfile, type Profile, type ProfilePackageOperations } from "./profile.js";
+import { formatVersionPolicy } from "./skill-install.js";
 import type { SourceOperations } from "./sources.js";
 import { scanUserGlobalSkillInventory } from "./user-global-skill-inventory.js";
 
@@ -12,18 +14,22 @@ export interface ProfileFilters {
   readonly noSources?: boolean;
   readonly noSkills?: boolean;
   readonly noApps?: boolean;
+  readonly noPackages?: boolean;
   readonly sources?: readonly string[];
   readonly skills?: readonly string[];
   readonly apps?: readonly string[];
+  readonly packages?: readonly string[];
 }
 export interface ProfileExportOptions extends ProfileFilters {
   /** Discovery choices are transient; absent means all registered Sources, as in Catalog. */
   readonly includedSourceIds?: readonly string[];
   readonly homeDirectory?: string;
+  /** Records whose selections are exported. Absent writes no Package block entries. */
+  readonly packageOperations?: ProfilePackageOperations;
 }
 
 export interface ProfileExportExclusion {
-  readonly block: "sources" | "skills" | "apps";
+  readonly block: "sources" | "skills" | "apps" | "packages";
   readonly label: string;
   readonly reason: string;
 }
@@ -48,7 +54,25 @@ export function selectProfileItems<T>(items: readonly T[], requested: readonly s
   return disabled ? [] : items.filter(item => !requested?.length || names(item).some(name => requested.includes(name)));
 }
 
-function validateOne<Block extends "sources" | "skills" | "apps">(block: Block, item: unknown): Profile[Block][number] {
+/** The Package identities a `--package` filter accepts, matching `describeCoordinates`. */
+export function packageFilterNames(selection: PackageSelection): readonly string[] {
+  const root = bundleRoot(selection);
+  const names: string[] = [describeCoordinates(selection)];
+  if (root !== "") {
+    names.push(root);
+    const basename = path.posix.basename(root);
+    if (basename !== root) names.push(basename);
+  }
+  if (selection.host === "claude") names.push(selection.pluginName);
+  return names;
+}
+
+/** One Package line, shared by the export preview and the import plan label. */
+export function describeProfilePackage(selection: PackageSelection): string {
+  return `Package ${describeCoordinates(selection)} (${formatVersionPolicy(selection.version)})`;
+}
+
+function validateOne<Block extends "sources" | "skills" | "apps" | "packages">(block: Block, item: unknown): Profile[Block][number] {
   const profile = parseProfile({ format: PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
     sources: [], skills: [], apps: [], [block]: [item] });
   return profile[block][0]!;
@@ -71,6 +95,12 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
     skill => [skill.path, path.posix.basename(skill.path)], "skills");
   const entries = selectProfileItems(await apps.load(), options.apps, options.noApps,
     entry => [entry.recipe?.name ?? path.basename(entry.file)], "apps");
+  const packageRecords = options.packageOperations === undefined ? [] : await options.packageOperations.list();
+  if (options.packageOperations === undefined && options.packages?.length) {
+    throw new Error("Profile export requires Package operations to select Packages");
+  }
+  const selectedPackages = selectProfileItems(packageRecords, options.packages, options.noPackages,
+    record => packageFilterNames(record.selection), "packages");
   const owned = await loadAppOwnedSkillFilter({ appEnvironment: { recipesDirectory: apps.directory },
     reportWarning: warn });
   const portableSources: Profile["sources"][number][] = [];
@@ -111,6 +141,15 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
       exclude("apps", `App recipe ${path.basename(entry.file)}`, error instanceof Error ? error.message : String(error));
     }
   }
+  const packages: Profile["packages"][number][] = [];
+  for (const record of selectedPackages) {
+    try {
+      packages.push(validateOne("packages", record.selection));
+    } catch (error) {
+      exclude("packages", describeProfilePackage(record.selection),
+        `not portable (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
   if (!options.noSkills) {
     const inventory = await scanUserGlobalSkillInventory({
       homeDirectory: options.homeDirectory, managedInstallations: allInstallations,
@@ -121,7 +160,7 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
     }
   }
   const profile = parseProfile({ format: PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
-    sources: portableSources, skills, apps: recipes });
+    sources: portableSources, skills, apps: recipes, packages });
   return {
     profile,
     exclusions: diagnostics.filter((item): item is ProfileExportExclusion => "block" in item),
@@ -131,13 +170,14 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
 }
 
 function sourceWarnings(profile: Profile): readonly ProfileExportWarning[] {
-  return profile.skills.flatMap(skill => {
-    const identity = skill.source;
-    if (identity.kind === "external" && "url" in identity && !profile.sources.some(source => source.url === identity.url)) {
-      return [{ kind: "source" as const, message: `WARNING: Skill ${skill.path} references Source ${identity.url} not included in profile` }];
-    }
-    return [];
-  });
+  const missing = (source: Profile["skills"][number]["source"], label: string): readonly ProfileExportWarning[] =>
+    source.kind === "external" && "url" in source && !profile.sources.some(candidate => candidate.url === source.url)
+      ? [{ kind: "source" as const, message: `WARNING: ${label} references Source ${source.url} not included in profile` }]
+      : [];
+  return [
+    ...profile.skills.flatMap(skill => missing(skill.source, `Skill ${skill.path}`)),
+    ...profile.packages.flatMap(selection => missing(selection.source, describeProfilePackage(selection))),
+  ];
 }
 
 /** Shared preview for a frontend-selected subset; Source warnings are recomputed. */
@@ -146,13 +186,14 @@ export function profileExportPreview(profile: Profile, diagnostics: readonly Pro
     ...profile.sources.map(source => `Source ${sourceIdForUrl(source.url)} ${source.url} (included: ${source.included})`),
     ...profile.skills.map(skill => `Skill ${skill.path} [${skill.hosts.join(", ")}] (${skill.version.policy})`),
     ...profile.apps.map(recipe => `App recipe ${recipe.name} (${recipe.platform ?? "all platforms"}; no approval)`),
+    ...profile.packages.map(selection => `${describeProfilePackage(selection)}; no receipt, no installed state`),
     ...diagnostics.flatMap(item => "block" in item ? [`Excluded ${item.label}: ${item.reason}`] : item.kind === "load" ? [item.message] : []),
     ...sourceWarnings(profile).map(warning => warning.message)];
 }
 
 /** Empty profiles are valid to parse, but are not useful export artifacts. */
 export function requireProfileExportSelection(profile: Profile): void {
-  if (!profile.sources.length && !profile.skills.length && !profile.apps.length) {
+  if (!profile.sources.length && !profile.skills.length && !profile.apps.length && !profile.packages.length) {
     throw new Error("Nothing selected; nothing written.");
   }
 }

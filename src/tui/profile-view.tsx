@@ -3,16 +3,18 @@ import { Box, Text } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAppOperations } from "../app-flow.js";
 import {
-  buildProfileExport, profileExportPreview, writeProfileExport,
+  buildProfileExport, describeProfilePackage, profileExportPreview, writeProfileExport,
   type ProfileExportDiagnostic, type ProfileExportPlan,
 } from "../profile-export.js";
 import {
-  applyProfileImport, buildProfileImport, type ProfileImportItem, type ProfileImportPlan,
+  applyProfileImport, buildProfileImport, type ProfileImportEntry, type ProfileImportItem,
+  type ProfileImportPackageItem, type ProfileImportPlan,
 } from "../profile-import.js";
 import { PROFILE_FORMAT } from "../profile.js";
 import type { Profile } from "../profile.js";
 import type { SourceOperations } from "../sources.js";
 import type { TuiEnvironment } from "./environment.js";
+import { packageOperationsOf } from "./environment.js";
 import { useKeys } from "./keys.js";
 import { answerYesNo, moveCursor, toggleChoice } from "./mode-keys.js";
 import { ChecklistLines, PreviewConfirm, PreviewLines } from "./panel-parts.js";
@@ -23,7 +25,7 @@ type Mode = "browse" | "busy" | "export-list" | "import-list" | "export-path" | 
 
 /** A choice's original block/index identity, or a non-selectable export diagnostic. */
 interface Row {
-  readonly block: "sources" | "skills" | "apps" | "excluded";
+  readonly block: "sources" | "skills" | "apps" | "packages" | "excluded";
   readonly index: number;
   readonly label: string;
   readonly selectable: boolean;
@@ -40,6 +42,9 @@ function rowsFromExport(plan: ProfileExportPlan): readonly Row[] {
     ...plan.profile.apps.map((value, index): Row => ({
       block: "apps", index, label: `Apps: ${value.name} (${value.platform ?? "all platforms"})`, selectable: true,
     })),
+    ...plan.profile.packages.map((value, index): Row => ({
+      block: "packages", index, label: `Packages: ${describeProfilePackage(value)}`, selectable: true,
+    })),
     ...plan.exclusions.map((item, index): Row => ({
       block: "excluded", index, label: `Excluded ${item.label}: ${item.reason}`, selectable: false,
     })),
@@ -49,16 +54,31 @@ function rowsFromExport(plan: ProfileExportPlan): readonly Row[] {
   ];
 }
 
+/** The four import blocks in one indexed list, so the checklist and the confirmation share positions. */
+function planEntries(plan: ProfileImportPlan): readonly ProfileImportEntry[] {
+  return [...plan.items, ...plan.packages];
+}
+
 function rowsFromPlan(plan: ProfileImportPlan): readonly Row[] {
-  return plan.items.map((item, index) => ({
+  return planEntries(plan).map((item, index) => ({
     block: item.block, index,
     label: `${item.status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`,
     selectable: item.status === "add",
   }));
 }
 
-function selectedPlanItems(plan: ProfileImportPlan, selected: readonly Row[]): readonly ProfileImportItem[] {
-  return plan.items.filter((item, index) => item.status !== "add" || selected.some(row => row.index === index));
+function selectedPlanEntries(plan: ProfileImportPlan, selected: readonly Row[]): readonly ProfileImportEntry[] {
+  return planEntries(plan).filter((item, index) => item.status !== "add" || selected.some(row => row.index === index));
+}
+
+/** A plan whose items are the chosen subset, split back into the block the writer consumes. */
+function chosenPlan(plan: ProfileImportPlan, selected: readonly Row[]): ProfileImportPlan {
+  const entries = selectedPlanEntries(plan, selected);
+  return {
+    ...plan,
+    items: entries.filter((item): item is ProfileImportItem => item.block !== "packages"),
+    packages: entries.filter((item): item is ProfileImportPackageItem => item.block === "packages"),
+  };
 }
 
 /** Collect choices, display shared-core previews and confirm portable Profile transfers. */
@@ -71,6 +91,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const apps = useMemo(() => createAppOperations({
     homeDirectory: environment.homeDirectory, ...environment.appEnvironment,
   }), [environment]);
+  const packages = useMemo(() => packageOperationsOf(environment), [environment]);
   const [mode, setModeState] = useState<Mode>("browse");
   const modeRef = useRef<Mode>("browse");
   const mounted = useRef(true);
@@ -138,6 +159,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       sources: profile!.sources.filter((_, index) => isChosen("sources", index)),
       skills: profile!.skills.filter((_, index) => isChosen("skills", index)),
       apps: profile!.apps.filter((_, index) => isChosen("apps", index)),
+      packages: profile!.packages.filter((_, index) => isChosen("packages", index)),
     };
   };
   useKeys((input, key) => {
@@ -147,7 +169,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       if (input === "e") {
         action.current = "export";
         void run(async () => {
-          const exported = await buildProfileExport(operations, apps, { homeDirectory: environment.homeDirectory });
+          const exported = await buildProfileExport(operations, apps, {
+            homeDirectory: environment.homeDirectory, packageOperations: packages,
+          });
           if (!mounted.current) return;
           setProfile(exported.profile);
           diagnostics.current = [...exported.exclusions, ...exported.warnings];
@@ -173,7 +197,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
           showLines(profileExportPreview(chosenProfile(), diagnostics.current), "confirm");
         } else void run(async () => {
           const raw = JSON.parse(await readFile(typed.current, "utf8"));
-          const imported = await buildProfileImport(raw, operations, apps);
+          const imported = await buildProfileImport(raw, operations, apps, {}, packages);
           profileVersion.current = raw.agentDepotVersion;
           if (!mounted.current) return;
           setPlan(imported);
@@ -196,9 +220,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
             await writeProfileExport(typed.current, chosenProfile());
             result = [`Exported profile to ${typed.current}`];
           } else {
-            const confirmed = { ...plan!, items: selectedPlanItems(plan!, selectedRef.current) };
+            const confirmed = chosenPlan(plan!, selectedRef.current);
             const outcomes = await applyProfileImport(confirmed, operations, apps, true, () => undefined,
-              { homeDirectory: environment.homeDirectory, ...environment.installationOptions });
+              { homeDirectory: environment.homeDirectory, packageOperations: packages, ...environment.installationOptions });
             result = outcomes.map(outcome =>
               `${outcome.status}: ${outcome.item.label}${outcome.detail ? `; ${outcome.detail}` : ""}`);
           }
@@ -231,13 +255,14 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
         } else prompt("export-path");
       } else void run(async () => {
         // Reuse the CLI's core preview for the exact selected subset, including argv and Source notes.
-        const items = selectedPlanItems(plan!, selectedRef.current);
+        const entries = selectedPlanEntries(plan!, selectedRef.current);
         const preview = await buildProfileImport({
           format: PROFILE_FORMAT, agentDepotVersion: profileVersion.current,
-          sources: items.filter(item => item.block === "sources").map(item => item.value),
-          skills: items.filter(item => item.block === "skills").map(item => item.value),
-          apps: items.filter(item => item.block === "apps").map(item => item.value),
-        }, operations, apps);
+          sources: entries.filter(item => item.block === "sources").map(item => item.value),
+          skills: entries.filter(item => item.block === "skills").map(item => item.value),
+          apps: entries.filter(item => item.block === "apps").map(item => item.value),
+          packages: entries.filter(item => item.block === "packages").map(item => item.value),
+        }, operations, apps, {}, packages);
         if (mounted.current) showLines(preview.preview, "confirm");
       });
     }
@@ -248,7 +273,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     <Text bold>Portable user-global Profile · e export · i import</Text>
     {mode === "busy" ? <Text>Loading Profile…</Text> : null}
     {mode.endsWith("-path") ? <Text>Profile path: {text}_</Text> : null}
-    {listing ? (["sources", "skills", "apps", "excluded"] as const).map(block => {
+    {listing ? (["sources", "skills", "apps", "packages", "excluded"] as const).map(block => {
       const choices = rows.slice(window.start, window.end).filter(row => row.block === block);
       if (!choices.length) return null;
       return <Box key={block} flexDirection="column">

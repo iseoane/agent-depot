@@ -452,6 +452,18 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
   };
 }
 
+/** Converts a registered Source back into the self-contained identity a selection carries. */
+export function projectSourceOf(source: Source): ProjectSource {
+  if (source.kind === "builtin") {
+    return Object.freeze({ kind: "builtin" as const, id: source.id });
+  }
+  return Object.freeze({
+    kind: "external" as const,
+    url: source.url,
+    ...(source.ref === undefined ? {} : { ref: source.ref }),
+  });
+}
+
 /** Converts persisted project identity into a read-only Source identity. */
 export function resolveProjectSource(projectSource: ProjectSource): Source {
   if (projectSource.kind === "builtin") {

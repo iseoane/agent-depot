@@ -1,12 +1,15 @@
 import type { BulkTarget } from "./bulk-actions.js";
 import type { AppRow, InstallationRow, InstallationsData, UnmanagedGroup } from "./installations.js";
+import type { PackageRow } from "./package-rows.js";
+import { selectionKey } from "../package-model.js";
 import type { TreeNode, VisibleRow } from "./tree.js";
 
-/** What a tree node stands for: a scope or source group, a managed installation or an unmanaged Skill. */
+/** What a tree node stands for: a scope or source group, a managed installation, an App or a Package. */
 export type NodeData =
   | { readonly kind: "group"; readonly label: string }
   | { readonly kind: "installation"; readonly row: InstallationRow }
   | { readonly kind: "app"; readonly row: AppRow }
+  | { readonly kind: "package"; readonly row: PackageRow }
   | { readonly kind: "unmanaged"; readonly group: UnmanagedGroup };
 
 export type InstallationNode = TreeNode<NodeData>;
@@ -54,6 +57,11 @@ export function buildTree(data: InstallationsData): readonly InstallationNode[] 
     id: "scope:apps", data: { kind: "group", label: `Apps (user-global) (${data.apps?.length ?? 0})${data.appsError ? ` — ${data.appsError}` : ""}` },
     children: (data.apps ?? []).map(row => ({ id: `app:${row.entry.file}`, data: { kind: "app", row } })),
   });
+  if (data.packages?.length || data.packagesError) roots.push({
+    id: "scope:packages",
+    data: { kind: "group", label: `Packages (user-global) (${data.packages?.length ?? 0})${data.packagesError ? ` — ${data.packagesError}` : ""}` },
+    children: (data.packages ?? []).map(row => ({ id: `package:${selectionKey(row.selection)}`, data: { kind: "package", row } })),
+  });
   return roots;
 }
 
@@ -82,9 +90,13 @@ export function describeNode(row: VisibleRow<NodeData>): string {
   const { data } = row.node;
   if (data.kind === "group") return `${row.expandable ? (row.expanded ? "▾" : "▸") : " "} ${data.label}`;
   if (data.kind === "installation") return data.row.selection.path;
+  if (data.kind === "package") return data.row.name;
   if (data.kind === "app") {
     const { entry, inspection } = data.row;
-    return `${entry.recipe?.name ?? entry.file}  ${inspection.status === "invalid" ? `invalid recipe: ${inspection.reason}` : inspection.installedVersion ?? inspection.status}`;
+    const name = entry.recipe?.name ?? entry.file;
+    if (inspection.status === "invalid") return `${name}  invalid recipe: ${inspection.reason}`;
+    const version = inspection.installedVersion ?? inspection.status;
+    return `${name}  ${version}${inspection.evidence === "recorded" ? " (recorded)" : ""}`;
   }
   return `${data.group.name} [${data.group.hosts.join(", ")}]`;
 }

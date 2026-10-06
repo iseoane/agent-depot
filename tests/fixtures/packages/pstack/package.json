@@ -1,0 +1,12 @@
+{
+  "name": "pstack",
+  "version": "0.9.69",
+  "keywords": ["pi-package", "pstack", "poteto-mode"],
+  "pi": {
+    "skills": ["./plugins/pstack/skills"],
+    "extensions": ["./plugins/pstack/pi/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

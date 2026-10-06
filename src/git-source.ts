@@ -70,6 +70,25 @@ const EXCLUDED_LIFECYCLE_SEGMENTS = new Set([
   "retired",
 ]);
 
+/**
+ * One file a Source snapshot carries: a Skill manifest, or a bundle manifest the
+ * Package discovery pass reads. The Pi root `package.json` and the two Claude
+ * `.claude-plugin` manifests sit beside the Skill files in the same immutable
+ * Source view, so one read feeds both passes.
+ */
+export function isSourceSnapshotFile(relativePath: string, scopeDirectory?: string): boolean {
+  if (path.posix.basename(relativePath) === "SKILL.md") {
+    return true;
+  }
+  const segments = relativePath.split("/");
+  if (segments.at(-2) === ".claude-plugin") {
+    const name = segments.at(-1);
+    return name === "plugin.json" || name === "marketplace.json";
+  }
+  const root = scopeDirectory === undefined || scopeDirectory === "" ? "package.json" : `${scopeDirectory}/package.json`;
+  return relativePath === root;
+}
+
 export class GitSourceAccessError extends Error {
   constructor(source: GitSource, reason: string) {
     super(`Unable to refresh Git Source ${JSON.stringify(source.id)} from ${JSON.stringify(source.url)}: ${reason}`);
@@ -346,7 +365,7 @@ export class GitSourceSnapshotAccess {
         || metadata[1] !== "blob"
         || !relativePath
         || (directory !== undefined && !relativePath.startsWith(`${directory}/`))
-        || path.posix.basename(relativePath) !== "SKILL.md"
+        || !isSourceSnapshotFile(relativePath, directory)
         || relativePath.split("/").slice(0, -1).some((segment) => EXCLUDED_LIFECYCLE_SEGMENTS.has(segment))
       ) {
         continue;
@@ -357,6 +376,80 @@ export class GitSourceSnapshotAccess {
       });
     }
     return Object.freeze(files);
+  }
+
+  /** File paths at or under `root`, from the same immutable commit as the other reads. */
+  async listFiles(source: GitSource, root: string): Promise<readonly string[]> {
+    const relativeRoot = root === "" ? "" : validateSkillDirectoryPath(root);
+    const destination = await this.requireMirror(source);
+    const commit = await this.readResolvedCommit(source);
+    const tree = await this.runner.run("git", [
+      "--git-dir", destination, "ls-tree", "-r", "-z", commit,
+      ...(relativeRoot === "" ? [] : ["--", relativeRoot]),
+    ], { maxOutputBytes: SKILL_TREE_LIMITS.maxListingBytes });
+    if (Buffer.byteLength(tree, "utf8") > SKILL_TREE_LIMITS.maxListingBytes) {
+      throw new Error("Source file listing exceeds the safe size limit");
+    }
+    const files: string[] = [];
+    for (const record of tree.split("\0")) {
+      if (!record) {
+        continue;
+      }
+      const separator = record.indexOf("\t");
+      if (separator < 0) {
+        continue;
+      }
+      const metadata = record.slice(0, separator).split(" ");
+      const relativePath = record.slice(separator + 1);
+      if (
+        metadata[0] === "120000"
+        || metadata[1] !== "blob"
+        || !relativePath
+        || (relativeRoot !== "" && !relativePath.startsWith(`${relativeRoot}/`))
+      ) {
+        continue;
+      }
+      files.push(relativePath);
+    }
+    return Object.freeze(files);
+  }
+
+  /** One file's text at `path`, or undefined when the commit has no such blob. */
+  async readFile(source: GitSource, path: string): Promise<string | undefined> {
+    const safePath = validateSkillDirectoryPath(path);
+    const destination = await this.requireMirror(source);
+    const commit = await this.readResolvedCommit(source);
+    const tree = await this.runner.run("git", [
+      "--git-dir", destination, "ls-tree", "-z", commit, "--", safePath,
+    ], { maxOutputBytes: SKILL_TREE_LIMITS.maxListingBytes });
+    for (const record of tree.split("\0")) {
+      if (!record) {
+        continue;
+      }
+      const separator = record.indexOf("\t");
+      if (separator < 0) {
+        continue;
+      }
+      const [mode, objectType, objectId] = record.slice(0, separator).split(" ");
+      const relativePath = record.slice(separator + 1);
+      if (relativePath !== safePath) {
+        continue;
+      }
+      if (objectType !== "blob" || (mode !== "100644" && mode !== "100755")) {
+        return undefined;
+      }
+      if (!objectId || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(objectId)) {
+        throw new Error("Git Source returned an unsafe object reference");
+      }
+      const content = await this.runner.run("git", [
+        "--git-dir", destination, "cat-file", "blob", objectId,
+      ], { maxOutputBytes: SKILL_TREE_LIMITS.maxFileBytes });
+      if (Buffer.byteLength(content, "utf8") > SKILL_TREE_LIMITS.maxFileBytes) {
+        throw new Error(`Source file exceeds the safe size limit: ${safePath}`);
+      }
+      return content;
+    }
+    return undefined;
   }
 }
 

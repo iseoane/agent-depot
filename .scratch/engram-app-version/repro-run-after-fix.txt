@@ -1,0 +1,29 @@
+✔ repro: Installations shows the recorded 3.0.0 and only reveals live 3.1.0 when the row is highlighted (232.350557ms)
+✔ red: the Installations row must not present unverified recorded evidence as the installed version (105.341361ms)
+✔ repro: the update check offers nothing while the local tap says 3.0.0, and offers 3.1.0 once the tap is refreshed (89.052464ms)
+✖ red: an update check must not report up to date while the App's release channel names a newer version (58.293416ms)
+✔ facts the diagnosis rests on: comparator, and that only the recipe's own commands run (5.736165ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 858.192792
+
+✖ failing tests:
+
+test at dist/tests/engram-app-version-repro.js:145:1
+✖ red: an update check must not report up to date while the App's release channel names a newer version (58.293416ms)
+  AssertionError [ERR_ASSERTION]: Agent Depot read lagging local tap metadata and reported up to date while the release existed
+      at TestContext.<anonymous> (file:///home/iseoane/Work/agent-depot/.claude/worktrees/agent-a1ba1fde7c85b5e36/dist/tests/engram-app-version-repro.js:151:12)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'Updates (scope: all)  t all · p project · g user-global\nchecked just now · no Git sources to refresh\n1 up to date',
+    expected: /3\.0\.0 -> 3\.1\.0/,
+    operator: 'match',
+    diff: 'simple'
+  }

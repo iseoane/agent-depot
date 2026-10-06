@@ -1,6 +1,7 @@
 import { Text } from "ink";
 
 import { describeDetails, describeLinks, describeNode, markersOf, type NodeData } from "./installations-tree.js";
+import { describePackageRow } from "./package-rows.js";
 import { rowStyle, theme } from "./theme.js";
 import type { VisibleRow } from "./tree.js";
 
@@ -18,6 +19,9 @@ export function TreeRowLine({ row, selected, marked }: {
       {prefix}{describeNode(row)}
       {item.kind === "installation" ? (
         <Text color={theme.marker}>{"  "}{describeDetails(item.row)}{markersOf(item.row) === "" ? "" : `  ${markersOf(item.row)}`}</Text>
+      ) : null}
+      {item.kind === "package" ? (
+        <Text color={theme.marker}>{"  "}{describePackageRow(item.row)}</Text>
       ) : null}
       {item.kind === "unmanaged" && describeLinks(item.group) !== "" ? (
         <Text color={theme.marker}>{"  "}{describeLinks(item.group)}</Text>

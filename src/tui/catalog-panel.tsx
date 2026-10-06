@@ -5,6 +5,7 @@ import { skillKey } from "./catalog-tree.js";
 import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
 import type { FilterState } from "./catalog-filter.js";
 import { describeRow, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
+import { isPackageMode, PackagePanel } from "./package-actions.js";
 import { HostChecklist, PreviewLines } from "./panel-parts.js";
 import { rowStyle } from "./theme.js";
 import type { VisibleRow } from "./tree.js";
@@ -33,7 +34,7 @@ export function CatalogHeader({ scope, listed, installable, total, filter }: {
   );
 }
 
-/** One line of the Catalog tree: cursor, indent, mark box, label and the unmanaged-copy marker. */
+/** One line of the Catalog tree: cursor, indent, mark box, label and the ownership markers. */
 export function CatalogRowLine({ row, selected, marked, installed }: {
   readonly row: VisibleRow<NodeData>;
   readonly selected: boolean;
@@ -41,10 +42,12 @@ export function CatalogRowLine({ row, selected, marked, installed }: {
   readonly installed: InstalledSkills;
 }) {
   const { data } = row.node;
-  const isSource = data.kind === "source";
+  const isGroup = data.kind === "source" || data.kind === "group";
+  const ownedBy = data.kind === "skill" ? data.ownedBy : undefined;
   return (
-    <Text {...rowStyle(selected)} color={isSource ? theme.group : undefined}>
-      {selected ? "> " : "  "}{"  ".repeat(row.depth)}{isSource ? "" : marked ? "[x] " : "[ ] "}{describeRow(row)}
+    <Text {...rowStyle(selected)} color={isGroup ? theme.group : ownedBy === undefined ? undefined : theme.inactive}>
+      {selected ? "> " : "  "}{"  ".repeat(row.depth)}{data.kind === "skill" ? marked ? "[x] " : "[ ] " : ""}{describeRow(row)}
+      {ownedBy === undefined ? null : <Text color={theme.inactive}>{"  "}provided by the {ownedBy.host} Package {ownedBy.name}</Text>}
       {data.kind === "skill" && hasUnmanagedCopy(data.skill, installed)
         ? <Text color={theme.marker}>{"  "}{UNMANAGED_MARKER}</Text>
         : null}
@@ -54,6 +57,7 @@ export function CatalogRowLine({ row, selected, marked, installed }: {
 
 /** The prompt of the install flow; browsing shows nothing. */
 export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
+  if (isPackageMode(mode)) return <PackagePanel mode={mode} />;
   switch (mode.kind) {
     case "browse":
       return null;

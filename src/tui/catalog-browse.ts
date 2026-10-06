@@ -4,6 +4,7 @@ import type { SkillCandidate } from "../skill-discovery.js";
 import { type ActionMode } from "./catalog-actions.js";
 import { leavesOf, skillKey, type NodeData } from "./catalog-tree.js";
 import type { CatalogFilterControls } from "./catalog-state.js";
+import type { PackageTarget } from "./package-actions.js";
 import { navigateTree, type TreeNavigation } from "./tree-navigation.js";
 import { toggleNode, type VisibleRow } from "./tree.js";
 import { toggledMark, type Marks, type ViewMessage } from "./view-state.js";
@@ -19,6 +20,8 @@ export interface CatalogBrowseContext {
   /** Skills are loaded, so installing is possible. */
   readonly ready: boolean;
   readonly toggleAll: () => void;
+  /** Starts the shared Package lifecycle for the highlighted bundle. */
+  readonly startPackage: (target: PackageTarget) => void;
   setMessage(message: ViewMessage | undefined): void;
   setAction(mode: ActionMode): void;
 }
@@ -47,15 +50,22 @@ function markAllListed(context: CatalogBrowseContext): void {
   setMarked(leaves.every((skill) => markedRef.current.has(skillKey(skill))) ? new Set() : new Set(leaves.map(skillKey)));
 }
 
-/** `i`: installs the marked Skills that are listed, or the highlighted one. */
+/** `i`: installs the highlighted bundle, or the marked Skills that are listed, or the highlighted one. */
 function chooseHosts(context: CatalogBrowseContext, row: Row): void {
+  const data = row.node.data;
+  // A bundle row is not markable, so it acts on itself and never picks up a Skill mark.
+  if (data.kind === "bundle") {
+    context.setMessage(undefined);
+    context.startPackage({ selection: data.entry.selection, name: data.entry.descriptor.name });
+    return;
+  }
   // Only what is listed installs: marks on Skills hidden by the filter are ignored.
   const marked = leavesOf(context.navigation.latestRoots())
     .filter((skill) => context.marks.markedRef.current.has(skillKey(skill)));
-  const highlighted: readonly SkillCandidate[] = row.node.data.kind === "skill" ? [row.node.data.skill] : [];
+  const highlighted: readonly SkillCandidate[] = data.kind === "skill" ? [data.skill] : [];
   const chosen = marked.length > 0 ? marked : highlighted;
   if (chosen.length === 0) {
-    context.setMessage({ kind: "error", text: "Install is not available for source rows; highlight a skill or mark some with space" });
+    context.setMessage({ kind: "error", text: "Install is not available for source rows; highlight a skill or a Package bundle, or mark some skills with space" });
     return;
   }
   context.setMessage(undefined);

@@ -1,6 +1,11 @@
 import path from "node:path";
 
 import { assertSkillNotAppOwned, type AppOwnedSkillOptions } from "./app-owned-skills.js";
+import {
+  assertSkillNotPackageOwned,
+  loadPackageOwnedSkillFilter,
+  type PackageOwnedSkillOptions,
+} from "./package-owned-skills.js";
 
 import { pathsOverlap } from "./path-safety.js";
 import {
@@ -54,7 +59,7 @@ export interface InstallOptionsSubset {
 }
 
 /** The part of the CLI dependencies the install flow needs. */
-export interface InstallEnvironment extends AppOwnedSkillOptions {
+export interface InstallEnvironment extends AppOwnedSkillOptions, PackageOwnedSkillOptions {
   readonly installationOptions?: Omit<ProjectInstallationOptions, "projectRoot" | "sourceAccess">;
 }
 
@@ -507,6 +512,7 @@ export async function planSingleInstall(
     selection, source, projectSource, context.root, request, context.operations, context.environment, context.sourceAccess,
   );
   await assertInstallNotAppOwned(request, context, installationInspection);
+  await assertInstallNotPackageOwned(selection, resolvedSource, context);
   return { request, context, selection, source, resolvedSource, resolved, inspection: installationInspection };
 }
 
@@ -527,6 +533,7 @@ export async function executeSingleInstall(
 ): Promise<void> {
   const { request, context, selection, resolvedSource, resolved, inspection } = plan;
   await assertInstallNotAppOwned(request, context, inspection);
+  await assertInstallNotPackageOwned(selection, resolvedSource, context);
   const protectedPaths = assertNoManagedInstallationOverlap(context.existing, selection, inspection, context.root, request.overwrite);
   rejectInstallationCollision(inspection, request.overwrite);
   const transaction = await installOne(
@@ -588,4 +595,20 @@ async function assertInstallNotAppOwned(
     if (location.status === "missing") continue;
     await assertSkillNotAppOwned(path.basename(location.path), { ...context.environment, homeDirectory: context.root });
   }
+}
+
+/** Reloads bundle ownership from the selected Source and refuses its own Skill paths. */
+async function assertInstallNotPackageOwned(
+  selection: ProjectSkillSelection, source: Source, context: SingleInstallContext,
+): Promise<void> {
+  const owned = await loadPackageOwnedSkillFilter({
+    sources: [source],
+    homeDirectory: context.root,
+    ...(context.environment.sourceContentAccess === undefined ? {} : { sourceContentAccess: context.environment.sourceContentAccess }),
+    ...(context.environment.selections === undefined ? {} : { selections: context.environment.selections }),
+    ...(context.environment.hostView === undefined ? {} : { hostView: context.environment.hostView }),
+    ...(context.environment.stateDirectory === undefined ? {} : { stateDirectory: context.environment.stateDirectory }),
+    ...(context.environment.reportWarning === undefined ? {} : { reportWarning: context.environment.reportWarning }),
+  });
+  assertSkillNotPackageOwned(selection.path, owned);
 }

@@ -6,7 +6,7 @@
 
 Agent Depot is one TypeScript/Node.js package, with pnpm preferred and npm-compatible package metadata. The CLI and existing TUI call the same terminal-independent application operations rather than implement separate workflows. V1 supports Linux and Windows.
 
-V1 manages portable directory-based skills and user-global Apps as confirmed resource types. Each managed skill is a portable directory containing `SKILL.md` with required `name` and `description` metadata, optionally with supporting files. Pi-only standalone Markdown skill files are not managed. Agent definitions, plugins/extensions, and MCP servers remain deferred as independently managed categories.
+V1 manages portable directory-based skills, user-global Apps, and host-native Packages as confirmed resource types. Each managed skill is a portable directory containing `SKILL.md` with required `name` and `description` metadata, optionally with supporting files. Pi-only standalone Markdown skill files are not managed. Agent definitions and MCP servers remain deferred as independently managed categories.
 
 For new skill installations, the canonical target is `.agents/skills` in project scope and `~/.agents/skills` in user-global scope, regardless of whether Claude Code is the only selected host. Claude Code does not document `.agents/skills` as a discovery location, so a Claude-selected installation creates a symlink entry under `.claude/skills` or `~/.claude/skills` that points to the canonical skill directory. This intentionally may expose a Claude-only selection to Pi, Codex, or OpenCode through their shared discovery convention. A matching pre-existing skill is adopted in place without replacing or moving it, even when it is at a noncanonical location; the actual location is tracked. If later host exposure needs another location, require explicit confirmation before moving the skill or creating an additional link or copy. The exact Windows symlink mechanics and runtime validation remain implementation/check prerequisites. If symlink creation fails, including on Windows, stop that target operation with actionable guidance and do not create a duplicate managed copy; preserve the canonical contents and existing conflict protections.
 
@@ -90,6 +90,12 @@ Agent Depot records App identity and installed version, but does not track, snap
 
 Recipes live in an environment-local per-user `apps/` directory beside `sources.json`. Private atomic approval receipts live in sibling `app-approvals/`, keyed on canonical recipe path and exact content hash; CLI approval is only `app approve <name> --yes`, not `app validate`. WSL manages Linux only and skips Windows drive PATH candidates. Installed-App records use atomic per-App JSON files in sibling `app-installations/`. Project-scoped Apps and per-project steps are excluded. Uninstall does not implicitly run teardown; user-global update selection uses repeatable `--app <name>` alongside `--skill`, or `--all` for both (see `.scratch/apps/spec.md`).
 
+## Packages and ownership
+
+Packages are host-native bundles discovered inside a registered Source, with per-host identity and per-host command grammar. The `package-model.ts`, `package-bundles.ts`, `package-host-plans.ts`, `package-host-state.ts`, `package-content.ts`, `package-state.ts`, and `package-flow.ts` modules parse manifests and host state into domain types at the boundary, derive host argv from frozen templates rather than pasted strings, and record only the selection and the receipt. This is explicit logic and frozen tables, not a generic plugin framework: the no-generic-plugin-framework line below stays true.
+
+Three owners never overlap: the Source snapshot owns what a bundle is (manifest bytes, component inventory, declared version); the host CLI owns installed state, which Agent Depot reads from `~/.pi/agent/settings.json` and `~/.claude/plugins/installed_plugins.json` and never writes; Agent Depot owns the selection record in one locked atomic `packages.json` and the approval receipt in `package-approvals/<digest>.json`, keyed on a digest of the derived declaration. Installed version comes from the host, so `unknown` is a first-class status. A bundle's own skills never become a second managed copy: no `package-*` module imports the Skill install engine, and a test asserts that edge. Ownership is active-only. A bundle reserves its declared Skills only while the user selected it or a host state file proves it installed, so an unselected or absent bundle leaves its Skills portable. Selecting or installing a bundle that would duplicate a managed portable Skill fails with an actionable conflict instead of replacing it. See [ADR 0009](docs/adr/0009-delegate-package-lifecycle-to-host-clis.md) and `.scratch/packages/design.md`.
+
 ## Testing seam
 
 Application operations receive an injectable command runner. Tests can assert the executable and argument list without invoking a shell or external process. Filesystem-dependent tests use isolated temporary directories for the project manifest, per-user state, and simulated host/skill locations.
@@ -100,8 +106,8 @@ V1 explicitly rejects:
 
 - a monorepo or multiple packages;
 - a database; JSON files are sufficient for the project manifest and per-user state;
-- a generalized plugin framework; supported skill logic stays explicit;
-- agent definitions, plugins/extensions, and MCP servers as independently managed V1 categories;
+- a generalized plugin framework; supported skill, App, and Package logic stays explicit;
+- agent definitions and MCP servers as independently managed V1 categories;
 - built-in or Source-declared App recipes, cloning App repositories, tracking App-written artifacts, and editing Host configuration on an App's behalf;
 - project-scoped Apps, per-project App steps, and executing manual shell strings;
 - per-OS skill-method command variants; skill methods are one portable executable-plus-args definition. App recipes may be platform-specific.

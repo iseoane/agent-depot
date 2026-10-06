@@ -7,9 +7,12 @@ import path from "node:path";
 
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck } from "./app-flow.js";
 import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
+import { createPackageOperations, type PackageOperations } from "./package-flow.js";
+import { describeLifecyclePlan, describePackageResult, describePackageUpdateCheck, formatPackageSelection, packageSelectionMatches, runPackageCommand } from "./package-cli.js";
+import { selectionKey, type PackageSelection, type PackageUpdateCheck } from "./package-model.js";
 import { EXPORT_USAGE, IMPORT_USAGE, runProfileExport, runProfileImport } from "./profile-cli.js";
 import { pathsOverlap } from "./path-safety.js";
-import { skillTreeBaseline, type SkillCandidate } from "./skill-discovery.js";
+import { skillTreeBaseline, type SkillCandidate, type SourceContentAccess } from "./skill-discovery.js";
 import {
   BuiltInSourceError,
   createSourceOperations,
@@ -100,11 +103,15 @@ export interface CliDependencies {
   readonly stderr?: (line: string) => void;
   readonly projectRoot?: string;
   readonly sourceAccess?: ProjectSkillTreeAccess;
+  /** Test/embedding seam for the Package-owned Skill guard's Source snapshots. */
+  readonly sourceContentAccess?: SourceContentAccess;
   readonly installationOptions?: Omit<ProjectInstallationOptions, "projectRoot" | "sourceAccess">;
   /** Test/embedding seam for the manifest transaction boundary. */
   readonly projectManifestStore?: ProjectManifestStore;
   /** Home directory used by user-global installation; injectable for tests. */
   readonly homeDirectory?: string;
+  /** Test/embedding seam for Package operations. */
+  readonly packageOperations?: PackageOperations;
   /** Test/embedding seam for the interactive TUI; defaults to the Ink renderer. */
   readonly renderTui?: (operations: SourceOperations, environment?: TuiEnvironment) => Promise<void>;
   /** Test seam: whether stdin supports raw-mode keyboard input; defaults to the real stdin. */
@@ -121,9 +128,9 @@ const USAGE = [
   "  agent-depot discover <source-id> [source-id...]",
   "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]",
   "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
-  "  agent-depot update check --scope <project|user-global>",
-  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>... | --app <name>...) [--yes] [--confirm-path <relative-path>...]",
-  "    Apps run after Skills; --all --scope project skips Apps.",
+  "  agent-depot update check --scope <project|user-global> [--package <selection>...]",
+  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>... | --app <name>... | --package <selection>...) [--yes] [--confirm-path <relative-path>...]",
+  "    Apps and Packages run after Skills; --all --scope project skips Apps and Packages.",
   "  agent-depot skill remove <id|path>... [--yes]",
   "  agent-depot skill remove <id|path> --host <host>... [--yes]",
   "  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]",
@@ -133,6 +140,12 @@ const USAGE = [
   "  agent-depot app approve <name> [--yes]",
   "  agent-depot app install|update|uninstall <name> [--yes] [--manual-done]",
   "  agent-depot app uninstall <name> --forget [--yes]",
+  "  agent-depot package list",
+  "  agent-depot package discover <source-id>",
+  "  agent-depot package inspect <selection> --host <host>",
+  "  agent-depot package approve <selection> --host <host> [--action <install|update|uninstall>]",
+  "  agent-depot package install|update|uninstall <selection> --host <host> [--yes]",
+  "  agent-depot package forget <selection> --host <host> --yes",
   `  ${EXPORT_USAGE}`,
   `  ${IMPORT_USAGE}`,
   "  agent-depot tui",
@@ -172,13 +185,24 @@ const SOURCE_SUBCOMMANDS = new Map<string, SourceSubcommandHandler>([
   ["migrate", (values, { operations, dependencies, output }) => runSourceMigration(values, operations, dependencies, output)],
 ]);
 
+function packageOperationsFor(dependencies: CliDependencies, operations: SourceOperations): PackageOperations {
+  return dependencies.packageOperations ?? createPackageOperations({
+    ...(dependencies.homeDirectory === undefined ? {} : { homeDirectory: dependencies.homeDirectory }),
+    sourceOperations: operations,
+    ...(dependencies.sourceContentAccess === undefined ? {} : { sourceContentAccess: dependencies.sourceContentAccess }),
+  });
+}
+
 const COMMANDS = new Map<string, CommandHandler>([
   ["import", (values, { operations, dependencies, output }) => runProfileImport(values, operations,
-    dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output, dependencies)],
+    dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output,
+    { ...dependencies, packageOperations: packageOperationsFor(dependencies, operations) })],
   ["export", (values, { operations, dependencies, output }) => runProfileExport(values, operations,
     dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }),
-    output, dependencies.stderr ?? (line => console.error(line)), dependencies.homeDirectory)],
+    output, dependencies.stderr ?? (line => console.error(line)), dependencies.homeDirectory,
+    packageOperationsFor(dependencies, operations))],
   ["app", (values, { dependencies, output }) => runAppCommand(values, dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output)],
+  ["package", (values, { operations, dependencies, output }) => runPackageCommand(values, packageOperationsFor(dependencies, operations), operations, output)],
   ["install", async (values, { operations, dependencies, output }) => {
     await runInstall(values, operations, dependencies, output);
     return 0;
@@ -894,6 +918,7 @@ interface UpdateOptions {
   readonly all: boolean;
   readonly requested: readonly string[];
   readonly requestedApps: readonly string[];
+  readonly requestedPackages: readonly string[];
   readonly confirmed: boolean;
   /** Exact relative non-canonical project paths the user confirmed with --confirm-path. */
   readonly confirmedPaths: readonly string[];
@@ -907,14 +932,26 @@ async function runUpdate(
 ): Promise<number> {
   const options = parseUpdateOptions(argv);
   const apps = dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory });
+  const packages = packageOperationsFor(dependencies, operations);
+  const requestedPackages = options.scope === "user-global" && options.requestedPackages.length > 0
+    ? await resolvePackageUpdateSelections(packages, options.requestedPackages)
+    : [];
   let appUpdates: readonly AppUpdateCheck[] = [];
   let appCheckFailed = false;
+  let packageUpdates: readonly PackageUpdateCheck[] = [];
+  let packageCheckFailed = false;
   if (options.scope === "user-global") {
     try {
       appUpdates = await checkAppUpdates(apps);
     } catch (error) {
       appCheckFailed = true;
       output(`Error (Apps): ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      packageUpdates = await packages.checkUpdates(requestedPackages.length === 0 ? undefined : requestedPackages);
+    } catch (error) {
+      packageCheckFailed = true;
+      output(`Error (Packages): ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   let loaded: Awaited<ReturnType<typeof loadUpdates>> | undefined;
@@ -942,9 +979,12 @@ async function runUpdate(
   for (const item of appUpdates) {
     output(`App ${item.entry.recipe?.name ?? item.entry.file}: ${item.status}; installed ${item.installedVersion ?? "unknown"}; latest ${item.latestVersion ?? "unknown"}${item.reason ? `; ${item.reason}` : ""}`);
   }
+  for (const item of packageUpdates) {
+    output(describePackageUpdateCheck(item));
+  }
   if (!loaded) return 1;
   if (options.action === "check") {
-    return appCheckFailed ? 1 : 0;
+    return appCheckFailed || packageCheckFailed ? 1 : 0;
   }
   const { assessment, context } = loaded;
   const selectedApps = options.all ? appUpdates.filter(item => item.status === "update available")
@@ -955,8 +995,13 @@ async function runUpdate(
       }
       return matches[0]!;
     });
+  const selectedPackages = options.all
+    ? packageUpdates.filter(item => item.status === "update available")
+    : selectPackageUpdateChecks(packageUpdates, requestedPackages);
   const appPlans = [];
+  const packagePlans = [];
   let appFailed = appCheckFailed ? 1 : 0;
+  let packageFailed = packageCheckFailed ? 1 : 0;
   for (const item of selectedApps) {
     try {
       const plan = await apps.planLifecycle(item.entry, "update", undefined, item);
@@ -967,6 +1012,22 @@ async function runUpdate(
     } catch (error) {
       appFailed++;
       output(`App ${item.entry.recipe!.name}: preview failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  for (const item of selectedPackages) {
+    try {
+      const plan = await packages.planLifecycle(item.installed.selection, "update");
+      const approval = await packages.approvalStatus(item.installed.selection, "update");
+      describeLifecyclePlan(plan, approval, output);
+      if (approval === "approved") {
+        packagePlans.push(plan);
+      } else {
+        packageFailed++;
+        output(`Package ${formatPackageSelection(item.installed.selection)}: needs approval for update`);
+      }
+    } catch (error) {
+      packageFailed++;
+      output(`Package ${formatPackageSelection(item.installed.selection)}: preview failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1019,8 +1080,23 @@ async function runUpdate(
       output(`App ${plan.entry.recipe!.name}: failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  output(`Update summary: ${result.updated.length + appUpdated} updated, ${result.failed.length + appFailed} failed`);
-  return result.failed.length + appFailed === 0 ? 0 : 1;
+  let packageUpdated = 0;
+  for (const plan of packagePlans) {
+    try {
+      const outcome = await packages.executeLifecycle(plan, true);
+      output(`Package ${formatPackageSelection(plan.selection)}: ${describePackageResult(outcome)}`);
+      if (outcome.status === "updated") {
+        packageUpdated++;
+      } else {
+        packageFailed++;
+      }
+    } catch (error) {
+      packageFailed++;
+      output(`Package ${formatPackageSelection(plan.selection)}: failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  output(`Update summary: ${result.updated.length + appUpdated + packageUpdated} updated, ${result.failed.length + appFailed + packageFailed} failed`);
+  return result.failed.length + appFailed + packageFailed === 0 ? 0 : 1;
 }
 
 function selectUpdateCandidates(
@@ -1039,6 +1115,43 @@ function selectUpdateCandidates(
   }
 }
 
+async function resolvePackageUpdateSelections(
+  packages: PackageOperations,
+  requested: readonly string[],
+): Promise<readonly PackageSelection[]> {
+  const records = await packages.list();
+  return Object.freeze(requested.map((value) => {
+    const matches = records.filter((record) => packageSelectionMatches(record.selection, value));
+    if (matches.length !== 1) {
+      throw new CliUsageError(matches.length === 0
+        ? `Unknown Package selection ${JSON.stringify(value)}`
+        : `Package selection ${JSON.stringify(value)} is ambiguous`);
+    }
+    return matches[0]!.selection;
+  }));
+}
+
+function selectPackageUpdateChecks(
+  checks: readonly PackageUpdateCheck[],
+  selections: readonly PackageSelection[],
+): readonly PackageUpdateCheck[] {
+  return Object.freeze(selections.map((selection) => {
+    const label = formatPackageSelection(selection);
+    const matches = checks.filter((check) => selectionKey(check.installed.selection) === selectionKey(selection));
+    if (matches.length !== 1) {
+      throw new CliUsageError(`Package ${JSON.stringify(label)} is unknown or not updateable`);
+    }
+    const match = matches[0]!;
+    if (match.status === "unknown") {
+      throw new CliUsageError(`Package ${JSON.stringify(label)} has unknown version status and is not updateable`);
+    }
+    if (match.status === "current") {
+      throw new CliUsageError(`Package ${JSON.stringify(label)} has no available update`);
+    }
+    return match;
+  }));
+}
+
 function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
   const action = argv[0];
   if (action !== "check" && action !== "apply") {
@@ -1050,6 +1163,7 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
   let confirmed = false;
   const requested: string[] = [];
   const requestedApps: string[] = [];
+  const requestedPackages: string[] = [];
   const confirmedPaths: string[] = [];
   for (let index = 1; index < argv.length; index += 1) {
     switch (argv[index]) {
@@ -1064,6 +1178,9 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
         break;
       case "--app":
         requestedApps.push(requireOptionValue(argv, ++index, "--app"));
+        break;
+      case "--package":
+        requestedPackages.push(requireOptionValue(argv, ++index, "--package"));
         break;
       case "--skill":
         requested.push(requireOptionValue(argv, ++index, "--skill"));
@@ -1080,13 +1197,15 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
     throw new CliUsageError("Update scope must be explicit: use --scope project or --scope user-global");
   }
   if (action === "check" && (all || requested.length > 0 || requestedApps.length > 0 || confirmed || confirmedPaths.length > 0)) {
-    throw new CliUsageError("update check only accepts --scope; use update apply to select and apply updates");
+    throw new CliUsageError("update check only accepts --scope and optional --package filters; use update apply to select and apply updates");
   }
-  if (action === "apply" && (all === (requested.length + requestedApps.length > 0))) {
-    throw new CliUsageError("update apply requires exactly one selection mode: --all or one or more --skill/--app values");
+  if (action === "apply" && (all === (requested.length + requestedApps.length + requestedPackages.length > 0))) {
+    throw new CliUsageError("update apply requires exactly one selection mode: --all or one or more --skill/--app/--package values");
   }
   if (requestedApps.length && scope !== "user-global") throw new CliUsageError("Apps are user-global only");
+  if (requestedPackages.length && scope !== "user-global") throw new CliUsageError("Packages are user-global only");
   if (new Set(requestedApps).size !== requestedApps.length) throw new CliUsageError("Duplicate App selection");
+  if (new Set(requestedPackages).size !== requestedPackages.length) throw new CliUsageError("Duplicate Package selection");
   if (scope === "user-global" && confirmedPaths.length > 0) {
     throw new CliUsageError("--confirm-path only applies to --scope project");
   }
@@ -1096,6 +1215,7 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
     all,
     requested: Object.freeze(requested),
     requestedApps: Object.freeze(requestedApps),
+    requestedPackages: Object.freeze(requestedPackages),
     confirmed,
     confirmedPaths: Object.freeze(confirmedPaths),
   };
