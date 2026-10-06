@@ -148,8 +148,13 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
   /** ADR 0004: a preview that leads to a write refreshes the Source first. */
   async function refreshSourceFor(selection: PackageSelection): Promise<Source> {
     const source = await resolveSourceFor(selection.source);
-    if (source.kind === "builtin" || sourceOperations.refreshProjectSource === undefined) {
+    if (source.kind === "builtin") {
       return source;
+    }
+    if (sourceOperations.refreshProjectSource === undefined) {
+      throw new PackagePlanError(
+        `Planning a Package lifecycle for ${describeCoordinates(selection)} requires a Source refresh, but this environment cannot refresh project Sources`,
+      );
     }
     return await sourceOperations.refreshProjectSource(selection.source);
   }

@@ -92,6 +92,7 @@ async function createHarness(options: {
   readonly commit?: string;
   readonly isWsl?: boolean;
   readonly resolveExecutable?: (name: string) => Promise<string | undefined>;
+  readonly refreshProjectSource?: SourceOperations["refreshProjectSource"] | null;
   readonly readHostStateFile?: (filePath: string, hostFiles: Map<string, string>) => Promise<string>;
 } = {}): Promise<Harness> {
   const home = await mkdtemp(path.join(tmpdir(), "ad-package-flow-"));
@@ -112,7 +113,9 @@ async function createHarness(options: {
     refreshSource: async () => SOURCE,
     selectSources: async () => Object.freeze([SOURCE]),
     resolveProjectSource: async () => SOURCE,
-    refreshProjectSource: async () => SOURCE,
+    ...(options.refreshProjectSource === null
+      ? {}
+      : { refreshProjectSource: options.refreshProjectSource ?? (async () => SOURCE) }),
   };
 
   const operations = createPackageOperations({
@@ -248,6 +251,16 @@ test("a moved Source commit between plan and execute returns stale plan and runs
     const result = await harness.operations.executeLifecycle(plan, true);
     assert.equal(result.status, "stale plan");
     assert.match(result.reason, /resolved Source commit changed/);
+    assert.equal(harness.calls.length, 0);
+  });
+});
+
+test("planning a lifecycle write fails closed when an external Source cannot be refreshed", async () => {
+  await withHarness({ refreshProjectSource: null }, async (harness) => {
+    await assert.rejects(
+      harness.operations.planLifecycle(piSelection(), "install"),
+      /requires a Source refresh/u,
+    );
     assert.equal(harness.calls.length, 0);
   });
 });
