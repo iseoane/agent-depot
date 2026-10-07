@@ -220,7 +220,7 @@ test("active Pi and Claude Package owners stay readable in a narrow real termina
   await mkdir(piSkillDirectory, { recursive: true });
   await writeFile(path.join(piSkillDirectory, "SKILL.md"), "---\nname: pty-pi-owner\ndescription: PTY fixture for Pi ownership\n---\n");
   await writeFile(gitConfig, `[url "file://${repository}"]\n\tinsteadOf = ${url}\n[protocol "file"]\n\tallow = always\n[user]\n\tname = e2e\n\temail = e2e@example.test\n`);
-  for (const args of [["init", "-q", "-b", "main"], ["add", "."], ["commit", "-qm", "fixture"]]) {
+  for (const args of [["init", "-q", "-b", "main"], ["add", "."], ["-c", "user.name=e2e", "-c", "user.email=e2e@example.test", "commit", "-qm", "fixture"]]) {
     execFileSync("git", args, { cwd: repository, stdio: "pipe" });
   }
   const env = {
