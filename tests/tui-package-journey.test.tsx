@@ -160,4 +160,5 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   assert.deepEqual(records[0]?.selection.source, { kind: "external", url: PORTABLE_URL });
   const settings = JSON.parse(await readFile(path.join(j.home, ".pi", "agent", "settings.json"), "utf8")) as { packages?: readonly string[] };
   assert.deepEqual(settings.packages, [`${PI_IDENTITY}@${"b".repeat(40)}`], "the fake host recorded the delegated install");
+  assert.doesNotMatch(j.view.lastFrame() ?? "", /Package pstack \(pi\)/u, "a host-confirmed install is no longer offered in Catalog");
 });
