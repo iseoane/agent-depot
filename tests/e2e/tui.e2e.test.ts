@@ -47,7 +47,13 @@ class TuiSession {
   constructor(environment: NodeJS.ProcessEnv = {}, cols = 110, rows = 40) {
     // Ink renders only the final frame when it detects CI (`CI` / `CONTINUOUS_INTEGRATION`), which leaves an
     // interactive PTY blank. The session is a real terminal, so hide the CI markers from the child.
-    const inherited = { ...process.env };
+    const inherited: NodeJS.ProcessEnv = {
+      ...process.env, TERM: "xterm-256color", HOME: homeDirectory, USERPROFILE: homeDirectory,
+      XDG_STATE_HOME: path.join(homeDirectory, ".local", "state"),
+      XDG_CONFIG_HOME: path.join(homeDirectory, ".config"),
+      XDG_CACHE_HOME: path.join(homeDirectory, ".cache"),
+      NO_COLOR: "1", FORCE_COLOR: "0", ...environment,
+    };
     delete inherited.CI;
     delete inherited.CONTINUOUS_INTEGRATION;
     this.terminal = pty.spawn(process.execPath, [CLI, "tui"], {
@@ -55,13 +61,7 @@ class TuiSession {
       cols,
       rows,
       cwd: projectRoot,
-      env: {
-        ...inherited, TERM: "xterm-256color", HOME: homeDirectory, USERPROFILE: homeDirectory,
-        XDG_STATE_HOME: path.join(homeDirectory, ".local", "state"),
-        XDG_CONFIG_HOME: path.join(homeDirectory, ".config"),
-        XDG_CACHE_HOME: path.join(homeDirectory, ".cache"),
-        NO_COLOR: "1", FORCE_COLOR: "0", ...environment,
-      },
+      env: inherited,
     });
     this.terminal.onData((data) => {
       this.output += data;
