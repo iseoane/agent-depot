@@ -1,15 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { Box, Text } from "ink";
 import { render } from "ink-testing-library";
+import { Children, isValidElement, type ReactNode } from "react";
 import { renderExpanded } from "./render-expanded.js";
 
 import { parseProjectManifest, ProjectManifestStore, type ProjectSkillSelection } from "../src/project-manifest.js";
-import type { BundleDescriptor } from "../src/package-model.js";
+import { packageSelectionFor, type BundleDescriptor } from "../src/package-model.js";
 import type { SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
+import { NO_INSTALLED } from "../src/tui/catalog-installs.js";
+import { CatalogRowLine, CatalogSelectionHelp } from "../src/tui/catalog-panel.js";
+import type { NodeData } from "../src/tui/catalog-tree.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
+import { theme } from "../src/tui/theme.js";
+import type { VisibleRow } from "../src/tui/tree.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
@@ -85,6 +92,59 @@ function selectedLine(frame: string | undefined): string | undefined {
   return frame?.split("\n").find((line) => line.startsWith("> "));
 }
 
+async function moveToSelected(lastFrame: () => string | undefined, stdin: { write(data: string): void }, pattern: RegExp): Promise<string> {
+  for (let moves = 0; moves < 20; moves += 1) {
+    const line = selectedLine(lastFrame()) ?? "";
+    if (pattern.test(line)) return lastFrame() ?? "";
+    const before = lastFrame();
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => frame !== before);
+  }
+  assert.fail(`selection never matched ${String(pattern)}; frame:\n${lastFrame() ?? ""}`);
+}
+
+function packageDescriptor(host: "pi" | "claude", name: string, pathPrefix: string): BundleDescriptor {
+  return {
+    host,
+    coordinates: host === "pi"
+      ? { host, root: pathPrefix.replace(/\/skills$/u, "") }
+      : { host, marketplaceRoot: pathPrefix.replace(/\/skills$/u, ""), pluginName: name },
+    name,
+    version: { kind: "manifest-version", version: "1.2.0", declaredBy: "bundle" },
+    components: [{
+      kind: "skills", ownership: "skill-category", effect: "instruction",
+      paths: [pathPrefix], skillNames: ["create-verification-skill"],
+    }],
+    warnings: [],
+    installable: true,
+    manifestDigest: host === "pi" ? "a".repeat(64) : "b".repeat(64),
+  };
+}
+
+function hasTextColor(node: ReactNode, color: string): boolean {
+  return Children.toArray(node).some((child) => {
+    if (!isValidElement<{ readonly color?: string; readonly children?: ReactNode }>(child)) return false;
+    return child.props.color === color || hasTextColor(child.props.children, color);
+  });
+}
+
+function ownedSkillRow(overrides: Partial<SkillCandidate> = {}, owner = packageDescriptor("pi", "pstack", "plugins/pstack/skills")): VisibleRow<NodeData> {
+  const skill: SkillCandidate = {
+    sourceId: "git:pstack",
+    path: "plugins/pstack/skills/create-verification-skill",
+    name: "create-verification-skill",
+    description: "Generate a project-local verification skill that drives your app the way a user does",
+    ...overrides,
+  };
+  return {
+    depth: 1,
+    parentId: "source:git:pstack",
+    expandable: false,
+    expanded: false,
+    node: { id: `skill:${skill.sourceId}:${skill.path}`, data: { kind: "skill", skill, ownedBy: owner } },
+  };
+}
+
 test("CatalogView shows a loading state", () => {
   const { lastFrame, unmount } = render(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(() => new Promise(() => undefined))} sourceId="builtin:agent-depot" />,
@@ -143,6 +203,82 @@ test("CatalogView says so when every skill is installed", async () => {
   const frame = await waitForFrame(lastFrame, /All skills are installed/);
   assert.ok(!frame.includes("alpha"));
   unmount();
+});
+
+test("CatalogRowLine keeps Package-owned rows to one physical terminal line", async () => {
+  for (const width of [80, 120, 40]) {
+    const view = render(<Box width={width}><CatalogRowLine row={ownedSkillRow()} selected={false} marked={false} installed={NO_INSTALLED} /></Box>);
+    try {
+      const frame = await waitForFrame(view.lastFrame, /create-verification-skill/);
+      assert.equal(frame.split("\n").length, 1, `width ${width} wrapped:\n${frame}`);
+    } finally {
+      view.unmount();
+    }
+  }
+});
+
+test("CatalogRowLine remains one line after a narrow resize with unicode and unmanaged markers", async () => {
+  const unicode = ownedSkillRow({
+    path: "plugins/pstack/skills/超级长技能名字超级长技能名字",
+    name: "超级长技能名字超级长技能名字",
+    description: "说明".repeat(80),
+  });
+  const installed = { ...NO_INSTALLED, unmanagedNames: new Set(["超级长技能名字超级长技能名字"]) };
+  const view = render(<Box width={120}><CatalogRowLine row={unicode} selected={false} marked={false} installed={installed} /></Box>);
+  try {
+    await waitForFrame(view.lastFrame, /超级长技能/);
+    view.rerender(<Box width={40}><CatalogRowLine row={unicode} selected={false} marked={false} installed={installed} /></Box>);
+    const narrow = await waitForFrame(view.lastFrame, /超级长技能/);
+    assert.equal(narrow.split("\n").length, 1, `narrow row wrapped:\n${narrow}`);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("Catalog ownership details keep a fixed Ink panel height across loose and long Unicode owners", async () => {
+  const pi = packageDescriptor("pi", "pstack-界🚀", "plugins/pi/skills");
+  const claude = packageDescriptor("claude", "claude-owner-with-a-long-name", "plugins/claude/skills");
+  const rows = [
+    ownedSkillRow({}, pi),
+    ownedSkillRow({}, claude),
+    { ...ownedSkillRow(), node: { id: "skill:loose", data: { kind: "skill" as const, skill: { sourceId: "s", path: "loose", name: "loose", description: "Loose Skill" } } } },
+  ];
+  const renderPanel = (index: number) => render(
+    <Box flexDirection="column" width={40}>
+      <Text>1–5 of 30</Text>
+      {Array.from({ length: 5 }, (_, row) => <Text key={row}>{row === 2 ? "> selected" : `  row ${row}`}</Text>)}
+      <CatalogSelectionHelp row={rows[index]} height={6} />
+      <Text>footer</Text>
+    </Box>,
+  );
+  const view = renderPanel(0);
+  try {
+    const baseline = await waitForFrame(view.lastFrame, /footer/);
+    for (const index of [1, 2]) {
+      view.rerender(
+        <Box flexDirection="column" width={40}>
+          <Text>1–5 of 30</Text>
+          {Array.from({ length: 5 }, (_, row) => <Text key={row}>{row === 2 ? "> selected" : `  row ${row}`}</Text>)}
+          <CatalogSelectionHelp row={rows[index]} height={6} />
+          <Text>footer</Text>
+        </Box>,
+      );
+      const frame = await waitForFrame(view.lastFrame, /footer/);
+      assert.equal(frame.split("\n").length, baseline.split("\n").length);
+      assert.equal(frame.split("\n").indexOf("1–5 of 30"), baseline.split("\n").indexOf("1–5 of 30"));
+      assert.equal(frame.split("\n").indexOf("footer"), baseline.split("\n").indexOf("footer"));
+    }
+    assert.match(baseline, /Package-owned Skill: provided by the pi[\s\S]*pstack-界🚀/);
+  } finally {
+    view.unmount();
+  }
+});
+
+test("Package-owned Catalog row text keeps readable contrast", () => {
+  const element = CatalogRowLine({ row: ownedSkillRow(), selected: false, marked: false, installed: NO_INSTALLED });
+  if (!isValidElement<{ readonly color?: string; readonly children?: ReactNode }>(element)) assert.fail("CatalogRowLine returned no Text element");
+  assert.notEqual(element.props.color, theme.inactive);
+  assert.ok(hasTextColor(element.props.children, theme.marker), "the compact Package badge uses the marker colour");
 });
 
 test("CatalogView truncates long descriptions", async () => {
@@ -261,6 +397,127 @@ test("CatalogView matches descriptions and shows no matches", async () => {
   stdin.write("zzz");
   await waitForFrame(lastFrame, /0 of 3.*No matching skills/s);
   unmount();
+});
+
+test("CatalogView a toggles only the highlighted repository and preserves marks in other repositories", async () => {
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills)} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /3 of 3/);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /2 selected/);
+    const marked = lastFrame();
+    stdin.write("a");
+    await waitForFrame(lastFrame, (frame) => frame !== marked && !frame.includes("selected"));
+
+    stdin.write("a");
+    await waitForFrame(lastFrame, /2 selected/);
+    await moveToSelected(lastFrame, stdin, /x\/y/);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /3 selected/);
+    stdin.write("kkk");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("builtin:agent-depot") === true);
+    const firstRepository = lastFrame() ?? "";
+    assert.match(firstRepository, /alpha/);
+    assert.match(firstRepository.split("\n").find((line) => line.includes("alpha")) ?? "", /\[x\] alpha/);
+    assert.match(firstRepository.split("\n").find((line) => line.includes("beta")) ?? "", /\[x\] beta/);
+  } finally {
+    unmount();
+  }
+});
+
+test("CatalogView a leaves filtered-out marks alone", async () => {
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => skills.slice(0, 2))} sourceId="builtin:agent-depot" />,
+  );
+  try {
+    await waitForFrame(lastFrame, /2 of 2/);
+    await waitForFrame(lastFrame, /alpha/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("alpha") === true);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("beta") === true);
+    stdin.write(" ");
+    await waitForFrame(lastFrame, /1 selected/);
+
+    stdin.write("/");
+    await waitForFrame(lastFrame, /Filter: _/);
+    stdin.write("alpha");
+    await waitForFrame(lastFrame, /Filter: alpha/);
+    stdin.write("\r");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("builtin:agent-depot") === true);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /1 selected/);
+    stdin.write(ESC);
+    await waitForFrame(lastFrame, /2 of 2/);
+    stdin.write(ENTER);
+    const unfiltered = await waitForFrame(lastFrame, (frame) => frame.includes("alpha") && frame.includes("beta"));
+    assert.match(unfiltered.split("\n").find((line) => line.includes("alpha")) ?? "", /\[x\] alpha/);
+    assert.match(unfiltered.split("\n").find((line) => line.includes("beta")) ?? "", /\[x\] beta/);
+  } finally {
+    unmount();
+  }
+});
+
+test("CatalogView a resolves the repository from Source, group, Package, and Skill rows", async () => {
+  const source = { id: "git:pstack", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
+  const descriptor = packageDescriptor("pi", "pstack", "plugins/pstack/skills");
+  const operations: SourceOperations = {
+    ...operationsFor(async () => [{ sourceId: source.id, path: "loose/skill", name: "loose", description: "Loose skill" }]),
+    async listSources() { return [source]; },
+  };
+  const packages = fakePackageOperations({ discover: async () => [descriptor] });
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /iseoane\/pstack \(1\)/);
+    await waitForFrame(lastFrame, /Packages \(1\)/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Packages (1)") === true);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /1 selected/);
+    stdin.write(ENTER);
+    await waitForFrame(lastFrame, /Package pstack \(pi\)/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Package pstack") === true);
+    stdin.write("a");
+    await waitForFrame(lastFrame, (frame) => !frame.includes("1 selected"));
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("loose") === true);
+    stdin.write("a");
+    await waitForFrame(lastFrame, /1 selected/);
+  } finally {
+    unmount();
+  }
+});
+
+test("CatalogView a excludes active Package-owned skills", async () => {
+  const source = { id: "git:pstack", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
+  const descriptor = packageDescriptor("pi", "pstack", "plugins/pstack/skills");
+  const owned = { sourceId: source.id, path: "plugins/pstack/skills/create-verification-skill", name: "create-verification-skill", description: "Owned" };
+  const loose = { sourceId: source.id, path: "loose/skill", name: "loose", description: "Loose" };
+  const operations: SourceOperations = {
+    ...operationsFor(async () => [owned, loose]),
+    async listSources() { return [source]; },
+  };
+  const packages = fakePackageOperations({
+    discover: async () => [descriptor],
+    activeBundles: async () => [{ descriptor, selection: packageSelectionFor(descriptor, { kind: "external", url: source.url }), reason: "selected" }],
+  });
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /iseoane\/pstack \(2\)/);
+    stdin.write("a");
+    const marked = await waitForFrame(lastFrame, /1 selected/);
+    assert.match(marked.split("\n").find((line) => line.includes("loose")) ?? "", /\[x\] loose/);
+    assert.match(marked.split("\n").find((line) => line.includes("create-verification-skill")) ?? "", /\[ \] create-verification-skill/);
+  } finally {
+    unmount();
+  }
 });
 
 test("CatalogView toggles all sources with s", async () => {
@@ -393,7 +650,7 @@ test("CatalogView shows repository names rather than Git IDs", async () => {
 });
 
 
-test("CatalogView lists a Source's bundles and dims the Skills they own", async () => {
+test("CatalogView lists a Source's bundles and marks the Skills they own", async () => {
   const source = { id: "git:1234567890abcdef12345678", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
   const pi: BundleDescriptor = {
     host: "pi",
@@ -434,7 +691,87 @@ test("CatalogView lists a Source's bundles and dims the Skills they own", async 
     assert.match(frame, /Package pstack \(pi\) {2}1\.2\.0/);
     assert.match(frame, /Package pstack \(claude\) {2}unknown/);
     const looseLine = frame.split("\n").find((line) => line.includes("loose")) ?? "";
-    assert.ok(!looseLine.includes("provided by"), "a loose Skill is never dimmed as bundle-owned");
+    assert.ok(!looseLine.includes("provided by"), "a loose Skill is never marked as bundle-owned");
+  } finally {
+    unmount();
+  }
+});
+
+
+test("CatalogView hides only the exact host-proven installed bundle", async () => {
+  const source = { id: "git:pstack", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
+  const pi = packageDescriptor("pi", "pstack-pi", "plugins/pi/skills");
+  const claude = packageDescriptor("claude", "pstack-claude", "plugins/claude/skills");
+  const operations: SourceOperations = {
+    ...operationsFor(async () => []),
+    async listSources() { return [source]; },
+  };
+  const packages = fakePackageOperations({
+    discover: async () => [pi, claude],
+    activeBundles: async () => [
+      { descriptor: pi, selection: packageSelectionFor(pi, { kind: "external", url: source.url }), reason: "selected" },
+      { descriptor: claude, selection: packageSelectionFor(claude, { kind: "external", url: source.url }), reason: "installed" },
+    ],
+  });
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /Packages \(1\)/u);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Packages (1)") === true);
+    stdin.write(ENTER);
+    const frame = await waitForFrame(lastFrame, /Package pstack-pi \(pi\)/u);
+    assert.match(frame, /Package pstack-pi \(pi\)/u);
+    assert.doesNotMatch(frame, /Package pstack-claude \(claude\)/u);
+  } finally {
+    unmount();
+  }
+});
+
+test("CatalogView keeps Package rows reachable and explains owned Skills without enabling loose install", async () => {
+  const source = { id: "git:pstack", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
+  const pi = packageDescriptor("pi", "pstack-pi", "plugins/pi/skills");
+  const claude = packageDescriptor("claude", "pstack-claude", "plugins/claude/skills");
+  const catalogSkills: readonly SkillCandidate[] = [
+    { sourceId: source.id, path: "plugins/pi/skills/create-verification-skill", name: "create-verification-skill", description: "Generate a project-local verification skill that drives your app the way a user does" },
+    { sourceId: source.id, path: "plugins/claude/skills/poteto-mode", name: "poteto-mode", description: "poteto's agent style for concise, detailed responses" },
+  ];
+  const operations: SourceOperations = {
+    ...operationsFor(async () => catalogSkills),
+    async listSources() { return [source]; },
+  };
+  const packages = fakePackageOperations({
+    discover: async () => [pi, claude],
+    activeBundles: async () => [
+      { descriptor: pi, selection: packageSelectionFor(pi, { kind: "external", url: source.url }), reason: "selected" },
+      { descriptor: claude, selection: packageSelectionFor(claude, { kind: "external", url: source.url }), reason: "selected" },
+    ],
+  });
+  const tree = <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />;
+  const view = await renderExpanded(tree);
+  const { lastFrame, stdin, stdout, unmount } = view;
+  Object.defineProperty(stdout, "columns", { configurable: true, value: 40 });
+  Object.defineProperty(stdout, "rows", { configurable: true, value: 16 });
+  view.rerender(tree);
+  try {
+    await moveToSelected(lastFrame, stdin, /Packages \(2\)/);
+    stdin.write(ENTER);
+    await waitForFrame(lastFrame, /Package pstack-pi \(pi\) {2}1\.2\.0/);
+    await moveToSelected(lastFrame, stdin, /Package pstack-pi \(pi\)/);
+    await moveToSelected(lastFrame, stdin, /Package pstack-claude \(claude\)/);
+    await moveToSelected(lastFrame, stdin, /create-verification-skill/);
+    const owned = await waitForFrame(lastFrame, /provided by the pi\s+Package pstack-pi/);
+    assert.ok(owned.split("\n").length + 4 <= 15, `selection help exceeded the 16-row terminal with shell chrome:\n${owned}`);
+    assert.match(selectedLine(owned) ?? "", /create-verification-skill/);
+    assert.doesNotMatch(selectedLine(owned) ?? "", /provided by the pi Package/);
+    assert.match(owned, /Install or update the\s+Package from its Package row/);
+    stdin.write(" ");
+    const markRefusal = await waitForFrame(lastFrame, /Package-owned Skills cannot be marked/);
+    assert.doesNotMatch(markRefusal, /1 selected/);
+    stdin.write("i");
+    const installRefusal = await waitForFrame(lastFrame, /Install or update the pi Package\s+pstack-pi/);
+    assert.doesNotMatch(installRefusal, /Host \(space\/1-4 toggle/);
   } finally {
     unmount();
   }

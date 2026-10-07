@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { runProcess } from "../src/process-runner.js";
 import type { BundleDescriptor, PackageSelection } from "../src/package-model.js";
 import {
   claudeMarketplaceNamesForSource,
@@ -117,6 +118,18 @@ function marketplaceRecord(overrides: Partial<ClaudeMarketplaceRecord> = {}): Cl
     ...overrides,
   };
 }
+
+test("host state defaults to the isolated test home instead of inherited Pi state", async () => {
+  const paths: string[] = [];
+  await readHostInstallView({
+    readHostStateFile: async (filePath) => {
+      paths.push(filePath);
+      throw Object.assign(new Error("missing fixture"), { code: "ENOENT" });
+    },
+  });
+  assert.equal(process.env.PI_CODING_AGENT_DIR, undefined);
+  assert.equal(paths.includes(path.join(process.env.HOME!, ".pi", "agent", "settings.json")), true);
+});
 
 test("the observed Pi settings shapes parse into identity, pin, and object-form records", () => {
   const records = parsePiPackagesSetting({
@@ -377,23 +390,43 @@ test("Pi identity is the repository URL without the ref, and never npm", () => {
   assert.deepEqual(findInstalledBundle(view, piDescriptor("tool"), piSelection("https://github.com/owner/tool")), { kind: "absent" });
 });
 
-test("findInstalledBundle matches Pi by identity and carries a pinned commit", () => {
-  const view = viewWith({
-    pi: piSection(parsePiPackagesSetting({
-      packages: [
-        "git:github.com/owner/repo@c6d593087709e9481223dc6c6c2269b371b5e055",
-        "git:github.com/other/unrelated",
-      ],
-    })),
-  });
+test("findInstalledBundle uses the verified checkout HEAD, not the settings pin", () => {
+  const records = parsePiPackagesSetting({
+    packages: [
+      "git:github.com/owner/repo@c6d593087709e9481223dc6c6c2269b371b5e055",
+      "git:github.com/other/unrelated",
+    ],
+  }).map((record) => record.identity === "git:github.com/owner/repo"
+    ? { ...record, checkoutCommit: "d".repeat(40), checkoutVersion: "1.2.3" }
+    : record);
+  const view = viewWith({ pi: piSection(records) });
   assert.deepEqual(
     findInstalledBundle(view, piDescriptor("repo"), piSelection("https://github.com/owner/repo")),
-    { kind: "installed", commit: "c6d593087709e9481223dc6c6c2269b371b5e055" },
+    { kind: "installed", version: "1.2.3", commit: "d".repeat(40) },
   );
   assert.deepEqual(
     findInstalledBundle(view, piDescriptor("repo"), piSelection("https://github.com/owner/missing")),
     { kind: "absent" },
   );
+});
+
+test("a Pi descriptor root must match the selected root exactly", () => {
+  const view = viewWith({
+    pi: piSection([{ ...parsePiPackagesSetting({ packages: ["git:github.com/owner/repo"] })[0], checkoutCommit: "a".repeat(40) }]),
+  });
+  const selection = { ...piSelection("https://github.com/owner/repo"), root: "nested" };
+  const evidence = findInstalledBundle(view, piDescriptor("repo"), selection);
+  assert.deepEqual(evidence, { kind: "unknown", reason: "the Pi bundle root and the selection disagree" });
+});
+
+test("a Pi settings record proves membership when checkout version evidence is unavailable", () => {
+  const view = viewWith({ pi: piSection(parsePiPackagesSetting({ packages: ["git:github.com/owner/repo"] })) });
+  const evidence = findInstalledBundle(view, piDescriptor("repo"), piSelection("https://github.com/owner/repo"));
+  assert.equal(evidence.kind, "installed");
+  if (evidence.kind === "installed") {
+    assert.equal(evidence.version, undefined);
+    assert.match(evidence.reason ?? "", /checkout could not be verified/u);
+  }
 });
 
 test("a drifted Pi entry or an unreadable file makes the Pi lookup unknown", () => {
@@ -451,10 +484,126 @@ test("findInstalledBundle attributes a Claude install only through its marketpla
   assert.deepEqual(findInstalledBundle(absent, claudeDescriptor("pstack"), claudeSelection("pstack")), { kind: "absent" });
 });
 
+test("a clean Pi checkout yields its HEAD and package manifest version", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    const view = await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    });
+    const evidence = findInstalledBundle(view, piDescriptor("repo"), piSelection(fixture.url));
+    assert.deepEqual(evidence, { kind: "installed", version: "1.2.3", commit: fixture.commit });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("Pi checkout origin mismatch and local modifications preserve installed membership but block version evidence", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    await git(fixture.checkoutPath, ["remote", "set-url", "origin", "https://github.com/other/repo"]);
+    const readView = () => readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    });
+    const wrongOrigin = findInstalledBundle(await readView(), piDescriptor("repo"), piSelection(fixture.url));
+    assert.equal(wrongOrigin.kind, "installed");
+    if (wrongOrigin.kind === "installed") {
+      assert.equal(wrongOrigin.version, undefined);
+      assert.match(wrongOrigin.reason ?? "", /origin does not match/u);
+    }
+
+    await git(fixture.checkoutPath, ["remote", "set-url", "origin", fixture.url]);
+    await writeFile(path.join(fixture.checkoutPath, "untracked.txt"), "local change", "utf8");
+    const modified = findInstalledBundle(await readView(), piDescriptor("repo"), piSelection(fixture.url));
+    assert.equal(modified.kind, "installed");
+    if (modified.kind === "installed") {
+      assert.equal(modified.version, undefined);
+      assert.match(modified.reason ?? "", /local modifications/u);
+      assert.match(modified.reason ?? "", /unavailable/u);
+    }
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a Pi checkout symlink preserves installation membership but cannot provide version evidence", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    const outside = path.join(fixture.root, "outside-checkout");
+    await rename(fixture.checkoutPath, outside);
+    await symlink(outside, fixture.checkoutPath, "dir");
+    const view = await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    });
+    const evidence = findInstalledBundle(view, piDescriptor("repo"), piSelection(fixture.url));
+    assert.equal(evidence.kind, "installed");
+    if (evidence.kind === "installed") {
+      assert.equal(evidence.commit, undefined);
+      assert.match(evidence.reason ?? "", /symbolic link/u);
+    }
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("findInstalledBundle refuses a descriptor that disagrees with the selection host", () => {
   const evidence = findInstalledBundle(viewWith({}), claudeDescriptor("pstack"), piSelection("https://github.com/owner/repo"));
   assert.equal(evidence.kind, "unknown");
 });
+
+async function piCheckoutFixture(): Promise<{
+  readonly root: string;
+  readonly home: string;
+  readonly agentDirectory: string;
+  readonly checkoutPath: string;
+  readonly settingsPath: string;
+  readonly url: string;
+  readonly source: string;
+  readonly commit: string;
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-depot-pi-checkout-"));
+  const home = path.join(root, "home");
+  const agentDirectory = path.join(home, ".pi", "agent");
+  const checkoutPath = path.join(agentDirectory, "git", "github.com", "owner", "repo");
+  const settingsPath = path.join(agentDirectory, "settings.json");
+  const url = "https://github.com/owner/repo";
+  const source = "git:github.com/owner/repo";
+  await mkdir(checkoutPath, { recursive: true });
+  await writeFile(path.join(checkoutPath, "package.json"), JSON.stringify({ name: "repo", version: "1.2.3" }), "utf8");
+  await git(checkoutPath, ["init"]);
+  await git(checkoutPath, ["config", "user.email", "fixture@example.test"]);
+  await git(checkoutPath, ["config", "user.name", "Fixture"]);
+  await git(checkoutPath, ["remote", "add", "origin", url]);
+  await git(checkoutPath, ["add", "package.json"]);
+  await git(checkoutPath, ["commit", "-m", "fixture"]);
+  const commit = await gitOutput(checkoutPath, ["rev-parse", "HEAD"]);
+  return { root, home, agentDirectory, checkoutPath, settingsPath, url, source, commit };
+}
+
+async function git(cwd: string, args: readonly string[]): Promise<void> {
+  const result = await runProcess("git", ["-C", cwd, ...args], { timeoutMs: 3000 });
+  assert.equal(result.code, 0, result.stderr);
+}
+
+async function gitOutput(cwd: string, args: readonly string[]): Promise<string> {
+  const result = await runProcess("git", ["-C", cwd, ...args], { captureStdout: true, timeoutMs: 3000 });
+  assert.equal(result.code, 0, result.stderr);
+  return result.stdout.toString("utf8").trim();
+}
 
 async function snapshotTree(root: string): Promise<readonly string[]> {
   const entries: string[] = [];

@@ -21,6 +21,10 @@ export function packageVersionLabel(evidence: PackageVersionEvidence | undefined
 export function installedEvidenceLabel(evidence: InstalledBundleEvidence): string {
   switch (evidence.kind) {
     case "installed": {
+      if (evidence.reason !== undefined) {
+        const reason = evidence.reason.includes("local modifications") ? "local changes" : evidence.reason;
+        return `installed (version unavailable: ${reason})`;
+      }
       if (evidence.version !== undefined) return `installed ${evidence.version}`;
       if (evidence.commit !== undefined) return `installed at ${evidence.commit.slice(0, 7)}`;
       return "installed with no version evidence";
@@ -65,7 +69,12 @@ export function packageRow(record: InstalledPackage, inspection: PackageInspecti
     name: inspection.descriptor?.name ?? describeCoordinates(record.selection),
     installed: installedEvidenceLabel(inspection.installed),
     available: packageVersionLabel(inspection.available),
-    status: classifyUpdate(inspection.installed, inspection.available),
+    status: classifyUpdate(
+      inspection.installed,
+      inspection.available,
+      inspection.availableCommit,
+      inspection.installedCommitIsAncestor,
+    ),
     ...(inspection.drift === undefined ? {} : { drift: inspection.drift }),
   };
 }

@@ -30,6 +30,12 @@ test("kills the process and flags output above the byte limit", async () => {
   assert.equal(result.outputTooLarge, true);
 });
 
+test("kills a process that exceeds its time budget", async () => {
+  const result = await runProcess(node, ["-e", "setTimeout(()=>{}, 5000)"], { timeoutMs: 20 });
+  assert.equal(result.timedOut, true);
+  assert.notEqual(result.code, 0);
+});
+
 test("rejects when the command cannot be spawned", async () => {
   await assert.rejects(runProcess("definitely-not-a-real-command-xyz", []), /ENOENT/);
 });

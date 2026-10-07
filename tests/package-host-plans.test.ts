@@ -287,17 +287,52 @@ test("the approval digest is canonical over the declaration and its exact argv o
 test("classifyUpdate compares like evidence and reports a mixed pair unknown", () => {
   const bundle = { kind: "manifest-version", declaredBy: "bundle" } as const;
   assert.equal(classifyUpdate({ kind: "installed", version: "1.0.0" }, { ...bundle, version: "1.0.1" }), "update available");
+  assert.equal(classifyUpdate(
+    { kind: "installed", version: "1.0.0", commit: "installed-commit" },
+    { ...bundle, version: "1.0.1" },
+  ), "unknown");
   assert.equal(classifyUpdate({ kind: "installed", version: "v1.0.1" }, { ...bundle, version: "1.0.1" }), "current");
   assert.equal(classifyUpdate({ kind: "installed", version: "2.0.0" }, { ...bundle, version: "1.0.0" }), "current");
+  assert.equal(classifyUpdate(
+    { kind: "installed", version: "1.0.0", commit: "installed-commit" },
+    { ...bundle, version: "1.0.0" },
+    "available-commit",
+  ), "unknown");
+  assert.equal(classifyUpdate(
+    { kind: "installed", version: "1.0.0", commit: "installed-commit" },
+    { ...bundle, version: "1.0.1" },
+    "available-commit",
+    true,
+  ), "update available");
+  assert.equal(classifyUpdate(
+    { kind: "installed", version: "0.8.0", commit: "same-commit" },
+    { ...bundle, version: "1.0.0" },
+    "same-commit",
+  ), "current");
   assert.equal(classifyUpdate({ kind: "installed", version: "abc" }, { ...bundle, version: "1.0.0" }), "unknown");
   assert.equal(classifyUpdate({ kind: "installed", version: "abc" }, { ...bundle, version: "abc" }), "current");
 
   assert.equal(classifyUpdate({ kind: "installed", commit: "ABC" }, { kind: "git-commit", commit: "abc" }), "current");
-  assert.equal(classifyUpdate({ kind: "installed", commit: "abc" }, { kind: "git-commit", commit: "def" }), "update available");
+  assert.equal(classifyUpdate({ kind: "installed", commit: "abc" }, { kind: "git-commit", commit: "def" }), "unknown");
+  assert.equal(classifyUpdate(
+    { kind: "installed", version: "1.0.0", commit: "a40" },
+    { ...bundle, version: "1.0.0" },
+    "b40",
+  ), "unknown");
+  assert.equal(classifyUpdate(
+    { kind: "installed", commit: "abc" },
+    { kind: "git-commit", commit: "def" },
+    undefined,
+    true,
+  ), "update available");
 
   assert.equal(classifyUpdate({ kind: "installed", version: "1.0.0" }, { kind: "git-commit", commit: "abc" }), "unknown");
   assert.equal(classifyUpdate({ kind: "installed", commit: "abc" }, { ...bundle, version: "1.0.0" }), "unknown");
   assert.equal(classifyUpdate({ kind: "installed" }, { ...bundle, version: "1.0.0" }), "unknown");
+  assert.equal(classifyUpdate(
+    { kind: "installed", reason: "checkout has local changes; version unavailable" },
+    { ...bundle, version: "1.0.0" },
+  ), "unknown");
   assert.equal(classifyUpdate({ kind: "absent" }, { ...bundle, version: "1.0.0" }), "unknown");
   assert.equal(classifyUpdate({ kind: "unknown", reason: "drifted" }, { ...bundle, version: "1.0.0" }), "unknown");
   assert.equal(classifyUpdate({ kind: "installed", version: "1.0.0" }, undefined), "unknown");

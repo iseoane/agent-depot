@@ -1,7 +1,7 @@
 import type { Key } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState, type MutableRefObject } from "react";
 
-import { packageSelectionFor, type BundleDescriptor } from "../package-model.js";
+import { packageSelectionFor, selectionKey, type BundleDescriptor } from "../package-model.js";
 import type { DiscoveredBundle } from "../package-owned-skills.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import { projectSourceOf, type Source, type SourceOperations } from "../sources.js";
@@ -34,7 +34,7 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
           : [sourceId];
         const labels = new Map(sources.map((source) => [source.id, sourceLabel(source)]));
         const skills: SkillCandidate[] = [];
-        const bundles: BundleEntry[] = [];
+        let bundles: BundleEntry[] = [];
         const discovered: DiscoveredBundle[] = [];
         const warnings: string[] = [];
         try {
@@ -69,7 +69,12 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
         // Ownership is selection- or host-gated, so a loose Skill stays normal until its Package is active.
         let activeBundles: readonly BundleDescriptor[] = [];
         try {
-          activeBundles = (await packages.activeBundles(discovered)).map(bundle => bundle.descriptor);
+          const active = await packages.activeBundles(discovered);
+          const installedKeys = new Set(active
+            .filter(bundle => bundle.reason === "installed" || bundle.reason === "selected-and-installed")
+            .map(bundle => selectionKey(bundle.selection)));
+          bundles = bundles.filter(entry => !installedKeys.has(selectionKey(entry.selection)));
+          activeBundles = active.map(bundle => bundle.descriptor);
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           warnings.push(`Package ownership unavailable: ${detail}`);

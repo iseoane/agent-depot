@@ -2,7 +2,8 @@ import type { Key } from "ink";
 
 import type { SkillCandidate } from "../skill-discovery.js";
 import { type ActionMode } from "./catalog-actions.js";
-import { leavesOf, skillKey, type NodeData } from "./catalog-tree.js";
+import { packageOwnedSkillAction } from "./catalog-ownership.js";
+import { looseLeavesOf, skillKey, type NodeData } from "./catalog-tree.js";
 import type { CatalogFilterControls } from "./catalog-state.js";
 import type { PackageTarget } from "./package-actions.js";
 import { navigateTree, type TreeNavigation } from "./tree-navigation.js";
@@ -34,20 +35,40 @@ function markRow(context: CatalogBrowseContext, row: Row): void {
     context.setMessage({ kind: "error", text: "Mark skills, not source rows" });
     return;
   }
+  if (row.node.data.ownedBy !== undefined) {
+    context.setMessage({ kind: "error", text: `Package-owned Skills cannot be marked. ${packageOwnedSkillAction(row.node.data.ownedBy)}` });
+    return;
+  }
   context.setMessage(undefined);
   context.marks.setMarked(toggledMark(context.marks.markedRef.current, row.node.id));
 }
 
-/** `a`: marks every listed Skill, or clears the marks when they are all marked already. */
-function markAllListed(context: CatalogBrowseContext): void {
-  const { markedRef, setMarked } = context.marks;
-  const leaves = leavesOf(context.navigation.latestRoots());
-  if (leaves.length === 0) {
-    context.setMessage({ kind: "error", text: "There are no skills to select" });
+/** `a`: marks the visible loose Skills in the highlighted Source, or clears those marks. */
+function markRepository(context: CatalogBrowseContext, row: Row | undefined, visible: readonly Row[]): void {
+  const byId = new Map(visible.map((candidate) => [candidate.node.id, candidate]));
+  let ancestor = row;
+  while (ancestor !== undefined && ancestor.node.data.kind !== "source") {
+    ancestor = ancestor.parentId === undefined ? undefined : byId.get(ancestor.parentId);
+  }
+  if (ancestor?.node.data.kind !== "source") {
+    context.setMessage({ kind: "error", text: "Move to a Source, group, Package, or Skill row to select repository Skills" });
+    return;
+  }
+
+  const sourceId = ancestor.node.data.sourceId;
+  const keys = looseLeavesOf(context.navigation.latestRoots())
+    .filter((skill) => skill.sourceId === sourceId)
+    .map(skillKey);
+  if (keys.length === 0) {
+    context.setMessage({ kind: "error", text: "There are no visible loose skills in this repository" });
     return;
   }
   context.setMessage(undefined);
-  setMarked(leaves.every((skill) => markedRef.current.has(skillKey(skill))) ? new Set() : new Set(leaves.map(skillKey)));
+  const { markedRef, setMarked } = context.marks;
+  const next = new Set(markedRef.current);
+  if (keys.every((key) => next.has(key))) keys.forEach((key) => next.delete(key));
+  else keys.forEach((key) => next.add(key));
+  setMarked(next);
 }
 
 /** `i`: installs the highlighted bundle, or the marked Skills that are listed, or the highlighted one. */
@@ -60,8 +81,12 @@ function chooseHosts(context: CatalogBrowseContext, row: Row): void {
     return;
   }
   // Only what is listed installs: marks on Skills hidden by the filter are ignored.
-  const marked = leavesOf(context.navigation.latestRoots())
+  const marked = looseLeavesOf(context.navigation.latestRoots())
     .filter((skill) => context.marks.markedRef.current.has(skillKey(skill)));
+  if (marked.length === 0 && data.kind === "skill" && data.ownedBy !== undefined) {
+    context.setMessage({ kind: "error", text: packageOwnedSkillAction(data.ownedBy) });
+    return;
+  }
   const highlighted: readonly SkillCandidate[] = data.kind === "skill" ? [data.skill] : [];
   const chosen = marked.length > 0 ? marked : highlighted;
   if (chosen.length === 0) {
@@ -82,7 +107,7 @@ export function handleCatalogBrowseKey(context: CatalogBrowseContext, input: str
   else if (key.escape && context.filter.filterRef.current.query !== "") context.filter.clear(context.navigation.restart);
   else if (input === "s" && context.canWiden) context.toggleAll();
   else if (input === " " && row) markRow(context, row);
-  else if (input === "a") markAllListed(context);
+  else if (input === "a") markRepository(context, row, snapshot.visible);
   else if (input === "i" && context.ready && row) chooseHosts(context, row);
 }
 

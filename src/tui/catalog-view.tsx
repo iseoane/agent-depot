@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
@@ -7,7 +7,8 @@ import { handleCatalogBrowseKey, type CatalogBrowseContext } from "./catalog-bro
 import { filterSkills } from "./catalog-filter.js";
 import { handleCatalogActionKey, type CatalogFlowContext } from "./catalog-flow.js";
 import { isInstalled } from "./catalog-installs.js";
-import { ActionPanel, CatalogHeader, CatalogRowLine } from "./catalog-panel.js";
+import { ActionPanel, CatalogHeader, CatalogRowLine, CatalogSelectionHelp } from "./catalog-panel.js";
+import { packageOwnedSkillNotice } from "./catalog-ownership.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 import { handlePackageKey, isPackageMode, startPackageAction, type PackageActionHost, type PackageContext } from "./package-actions.js";
 import { ListFooter } from "./panel-parts.js";
@@ -20,6 +21,25 @@ import { computeWindow, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 
 const NO_ENVIRONMENT: TuiEnvironment = {};
+
+function wrappedLineCount(text: string, columns: number): number {
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(" ")) {
+    const width = [...word].reduce((total, character) => total + ((character.codePointAt(0) ?? 0) > 0xff ? 2 : 1), 0);
+    if (used > 0 && used + 1 + width <= columns) {
+      used += 1 + width;
+      continue;
+    }
+    if (used > 0) {
+      lines += 1;
+      used = 0;
+    }
+    lines += Math.floor((width - 1) / columns);
+    used = ((width - 1) % columns) + 1;
+  }
+  return lines;
+}
 
 export interface CatalogViewProps {
   readonly operations: SourceOperations;
@@ -34,7 +54,7 @@ export interface CatalogViewProps {
 }
 
 export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight }: CatalogViewProps) {
-  const height = useListHeight(listHeight, 6);
+  const { columns } = useWindowSize();
   const env = environment ?? NO_ENVIRONMENT;
   const [all, setAll] = useState(sourceId === undefined);
   const mounted = useMounted();
@@ -70,6 +90,10 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const { restart } = navigation;
   useEffect(restart, [operations, sourceId, all, restart]);
   const { rows, index } = navigation;
+  const helpLines = state.status === "ready"
+    ? Math.max(1, ...state.activeBundles.map((owner) => wrappedLineCount(packageOwnedSkillNotice(owner), Math.max(columns, 1))))
+    : 1;
+  const height = useListHeight(listHeight, 6 + helpLines);
 
   const flow: CatalogFlowContext = {
     operations,
@@ -133,6 +157,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       {rows.slice(window.start, window.end).map((row, offset) => (
         <CatalogRowLine key={row.node.id} row={row} selected={window.start + offset === index} marked={marks.marked.has(row.node.id)} installed={installed} />
       ))}
+      <CatalogSelectionHelp row={rows[index]} height={helpLines} />
       <ListFooter indicator={window.indicator} selectedCount={selectedCount} message={message} />
       <ActionPanel mode={action} />
     </Box>

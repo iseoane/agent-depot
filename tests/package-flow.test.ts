@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { createPackageOperations, type PackageOperations } from "../src/package-flow.js";
+import type { PiCheckoutEvidence } from "../src/package-host-state.js";
 import type { GitSource } from "../src/git-source.js";
 import type { PackageLifecyclePlan, PackageSelection } from "../src/package-model.js";
 import type { ProcessRunOptions, ProcessRunResult } from "../src/process-runner.js";
@@ -38,6 +39,7 @@ interface Harness {
   setCommit(commit: string): void;
   setRunner(run: Runner): void;
   setPiPackages(entries: readonly unknown[]): void;
+  setPiCheckoutEvidence(evidence: PiCheckoutEvidence): void;
   setClaudePlugins(value: unknown): void;
   setClaudeMarketplaces(value: unknown): void;
   setPortableInstallations(items: readonly ProjectSkillSelection[]): Promise<void>;
@@ -103,12 +105,14 @@ async function createHarness(options: {
   let files = [...(options.files ?? piFiles("1.0.0"))];
   let commit = options.commit ?? COMMIT;
   let run: Runner = async () => okResult();
+  let piCheckoutEvidence: PiCheckoutEvidence = { issue: "fixture Pi checkout has no version evidence" };
   const calls: Call[] = [];
   const hostFiles = new Map<string, string>();
 
   const contentAccess: SourceContentAccess = {
     readSnapshot: async () => Object.freeze(files.map((file) => Object.freeze({ ...file }))),
     readResolvedVersion: async () => Object.freeze({ kind: "git-commit" as const, commit }),
+    isCommitAncestor: async (_source, older, newer) => older === COMMIT && newer === NEXT_COMMIT,
   };
   const sourceOperations: SourceOperations = {
     addGitSource: async () => SOURCE,
@@ -145,6 +149,7 @@ async function createHarness(options: {
       }
       return contents;
     },
+    readPiCheckout: async () => piCheckoutEvidence,
   });
 
   return {
@@ -164,6 +169,9 @@ async function createHarness(options: {
     },
     setPiPackages: (entries) => {
       hostFiles.set(path.join(home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: entries }));
+    },
+    setPiCheckoutEvidence: (evidence) => {
+      piCheckoutEvidence = evidence;
     },
     setClaudePlugins: (value) => {
       hostFiles.set(path.join(home, ".claude", "plugins", "installed_plugins.json"), JSON.stringify(value));
@@ -340,6 +348,7 @@ test("a fixed Pi pin does not adopt a different installed pin", async () => {
       version: { policy: "fixed", version: COMMIT },
     };
     harness.setPiPackages([`${PI_IDENTITY}@${NEXT_COMMIT}`]);
+    harness.setPiCheckoutEvidence({ commit: NEXT_COMMIT });
     const plan = await harness.operations.planLifecycle(selection, "install");
     assert.equal(plan.skipExecution, undefined);
     assert.deepEqual(plan.commands.map((command) => [command.executable, ...command.args]), [
@@ -348,6 +357,7 @@ test("a fixed Pi pin does not adopt a different installed pin", async () => {
 
     harness.setRunner(async () => {
       harness.setPiPackages([`${PI_IDENTITY}@${COMMIT}`]);
+      harness.setPiCheckoutEvidence({ commit: COMMIT });
       return okResult();
     });
     await harness.operations.approve(selection, "install");
@@ -367,6 +377,7 @@ test("a fixed Pi pin whose install leaves a different pin fails and writes no re
     };
     harness.setRunner(async () => {
       harness.setPiPackages([`${PI_IDENTITY}@${NEXT_COMMIT}`]);
+      harness.setPiCheckoutEvidence({ commit: NEXT_COMMIT });
       return okResult();
     });
     const plan = await harness.operations.planLifecycle(selection, "install");
@@ -463,7 +474,7 @@ test("an update with unknown observed version evidence fails and leaves the reco
     await harness.operations.approve(selection, "update");
     const result = await harness.operations.executeLifecycle(update, true);
     assert.equal(result.status, "failed");
-    assert.match(result.reason, /version.*changed|change.*version|cannot verify/u);
+    assert.match(result.reason, /version change cannot be verified|version.*unavailable/u);
     assert.deepEqual((await harness.operations.list())[0], before);
     assert.equal(harness.calls.length, 1);
   });
@@ -482,6 +493,7 @@ test("an update that installs where the host reported nothing is recorded as upd
     await harness.operations.approve(selection, "update");
     harness.setRunner(async () => {
       harness.setPiPackages([`${PI_IDENTITY}@${NEXT_COMMIT}`]);
+      harness.setPiCheckoutEvidence({ commit: NEXT_COMMIT });
       return okResult();
     });
     const result = await harness.operations.executeLifecycle(update, true);
@@ -496,6 +508,7 @@ test("records persist the observed host version evidence", async () => {
     const selection = piSelection();
     harness.setRunner(async () => {
       harness.setPiPackages([`${PI_IDENTITY}@${NEXT_COMMIT}`]);
+      harness.setPiCheckoutEvidence({ commit: NEXT_COMMIT });
       return okResult();
     });
 
@@ -525,6 +538,7 @@ test("an update whose observed version is unchanged fails and leaves the record 
   await withHarness({}, async (harness) => {
     const selection = piSelection();
     harness.setPiPackages([`${PI_IDENTITY}@${COMMIT}`]);
+    harness.setPiCheckoutEvidence({ commit: COMMIT });
     const install = await harness.operations.planLifecycle(selection, "install");
     await harness.operations.approve(selection, "install");
     await harness.operations.executeLifecycle(install, true);
@@ -543,11 +557,28 @@ test("an update whose observed version is unchanged fails and leaves the record 
   });
 });
 
+test("reports a native Git update only when cached Source history proves ancestry", async () => {
+  await withHarness({}, async (harness) => {
+    const selection = piSelection();
+    harness.setPiPackages([`${PI_IDENTITY}@${COMMIT}`]);
+    harness.setPiCheckoutEvidence({ commit: COMMIT });
+    const install = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    assert.equal((await harness.operations.executeLifecycle(install, true)).status, "installed");
+
+    harness.setCommit(NEXT_COMMIT);
+    const checks = await harness.operations.checkUpdates();
+    assert.equal(checks[0]?.status, "update available");
+    assert.equal(harness.calls.length, 0);
+  });
+});
+
 test("one broken Package in a batch does not hide the other checks", async () => {
   await withHarness({ files: [...piFiles(), ...claudeFiles()] }, async (harness) => {
     const pi = piSelection();
     const claude = claudeSelection();
     harness.setPiPackages([`${PI_IDENTITY}@${COMMIT}`]);
+    harness.setPiCheckoutEvidence({ commit: COMMIT });
     harness.setClaudePlugins({
       plugins: { "demo@demo-market": [{ scope: "user", installPath: "/cache/demo", version: "1.0.0" }] },
     });

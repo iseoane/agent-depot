@@ -40,12 +40,13 @@ export interface DiscoveredBundle {
   readonly descriptor: BundleDescriptor;
 }
 
-/** Why a bundle is active: the user selected it, or a host state file proves it installed. */
-export type PackageOwnershipReason = "selected" | "installed";
+/** Why a bundle is active, including when the user selected and installed it. */
+export type PackageOwnershipReason = "selected" | "installed" | "selected-and-installed";
 
-/** A bundle that owns its Skills, and the evidence that made it active. */
+/** A bundle that owns its Skills, and the exact selection and evidence that made it active. */
 export interface ActiveBundle {
   readonly descriptor: BundleDescriptor;
+  readonly selection: PackageSelection;
   readonly reason: PackageOwnershipReason;
 }
 
@@ -68,12 +69,14 @@ export function activeBundles(
       continue;
     }
     const selection = packageSelectionFor(descriptor, source);
-    if (selectedKeys.has(selectionKey(selection))) {
-      active.push({ descriptor, reason: "selected" });
-      continue;
-    }
-    if (findInstalledBundle(hostView, descriptor, selection).kind === "installed") {
-      active.push({ descriptor, reason: "installed" });
+    const selected = selectedKeys.has(selectionKey(selection));
+    const installed = findInstalledBundle(hostView, descriptor, selection).kind === "installed";
+    if (selected || installed) {
+      active.push({
+        descriptor,
+        selection,
+        reason: selected ? (installed ? "selected-and-installed" : "selected") : "installed",
+      });
     }
   }
   return Object.freeze(active);

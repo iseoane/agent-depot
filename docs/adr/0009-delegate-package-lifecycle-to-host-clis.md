@@ -50,3 +50,11 @@ The Source, host, and coordinates must all agree, so a selection or install for 
 The complementary direction is a refusal. Selecting or installing a Package whose declared Skills already exist as managed portable user-global installations fails with an actionable conflict naming the portable paths. Nothing is uninstalled, replaced, or written; the user forgets the portable installations first.
 
 `activeBundles` in `src/package-owned-skills.ts` is the one classifier. It reuses the descriptors from the snapshot pass the guard already reads, so there is no second walk. The guard, the unmanaged inventory, the CLI install and uninstall paths, and the Catalog tree all consume its output.
+
+## Amendment: separate Pi membership from version evidence (2026-10-07)
+
+A Pi `packages` setting proves the host has configured a Package. It does not prove its checked-out version. Agent Depot resolves Pi's documented Git install directory and verifies the checkout's repository root, `origin`, clean state, `HEAD`, and manifest version from that commit.
+
+A matching settings entry remains installed when the checkout is missing, dirty, or cannot be verified. Agent Depot keeps the Package out of Catalog and keeps its Skills host-owned. Installations reports that the version is unavailable, and Updates reports `cannot assess`. Agent Depot does not treat the settings pin or `lastDelegatedCommit` as installed-version evidence, and it does not discard or modify local checkout changes.
+
+When the checkout is clean and its origin matches the selected Source, Agent Depot compares its actual `HEAD` with the resolved Source commit. The manifest version remains useful display evidence, but matching version strings cannot override a commit mismatch.

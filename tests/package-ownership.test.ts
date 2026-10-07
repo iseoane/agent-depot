@@ -71,7 +71,7 @@ test("a bundle selected from its own Source owns its Skills, and an unrelated So
   const { descriptor, source } = await mattBundle();
   const bundle = { source: projectSourceOf(source), descriptor };
   const selection = packageSelectionFor(descriptor, projectSourceOf(source));
-  assert.deepEqual(activeBundles([bundle], [selection], EMPTY_HOST_VIEW), [{ descriptor, reason: "selected" }]);
+  assert.deepEqual(activeBundles([bundle], [selection], EMPTY_HOST_VIEW), [{ descriptor, selection, reason: "selected" }]);
 
   const otherSelection = packageSelectionFor(descriptor, { kind: "external", url: "https://github.com/other/skills" });
   assert.deepEqual(activeBundles([bundle], [otherSelection], EMPTY_HOST_VIEW), []);
@@ -87,7 +87,36 @@ test("a host-proven install owns its Skills with no selection record", async () 
       plugins: { "mattpocock-skills@mattpocock": [{ scope: "user", installPath: path.join(home, "plugin"), version: "1.3.1" }] },
     });
     const view = await readHostInstallView({ homeDirectory: home });
-    assert.deepEqual(activeBundles([{ source: projectSourceOf(source), descriptor }], [], view), [{ descriptor, reason: "installed" }]);
+    const selection = packageSelectionFor(descriptor, projectSourceOf(source));
+    const bundle = { source: projectSourceOf(source), descriptor };
+    assert.deepEqual(activeBundles([bundle], [], view), [{ descriptor, selection, reason: "installed" }]);
+    assert.deepEqual(activeBundles([bundle], [selection], view), [{ descriptor, selection, reason: "selected-and-installed" }]);
+  });
+});
+
+test("a dirty Pi checkout remains installed and keeps its Skills Package-owned", async () => {
+  await withHome(async (home) => {
+    const files = await readFixtureFiles("pstack");
+    const descriptor = discoverBundlesInSnapshot(files, {})[0];
+    assert.ok(descriptor);
+    const source: Source = { id: sourceIdForUrl(PSTACK_URL), kind: "git", url: PSTACK_URL };
+    const projectSource = projectSourceOf(source);
+    const selection = packageSelectionFor(descriptor, projectSource);
+    const agentDirectory = path.join(home, ".pi", "agent");
+    const view = await readHostInstallView({
+      homeDirectory: home,
+      piAgentDirectory: agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === path.join(agentDirectory, "settings.json")) {
+          return JSON.stringify({ packages: ["git:github.com/iseoane/pstack"] });
+        }
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+      readPiCheckout: async () => ({ issue: "Pi checkout has local modifications" }),
+    });
+    const bundle = { source: projectSource, descriptor };
+    assert.deepEqual(activeBundles([bundle], [], view), [{ descriptor, selection, reason: "installed" }]);
+    assert.deepEqual(activeBundles([bundle], [selection], view), [{ descriptor, selection, reason: "selected-and-installed" }]);
   });
 });
 
@@ -109,7 +138,7 @@ test("an install for an unrelated Source or an unreadable host file never claims
     const bundle = { source: projectSourceOf(source), descriptor };
     assert.deepEqual(activeBundles([bundle], [], unreadable), []);
     const selection = packageSelectionFor(descriptor, projectSourceOf(source));
-    assert.deepEqual(activeBundles([bundle], [selection], unreadable), [{ descriptor, reason: "selected" }]);
+    assert.deepEqual(activeBundles([bundle], [selection], unreadable), [{ descriptor, selection, reason: "selected" }]);
   });
 });
 

@@ -65,6 +65,8 @@ export interface SourceContentAccess {
   readonly readSkillTreeSnapshot?: (source: Source, skillPath: string) => Promise<SourceSkillTreeSnapshot>;
   /** Reads trustworthy version evidence without replacing the immutable Source view. */
   readonly readResolvedVersion?: (source: Source) => Promise<ResolvedVersionEvidence | undefined>;
+  /** Proves commit ordering from cached Git history without refreshing or fetching. */
+  readonly isCommitAncestor?: (source: Source, olderCommit: string, newerCommit: string) => Promise<boolean | undefined>;
 }
 
 export interface SourceContentAccessOptions {
@@ -139,6 +141,11 @@ export class NodeSourceContentAccess implements SourceContentAccess {
       files: snapshot.files,
       resolvedVersion: Object.freeze({ kind: "git-commit", commit: snapshot.resolvedVersion }),
     });
+  }
+
+  async isCommitAncestor(source: Source, olderCommit: string, newerCommit: string): Promise<boolean | undefined> {
+    if (source.kind === "builtin") return undefined;
+    return this.gitSnapshots.isAncestor(source, olderCommit, newerCommit);
   }
 
   async readResolvedVersion(source: Source): Promise<ResolvedVersionEvidence | undefined> {

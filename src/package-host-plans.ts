@@ -210,15 +210,23 @@ export function packageApprovalDigest(declaration: PackageDeclaration): string {
 
 /**
  * Compares installed evidence with available evidence. Manifest versions compare
- * through `sameAppVersion` and `compareAppVersions`; commits compare by equality.
- * A mixed pair, missing evidence, or an opaque version is `unknown`, never `current`.
+ * through `sameAppVersion` and `compareAppVersions`; differing commits compare only
+ * when cached Source history proves the installed commit is an ancestor.
  */
 export function classifyUpdate(
   installed: InstalledBundleEvidence,
   available: PackageVersionEvidence | undefined,
+  availableCommit?: string,
+  installedCommitIsAncestor?: boolean,
 ): "unknown" | "current" | "update available" {
-  if (installed.kind !== "installed" || available === undefined) {
+  if (installed.kind !== "installed" || installed.reason !== undefined || available === undefined) {
     return "unknown";
+  }
+  if (installed.commit !== undefined) {
+    const sourceCommit = availableCommit ?? (available.kind === "git-commit" ? available.commit : undefined);
+    if (sourceCommit === undefined) return "unknown";
+    if (normalizeCommit(installed.commit) === normalizeCommit(sourceCommit)) return "current";
+    return installedCommitIsAncestor === true ? "update available" : "unknown";
   }
   if (installed.version !== undefined && available.kind === "manifest-version") {
     if (sameAppVersion(installed.version, available.version)) {
@@ -229,11 +237,6 @@ export function classifyUpdate(
       return "unknown";
     }
     return order < 0 ? "update available" : "current";
-  }
-  if (installed.commit !== undefined && available.kind === "git-commit") {
-    return normalizeCommit(installed.commit) === normalizeCommit(available.commit)
-      ? "current"
-      : "update available";
   }
   return "unknown";
 }

@@ -322,6 +322,27 @@ export class GitSourceSnapshotAccess {
     });
   }
 
+  /** True only when the cached Source history proves `olderCommit` precedes `newerCommit`. */
+  async isAncestor(source: GitSource, olderCommit: string, newerCommit: string): Promise<boolean | undefined> {
+    if (![olderCommit, newerCommit].every((commit) => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(commit))) {
+      return undefined;
+    }
+    try {
+      const destination = await this.requireMirror(source);
+      await this.runner.run("git", [
+        "--git-dir",
+        destination,
+        "merge-base",
+        "--is-ancestor",
+        olderCommit,
+        newerCommit,
+      ]);
+      return true;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Resolves the selected ref to an immutable commit without refreshing the mirror. */
   async readResolvedCommit(source: GitSource): Promise<GitSourceResolvedVersion> {
     const destination = await this.requireMirror(source);

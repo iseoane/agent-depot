@@ -66,7 +66,7 @@ export type PackageVersionEvidence =
 
 /** What the host reports about an install. Read-only evidence, never written. */
 export type InstalledBundleEvidence =
-  | { readonly kind: "installed"; readonly version?: string; readonly commit?: string }
+  | { readonly kind: "installed"; readonly version?: string; readonly commit?: string; readonly reason?: string }
   | { readonly kind: "absent" }
   | { readonly kind: "unknown"; readonly reason: string };
 
@@ -88,6 +88,9 @@ export interface PackageInspection {
   readonly descriptor?: BundleDescriptor;
   readonly installed: InstalledBundleEvidence;
   readonly available?: PackageVersionEvidence;
+  readonly availableCommit?: string;
+  /** Proven from the Source's cached Git history, never inferred from different commit IDs. */
+  readonly installedCommitIsAncestor?: boolean;
   readonly approval: "approved" | "needs approval";
   readonly drift?: string;
 }
@@ -138,6 +141,7 @@ export interface PackageUpdateCheck {
   readonly installed: InstalledPackage;
   readonly status: "unknown" | "current" | "update available";
   readonly available?: PackageVersionEvidence;
+  readonly availableCommit?: string;
   readonly reason?: string;
 }
 

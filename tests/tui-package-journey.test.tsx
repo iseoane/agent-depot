@@ -55,9 +55,30 @@ function fakePiRunner(calls: Call[], home: string): (command: string, args: read
   return async (command, args) => {
     calls.push({ command, args: [...args] });
     if (path.basename(command) === "pi" && args[0] === "install") {
-      const settings = path.join(home, ".pi", "agent", "settings.json");
+      const agentDirectory = path.join(home, ".pi", "agent");
+      const settings = path.join(agentDirectory, "settings.json");
+      const checkout = path.join(agentDirectory, "git", "example.test", "packages", "pstack");
+      await mkdir(checkout, { recursive: true });
+      await writeFile(path.join(checkout, "package.json"), JSON.stringify({ name: "pstack", version: "0.9.68" }));
+      execFileSync("git", ["init", "-q"], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "journey"], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "journey@example.test"], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["remote", "add", "origin", PORTABLE_URL], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["add", "package.json"], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["commit", "-qm", "installed fixture"], { cwd: checkout, stdio: "pipe" });
+      await writeFile(path.join(checkout, "package-lock.json"), "pre-existing local file\n");
       await mkdir(path.dirname(settings), { recursive: true });
       await writeFile(settings, `${JSON.stringify({ packages: [`${PI_IDENTITY}@${"b".repeat(40)}`] }, null, 2)}\n`);
+    }
+    if (path.basename(command) === "claude" && args[0] === "plugin" && args[1] === "marketplace" && args[2] === "add") {
+      const state = path.join(home, ".claude", "plugins", "known_marketplaces.json");
+      await mkdir(path.dirname(state), { recursive: true });
+      await writeFile(state, `${JSON.stringify({ "pstack-claude": { source: { source: "git", url: PORTABLE_URL }, installLocation: path.join(home, "marketplaces", "pstack-claude") } }, null, 2)}\n`);
+    }
+    if (path.basename(command) === "claude" && args[0] === "plugin" && args[1] === "install") {
+      const state = path.join(home, ".claude", "plugins", "installed_plugins.json");
+      await mkdir(path.dirname(state), { recursive: true });
+      await writeFile(state, `${JSON.stringify({ version: 2, plugins: { "pstack@pstack-claude": [{ scope: "user", installPath: path.join(home, "plugins", "pstack"), version: "0.9.68" }] } }, null, 2)}\n`);
     }
     return { code: 0, signal: null, stdout: Buffer.alloc(0), stderr: "", outputTooLarge: false };
   };
@@ -111,10 +132,8 @@ async function moveDownTo(lastFrame: Frame, stdin: { write(data: string): void }
   assert.fail("selection never reached the expected line");
 }
 
-test("n adds a Git Source, refresh discovers its Package, and i installs it through the shared flow", async (t) => {
-  const j = await journey(t);
+async function addSourceAndOpenCatalog(j: Journey): Promise<void> {
   await waitForFrame(j.view.lastFrame, /builtin:agent-depot/);
-
   j.view.stdin.write("n");
   const chooser = await waitForFrame(j.view.lastFrame, /Add: 1 Git Source \(skills \+ Packages\)/);
   assert.ok(chooser.includes("2 App recipe"));
@@ -125,17 +144,65 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   j.view.stdin.write(ENTER);
   await waitForFrame(j.view.lastFrame, /Added Git Source: git:/);
   await waitForFrame(j.view.lastFrame, /j\/k move · space mark/);
-
   j.view.stdin.write("r");
   await waitForFrame(j.view.lastFrame, /refresh Git Source git:/);
   j.view.stdin.write("y");
   await waitForFrame(j.view.lastFrame, /Refreshed Git Source: git:/);
   await waitForFrame(j.view.lastFrame, /j\/k move · space mark/);
-
   j.view.stdin.write(ENTER);
   await waitForFrame(j.view.lastFrame, /Scope: git:/);
   j.view.stdin.write(ENTER);
   await waitForFrame(j.view.lastFrame, /Packages \(2\)/);
+}
+
+test("a Claude install disappears from Catalog and shows a verified available update", async (t) => {
+  const j = await journey(t);
+  await addSourceAndOpenCatalog(j);
+  await moveDownTo(j.view.lastFrame, j.view.stdin, /> .*Packages \(2\)/u);
+  j.view.stdin.write(ENTER);
+  await waitForFrame(j.view.lastFrame, /Package pstack \(pi\)/u);
+  await moveDownTo(j.view.lastFrame, j.view.stdin, /> .*Package pstack \(claude\)/u);
+  j.view.stdin.write("i");
+  await waitForFrame(j.view.lastFrame, /Approval: needs approval/u);
+  j.view.stdin.write("y");
+  await waitForFrame(j.view.lastFrame, /Approval: approved/u);
+  j.view.stdin.write("y");
+  await waitForFrame(j.view.lastFrame, /pstack: installed/u);
+
+  assert.deepEqual(j.calls.map((call) => [path.basename(call.command), ...call.args]), [
+    ["claude", "plugin", "marketplace", "add", PORTABLE_URL],
+    ["claude", "plugin", "install", "pstack@pstack-claude"],
+  ]);
+  const catalog = j.view.lastFrame() ?? "";
+  assert.doesNotMatch(catalog, /Package pstack \(claude\)/u);
+  assert.match(catalog, /Package pstack \(pi\)/u);
+
+  j.view.stdin.write("3");
+  await waitForFrame(j.view.lastFrame, /Packages \(user-global\) \(1\)/u);
+  j.view.stdin.write("j");
+  await waitForFrame(j.view.lastFrame, /Managed \(project\)/u);
+  j.view.stdin.write("j");
+  await waitForFrame(j.view.lastFrame, /Unmanaged \(user-global\)/u);
+  j.view.stdin.write("j");
+  await waitForFrame(j.view.lastFrame, /Packages \(user-global\)/u);
+  j.view.stdin.write(ENTER);
+  const installations = await waitForFrame(j.view.lastFrame, /pstack {2}claude {2}installed 0\.9\.68/u);
+  assert.match(installations, /update available/u);
+
+  j.view.stdin.write("4");
+  const updates = await waitForFrame(j.view.lastFrame, /Package: claude/u);
+  assert.match(updates, /-> 0\.9\.69/u);
+  assert.doesNotMatch(updates, /cannot be checked/u);
+  j.view.stdin.write(" ");
+  j.view.stdin.write(ENTER);
+  const updatePreview = await waitForFrame(j.view.lastFrame, /Package: pstack \(claude\) update/u);
+  assert.match(updatePreview, /\["claude","plugin","update","pstack@pstack-claude"\]/u);
+  assert.match(updatePreview, /Apply 1 update\?/u);
+});
+
+test("n adds a Git Source, refresh discovers its Package, and i installs it through the shared flow", async (t) => {
+  const j = await journey(t);
+  await addSourceAndOpenCatalog(j);
   await moveDownTo(j.view.lastFrame, j.view.stdin, /> .*Packages \(2\)/);
   j.view.stdin.write(ENTER);
   await waitForFrame(j.view.lastFrame, /Package pstack \(pi\)/);
@@ -160,4 +227,34 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   assert.deepEqual(records[0]?.selection.source, { kind: "external", url: PORTABLE_URL });
   const settings = JSON.parse(await readFile(path.join(j.home, ".pi", "agent", "settings.json"), "utf8")) as { packages?: readonly string[] };
   assert.deepEqual(settings.packages, [`${PI_IDENTITY}@${"b".repeat(40)}`], "the fake host recorded the delegated install");
+  const refreshedCatalog = j.view.lastFrame() ?? "";
+  assert.doesNotMatch(refreshedCatalog, /Package pstack \(pi\)/u, "a host-confirmed install is no longer offered in Catalog");
+  assert.match(refreshedCatalog, /Package pstack \(claude\)/u, "the other host's uninstalled descriptor remains in Catalog");
+
+  j.view.stdin.write("3");
+  await waitForFrame(j.view.lastFrame, /Packages \(user-global\) \(1\)/u);
+  j.view.stdin.write("j");
+  await waitForFrame(j.view.lastFrame, /Managed \(project\)/u);
+  j.view.stdin.write("j");
+  await waitForFrame(j.view.lastFrame, /Unmanaged \(user-global\)/u);
+  j.view.stdin.write("j");
+  await waitForFrame(j.view.lastFrame, /Packages \(user-global\)/u);
+  j.view.stdin.write(ENTER);
+  const installations = await waitForFrame(j.view.lastFrame, /pstack {2}pi {2}installed \(version unavailable: local changes\)/u);
+  assert.doesNotMatch(installations, /local modifications/u);
+  assert.match(installations, /cannot assess/u);
+  assert.equal(
+    await readFile(path.join(j.home, ".pi", "agent", "git", "example.test", "packages", "pstack", "package-lock.json"), "utf8"),
+    "pre-existing local file\n",
+    "the inspection preserves package-local changes",
+  );
+
+  j.view.stdin.write("4");
+  await waitForFrame(j.view.lastFrame, /cannot be checked/u);
+  j.view.stdin.write(ENTER);
+  const updates = await waitForFrame(j.view.lastFrame, /Package: pi/u);
+  assert.match(updates, /1 cannot be checked/u, "uncomparable host and manifest evidence stays unknown, not an invented update");
+  assert.match(updates, /local modifications/u);
+  assert.doesNotMatch(updates, /installed at commit b{40}/u);
+  assert.doesNotMatch(updates, /update available/u);
 });
