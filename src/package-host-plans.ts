@@ -216,9 +216,15 @@ export function packageApprovalDigest(declaration: PackageDeclaration): string {
 export function classifyUpdate(
   installed: InstalledBundleEvidence,
   available: PackageVersionEvidence | undefined,
+  availableCommit?: string,
 ): "unknown" | "current" | "update available" {
-  if (installed.kind !== "installed" || available === undefined) {
+  if (installed.kind !== "installed" || installed.reason !== undefined || available === undefined) {
     return "unknown";
+  }
+  if (installed.commit !== undefined && availableCommit !== undefined) {
+    return normalizeCommit(installed.commit) === normalizeCommit(availableCommit)
+      ? "current"
+      : "update available";
   }
   if (installed.version !== undefined && available.kind === "manifest-version") {
     if (sameAppVersion(installed.version, available.version)) {

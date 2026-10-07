@@ -8,6 +8,8 @@ export interface ProcessRunOptions {
   readonly maxOutputBytes?: number;
   /** Cap stderr and kill the process if it exceeds this many bytes; otherwise uncapped. */
   readonly maxStderrBytes?: number;
+  /** Kill a process that does not finish before this duration. */
+  readonly timeoutMs?: number;
 }
 
 export interface ProcessRunResult {
@@ -16,6 +18,7 @@ export interface ProcessRunResult {
   readonly stdout: Buffer;
   readonly stderr: string;
   readonly outputTooLarge: boolean;
+  readonly timedOut?: boolean;
 }
 
 /** Runs a command with an argument vector and no shell; rejects only when spawning fails. */
@@ -35,6 +38,12 @@ export function runProcess(
     let stderr = "";
     let stderrBytes = 0;
     let outputTooLarge = false;
+    let timedOut = false;
+    const timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, options.timeoutMs);
+    timeout?.unref();
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutBytes += chunk.length;
       if (options.maxOutputBytes !== undefined && stdoutBytes > options.maxOutputBytes) {
@@ -58,7 +67,8 @@ export function runProcess(
     });
     child.on("error", reject);
     child.on("close", (code, signal) => {
-      resolve({ code, signal, stdout: Buffer.concat(stdout), stderr, outputTooLarge });
+      if (timeout !== undefined) clearTimeout(timeout);
+      resolve({ code, signal, stdout: Buffer.concat(stdout), stderr, outputTooLarge, ...(timedOut ? { timedOut: true } : {}) });
     });
   });
 }

@@ -1,6 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+
+import { canonicalizeGitSourceUrl } from "./git-source.js";
+import { assertNoSymlinkPath } from "./path-safety.js";
+import { runProcess } from "./process-runner.js";
 
 import type {
   BundleDescriptor,
@@ -39,6 +43,12 @@ export interface PiInstallRecord {
   readonly objectForm: boolean;
   /** True when the entry's shape could not be decoded; matching must degrade to unknown. */
   readonly drifted: boolean;
+  /** The checkout's actual Git HEAD, validated against its configured repository. */
+  readonly checkoutCommit?: string;
+  /** Version from package.json at that same clean HEAD. */
+  readonly checkoutVersion?: string;
+  /** An installed settings entry whose checkout could not be safely verified. */
+  readonly checkoutIssue?: string;
 }
 
 /** One entry of `~/.claude/plugins/installed_plugins.json`. */
@@ -83,7 +93,15 @@ export interface HostInstallView {
 
 export interface HostInstallViewEnvironment {
   readonly homeDirectory?: string;
+  readonly piAgentDirectory?: string;
   readonly readHostStateFile?: (filePath: string) => Promise<string>;
+  readonly readPiCheckout?: (checkoutPath: string, sourceUrl: string) => Promise<PiCheckoutEvidence>;
+}
+
+export interface PiCheckoutEvidence {
+  readonly commit?: string;
+  readonly version?: string;
+  readonly issue?: string;
 }
 
 interface SectionParse<T> {
@@ -137,9 +155,10 @@ export function parseClaudeMarketplaceState(value: unknown): readonly ClaudeMark
  */
 export async function readHostInstallView(env: HostInstallViewEnvironment = {}): Promise<HostInstallView> {
   const home = env.homeDirectory ?? homedir();
+  const piAgentDirectory = path.resolve(env.piAgentDirectory ?? process.env.PI_CODING_AGENT_DIR ?? path.join(home, ".pi", "agent"));
   const reader = env.readHostStateFile ?? ((filePath: string) => readFile(filePath, "utf8"));
   const [pi, claudePlugins, claudeMarketplaces] = await Promise.all([
-    readSection("pi-settings", path.join(home, ".pi", "agent", "settings.json"), reader, parsePiSettingsFile),
+    readSection("pi-settings", path.join(piAgentDirectory, "settings.json"), reader, parsePiSettingsFile),
     readSection(
       "claude-installed-plugins",
       path.join(home, ".claude", "plugins", "installed_plugins.json"),
@@ -153,7 +172,8 @@ export async function readHostInstallView(env: HostInstallViewEnvironment = {}):
       parseClaudeMarketplacesFile,
     ),
   ]);
-  return Object.freeze({ pi, claudePlugins, claudeMarketplaces });
+  const verifiedPi = await attachPiCheckoutEvidence(pi, piAgentDirectory, env.readPiCheckout ?? readPiCheckoutEvidence);
+  return Object.freeze({ pi: verifiedPi, claudePlugins, claudeMarketplaces });
 }
 
 /**
@@ -169,6 +189,9 @@ export function findInstalledBundle(
 ): InstalledBundleEvidence {
   if (descriptor.host !== selection.host) {
     return unknownEvidence("the bundle descriptor and the selection disagree on the host");
+  }
+  if (selection.host === "pi" && (descriptor.coordinates.host !== "pi" || descriptor.coordinates.root !== selection.root)) {
+    return unknownEvidence("the Pi bundle root and the selection disagree");
   }
   return selection.host === "pi"
     ? findPiInstalled(view.pi, selection)
@@ -237,7 +260,7 @@ function marketplaceSourceMatches(source: ClaudeMarketplaceSource, target: HostS
 
 function findPiInstalled(
   section: HostStateSection<PiInstallRecord>,
-  selection: PackageSelection,
+  selection: Extract<PackageSelection, { readonly host: "pi" }>,
 ): InstalledBundleEvidence {
   if (section.issue !== undefined) {
     return unknownEvidence(section.issue);
@@ -251,7 +274,16 @@ function findPiInstalled(
     !record.drifted && normalizeRepository(record.identity) === wanted,
   );
   if (match !== undefined) {
-    return installedEvidence(undefined, match.commit);
+    if (selection.root !== "") {
+      return unknownEvidence("Pi project-scoped and subdirectory package checkouts are not supported for version evidence");
+    }
+    if (match.checkoutIssue !== undefined) {
+      return installedEvidence(undefined, undefined, match.checkoutIssue);
+    }
+    if (match.checkoutCommit === undefined) {
+      return installedEvidence(undefined, undefined, `Pi reports this Package installed, but its checkout could not be verified. Version and update assessment are unavailable; inspect the configured checkout before updating.`);
+    }
+    return installedEvidence(match.checkoutVersion, match.checkoutCommit);
   }
   if (section.records.some((record) => record.drifted)) {
     return unknownEvidence(`${section.path} holds an entry whose shape could not be read, so the install cannot be verified`);
@@ -289,12 +321,119 @@ function findClaudeInstalled(
   return Object.freeze({ kind: "absent" });
 }
 
-function installedEvidence(version: string | undefined, commit: string | undefined): InstalledBundleEvidence {
+function installedEvidence(
+  version: string | undefined,
+  commit: string | undefined,
+  reason?: string,
+): InstalledBundleEvidence {
   return Object.freeze({
     kind: "installed",
     ...(version === undefined || version === "" ? {} : { version }),
     ...(commit === undefined || commit === "" ? {} : { commit }),
+    ...(reason === undefined ? {} : { reason }),
   });
+}
+
+async function attachPiCheckoutEvidence(
+  section: HostStateSection<PiInstallRecord>,
+  agentDirectory: string,
+  reader: (checkoutPath: string, sourceUrl: string) => Promise<PiCheckoutEvidence>,
+): Promise<HostStateSection<PiInstallRecord>> {
+  const records = await Promise.all(section.records.map(async (record) => {
+    if (record.drifted || !record.identity.startsWith("git:")) return record;
+    try {
+      const checkoutPath = piGitInstallPath(agentDirectory, record.identity);
+      const evidence = await reader(checkoutPath, record.identity);
+      return Object.freeze({
+        ...record,
+        ...(evidence.commit === undefined ? {} : { checkoutCommit: evidence.commit }),
+        ...(evidence.version === undefined ? {} : { checkoutVersion: evidence.version }),
+        ...(evidence.issue === undefined ? {} : { checkoutIssue: evidence.issue }),
+      });
+    } catch (error) {
+      return Object.freeze({
+        ...record,
+        checkoutIssue: error instanceof Error ? error.message : "Pi Git checkout could not be verified",
+      });
+    }
+  }));
+  return Object.freeze({ ...section, records: Object.freeze(records) });
+}
+
+function piGitInstallPath(agentDirectory: string, identity: string): string {
+  const source = identity.slice("git:".length);
+  let parsed: URL;
+  try {
+    parsed = new URL(`https://${source}`);
+  } catch {
+    throw new Error("the configured Pi Git source has no safe checkout path");
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean).map((segment) => decodeURIComponent(segment));
+  const lastSegment = segments.at(-1);
+  if (lastSegment?.endsWith(".git")) segments[segments.length - 1] = lastSegment.slice(0, -4);
+  if (segments.length < 2 || segments.some((segment) => segment === "." || segment === ".." || segment.includes("/") || segment.includes("\\"))) {
+    throw new Error("the configured Pi Git source has no safe checkout path");
+  }
+  return path.resolve(agentDirectory, "git", parsed.hostname, ...segments);
+}
+
+async function readPiCheckoutEvidence(checkoutPath: string, sourceIdentity: string): Promise<PiCheckoutEvidence> {
+  const unavailable = (reason: string): PiCheckoutEvidence => ({
+    issue: `Pi reports this Package installed, but ${reason}. Version and update assessment are unavailable; inspect the checkout before updating.`,
+  });
+  try {
+    await assertNoSymlinkPath(checkoutPath, "Pi package checkout path");
+    const root = await lstat(checkoutPath).catch((error: unknown) => {
+      if (isNotFound(error)) return undefined;
+      throw error;
+    });
+    if (root === undefined) return unavailable("its configured Git checkout is missing");
+    if (!root.isDirectory()) return unavailable("its configured Git checkout is not a directory");
+    const [topLevel, origin, commit, status, manifest] = await Promise.all([
+      runPiGit(checkoutPath, ["rev-parse", "--show-toplevel"]),
+      runPiGit(checkoutPath, ["config", "--get", "remote.origin.url"]),
+      runPiGit(checkoutPath, ["rev-parse", "--verify", "HEAD^{commit}"]),
+      runPiGit(checkoutPath, ["status", "--porcelain", "--untracked-files=all"]),
+      runPiGit(checkoutPath, ["show", "HEAD:package.json"]),
+    ]);
+    const expectedRoot = path.resolve(checkoutPath);
+    if (path.resolve(topLevel) !== expectedRoot) return unavailable("the package path is not the root of its Git checkout");
+    if (normalizeRepository(piSourceIdentityFromUrl(origin)) !== normalizeRepository(sourceIdentity)) {
+      return unavailable("the Git checkout origin does not match the selected Pi package Source");
+    }
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(commit)) return unavailable("the Pi checkout HEAD is not a full Git commit");
+    if (status !== "") return unavailable("the Pi Git checkout has local modifications");
+    const packageJson: unknown = JSON.parse(manifest);
+    if (!isRecord(packageJson) || typeof packageJson.version !== "string" || packageJson.version.trim() === "") {
+      return { commit: commit.toLowerCase() };
+    }
+    return { commit: commit.toLowerCase(), version: packageJson.version };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const reason = message.includes("timed out")
+      ? "Git checkout verification timed out"
+      : message.includes("symbolic link")
+        ? "the configured checkout path contains a symbolic link"
+        : "the Pi Git checkout could not be read safely";
+    return unavailable(reason);
+  }
+}
+
+async function runPiGit(checkoutPath: string, args: readonly string[]): Promise<string> {
+  const result = await runProcess("git", ["-C", checkoutPath, ...args], {
+    captureStdout: true,
+    maxOutputBytes: 1024 * 1024,
+    maxStderrBytes: 8192,
+    timeoutMs: 3000,
+  });
+  if (result.timedOut) throw new Error("Pi checkout verification timed out");
+  if (result.outputTooLarge || result.code !== 0 || result.signal !== null) throw new Error("Pi checkout verification command failed");
+  return result.stdout.toString("utf8").trim();
+}
+
+function piSourceIdentityFromUrl(origin: string): string {
+  const canonical = canonicalizeGitSourceUrl(origin);
+  return `git:${canonical.replace(/^[a-z][a-z0-9+.-]*:\/\//iu, "")}`;
 }
 
 function unknownEvidence(reason: string): InstalledBundleEvidence {

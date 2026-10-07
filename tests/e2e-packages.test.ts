@@ -14,7 +14,6 @@ const PORTABLE_URL = "https://example.test/packages/pstack.git";
 const PI_IDENTITY = "git:example.test/packages/pstack";
 const CLAUDE_INSTALL_ID = "pstack@pstack-claude";
 const INSTALLED_COMMIT = "b".repeat(40);
-const UPDATED_COMMIT = "c".repeat(40);
 const STALE_VERSION = "0.9.60";
 const AVAILABLE_VERSION = "0.9.69";
 
@@ -57,6 +56,8 @@ interface FakeHost {
   readonly calls: readonly Call[];
   /** Writes the `packages[]` entry Pi would leave after an install. */
   setPiEntry(entry: string | undefined): Promise<void>;
+  /** Advances the temporary Source repository so the fixture checkout can update. */
+  advancePiSource(): Promise<void>;
 }
 
 /**
@@ -71,6 +72,7 @@ async function createFakeHost(home: string): Promise<FakeHost> {
   const calls: Call[] = [];
   let piEntry: string | undefined;
   let claudeVersion: string | undefined;
+  const piCheckout = path.join(home, ".pi", "agent", "git", "example.test", "packages", "pstack");
   let marketplaceUrl: string | undefined;
   const writePi = async (): Promise<void> => {
     await mkdir(path.dirname(piSettings), { recursive: true });
@@ -101,10 +103,17 @@ async function createFakeHost(home: string): Promise<FakeHost> {
   const runner: Runner = async (command, args) => {
     calls.push({ command, args: [...args] });
     if (path.basename(command) === "pi") {
-      // Pi records the commit it resolved, which the observed settings form shows as `@<commit>`.
-      if (args[0] === "install") piEntry = `${PI_IDENTITY}@${INSTALLED_COMMIT}`;
-      else if (args[0] === "update") piEntry = `${PI_IDENTITY}@${UPDATED_COMMIT}`;
-      else if (args[0] === "remove") piEntry = undefined;
+      if (args[0] === "install") {
+        execFileSync("git", ["clone", "--quiet", PORTABLE_URL, piCheckout], { stdio: "pipe" });
+        piEntry = PI_IDENTITY;
+      } else if (args[0] === "update") {
+        execFileSync("git", ["-C", piCheckout, "fetch", "--quiet", "origin"], { stdio: "pipe" });
+        execFileSync("git", ["-C", piCheckout, "reset", "--hard", "origin/main"], { stdio: "pipe" });
+        piEntry = PI_IDENTITY;
+      } else if (args[0] === "remove") {
+        piEntry = undefined;
+        await rm(piCheckout, { recursive: true, force: true });
+      }
       await writePi();
     } else if (path.basename(command) === "claude") {
       if (args[1] === "marketplace" && args[2] === "add") {
@@ -130,6 +139,14 @@ async function createFakeHost(home: string): Promise<FakeHost> {
     async setPiEntry(next) {
       piEntry = next;
       await writePi();
+    },
+    async advancePiSource() {
+      const manifestPath = path.join(repository, "package.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { keywords?: string[] };
+      manifest.keywords = [...(manifest.keywords ?? []), "e2e-update"];
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      execFileSync("git", ["add", "package.json"], { cwd: repository, stdio: "pipe" });
+      execFileSync("git", ["commit", "-qm", "advance package fixture"], { cwd: repository, stdio: "pipe" });
     },
   };
 }
@@ -226,23 +243,32 @@ test("the Pi lifecycle installs, updates and uninstalls through the fake host wi
   await side.operations.approve(selection, "install");
   const installed = await side.operations.executeLifecycle(install, true);
   assert.equal(installed.status, "installed");
-  assert.deepEqual(await readPiPackages(side.home), [`${PI_IDENTITY}@${INSTALLED_COMMIT}`]);
+  assert.deepEqual(await readPiPackages(side.home), [PI_IDENTITY]);
 
   // The record and the evidence come from the fixture home, not from the runner.
   const inspection = await side.operations.inspect(selection);
-  assert.deepEqual(inspection.installed, { kind: "installed", commit: INSTALLED_COMMIT });
+  assert.equal(inspection.installed.kind, "installed");
+  if (inspection.installed.kind === "installed") {
+    assert.equal(inspection.installed.version, AVAILABLE_VERSION);
+    assert.match(inspection.installed.commit ?? "", /^[0-9a-f]{40}$/u);
+  }
   const records = await side.operations.list();
   assert.equal(records.length, 1);
-  assert.deepEqual(records[0]?.verified, { kind: "git-commit", commit: INSTALLED_COMMIT });
+  assert.deepEqual(records[0]?.verified, { kind: "git-commit", commit: inspection.installed.kind === "installed" ? inspection.installed.commit : undefined });
 
+  await side.host.advancePiSource();
   const update = await side.operations.planLifecycle(selection, "update");
   assert.deepEqual(argvOf(update), [["pi", "update", PI_IDENTITY]]);
   await side.operations.approve(selection, "update");
   const updated = await side.operations.executeLifecycle(update, true);
   assert.equal(updated.status, "updated");
-  assert.deepEqual(updated.previous, { kind: "installed", commit: INSTALLED_COMMIT });
-  assert.deepEqual(updated.verified, { kind: "installed", commit: UPDATED_COMMIT });
-  assert.deepEqual(await readPiPackages(side.home), [`${PI_IDENTITY}@${UPDATED_COMMIT}`]);
+  assert.equal(updated.previous.kind, "installed");
+  assert.equal(updated.verified.kind, "installed");
+  if (updated.previous.kind === "installed" && updated.verified.kind === "installed") {
+    assert.notEqual(updated.previous.commit, updated.verified.commit);
+    assert.equal(updated.previous.version, updated.verified.version);
+  }
+  assert.deepEqual(await readPiPackages(side.home), [PI_IDENTITY]);
 
   const uninstall = await side.operations.planLifecycle(selection, "uninstall");
   assert.deepEqual(argvOf(uninstall), [["pi", "remove", PI_IDENTITY]]);
@@ -313,13 +339,20 @@ test("installed evidence is read from the fixture host home, and an unversioned 
 
   // A bare identity is the form Pi writes for a package with no resolved pin.
   await side.host.setPiEntry(PI_IDENTITY);
-  assert.deepEqual((await side.operations.inspect(selection)).installed, { kind: "installed" });
+  const unversioned = (await side.operations.inspect(selection)).installed;
+  assert.equal(unversioned.kind, "installed");
+  if (unversioned.kind === "installed") assert.match(unversioned.reason ?? "", /checkout.*missing/u);
   const unknown = await side.operations.checkUpdates([selection]);
   assert.equal(unknown[0]?.status, "unknown");
-  assert.match(unknown[0]?.reason ?? "", /no version evidence/u);
+  assert.match(unknown[0]?.reason ?? "", /checkout.*missing/u);
 
   await side.host.setPiEntry(`${PI_IDENTITY}@${INSTALLED_COMMIT}`);
-  assert.deepEqual((await side.operations.inspect(selection)).installed, { kind: "installed", commit: INSTALLED_COMMIT });
+  const pinned = (await side.operations.inspect(selection)).installed;
+  assert.equal(pinned.kind, "installed");
+  if (pinned.kind === "installed") {
+    assert.equal(pinned.commit, undefined);
+    assert.match(pinned.reason ?? "", /checkout.*missing/u);
+  }
 });
 
 test("a select run writes only packages.json and package-approvals and never a Host skill root", async () => {

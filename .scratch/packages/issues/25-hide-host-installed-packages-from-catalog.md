@@ -17,10 +17,13 @@ bundles. Catalog filters only host-proven installed Packages by the full
 selection identity. Selected-only bundles and bundles with unknown host state
 remain listed. The Installations view still shows tracked Package records.
 
-**Known limitation:** The observed Pi settings entry has no pin, version, or
-commit evidence. Agent Depot can confirm that Pi lists the Package, but it cannot
-compare the installed Package with the available manifest version. Updates must
-continue to report `cannot assess` rather than guess. This follows ADR 0009.
+**Pi Git checkout evidence:** A Pi settings entry proves Package membership, not
+its installed version. Agent Depot now resolves the checkout with Pi 1.0.3's Git
+install path, then checks the checkout root, `origin`, clean state, `HEAD`, and
+`package.json` at that commit. A dirty, missing, or mismatched checkout remains
+installed and hidden from Catalog, but Installations reports that version
+comparison is unavailable. Updates say `cannot assess`. The inspection preserves
+local checkout changes and never uses `lastDelegatedCommit` as installed evidence.
 
 **Status:** completed
 
@@ -30,6 +33,10 @@ continue to report `cannot assess` rather than guess. This follows ADR 0009.
 - [x] Installations retains the Package row.
 - [x] Updates show a Claude Package when host and available version evidence prove an update.
 - [x] Updates do not report an unversioned Pi Git Package as an update.
+- [x] A dirty Pi checkout remains host-installed and hidden from Catalog while
+  version and update evidence stay unavailable.
+- [x] Installed Pi versions come from the actual clean checkout `HEAD`; the
+  settings pin and Agent Depot's delegated commit do not stand in for it.
 
 ## Verification
 
@@ -38,5 +45,12 @@ continue to report `cannot assess` rather than guess. This follows ADR 0009.
 - `tests/tui-catalog-view.test.tsx` checks exact host and selection filtering.
 - `tests/package-ownership.test.ts` checks selected, installed, selected-and-installed,
   and unreadable-host-state classifications.
-- `pnpm test` passes all 984 tests. `pnpm typecheck`, `pnpm lint`,
-  `pnpm audit:dead-code`, and `pnpm test:e2e` pass.
+- `pnpm test` passed all 984 tests at the original closure. The Pi checkout
+  follow-up is verified by the targeted tests listed above; full gates are rerun
+  for this follow-up.
+
+## Comments
+
+- 2026-10-07: Pi settings membership and checkout version evidence are separate.
+  A local checkout change does not turn an installed Package into an unknown or
+  absent installation. It blocks version comparison and leaves the checkout untouched.

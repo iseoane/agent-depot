@@ -55,7 +55,18 @@ function fakePiRunner(calls: Call[], home: string): (command: string, args: read
   return async (command, args) => {
     calls.push({ command, args: [...args] });
     if (path.basename(command) === "pi" && args[0] === "install") {
-      const settings = path.join(home, ".pi", "agent", "settings.json");
+      const agentDirectory = path.join(home, ".pi", "agent");
+      const settings = path.join(agentDirectory, "settings.json");
+      const checkout = path.join(agentDirectory, "git", "example.test", "packages", "pstack");
+      await mkdir(checkout, { recursive: true });
+      await writeFile(path.join(checkout, "package.json"), JSON.stringify({ name: "pstack", version: "0.9.68" }));
+      execFileSync("git", ["init", "-q"], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["config", "user.name", "journey"], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "journey@example.test"], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["remote", "add", "origin", PORTABLE_URL], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["add", "package.json"], { cwd: checkout, stdio: "pipe" });
+      execFileSync("git", ["commit", "-qm", "installed fixture"], { cwd: checkout, stdio: "pipe" });
+      await writeFile(path.join(checkout, "package-lock.json"), "pre-existing local file\n");
       await mkdir(path.dirname(settings), { recursive: true });
       await writeFile(settings, `${JSON.stringify({ packages: [`${PI_IDENTITY}@${"b".repeat(40)}`] }, null, 2)}\n`);
     }
@@ -229,14 +240,21 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   j.view.stdin.write("j");
   await waitForFrame(j.view.lastFrame, /Packages \(user-global\)/u);
   j.view.stdin.write(ENTER);
-  const installations = await waitForFrame(j.view.lastFrame, /pstack {2}pi {2}installed at bbbbbbb/u);
-  assert.match(installations, /pstack {2}pi {2}installed at bbbbbbb/u);
+  const installations = await waitForFrame(j.view.lastFrame, /pstack {2}pi {2}installed \(version unavailable:/u);
+  assert.match(installations, /local modifications/u);
+  assert.match(installations, /cannot assess/u);
+  assert.equal(
+    await readFile(path.join(j.home, ".pi", "agent", "git", "example.test", "packages", "pstack", "package-lock.json"), "utf8"),
+    "pre-existing local file\n",
+    "the inspection preserves package-local changes",
+  );
 
   j.view.stdin.write("4");
   await waitForFrame(j.view.lastFrame, /cannot be checked/u);
   j.view.stdin.write(ENTER);
   const updates = await waitForFrame(j.view.lastFrame, /Package: pi/u);
   assert.match(updates, /1 cannot be checked/u, "uncomparable host and manifest evidence stays unknown, not an invented update");
-  assert.match(updates, /installed at commit b{40}/u);
+  assert.match(updates, /local modifications/u);
+  assert.doesNotMatch(updates, /installed at commit b{40}/u);
   assert.doesNotMatch(updates, /update available/u);
 });

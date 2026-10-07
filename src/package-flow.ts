@@ -14,7 +14,7 @@ import {
   PackagePlanError,
   type HostPlanResolution,
 } from "./package-host-plans.js";
-import { findInstalledBundle, readHostInstallView, type HostInstallView } from "./package-host-state.js";
+import { findInstalledBundle, readHostInstallView, type HostInstallView, type PiCheckoutEvidence } from "./package-host-state.js";
 import {
   activeBundles as classifyActiveBundles,
   portableSkillConflicts,
@@ -75,6 +75,7 @@ export interface PackageEnvironment {
   /** Reads the immutable Source snapshot the discovery pass and the guard share. */
   readonly sourceContentAccess?: SourceContentAccess;
   readonly readHostStateFile?: (path: string) => Promise<string>;
+  readonly readPiCheckout?: (checkoutPath: string, sourceUrl: string) => Promise<PiCheckoutEvidence>;
 }
 
 export interface PackageOperations {
@@ -150,6 +151,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
   const readHostView = (): Promise<HostInstallView> => readHostInstallView({
     ...(environment.homeDirectory === undefined ? {} : { homeDirectory: environment.homeDirectory }),
     ...(environment.readHostStateFile === undefined ? {} : { readHostStateFile: environment.readHostStateFile }),
+    ...(environment.readPiCheckout === undefined ? {} : { readPiCheckout: environment.readPiCheckout }),
   });
 
   async function resolveSourceFor(projectSource: ProjectSource): Promise<Source> {
@@ -314,6 +316,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
       ...(bundle === undefined ? {} : { descriptor: bundle.descriptor }),
       installed,
       ...(bundle?.available === undefined ? {} : { available: bundle.available }),
+      ...(bundle?.resolvedCommit === undefined ? {} : { availableCommit: bundle.resolvedCommit }),
       approval,
       ...((drift ?? identityDrift) === undefined ? {} : { drift: drift ?? identityDrift }),
     });
@@ -322,11 +325,12 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
   async function checkOne(record: InstalledPackage): Promise<PackageUpdateCheck> {
     try {
       const inspection = await inspect(record.selection);
-      const status = classifyUpdate(inspection.installed, inspection.available);
+      const status = classifyUpdate(inspection.installed, inspection.available, inspection.availableCommit);
       return Object.freeze({
         installed: record,
         status,
         ...(inspection.available === undefined ? {} : { available: inspection.available }),
+        ...(inspection.availableCommit === undefined ? {} : { availableCommit: inspection.availableCommit }),
         ...(status === "unknown" ? { reason: inspection.drift ?? describeEvidence(inspection.installed) } : {}),
       });
     } catch (error) {
@@ -734,13 +738,13 @@ function installedEvidenceChange(
   if (previous.kind === "absent") {
     return "changed";
   }
-  if (previous.version !== undefined && observed.version !== undefined) {
-    return sameAppVersion(previous.version, observed.version) ? "unchanged" : "changed";
-  }
   const previousCommit = previous.commit === undefined ? undefined : gitCommitId(previous.commit);
   const observedCommit = observed.commit === undefined ? undefined : gitCommitId(observed.commit);
   if (previousCommit !== undefined && observedCommit !== undefined) {
     return previousCommit === observedCommit ? "unchanged" : "changed";
+  }
+  if (previous.version !== undefined && observed.version !== undefined) {
+    return sameAppVersion(previous.version, observed.version) ? "unchanged" : "changed";
   }
   return "unknown";
 }
@@ -837,6 +841,7 @@ function hasControlCharacter(value: string): boolean {
 function describeEvidence(evidence: InstalledBundleEvidence): string {
   switch (evidence.kind) {
     case "installed": {
+      if (evidence.reason !== undefined) return evidence.reason;
       if (evidence.version !== undefined) {
         return `installed ${JSON.stringify(evidence.version)}`;
       }

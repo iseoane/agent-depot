@@ -94,6 +94,32 @@ test("a host-proven install owns its Skills with no selection record", async () 
   });
 });
 
+test("a dirty Pi checkout remains installed and keeps its Skills Package-owned", async () => {
+  await withHome(async (home) => {
+    const files = await readFixtureFiles("pstack");
+    const descriptor = discoverBundlesInSnapshot(files, {})[0];
+    assert.ok(descriptor);
+    const source: Source = { id: sourceIdForUrl(PSTACK_URL), kind: "git", url: PSTACK_URL };
+    const projectSource = projectSourceOf(source);
+    const selection = packageSelectionFor(descriptor, projectSource);
+    const agentDirectory = path.join(home, ".pi", "agent");
+    const view = await readHostInstallView({
+      homeDirectory: home,
+      piAgentDirectory: agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === path.join(agentDirectory, "settings.json")) {
+          return JSON.stringify({ packages: ["git:github.com/iseoane/pstack"] });
+        }
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+      readPiCheckout: async () => ({ issue: "Pi checkout has local modifications" }),
+    });
+    const bundle = { source: projectSource, descriptor };
+    assert.deepEqual(activeBundles([bundle], [], view), [{ descriptor, selection, reason: "installed" }]);
+    assert.deepEqual(activeBundles([bundle], [selection], view), [{ descriptor, selection, reason: "selected-and-installed" }]);
+  });
+});
+
 test("an install for an unrelated Source or an unreadable host file never claims", async () => {
   await withHome(async (home) => {
     const { descriptor, source } = await mattBundle();
