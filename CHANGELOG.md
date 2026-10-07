@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-07
+
+### Changed
+
+- The TUI fills the terminal from startup, responds to resize, and restores the primary screen on exit.
+- Catalog keeps a stable list height while you move between Skills with different Package owners.
+- Catalog `a` marks or clears only visible loose Skills in the repository under the cursor. Marks in other repositories and filtered-out Skills stay unchanged.
+
+### Fixed
+
+- Catalog rows use readable contrast, one-line truncation, and compact Package badges. A separate panel explains the highlighted Skill's ownership.
+- Host-confirmed installed Packages disappear from Catalog. Selected-only Packages and Packages with unknown installation state remain visible.
+- Pi Git Package inspections read the installed checkout's origin, commit, and version without changing the checkout. Local modifications keep the Package installed but make version assessment unavailable.
+- Git Package updates require cached Source history to prove that the installed commit precedes the available commit. Different or locally divergent commits alone do not imply an update.
+- Tests isolate `PI_CODING_AGENT_DIR` so an inherited shell override cannot redirect fixtures to user state.
+
 ## [0.5.0] - 2026-10-06
 
 ### Added
