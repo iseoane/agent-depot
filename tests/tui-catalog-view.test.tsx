@@ -7,7 +7,7 @@ import { Children, isValidElement, type ReactNode } from "react";
 import { renderExpanded } from "./render-expanded.js";
 
 import { parseProjectManifest, ProjectManifestStore, type ProjectSkillSelection } from "../src/project-manifest.js";
-import type { BundleDescriptor } from "../src/package-model.js";
+import { packageSelectionFor, type BundleDescriptor } from "../src/package-model.js";
 import type { SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { NO_INSTALLED } from "../src/tui/catalog-installs.js";
@@ -504,7 +504,7 @@ test("CatalogView a excludes active Package-owned skills", async () => {
   };
   const packages = fakePackageOperations({
     discover: async () => [descriptor],
-    activeBundles: async () => [{ descriptor, reason: "selected" }],
+    activeBundles: async () => [{ descriptor, selection: packageSelectionFor(descriptor, { kind: "external", url: source.url }), reason: "selected" }],
   });
   const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />,
@@ -698,6 +698,37 @@ test("CatalogView lists a Source's bundles and marks the Skills they own", async
 });
 
 
+test("CatalogView hides only the exact host-proven installed bundle", async () => {
+  const source = { id: "git:pstack", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
+  const pi = packageDescriptor("pi", "pstack-pi", "plugins/pi/skills");
+  const claude = packageDescriptor("claude", "pstack-claude", "plugins/claude/skills");
+  const operations: SourceOperations = {
+    ...operationsFor(async () => []),
+    async listSources() { return [source]; },
+  };
+  const packages = fakePackageOperations({
+    discover: async () => [pi, claude],
+    activeBundles: async () => [
+      { descriptor: pi, selection: packageSelectionFor(pi, { kind: "external", url: source.url }), reason: "selected" },
+      { descriptor: claude, selection: packageSelectionFor(claude, { kind: "external", url: source.url }), reason: "installed" },
+    ],
+  });
+  const { lastFrame, stdin, unmount } = await renderExpanded(
+    <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />,
+  );
+  try {
+    await waitForFrame(lastFrame, /Packages \(1\)/u);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Packages (1)") === true);
+    stdin.write(ENTER);
+    const frame = await waitForFrame(lastFrame, /Package pstack-pi \(pi\)/u);
+    assert.match(frame, /Package pstack-pi \(pi\)/u);
+    assert.doesNotMatch(frame, /Package pstack-claude \(claude\)/u);
+  } finally {
+    unmount();
+  }
+});
+
 test("CatalogView keeps Package rows reachable and explains owned Skills without enabling loose install", async () => {
   const source = { id: "git:pstack", kind: "git" as const, url: "https://github.com/iseoane/pstack.git" };
   const pi = packageDescriptor("pi", "pstack-pi", "plugins/pi/skills");
@@ -712,7 +743,10 @@ test("CatalogView keeps Package rows reachable and explains owned Skills without
   };
   const packages = fakePackageOperations({
     discover: async () => [pi, claude],
-    activeBundles: async () => [{ descriptor: pi, reason: "selected" }, { descriptor: claude, reason: "installed" }],
+    activeBundles: async () => [
+      { descriptor: pi, selection: packageSelectionFor(pi, { kind: "external", url: source.url }), reason: "selected" },
+      { descriptor: claude, selection: packageSelectionFor(claude, { kind: "external", url: source.url }), reason: "selected" },
+    ],
   });
   const tree = <CatalogView environment={{ ...NO_MANIFEST, packages }} operations={operations} />;
   const view = await renderExpanded(tree);
