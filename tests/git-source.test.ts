@@ -58,12 +58,17 @@ class FakeSelectedSnapshotRunner implements GitSnapshotCommandRunner {
     private readonly tree: string,
     private readonly blobs: ReadonlyMap<string, string | Uint8Array>,
     private readonly commit = "e".repeat(40),
+    private readonly ancestorAvailable = true,
   ) {}
 
   async run(command: string, args: readonly string[]): Promise<string> {
     this.calls.push({ command, args: [...args] });
     if (args[args.length - 1]?.endsWith("^{commit}")) {
       return `${this.commit}\n`;
+    }
+    if (args.includes("merge-base")) {
+      if (this.ancestorAvailable) return "";
+      throw new Error("the commits are not proven related");
     }
     if (args.includes("ls-tree")) {
       return this.tree;
@@ -292,6 +297,29 @@ test("resolves trustworthy Git commit evidence from the selected ref without ref
 
     assert.equal(await new GitSourceSnapshotAccess({ cachePath, runner }).readResolvedCommit(source), "f".repeat(40));
     assert.equal(runner.calls[0]?.args.at(-1), "refs/tags/v1.2.3^{commit}");
+  });
+});
+
+test("proves commit ancestry from the cached mirror without fetching", async () => {
+  await withCache(async (cachePath) => {
+    const source = {
+      id: sourceIdForUrl("https://github.com/example/skills.git"),
+      kind: "git" as const,
+      url: "https://github.com/example/skills.git",
+    };
+    await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
+    const older = "a".repeat(40);
+    const newer = "b".repeat(40);
+    const runner = new FakeSelectedSnapshotRunner("", new Map(), "e".repeat(40));
+    const access = new GitSourceSnapshotAccess({ cachePath, runner });
+
+    assert.equal(await access.isAncestor(source, older, newer), true);
+    assert.deepEqual(runner.calls[0]?.args, ["--git-dir", path.join(cachePath, source.id.slice(4)), "merge-base", "--is-ancestor", older, newer]);
+    assert.equal(await new GitSourceSnapshotAccess({
+      cachePath,
+      runner: new FakeSelectedSnapshotRunner("", new Map(), "e".repeat(40), false),
+    }).isAncestor(source, older, newer), undefined);
+    assert.equal(await access.isAncestor(source, "not-a-commit", newer), undefined);
   });
 });
 
@@ -585,6 +613,13 @@ test("directory Sources read and install the selected branch from a real Git mir
     await git(["-C", repository, "add", "."]);
     await git(["-C", repository, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "selected"]);
     await git(["-C", repository, "checkout", "main"]);
+    const commit = async (ref: string) => {
+      const result = await runProcess("git", ["-C", repository, "rev-parse", ref], { captureStdout: true });
+      assert.equal(result.code, 0, result.stderr);
+      return result.stdout.toString("utf8").trim();
+    };
+    const mainCommit = await commit("main");
+    const selectedCommit = await commit("selected");
     const url = "https://github.com/cursor/plugins/tree/selected/pstack";
     const source = { id: sourceIdForUrl(url), kind: "git" as const, url };
     // Replace only the remote transport; all mirror and snapshot commands use real Git.
@@ -603,6 +638,17 @@ test("directory Sources read and install the selected branch from a real Git mir
       ["pstack/skills/example/notes.txt", "supporting file"],
     ]);
     assert.match(tree.resolvedVersion, /^[0-9a-f]{40,64}$/u);
+    const ancestry = await runProcess("git", [
+      "--git-dir",
+      path.join(cachePath, source.id.slice(4)),
+      "merge-base",
+      "--is-ancestor",
+      mainCommit,
+      selectedCommit,
+    ]);
+    assert.equal(ancestry.code, 0, ancestry.stderr);
+    assert.equal(await snapshots.isAncestor(source, mainCommit, selectedCommit), true);
+    assert.equal(await snapshots.isAncestor(source, selectedCommit, mainCommit), undefined);
     assert.equal((await snapshots.readSnapshot({ ...source, ref: "main" }))[0].content, "main manifest");
     await access.refresh(source);
   } finally {

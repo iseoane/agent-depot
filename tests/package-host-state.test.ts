@@ -119,6 +119,18 @@ function marketplaceRecord(overrides: Partial<ClaudeMarketplaceRecord> = {}): Cl
   };
 }
 
+test("host state defaults to the isolated test home instead of inherited Pi state", async () => {
+  const paths: string[] = [];
+  await readHostInstallView({
+    readHostStateFile: async (filePath) => {
+      paths.push(filePath);
+      throw Object.assign(new Error("missing fixture"), { code: "ENOENT" });
+    },
+  });
+  assert.equal(process.env.PI_CODING_AGENT_DIR, undefined);
+  assert.equal(paths.includes(path.join(process.env.HOME!, ".pi", "agent", "settings.json")), true);
+});
+
 test("the observed Pi settings shapes parse into identity, pin, and object-form records", () => {
   const records = parsePiPackagesSetting({
     packages: [

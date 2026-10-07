@@ -89,6 +89,8 @@ export interface PackageInspection {
   readonly installed: InstalledBundleEvidence;
   readonly available?: PackageVersionEvidence;
   readonly availableCommit?: string;
+  /** Proven from the Source's cached Git history, never inferred from different commit IDs. */
+  readonly installedCommitIsAncestor?: boolean;
   readonly approval: "approved" | "needs approval";
   readonly drift?: string;
 }

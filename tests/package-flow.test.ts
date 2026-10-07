@@ -112,6 +112,7 @@ async function createHarness(options: {
   const contentAccess: SourceContentAccess = {
     readSnapshot: async () => Object.freeze(files.map((file) => Object.freeze({ ...file }))),
     readResolvedVersion: async () => Object.freeze({ kind: "git-commit" as const, commit }),
+    isCommitAncestor: async (_source, older, newer) => older === COMMIT && newer === NEXT_COMMIT,
   };
   const sourceOperations: SourceOperations = {
     addGitSource: async () => SOURCE,
@@ -553,6 +554,22 @@ test("an update whose observed version is unchanged fails and leaves the record 
     assert.match(result.reason, /did not change/);
     assert.deepEqual((await harness.operations.list())[0], before);
     assert.equal(harness.calls.length, 1);
+  });
+});
+
+test("reports a native Git update only when cached Source history proves ancestry", async () => {
+  await withHarness({}, async (harness) => {
+    const selection = piSelection();
+    harness.setPiPackages([`${PI_IDENTITY}@${COMMIT}`]);
+    harness.setPiCheckoutEvidence({ commit: COMMIT });
+    const install = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    assert.equal((await harness.operations.executeLifecycle(install, true)).status, "installed");
+
+    harness.setCommit(NEXT_COMMIT);
+    const checks = await harness.operations.checkUpdates();
+    assert.equal(checks[0]?.status, "update available");
+    assert.equal(harness.calls.length, 0);
   });
 });
 

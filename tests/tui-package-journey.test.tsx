@@ -240,8 +240,8 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   j.view.stdin.write("j");
   await waitForFrame(j.view.lastFrame, /Packages \(user-global\)/u);
   j.view.stdin.write(ENTER);
-  const installations = await waitForFrame(j.view.lastFrame, /pstack {2}pi {2}installed \(version unavailable:/u);
-  assert.match(installations, /local modifications/u);
+  const installations = await waitForFrame(j.view.lastFrame, /pstack {2}pi {2}installed \(version unavailable: local changes\)/u);
+  assert.doesNotMatch(installations, /local modifications/u);
   assert.match(installations, /cannot assess/u);
   assert.equal(
     await readFile(path.join(j.home, ".pi", "agent", "git", "example.test", "packages", "pstack", "package-lock.json"), "utf8"),

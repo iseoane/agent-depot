@@ -312,11 +312,15 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
     const installed = bundle === undefined
       ? Object.freeze({ kind: "unknown" as const, reason: drift ?? "the bundle could not be resolved" })
       : findInstalledBundle(view, bundle.descriptor, selection);
+    const installedCommitIsAncestor = bundle?.resolvedCommit === undefined || installed.kind !== "installed" || installed.commit === undefined
+      ? undefined
+      : await contentAccess.isCommitAncestor?.(bundle.source, installed.commit, bundle.resolvedCommit).catch(() => undefined);
     return Object.freeze({
       ...(bundle === undefined ? {} : { descriptor: bundle.descriptor }),
       installed,
       ...(bundle?.available === undefined ? {} : { available: bundle.available }),
       ...(bundle?.resolvedCommit === undefined ? {} : { availableCommit: bundle.resolvedCommit }),
+      ...(installedCommitIsAncestor === true ? { installedCommitIsAncestor: true } : {}),
       approval,
       ...((drift ?? identityDrift) === undefined ? {} : { drift: drift ?? identityDrift }),
     });
@@ -325,7 +329,12 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
   async function checkOne(record: InstalledPackage): Promise<PackageUpdateCheck> {
     try {
       const inspection = await inspect(record.selection);
-      const status = classifyUpdate(inspection.installed, inspection.available, inspection.availableCommit);
+      const status = classifyUpdate(
+        inspection.installed,
+        inspection.available,
+        inspection.availableCommit,
+        inspection.installedCommitIsAncestor,
+      );
       return Object.freeze({
         installed: record,
         status,
