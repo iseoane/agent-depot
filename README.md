@@ -23,15 +23,19 @@ What it does:
   user-written App recipes that must be approved before they run.
 - **Packages**: install, update and uninstall host-native bundles (Pi packages and
   Claude Code plugins) by delegating the lifecycle to each Host's own CLI and
-  reading the installed version from the Host's own state files. A bundle reserves
+  reading Host-owned installation and version evidence. A bundle reserves
   its Skills only while you have selected it or a Host proves it installed, so an
   unselected bundle's Skills stay installable on their own.
 - **Profiles**: export your user-global Sources, Skill selections, App recipes and
   Package selections to a portable file and import them, add-only, on another
   machine.
 
-Agent Depot never overwrites or deletes content without a preview and confirmation,
-and refuses unsafe paths and links.
+Agent Depot previews and confirms the filesystem changes it manages. This
+guarantee does not cover side effects from delegated commands. User-provided Skill
+methods, approved App recipes, and approved Package Host commands run as child
+processes. Agent Depot cannot fully preview or roll back their effects outside its
+managed changes. Agent Depot rejects unsafe paths and links in its managed
+filesystem operations.
 
 Requires Node.js >= 24 (Active LTS). The [interactive TUI](#interactive-tui)
 needs an interactive terminal.
@@ -91,10 +95,10 @@ agent-depot source remove git:<source-id> --yes
 agent-depot source remove git:<source-id> --skill <id|path> --yes
 agent-depot source migrate git:<old-source-id> git:<new-source-id> --skill <path> --yes
 agent-depot discover builtin:agent-depot git:<source-id>
-agent-depot install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
-agent-depot install --scope user-global --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --yes
+agent-depot install --scope project --source builtin:agent-depot --skill agent-depot-apprecipe --host pi --version latest --portable-v1 --yes
+agent-depot install --scope user-global --source builtin:agent-depot --skill agent-depot-apprecipe --host pi --version latest --portable-v1 --yes
 # Only for an explicitly reviewed, untracked real-directory conflict:
-agent-depot install --scope project --source builtin:agent-depot --skill architecture --host pi --version latest --portable-v1 --overwrite --yes
+agent-depot install --scope project --source builtin:agent-depot --skill agent-depot-apprecipe --host pi --version latest --portable-v1 --overwrite --yes
 agent-depot install --scope project --manifest --portable-v1 --yes
 agent-depot update check --scope project
 agent-depot update apply --scope project --all --yes
@@ -299,7 +303,7 @@ method object, for example:
 
 ```sh
 agent-depot install --scope user-global --source builtin:agent-depot \
-  --skill architecture --host pi --version latest \
+  --skill agent-depot-apprecipe --host pi --version latest \
   --method '{"kind":"command","argv":["node","scripts/install.mjs"],"cwd":"tools"}' \
   --portable-v1 --yes
 ```
@@ -358,7 +362,7 @@ requires both `--overwrite` and `--yes`:
 
 ```sh
 agent-depot install --scope project --source builtin:agent-depot \
-  --skill architecture --host pi --version latest --portable-v1 --overwrite --yes
+  --skill agent-depot-apprecipe --host pi --version latest --portable-v1 --overwrite --yes
 ```
 
 The preview is explicit about this distinction: without `--yes`, zero files or
@@ -446,14 +450,17 @@ agent-depot tui
 
 The TUI is an [Ink](https://github.com/vadimdemedes/ink) (React for terminals)
 front end over the same operations as the CLI. It needs Node.js >= 24 and an
-interactive terminal; otherwise `tui` fails with an error. Switch views with
-`1`-`5`, quit with `q` (not while a prompt is open). Every list scrolls when it is
-taller than the terminal. `j`/`k` or the arrow keys move.
+interactive terminal; otherwise `tui` fails with an error. It uses the terminal's
+alternate screen and returns to the previous screen when you quit. It adjusts to
+terminal resizing. Switch views with `1`-`5`, quit with `q` (not while a prompt is
+open). Lists scroll when they are taller than the terminal. In Sources, Catalog,
+Installations, and Updates, `j`/`k` or the arrows move one row; `PageUp` and
+`PageDown` move by one visible page.
 
 | View | Purpose |
 | --- | --- |
 | 1 Sources | Git Sources (their skills and Packages) and user-owned App recipes in one list, with `skills`/`app` kinds and contextual actions. |
-| 2 Catalog | Skills that can be installed: those not installed yet, as Source, then Skills. Each Source also shows a Packages group, and the Skills a bundle owns are marked and dimmed. |
+| 2 Catalog | Available Skills and Packages, grouped by Source. Host-confirmed installed Packages are hidden; selected-only Packages remain visible. An active Package-owned Skill stays at normal contrast with a compact owner badge; it cannot be marked or installed separately. Move the cursor to it to see why. |
 | 3 Installations | What is on disk: managed installations (user-global and project), Package selections and unmanaged user-global skills. |
 | 4 Updates | Managed skills and Packages with a newer version available, for user-global and project scope. |
 | 5 Import/Export | Transfer portable user-global Source choices, Skill selections, App recipes and Package selections. |
@@ -463,9 +470,9 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | View | Keys |
 | --- | --- |
 | Sources | `j`/`k` move through Git Sources and App recipes (no Tab section switch). `Enter` opens the Catalog for a Git Source (its skills and Packages) or previews/approves an App recipe. `n` adds a reusable Git Source or guides recipe authoring; `r` refreshes Sources or reloads recipe status; `d` removes. `space`/`a` mark Git Sources only. |
-| Catalog | `Enter`/arrows expand and collapse, `space` mark, `a` mark all listed, `i` install the marked Skills (or the highlighted skill) or preview the highlighted Package bundle, `/` filter, `s` toggle one Source or all (when opened from a Source) |
+| Catalog | `Enter`/arrows expand and collapse, `space` toggle the highlighted loose Skill, `a` toggle all loose Skills in the highlighted Source that match the current filter, `i` install marked Skills that match the filter or the highlighted loose Skill, or preview the highlighted Package, `/` filter, `s` toggle one Source or all (when opened from a Source). Marks in other Sources remain unchanged. |
 | Installations | `Enter`/arrows expand and collapse, `u` uninstall (all Hosts or chosen Hosts) or remove an unmanaged skill, `h` or `i` add Hosts to an installation, `A` or `Enter` adopt an unmanaged skill, `space` marks a leaf and `a` marks all visible leaves: with marks, `u` and `h` act on all of them with one combined preview and one confirmation (project installations are skipped with a reason). On a Package row: `i` previews the frozen install plan and runs it, approving the receipt first when it is missing, `Enter` approves the install declaration only, `U` update, `u` uninstall, `f` forget the selection record. Package rows are not markable for bulk actions. |
-| Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot assess" line. A marked Package joins the batch and is approved before its update runs. |
+| Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot be checked" group. Rows in that group are informational and cannot be marked for an update. A marked Package joins the batch and is approved before its update runs. |
 | Import/Export | `e` export, `i` import; enter a file path, `space` toggle choices, `a` toggle all, `Enter` preview, `y` apply; `j`/`k` scroll previews and results |
 
 Removing an App recipe checks its approved version command and tracked state.
@@ -682,11 +689,21 @@ deferred.
 
 Agent Depot does not copy a bundle's contents. It reads the bundle manifest into a
 typed component inventory, derives the Host's own commands from that declaration,
-runs them through the no-shell command runner after approval, and reads the
-installed version back from the Host's state files. The Host owns what is
-installed. Agent Depot owns the selection record and the receipt for what it
-delegated. A bundle's own Skills are never offered for adoption or installed a
-second time, because the Host owns their files and locations.
+runs them through the no-shell command runner after approval, and reads installed
+state from Host-owned files. Agent Depot reads those files and never writes them.
+For Pi, the `packages` setting in `~/.pi/agent/settings.json` identifies a
+configured package. Agent Depot then verifies the checkout under
+`$PI_CODING_AGENT_DIR/git` (or `~/.pi/agent/git` when unset): the checkout root,
+`origin`, clean working tree, `HEAD` commit, and `package.json` at that commit. A
+missing, dirty, unsafe, or mismatched checkout leaves the package installed but its
+version unavailable. A manifest version is display evidence, not proof that the
+checkout matches the selected Source. Update assessment compares the verified
+installed commit with the available Source commit using ancestry in the cached
+Source history. For Claude, Agent Depot reads the plugin and marketplace state
+files. The Host owns what is installed. Agent Depot owns the selection record and
+the receipt for what it delegated. While a Package is selected or confirmed
+installed, its declared Skills cannot be adopted or installed separately. A
+discovered descriptor alone does not reserve its Skills.
 
 ### Add a Source and discover its bundles
 
@@ -767,7 +784,9 @@ evidence Agent Depot recorded. Live evidence comes from
 `~/.pi/agent/settings.json` and `~/.claude/plugins/installed_plugins.json`, which
 Agent Depot reads and never writes. A missing Host file is an empty view. A
 drifted or undecodable file leaves the affected lookup `unknown` and never throws.
-An unversioned Pi git package is reported as `unknown`, never as `current`.
+A Pi git package with no version in its manifest can still have verified commit
+evidence. If Agent Depot cannot verify its checkout, the installed version is
+unavailable. The update status is `cannot assess`, not `current`.
 
 An update records a new version only when the Host state changed in a way Agent
 Depot can verify, meaning the two observations agree on a version or a
@@ -793,8 +812,10 @@ and leaves the Host install as it is.
   fixed pin for a Pi selection, until a supported Claude pin form is verified.
 - A Claude plugin with no in-repo marketplace binding is reported but not
   installable.
-- Agent Depot does not read Host CLI prose output, including `pi list`. Installed
-  evidence comes from the Host state files only.
+- Agent Depot does not use Host CLI prose output, including `pi list`, as
+installed-state evidence. For Pi, it combines the read-only settings entry with
+verified checkout evidence. For Claude, it reads Host state files. Agent Depot
+never writes those Host files.
 
 ## Export a user-global Profile
 

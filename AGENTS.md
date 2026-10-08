@@ -1,52 +1,29 @@
-## Agent skills
+## Agent guidance
 
-### Issue tracker
+This repository develops Agent Depot, a cross-platform manager for coding-agent
+resources.
 
-Issues and specs live as local Markdown files in `.scratch/` for now; GitHub Issues is planned for later. See `docs/agents/issue-tracker.md`.
+Before exploring implementation or domain behavior, read root `CONTEXT.md` and
+relevant ADRs in `docs/adr/`. Follow `docs/agents/domain.md`.
 
-### Triage labels
+When investigating, triaging, or editing an issue or spec, follow
+`docs/agents/issue-tracker.md` and use the canonical labels in
+`docs/agents/triage-labels.md`.
 
-Use the canonical labels documented in `docs/agents/triage-labels.md`.
+## Test isolation
 
-### Domain docs
-
-This is a single-context repo; read root `CONTEXT.md` and relevant ADRs in `docs/adr/`. See `docs/agents/domain.md`.
+When testing state-writing flows, load `tests/isolated-env.ts` and inject temporary
+state paths. A temporary `homeDirectory` alone does not override inherited XDG or
+Pi environment paths. Verify that writes stay inside the test sandbox.
 
 <!-- POTETO-MATT-INTEGRATION:START -->
 
-## Poteto + Matt integration
+## Engineering workflow
 
-Use `poteto-mode` as the primary orchestrator for non-trivial engineering work.
-
-Do not start a second implementation workflow when `poteto-mode` is active.
-Pstack owns implementation, debugging, testing, verification, and engineering
-orchestration.
-
-### Supporting skills
-
-Use Matt Pocock skills as supporting primitives when relevant:
-
-- `domain-modeling` when changing domain concepts, terminology, entities,
-  relationships, or invariants.
-- `codebase-design` when designing or restructuring modules, interfaces,
-  seams, boundaries, or abstractions.
-- `grilling` only when a genuine product or domain decision remains after
-  exhausting available evidence.
-- `research` when external or primary-source investigation is required.
-- `code-review` when a meaningful specification or explicit requirements
-  exist and the finished implementation should be checked against them.
-
-These skills support `poteto-mode`; they do not replace its implementation
-workflow.
-
-### Explicit Matt workflows
-
-Keep these available independently:
-
-- `triage` for issue investigation and preparation.
-- `to-spec` when a durable implementation specification is the desired output.
-- `improve-codebase-architecture` for deliberate architecture improvement.
-
-Do not automatically turn non-trivial tasks into specifications.
+For non-trivial engineering work, use `poteto-mode` as the primary orchestrator.
+Do not start a second implementation workflow while it is active. Pstack owns
+implementation, debugging, testing, verification, and engineering orchestration.
+When choosing supporting skills or running an explicit Matt Pocock workflow,
+read `docs/agents/workflows.md`.
 
 <!-- POTETO-MATT-INTEGRATION:END -->
