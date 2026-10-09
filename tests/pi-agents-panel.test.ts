@@ -10,7 +10,7 @@ import {
   parseAgentSnapshotResponse,
   type AgentSnapshot,
 } from "../resources/pi/agents-panel/contract.js";
-import {
+import agentsPanelExtension, {
   AgentsPanel,
   SnapshotChannel,
   type PanelEventBus,
@@ -77,6 +77,38 @@ function setup(rows = 24) {
   return { events, channel, panel, tui, renders };
 }
 
+type ExtensionAPI = Parameters<typeof agentsPanelExtension>[0];
+type CommandRegistration = Parameters<ExtensionAPI["registerCommand"]>[1];
+type CommandContext = Parameters<CommandRegistration["handler"]>[1];
+
+function registerAgentsCommand(events: PanelEventBus): CommandRegistration["handler"] {
+  let registration: CommandRegistration | undefined;
+  const pi: ExtensionAPI = {
+    events,
+    on() {},
+    registerCommand(name, options) {
+      assert.equal(name, "agents");
+      registration = options;
+    },
+  };
+  agentsPanelExtension(pi);
+  assert.ok(registration);
+  return registration.handler;
+}
+
+function rpcContext(hasUI: boolean, notifications: string[]): CommandContext {
+  return {
+    mode: "rpc",
+    hasUI,
+    ui: {
+      notify(message) {
+        notifications.push(message);
+      },
+      async custom() {},
+    },
+  };
+}
+
 test("the panel explains a missing provider and does not invent agent records", () => {
   const { channel, panel } = setup();
   const requestId = channel.request();
@@ -85,6 +117,93 @@ test("the panel explains a missing provider and does not invent agent records", 
   const text = panel.render(90).join("\n");
   assert.match(text, /No agent provider responded/u);
   assert.doesNotMatch(text, /running|completed|fixture-model/u);
+});
+
+test("the RPC command requests a fresh ordered snapshot with sanitized details and measured usage", async () => {
+  const events = eventBus();
+  const notifications: string[] = [];
+  const requests: string[] = [];
+  const escape = String.fromCharCode(27);
+  events.on(AGENT_SNAPSHOT_REQUEST_EVENT, (payload) => {
+    if (typeof payload !== "object" || payload === null || !("requestId" in payload) || typeof payload.requestId !== "string") return;
+    requests.push(payload.requestId);
+    events.emit(AGENT_SNAPSHOT_RESPONSE_EVENT, {
+      version: 1,
+      requestId: payload.requestId,
+      agents: [
+        agent({ id: "completed", description: "completed task", status: "completed", startedAt: "2025-01-02T00:00:00.000Z" }),
+        agent({
+          id: "running",
+          description: "running task",
+          model: `mock${escape}[31m-model${escape}[0m`,
+          thinking: `high${escape}[2J`,
+          status: "running",
+          kind: "local",
+          startedAt: "2025-01-01T00:00:00.000Z",
+          activity: { label: "running command", at: 1735689600000 },
+          usage: { input: 1200, output: 340, cost: 0.0034 },
+        }),
+      ],
+    });
+  });
+
+  const handler = registerAgentsCommand(events);
+  await handler("", rpcContext(true, notifications));
+
+  assert.equal(requests.length, 1);
+  assert.equal(notifications.length, 1);
+  const text = notifications[0] ?? "";
+  assert.ok(text.indexOf("running task") < text.indexOf("completed task"));
+  assert.match(text, /mock-model/u);
+  assert.match(text, /@high/u);
+  assert.match(text, /running command/u);
+  assert.ok(text.includes("1.2k in, 340 out, $0.0034"));
+  assert.equal(text.includes(escape), false);
+});
+
+test("the RPC command reports a missing provider after its bounded request wait", async () => {
+  const events = eventBus();
+  let requests = 0;
+  events.on(AGENT_SNAPSHOT_REQUEST_EVENT, () => requests++);
+  const notifications: string[] = [];
+
+  await registerAgentsCommand(events)("", rpcContext(true, notifications));
+
+  assert.equal(requests, 1);
+  assert.deepEqual(notifications, ["No agent provider responded. Install an adapter that publishes agent snapshots."]);
+});
+
+test("the RPC command without a UI refuses before requesting a snapshot", async () => {
+  const events = eventBus();
+  let requests = 0;
+  events.on(AGENT_SNAPSHOT_REQUEST_EVENT, () => requests++);
+
+  await assert.rejects(registerAgentsCommand(events)("", rpcContext(false, [])), /interactive terminal/u);
+  assert.equal(requests, 0);
+});
+
+test("the panel sanitizes model, thinking, and ID before terminal rendering", () => {
+  const { events, channel, panel } = setup();
+  const escape = String.fromCharCode(27);
+  const requestId = channel.request();
+  events.emit(AGENT_SNAPSHOT_RESPONSE_EVENT, {
+    version: 1,
+    requestId,
+    agents: [agent({
+      id: `unsafe${escape}[31m-id`,
+      model: `model${escape}[31m-name`,
+      thinking: `high${escape}[2J`,
+    })],
+  });
+
+  const listing = panel.render(90).join("\n");
+  assert.equal(listing.includes(escape), false);
+  assert.match(listing, /model-name/u);
+  assert.match(listing, /@high/u);
+  panel.handleInput("d");
+  const details = panel.render(90).join("\n");
+  assert.equal(details.includes(escape), false);
+  assert.match(details, /unsafe-id/u);
 });
 
 test("the panel validates snapshots, sorts running agents first, and preserves selection by ID", () => {

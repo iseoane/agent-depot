@@ -9,6 +9,7 @@ import {
 
 const TICK_MS = 1000;
 const RESPONSE_TIMEOUT_MS = 2000;
+const MAX_NOTIFY_CHARS = 4000;
 const OVERLAY_MARGIN = 1;
 const OVERLAY_MAX_HEIGHT_PERCENT = 80;
 const MAX_AGENTS = 12;
@@ -95,6 +96,36 @@ export class SnapshotChannel {
     return requestId;
   }
 
+  async requestSnapshot(timeoutMs = RESPONSE_TIMEOUT_MS): Promise<SnapshotState> {
+    const requestId = this.request();
+    if (this.current.kind === "available" && this.current.requestId === requestId) return this.current;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let unsubscribe = () => {};
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.markUnavailable(requestId);
+        unsubscribe();
+        resolve(this.latestRequestId === requestId ? this.current : { kind: "unavailable" });
+      }, timeoutMs);
+      const finish = (state: SnapshotState) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve(state);
+      };
+      unsubscribe = this.subscribe(() => {
+        const state = this.current;
+        if (state.kind === "available" && state.requestId === requestId) finish(state);
+        if (state.kind === "unavailable" && this.latestRequestId === requestId) finish(state);
+      });
+      if (this.current.kind === "available" && this.current.requestId === requestId) finish(this.current);
+    });
+  }
+
   markUnavailable(requestId: string): void {
     if (this.latestRequestId !== requestId || this.current.kind === "unavailable") return;
     this.current = { kind: "unavailable" };
@@ -144,6 +175,24 @@ function usageLine(usage: NonNullable<AgentSnapshot["usage"]>): string {
   if (usage.cost !== undefined) values.push(`$${usage.cost.toFixed(4)}`);
   if (!values.length && usage.totalTokens !== undefined) values.push(`${formatTokens(usage.totalTokens)} tokens`);
   return values.join(", ");
+}
+
+function textListing(agents: readonly AgentSnapshot[]): string {
+  const ordered = orderAgents(agents);
+  if (!ordered.length) return "No agent has been started in this session.";
+  const text = ordered.map((agent) => {
+    const head = `${sanitize(agent.id)}  ${sanitize(agent.status)}  ${sanitize(agent.description)}`;
+    const meta = [
+      sanitize(agent.model),
+      agent.thinking ? `@${sanitize(agent.thinking)}` : "",
+      formatElapsed(agent.elapsedMs),
+      agent.activity ? sanitize(agent.activity.label) : "",
+      agent.usage ? usageLine(agent.usage) : "",
+    ].filter(Boolean);
+    return `${head}\n  ${meta.join("  ")}`;
+  }).join("\n\n");
+  const chars = [...text];
+  return chars.length <= MAX_NOTIFY_CHARS ? text : `${chars.slice(0, MAX_NOTIFY_CHARS).join("")}\n(truncated)`;
 }
 
 function orderAgents(agents: readonly AgentSnapshot[]): AgentSnapshot[] {
@@ -332,12 +381,12 @@ export class AgentsPanel implements Component {
   private row(agent: AgentSnapshot, selected: boolean): string {
     const mark = agent.status === "running" ? ">" : agent.status === "completed" ? "+" : agent.status === "failed" ? "x" : "-";
     const color = agent.status === "running" ? "accent" : agent.status === "completed" ? "success" : agent.status === "failed" ? "error" : "warning";
-    return `${selected ? "*" : " "} ${this.theme.fg(color, mark)} ${this.theme.fg("muted", agent.id.slice(0, 8))}  ${sanitize(agent.description)}`;
+    return `${selected ? "*" : " "} ${this.theme.fg(color, mark)} ${this.theme.fg("muted", sanitize(agent.id).slice(0, 8))}  ${sanitize(agent.description)}`;
   }
 
   private meta(agent: AgentSnapshot): string {
-    const fields = [agent.model];
-    if (agent.thinking) fields.push(`@${agent.thinking}`);
+    const fields = [sanitize(agent.model)];
+    if (agent.thinking) fields.push(`@${sanitize(agent.thinking)}`);
     fields.push(formatElapsed(agent.elapsedMs));
     if (agent.usage) fields.push(usageLine(agent.usage));
     fields.push(agent.activity ? sanitize(agent.activity.label) : "no activity seen");
@@ -347,9 +396,9 @@ export class AgentsPanel implements Component {
   private detailLines(agent: AgentSnapshot, limit: number): PanelLine[] {
     const lines: PanelLine[] = [
       { text: this.heading(sanitize(agent.description)) },
-      { text: this.theme.fg("muted", agent.id) },
+      { text: this.theme.fg("muted", sanitize(agent.id)) },
       { text: "" },
-      { text: `${this.theme.fg("muted", "status:")} ${agent.status}` },
+      { text: `${this.theme.fg("muted", "status:")} ${sanitize(agent.status)}` },
       { text: `${this.theme.fg("muted", "type:")} ${sanitize(agent.subagentType)}` },
       { text: `${this.theme.fg("muted", "model:")} ${sanitize(agent.thinking ? `${agent.model} @${agent.thinking}` : agent.model)}` },
       { text: `${this.theme.fg("muted", "readonly:")} ${agent.readonly ? "yes" : "no"}` },
@@ -387,12 +436,10 @@ class AgentSnapshotPanelExtension {
       handler: async (_args, ctx: PanelCommandContext) => {
         if (ctx.mode !== "tui") {
           if (ctx.hasUI) {
-            const state = this.channel.state;
+            const state = await this.channel.requestSnapshot();
             const text = state.kind === "available"
-              ? state.agents.length === 0 ? "No agent has been started in this session." : `${state.agents.length} agent(s) are available. Run /agents in an interactive terminal to inspect them.`
-              : state.kind === "waiting"
-                ? "Run /agents in an interactive terminal to request an agent snapshot."
-                : "No agent provider responded. Install an adapter that publishes agent snapshots.";
+              ? textListing(state.agents)
+              : "No agent provider responded. Install an adapter that publishes agent snapshots.";
             ctx.ui.notify(text, "info");
             return;
           }

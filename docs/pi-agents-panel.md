@@ -14,6 +14,8 @@ Each agent snapshot includes its stable ID, description, agent type, resolved mo
 
 The event bus carries `unknown`, so the panel validates each response with the TypeBox schema before rendering it. Provider data is read-only. The panel sorts active agents first and then orders each status group by start date, newest first. Selection follows the stable ID across refreshes and status changes.
 
+Outside the interactive TUI, `/agents` requests a fresh snapshot and sends an ordered text listing through Pi's notification channel. The command waits up to two seconds for the provider and includes measured usage when available. Without a UI channel, it reports that the panel needs an interactive terminal and sends no request.
+
 ## Coordinated pstack adapter
 
 The installed pstack extension currently passes its private `AgentRunner` directly to its `/agents` panel. It does not publish the provider contract. The separate patch in `docs/pi-agents-panel-pstack-adapter.patch` changes pstack's extension to answer snapshot requests with `AgentRunner.snapshot()` and removes its old command registration. Apply and review that patch in the pstack project, then install the Agent Depot Package as part of the same migration. This repository does not change the installed pstack checkout.
