@@ -92,6 +92,12 @@
         "patterns": [
           "scripts/**"
         ]
+      },
+      {
+        "name": "pi-extension",
+        "patterns": [
+          "resources/pi/**"
+        ]
       }
     ],
     "rules": [
@@ -131,6 +137,10 @@
       },
       {
         "from": "tooling",
+        "allow": []
+      },
+      {
+        "from": "pi-extension",
         "allow": []
       }
     ],

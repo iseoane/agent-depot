@@ -4,7 +4,7 @@
 // Requires a prior `pnpm build`. Never publishes anything.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,7 +27,7 @@ try {
   for (const file of files) console.log(`  ${file}`);
 
   // npm ships every root README, including the localized ones the manifest lists.
-  const allowedTopLevel = /^(dist\/src\/|skills\/|package\.json$|README(\.[\w-]+)?\.md$|LICENSE$|CHANGELOG\.md$)/u;
+  const allowedTopLevel = /^(dist\/src\/|resources\/pi\/|skills\/|package\.json$|README(\.[\w-]+)?\.md$|LICENSE$|CHANGELOG\.md$)/u;
   const unexpected = files.filter((file) => !allowedTopLevel.test(file));
   assert.deepEqual(unexpected, [], `unexpected files in tarball: ${unexpected.join(", ")}`);
   const forbidden = files.filter((file) => /(^|\/)(tests?|coverage|odd|\.scratch)\/|\.test\.(js|d\.ts|js\.map)$/u.test(file));
@@ -35,7 +35,7 @@ try {
   // Source maps point at ../../src (not shipped); skill tests and fixtures are dev-only.
   const devOnly = files.filter((file) => /\.map$/u.test(file) || /(^|\/)test_[^/]*\.py$/u.test(file) || /(^|\/)testdata\//u.test(file));
   assert.deepEqual(devOnly, [], `dev-only files in tarball: ${devOnly.join(", ")}`);
-  for (const required of ["dist/src/cli.js", "package.json", "README.md", "LICENSE", "CHANGELOG.md", "skills/doctor-md-agents/SKILL.md", "skills/agent-depot-apprecipe/SKILL.md", "skills/agent-depot-apprecipe/assets/example.md"]) {
+  for (const required of ["dist/src/cli.js", "package.json", "README.md", "LICENSE", "CHANGELOG.md", "resources/pi/agents-panel/index.ts", "resources/pi/agents-panel/contract.ts", "skills/doctor-md-agents/SKILL.md", "skills/agent-depot-apprecipe/SKILL.md", "skills/agent-depot-apprecipe/assets/example.md"]) {
     assert.ok(files.includes(required), `missing from tarball: ${required}`);
   }
 
@@ -51,6 +51,10 @@ try {
   mkdirSync(cacheDirectory);
   writeFileSync(path.join(installDirectory, "package.json"), JSON.stringify({ name: "pack-smoke", private: true }));
   run(npm, ["install", "--no-audit", "--no-fund", path.join(packDirectory, packed.filename)], { cwd: installDirectory });
+  for (const peer of ["@earendil-works/pi-tui", "typebox"]) {
+    assert.equal(existsSync(path.join(installDirectory, "node_modules", peer)), false,
+      `normal npm install must not fetch the optional Pi host peer ${peer}`);
+  }
 
   // A HOME override alone is not enough: an exported XDG_STATE_HOME would send the CLI to the
   // developer's real Agent Depot state, where the Skill may already be recorded.

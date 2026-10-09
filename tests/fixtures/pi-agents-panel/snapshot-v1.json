@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "requestId": "fixture-request-1",
+  "agents": [
+    {
+      "id": "agent-8f485c3",
+      "description": "verify provider telemetry",
+      "subagentType": "general-purpose",
+      "model": "openai-codex/gpt-6-luna",
+      "thinking": "high",
+      "readonly": true,
+      "status": "running",
+      "kind": "local",
+      "startedAt": "2026-10-09T10:00:00.000Z",
+      "elapsedMs": 42000,
+      "observed": true,
+      "activity": {
+        "label": "bash: pnpm test",
+        "at": 1791540030000
+      },
+      "usage": {
+        "input": 1200,
+        "output": 340,
+        "cacheRead": 250,
+        "totalTokens": 1790,
+        "cost": 0.0042
+      }
+    }
+  ]
+}

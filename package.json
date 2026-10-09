@@ -26,6 +26,7 @@
   "files": [
     "dist/src",
     "!dist/src/**/*.map",
+    "resources/pi",
     "skills",
     "!skills/**/test_*.py",
     "!skills/**/testdata",
@@ -41,10 +42,37 @@
   "engines": {
     "node": ">=24"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-tui": "^1.0.3",
+    "typebox": "^1.3.27"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-tui": "1.0.3",
+    "@eslint/js": "^9.39.2",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.14.1",
+    "@types/node": "^24.19.0",
+    "@types/react": "^19.3.0",
+    "eslint": "^9.39.2",
+    "ink-testing-library": "^4.0.0",
+    "typebox": "1.3.27",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.70.1"
+  },
+  "pi": {
+    "extensions": ["./resources/pi/agents-panel/index.ts"]
+  },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\"",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" \"resources/pi/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\"",
     "test": "pnpm build && node --test --import ./dist/tests/isolated-env.js \"dist/tests/*.test.js\"",
     "test:single": "pnpm build && node -e \"const { spawnSync } = require('node:child_process'); const input = process.argv[1] || 'tests/version.test.ts'; const file = input.replace(/^tests[\\\\/]/, 'dist/tests/').replace(/\\\\.ts$/i, '.js'); process.exit(spawnSync(process.execPath, ['--import', './dist/tests/isolated-env.js', '--test', file], { stdio: 'inherit' }).status ?? 1);\"",
     "test:coverage": "node -e \"require('node:fs').rmSync('coverage',{recursive:true,force:true})\" && tsc -p tsconfig.coverage.json && node -e \"const { spawnSync } = require('node:child_process'); process.exit(spawnSync(process.execPath, ['--enable-source-maps','--import','./dist/tests/isolated-env.js','--test','--test-reporter=dot','dist/tests/*.test.js'], { stdio: 'inherit', env: { ...process.env, NODE_V8_COVERAGE: 'coverage/v8' } }).status ?? 1);\"",
@@ -55,16 +83,6 @@
     "test:e2e": "pnpm build && node --test --test-timeout=120000 \"dist/tests/e2e/*.e2e.test.js\"",
     "prepublishOnly": "pnpm build && pnpm test",
     "test:pack": "pnpm build && node scripts/pack-smoke.mjs"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.39.2",
-    "@homebridge/node-pty-prebuilt-multiarch": "^0.14.1",
-    "@types/node": "^24.19.0",
-    "@types/react": "^19.3.0",
-    "eslint": "^9.39.2",
-    "ink-testing-library": "^4.0.0",
-    "typescript": "^5.7.2",
-    "typescript-eslint": "^8.70.1"
   },
   "dependencies": {
     "ink": "^7.1.1",

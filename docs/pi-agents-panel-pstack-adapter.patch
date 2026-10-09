@@ -1,0 +1,46 @@
+diff --git a/plugins/pstack/pi/index.ts b/plugins/pstack/pi/index.ts
+index bce3e32..6769bcf 100644
+--- a/plugins/pstack/pi/index.ts
++++ b/plugins/pstack/pi/index.ts
+@@ -1,7 +1,8 @@
+ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
++import { Type } from "typebox";
++import { Value } from "typebox/value";
+ 
+ import { registerAgentTools } from "./agent-tools.ts";
+-import { registerAgentsCommand } from "./agents-panel.ts";
+ import { AgentRunner } from "./agents.ts";
+ import { registerAsk } from "./ask.ts";
+ import { DEPTH_FLAG, defaultSettings, type Settings } from "./config.ts";
+@@ -15,7 +16,7 @@ export function install(pi: ExtensionAPI, settings: Settings): void {
+   const scheduler = new Scheduler(pi);
+   const oneShot = registerOneShot(pi, settings, runner);
+   registerAgentTools(pi, runner);
+-  registerAgentsCommand(pi, runner);
++  registerAgentSnapshotProvider(pi, runner);
+   registerAsk(pi, oneShot);
+   registerSchedule(pi, scheduler, oneShot);
+   registerPromptSections(pi, settings);
+@@ -36,6 +37,22 @@ export function install(pi: ExtensionAPI, settings: Settings): void {
+   });
+ }
+ 
++const agentSnapshotRequest = Type.Object({
++  version: Type.Literal(1),
++  requestId: Type.String(),
++});
++
++function registerAgentSnapshotProvider(pi: ExtensionAPI, runner: AgentRunner): void {
++  pi.events.on("agent-depot:agents:v1:request", (payload) => {
++    if (!Value.Check(agentSnapshotRequest, payload)) return;
++    pi.events.emit("agent-depot:agents:v1:snapshot", {
++      version: 1,
++      requestId: payload.requestId,
++      agents: runner.snapshot(),
++    });
++  });
++}
++
+ export default function pstack(pi: ExtensionAPI): void {
+   pi.registerFlag(DEPTH_FLAG, { type: "string", description: "Layers below the main session; pstack sets it on the agents it starts." });
+   install(pi, defaultSettings(() => Number(pi.getFlag(DEPTH_FLAG)) || 0));

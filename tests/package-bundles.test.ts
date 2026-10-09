@@ -73,6 +73,15 @@ test("the Claude descriptor reports twelve agents as deferred and no skill is fo
   }
 });
 
+test("Agent Depot declares its agent panel as a Pi Package without exposing Skills", async () => {
+  const raw = await readFile(path.resolve("package.json"), "utf8");
+  const bundle = parsePiPackageManifest(raw, "");
+  assert.equal(bundle.name, "@iseoane/agent-depot");
+  assert.equal(bundle.installable, true);
+  assert.deepEqual(bundle.components.map((component) => component.kind), ["extensions"]);
+  assert.deepEqual(bundle.components[0]?.paths, ["resources/pi/agents-panel/index.ts"]);
+});
+
 test("a Pi package with no pi key discovers the same inventory as the explicit manifest", async () => {
   const explicit = discoverBundlesInSnapshot(await readFixtureFiles("pi-explicit"), {})[0];
   const conventional = discoverBundlesInSnapshot(await readFixtureFiles("pi-conventional"), {})[0];
