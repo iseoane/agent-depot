@@ -86,6 +86,7 @@ import {
 } from "./skill-install.js";
 import type { TuiEnvironment } from "./tui/environment.js";
 import { CliUsageError } from "./usage-error.js";
+import { createSelfUpdateOperations, type SelfUpdateOperations } from "./self-update.js";
 import { selectionWithInstallation } from "./skill-update.js";
 import { applyConfirmedUpdates, describeUpdatePreview, findPathConfirmationProblem, loadUpdates, previewUpdateCandidates } from "./update-flow.js";
 import {
@@ -112,6 +113,8 @@ export interface CliDependencies {
   readonly homeDirectory?: string;
   /** Test/embedding seam for Package operations. */
   readonly packageOperations?: PackageOperations;
+  /** Test seam for the self-update flow. */
+  readonly selfUpdateOperations?: SelfUpdateOperations;
   /** Test/embedding seam for the interactive TUI; defaults to the Ink renderer. */
   readonly renderTui?: (operations: SourceOperations, environment?: TuiEnvironment) => Promise<void>;
   /** Test seam: whether stdin supports raw-mode keyboard input; defaults to the real stdin. */
@@ -131,6 +134,7 @@ const USAGE = [
   "  agent-depot update check --scope <project|user-global> [--package <selection>...]",
   "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>... | --app <name>... | --package <selection>...) [--yes] [--confirm-path <relative-path>...]",
   "    Apps and Packages run after Skills; --all --scope project skips Apps and Packages.",
+  "  agent-depot self-update [--yes] (npm global installations only; otherwise prints manual guidance)",
   "  agent-depot skill remove <id|path>... [--yes]",
   "  agent-depot skill remove <id|path> --host <host>... [--yes]",
   "  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]",
@@ -208,6 +212,7 @@ const COMMANDS = new Map<string, CommandHandler>([
     return 0;
   }],
   ["update", (values, { operations, dependencies, output }) => runUpdate(values, operations, dependencies, output)],
+  ["self-update", (values, { dependencies, output }) => runSelfUpdate(values, dependencies, output)],
   ["skill", async (values, { operations, dependencies, output }) => {
     if (values[0] === "remove") {
       await runSkillRemoval(values.slice(1), operations, dependencies, output);
@@ -922,6 +927,59 @@ interface UpdateOptions {
   readonly confirmed: boolean;
   /** Exact relative non-canonical project paths the user confirmed with --confirm-path. */
   readonly confirmedPaths: readonly string[];
+}
+
+function selfUpdateOperationsFor(dependencies: CliDependencies): SelfUpdateOperations {
+  if (dependencies.selfUpdateOperations !== undefined) return dependencies.selfUpdateOperations;
+  if (AGENT_DEPOT_PACKAGE_NAME === undefined || AGENT_DEPOT_PACKAGE_VERSION === undefined) {
+    throw new Error("Unable to determine the Agent Depot package name and version");
+  }
+  return createSelfUpdateOperations({
+    packageName: AGENT_DEPOT_PACKAGE_NAME,
+    packageVersion: AGENT_DEPOT_PACKAGE_VERSION,
+    packageRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."),
+  });
+}
+
+async function runSelfUpdate(
+  argv: readonly string[],
+  dependencies: CliDependencies,
+  output: (line: string) => void,
+): Promise<number> {
+  if (argv.length > 1 || (argv.length === 1 && argv[0] !== "--yes")) {
+    throw new CliUsageError("Usage: agent-depot self-update [--yes]");
+  }
+  const confirmed = argv[0] === "--yes";
+  const selfUpdate = selfUpdateOperationsFor(dependencies);
+  const status = await selfUpdate.check();
+  switch (status.kind) {
+    case "unsupported":
+      output(`Self-update is unavailable: ${status.reason}`);
+      output("For a persistent global installation, use the package manager that installed it:");
+      output(`  npm install --global ${AGENT_DEPOT_PACKAGE_NAME ?? "@iseoane/agent-depot"}@latest`);
+      output(`  pnpm add --global ${AGENT_DEPOT_PACKAGE_NAME ?? "@iseoane/agent-depot"}@latest`);
+      output("For a one-off run, use:");
+      output(`  npx ${AGENT_DEPOT_PACKAGE_NAME ?? "@iseoane/agent-depot"}@latest tui`);
+      return 0;
+    case "current":
+      output(`Agent Depot ${status.current} is current`);
+      return 0;
+    case "ahead":
+      output(`Agent Depot ${status.current} is newer than npm's latest ${status.latest}; refusing to downgrade`);
+      return 0;
+    case "available":
+      output(`Preview: update Agent Depot from ${status.current} to ${status.latest}`);
+      output(`  command: npm install --global --no-audit --no-fund --no-update-notifier --logs-max=0 --ignore-scripts --registry=https://registry.npmjs.org/ ${AGENT_DEPOT_PACKAGE_NAME ?? "@iseoane/agent-depot"}@${status.latest}`);
+      output("  npm package scripts will not run; no elevated privileges will be requested");
+      requireConfirmation(confirmed, "Self-update not confirmed; rerun with --yes after reviewing the preview");
+      await selfUpdate.apply(status.latest);
+      output(`Updated Agent Depot to ${status.latest}; restart the CLI to use the new version`);
+      return 0;
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
+  }
 }
 
 async function runUpdate(

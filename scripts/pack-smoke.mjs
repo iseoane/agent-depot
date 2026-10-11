@@ -77,6 +77,12 @@ try {
   const help = agentDepot("--help");
   assert.match(help.output, /Usage:[\s\S]*agent-depot tui/u);
 
+  const selfUpdate = agentDepot("self-update", "--yes");
+  assert.equal(selfUpdate.status, 0, selfUpdate.output);
+  assert.match(selfUpdate.output, /Self-update is unavailable/u,
+    "the temporary project installation must never be treated as a global npm installation");
+  assert.doesNotMatch(selfUpdate.output, /Updated Agent Depot/u);
+
   const discovery = agentDepot("discover", "builtin:agent-depot");
   assert.equal(discovery.status, 0, discovery.output);
   assert.match(discovery.output, /doctor-md-agents/u);
