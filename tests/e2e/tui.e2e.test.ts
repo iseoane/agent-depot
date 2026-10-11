@@ -106,12 +106,12 @@ class TuiSession {
     return `child ${state}; ${this.rawLength} raw chars received`;
   }
 
-  async waitFor(expected: RegExp): Promise<string> {
+  async waitFor(expected: RegExp, ready: (screen: string) => boolean = () => true): Promise<string> {
     const deadline = Date.now() + TIMEOUT_MS;
     for (;;) {
       const screen = this.screen;
       assert.doesNotMatch(screen, /Error:|TypeError/u, `TUI reported an error:\n${screen}`);
-      if (expected.test(screen)) return screen;
+      if (expected.test(screen) && ready(screen)) return screen;
       if (this.exit) {
         assert.fail(`TUI exited early while waiting for ${String(expected)}; ${this.diagnostics}; screen:\n${screen}`);
       }
@@ -261,7 +261,14 @@ test("active Pi and Claude Package owners stay readable in a narrow real termina
     assert.match(pi, /\d+–\d+ of \d+/u);
     assert.match(pi, /j\/k move/u);
     session.resize(80, 24);
-    const claude = await session.send("j", /Package-owned Skill: provided by the claude[\s\S]*?force-wrapping/u);
+    session.press("j");
+    const claude = await session.waitFor(
+      /Package-owned Skill: provided by the claude[\s\S]*?force-wrapping/u,
+      screen => {
+        const frame = screen.slice(screen.lastIndexOf("Agent Depot"));
+        return frame.includes("j/k move") && frame.split("\n").length >= 24;
+      },
+    );
     assert.match(claude, /j\/k move/u);
     const resizedFrame = claude.slice(claude.lastIndexOf("Agent Depot"));
     assert.ok(resizedFrame.split("\n").length >= 24, `resize did not fill the 24-row PTY:\n${resizedFrame}`);
