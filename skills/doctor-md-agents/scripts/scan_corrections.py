@@ -2,10 +2,11 @@
 """Mine the raw session logs for hard evidence that the user had to correct
 the agent -- the whole window, not a sample.
 
-Sources: Claude Code JSONL (`<claude-home>/projects/*/*.jsonl`, required)
-and, best-effort, Codex rollout JSONL (`<codex-home>/{sessions,
-archived_sessions}/**/rollout-*.jsonl`) when that layout is present. When
-Codex is not found, `sources` in the output is `["claude"]` only.
+Sources: Claude Code JSONL (`<claude-home>/projects/*/*.jsonl`), Codex rollout
+JSONL (`<codex-home>/{sessions,archived_sessions}/**/rollout-*.jsonl`), and Pi
+session JSONL (`<pi-home>/sessions/*/*.jsonl`). The report records each
+source's availability and scanned-file count. Grok Build and ZCode are not
+supported by this correction scanner.
 
 Detection is a case-insensitive regex over the user's own words, seeded with
 both Spanish and English phrasings. The patterns intentionally over-match --
@@ -469,6 +470,104 @@ def find_codex_files(codex_home, cutoff):
 
 
 # ---------------------------------------------------------------------------
+# Pi
+# ---------------------------------------------------------------------------
+
+
+def pi_active_entry_ids(records):
+    """Return Pi's active session-entry ancestry when parent links are complete."""
+    entries = [record for record in records if record.get("type") != "session"]
+    if not entries or any(
+        not entry.get("id") or "parentId" not in entry for entry in entries
+    ):
+        return None
+    by_id = {entry["id"]: entry for entry in entries}
+    active = set()
+    current = entries[-1]["id"]
+    while current is not None:
+        if current in active or current not in by_id:
+            return None
+        active.add(current)
+        current = by_id[current].get("parentId")
+    return active
+
+
+def pi_text(content):
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    parts = [
+        block["text"] for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+        and isinstance(block.get("text"), str) and block["text"]
+    ]
+    return "\n".join(parts) if parts else None
+
+
+def iter_pi_turns(path, max_context):
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            records = []
+            for line in handle:
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return
+    records = [record for record in records if isinstance(record, dict)]
+    header = next((record for record in records if record.get("type") == "session"), {})
+    session_id = header.get("id") or path.stem
+    cwd = header.get("cwd")
+    messages = [record for record in records if record.get("type") == "message"]
+    active_ids = pi_active_entry_ids(records)
+    for index, record in enumerate(messages):
+        if active_ids is not None and record.get("id") not in active_ids:
+            continue
+        message = record.get("message")
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        raw_text = pi_text(message.get("content"))
+        if role == "user":
+            text = clean_user_text(raw_text)
+            if text is not None:
+                yield {
+                    "session_id": session_id, "harness": "pi",
+                    "uuid": record.get("id") or f"{path}:{index}",
+                    "timestamp": record.get("timestamp"), "cwd": cwd,
+                    "git_branch": None, "role": "user", "text": text,
+                    "condensed": truncate(text, max_context),
+                }
+        else:
+            yield {
+                "session_id": session_id, "harness": "pi",
+                "uuid": record.get("id") or f"{path}:{index}",
+                "timestamp": record.get("timestamp"), "cwd": cwd,
+                "git_branch": None, "role": "assistant", "text": None,
+                "condensed": truncate(raw_text, max_context) if raw_text else "",
+            }
+
+
+def find_pi_files(pi_home, cutoff):
+    root = pi_home / "sessions"
+    if not root.is_dir():
+        return []
+    files = []
+    for path in root.glob("*/*.jsonl"):
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            continue
+        if mtime >= cutoff:
+            files.append(path)
+    return sorted(files)
+
+
+# ---------------------------------------------------------------------------
 # Timestamp / scope helpers
 # ---------------------------------------------------------------------------
 
@@ -563,6 +662,7 @@ def parse_args(argv=None):
     p.add_argument("--all-conversations", action="store_true")
     p.add_argument("--claude-home", default=os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"))
     p.add_argument("--codex-home", default="~/.codex")
+    p.add_argument("--pi-home", default=os.environ.get("PI_CODING_AGENT_DIR", "~/.pi/agent"))
     p.add_argument("--patterns", default=None, help="extra newline-separated regex patterns")
     p.add_argument("--max-context", type=int, default=400,
                     help="chars of preceding-assistant excerpt to keep (default: 400)")
@@ -589,23 +689,41 @@ def main(argv=None):
 
     claude_home = Path(args.claude_home).expanduser()
     codex_home = Path(args.codex_home).expanduser()
+    pi_home = Path(args.pi_home).expanduser()
     cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
     repo_norms = [normalize_repo(r) for r in args.repo]
 
     patterns = compile_patterns(args.patterns)
 
     claude_files = find_claude_files(claude_home, cutoff)
-    if not claude_files and not (claude_home / "projects").is_dir():
-        print(f"error: Claude Code project history not found at {claude_home / 'projects'}",
+    codex_files = find_codex_files(codex_home, cutoff)
+    pi_files = find_pi_files(pi_home, cutoff)
+    roots = {
+        "claude": (claude_home / "projects",),
+        "codex": (codex_home / "sessions", codex_home / "archived_sessions"),
+        "pi": (pi_home / "sessions",),
+    }
+    if not any(any(root.is_dir() for root in paths) for paths in roots.values()):
+        print("error: no supported session source found (Claude Code, Codex, or Pi)",
               file=sys.stderr)
         sys.exit(1)
 
-    codex_files = find_codex_files(codex_home, cutoff)
-    sources = ["claude"]
-    if codex_files:
-        sources.append("codex")
-
-    session_files_scanned = len(claude_files) + len(codex_files)
+    files_by_source = {"claude": claude_files, "codex": codex_files, "pi": pi_files}
+    sources = []
+    if roots["claude"][0].is_dir():
+        sources.append("claude")
+    sources.extend(source for source in ("codex", "pi") if files_by_source[source])
+    source_status = {
+        source: {
+            "status": "scanned" if files else "no_recent_sessions" if any(
+                root.is_dir() for root in roots[source]
+            ) else "not_found",
+            "session_files": len(files),
+            "paths": [str(root) for root in roots[source]],
+        }
+        for source, files in files_by_source.items()
+    }
+    session_files_scanned = sum(len(files) for files in files_by_source.values())
 
     # session_id -> {"turns": {turn_key: turn_dict}}
     sessions = {}
@@ -618,6 +736,11 @@ def main(argv=None):
         for turn in iter_codex_turns(path, args.max_context):
             bucket = sessions.setdefault(turn["session_id"], {})
             key = f"codex:{turn['uuid']}"
+            bucket[key] = turn
+    for path in pi_files:
+        for turn in iter_pi_turns(path, args.max_context):
+            bucket = sessions.setdefault(turn["session_id"], {})
+            key = f"pi:{turn['uuid']}"
             bucket[key] = turn
 
     # Pass 1: walk every in-scope session and collect pattern-matched
@@ -744,6 +867,8 @@ def main(argv=None):
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "window_days": args.days,
         "sources": sources,
+        "source_status": source_status,
+        "unsupported_sources": ["grok", "zcode"],
         "stats": {
             "session_files_scanned": session_files_scanned,
             "sessions_scanned": sessions_scanned,
@@ -763,7 +888,10 @@ def main(argv=None):
     (out_dir / "corrections.json").write_text(json.dumps(report, indent=2))
 
     print(f"corrections.json:  {out_dir / 'corrections.json'}")
-    print(f"sources:           {', '.join(sources)}")
+    print(f"sources:           {', '.join(sources) if sources else 'none in window'}")
+    for source, status in source_status.items():
+        print(f"  {source}: {status['status']} ({status['session_files']} files)")
+    print("not supported:     Grok Build, ZCode")
     print(f"session files:     {session_files_scanned} scanned")
     print(f"sessions:          {sessions_scanned} scanned, {sessions_in_scope} in scope")
     print(f"user turns:        {user_turns_total}")
