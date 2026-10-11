@@ -1,0 +1,214 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact stable version already set in package.json, such as 0.5.2
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-agent-depot
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@12.2.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm test:e2e
+      - run: pnpm audit:dead-code
+      - run: node --test scripts/release-artifact.test.mjs
+      - name: Test both Python doctor tools
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 -m unittest discover -s skills/doctor-md-agents/scripts -p 'test_*.py'
+          python3 -m unittest discover -s skills/doctor-md-skill/scripts -p 'test_*.py'
+      - run: pnpm test:pack
+      - name: Pack and validate the release artifact
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: |
+          mkdir -p "$RELEASE_DIR"
+          npm pack --json --pack-destination "$RELEASE_DIR" > "$RELEASE_DIR/pack.json"
+          node scripts/release-artifact.mjs prepare \
+            --root "$GITHUB_WORKSPACE" \
+            --version "$RELEASE_VERSION" \
+            --source-sha "$SOURCE_SHA" \
+            --report "$RELEASE_DIR/pack.json" \
+            --output "$RELEASE_DIR/release-manifest.json"
+      - name: Refuse an already published version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: |
+          metadata="$RELEASE_DIR/registry.json"
+          if ! status=$(curl --silent --show-error --connect-timeout 10 --max-time 30 --output "$metadata" --write-out '%{http_code}' \
+            https://registry.npmjs.org/@iseoane%2fagent-depot); then
+            echo "npm registry request failed; refusing to treat the version as available" >&2
+            exit 1
+          fi
+          if [[ "$status" == "404" ]]; then
+            printf '{"versions":{}}\n' > "$metadata"
+          elif [[ "$status" != "200" ]]; then
+            echo "npm registry preflight returned HTTP $status; refusing to publish" >&2
+            exit 1
+          fi
+          node scripts/release-artifact.mjs check-registry \
+            --artifact "$RELEASE_DIR/release-manifest.json" \
+            --metadata "$metadata" \
+            --version "$RELEASE_VERSION" \
+            --source-sha "$SOURCE_SHA" \
+            --published false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/release/*.tgz
+            ${{ runner.temp }}/release/release-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@12.2.0
+      - name: Verify artifact identity and checksum
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: |
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { createHash } from "node:crypto";
+            import { execFileSync } from "node:child_process";
+            import { readFileSync } from "node:fs";
+            import path from "node:path";
+            const directory = process.env.RELEASE_DIR;
+            const artifact = JSON.parse(readFileSync(path.join(directory, "release-manifest.json"), "utf8"));
+            assert.equal(artifact.name, "@iseoane/agent-depot");
+            assert.equal(artifact.version, process.env.RELEASE_VERSION);
+            assert.equal(artifact.sourceSha, process.env.SOURCE_SHA);
+            assert.equal(artifact.filename, `iseoane-agent-depot-${process.env.RELEASE_VERSION}.tgz`);
+            const bytes = readFileSync(path.join(directory, artifact.filename));
+            assert.equal(createHash("sha256").update(bytes).digest("hex"), artifact.sha256);
+            assert.equal(`sha512-${createHash("sha512").update(bytes).digest("base64")}`, artifact.integrity);
+            const packed = JSON.parse(execFileSync("tar", ["-xOzf", path.join(directory, artifact.filename), "package/package.json"], { encoding: "utf8" }));
+            assert.equal(packed.name, artifact.name);
+            assert.equal(packed.version, artifact.version);
+          '
+      - name: Refuse a duplicate version and publish the validated tarball
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: |
+          metadata="$RELEASE_DIR/registry.json"
+          if ! status=$(curl --silent --show-error --connect-timeout 10 --max-time 30 --output "$metadata" --write-out '%{http_code}' \
+            https://registry.npmjs.org/@iseoane%2fagent-depot); then
+            echo "npm registry request failed; refusing to treat the version as available" >&2
+            exit 1
+          fi
+          if [[ "$status" == "404" ]]; then
+            printf '{"versions":{}}\n' > "$metadata"
+          elif [[ "$status" != "200" ]]; then
+            echo "npm registry preflight returned HTTP $status; refusing to publish" >&2
+            exit 1
+          fi
+          METADATA_PATH="$metadata" node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { readFileSync } from "node:fs";
+            const metadata = JSON.parse(readFileSync(process.env.METADATA_PATH, "utf8"));
+            assert.ok(metadata.versions && typeof metadata.versions === "object", "npm response lacks package versions");
+            assert.equal(Object.hasOwn(metadata.versions, process.env.RELEASE_VERSION), false,
+              `@iseoane/agent-depot@${process.env.RELEASE_VERSION} already exists on npm`);
+          '
+          tarball="$RELEASE_DIR/iseoane-agent-depot-$RELEASE_VERSION.tgz"
+          npm publish "$tarball" --access public --ignore-scripts
+      - name: Verify npm latest and published tarball integrity
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: |
+          for attempt in {1..24}; do
+            metadata="$RELEASE_DIR/registry.json"
+            if ! status=$(curl --silent --show-error --connect-timeout 10 --max-time 30 --output "$metadata" --write-out '%{http_code}' \
+              https://registry.npmjs.org/@iseoane%2fagent-depot); then
+              echo "npm registry request failed after publish; publication may have succeeded, but verification failed" >&2
+              exit 1
+            fi
+            if [[ "$status" == "200" ]]; then
+              result=$(ARTIFACT_PATH="$RELEASE_DIR/release-manifest.json" METADATA_PATH="$metadata" node --input-type=module -e '
+                import assert from "node:assert/strict";
+                import { readFileSync } from "node:fs";
+                const artifact = JSON.parse(readFileSync(process.env.ARTIFACT_PATH, "utf8"));
+                const metadata = JSON.parse(readFileSync(process.env.METADATA_PATH, "utf8"));
+                const published = metadata.versions?.[process.env.RELEASE_VERSION];
+                if (!published || metadata["dist-tags"]?.latest !== process.env.RELEASE_VERSION) {
+                  console.log("pending");
+                } else {
+                  assert.equal(artifact.name, "@iseoane/agent-depot");
+                  assert.equal(artifact.version, process.env.RELEASE_VERSION);
+                  assert.equal(artifact.sourceSha, process.env.SOURCE_SHA);
+                  assert.equal(published.name, artifact.name);
+                  assert.equal(published.version, artifact.version);
+                  assert.equal(published.dist?.integrity, artifact.integrity);
+                  console.log("published");
+                }
+              ')
+              if [[ "$result" == "published" ]]; then
+                echo "Verified @iseoane/agent-depot@$RELEASE_VERSION as npm latest with matching tarball integrity"
+                exit 0
+              fi
+              echo "Waiting for npm version metadata and latest tag (attempt $attempt/24)"
+            elif [[ "$status" != "404" ]]; then
+              echo "npm registry verification returned HTTP $status; publish may have succeeded, but verification failed" >&2
+              exit 1
+            fi
+            if [[ "$attempt" != 24 ]]; then
+              echo "Waiting for the published version to appear on npm (attempt $attempt/24)"
+              sleep 5
+            fi
+          done
+          echo "Publish command completed, but npm did not expose the version before polling stopped. Do not retry until registry state is checked." >&2
+          exit 1
