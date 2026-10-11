@@ -185,6 +185,26 @@ test("package inspect reports the host evidence, the approval state and the desc
   assert.deepEqual(f.executed, []);
 });
 
+test("package inspect qualifies a dirty Pi manifest version as HEAD-only evidence", async () => {
+  const f = fixture();
+  const packages: PackageOperations = {
+    ...f.packages,
+    inspect: async () => ({
+      descriptor: PI_DESCRIPTOR,
+      installed: {
+        kind: "installed",
+        version: "0.9.82",
+        reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
+      },
+      available: PI_DESCRIPTOR.version,
+      approval: "approved",
+    }),
+  };
+  assert.equal(await runPackageCommand(["inspect", PI_TOKEN, "--host", "pi"], packages, fakeSources(), (line) => f.lines.push(line)), 0);
+  assert.match(f.lines.join("\n"), /installed: installed 0\.9\.82 \(HEAD; local changes\)/u);
+  assert.deepEqual(f.executed, []);
+});
+
 test("package install previews the exact argv, executable, blast radius, cwd and environment, then refuses without --yes", async () => {
   const f = fixture();
   await assert.rejects(run(f, ["install", PI_TOKEN, "--host", "pi"]), /not confirmed/u);

@@ -772,16 +772,20 @@ y lee el estado instalado de archivos propiedad del Host. Agent Depot lee esos
 archivos y nunca los escribe. Para Pi, el ajuste `packages` de
 `~/.pi/agent/settings.json` identifica un paquete configurado. Agent Depot verifica
 después el checkout bajo `$PI_CODING_AGENT_DIR/git` (o `~/.pi/agent/git` si la
-variable no está definida): la raíz del checkout, `origin`, que el árbol de trabajo
-esté limpio, el commit `HEAD` y el `package.json` de ese commit. Si el checkout no
-existe, está modificado, no es seguro o no coincide, el paquete sigue instalado,
-pero su versión no está disponible. La versión del manifiesto sirve para mostrar
+variable no está definida): la raíz del checkout, `origin`, el commit `HEAD` y el
+`package.json` de ese commit. Si no puede verificar la raíz, el origen o `HEAD`, el
+paquete sigue instalado, pero su versión no está disponible. Si los cambios locales
+hacen que el checkout esté modificado, Agent Depot muestra la versión de `HEAD`, pero
+no usa el commit para evaluar actualizaciones. Installations y `package inspect`
+indican `(HEAD; local changes)` en la etiqueta. Tanto los cambios en archivos
+controlados como los archivos sin seguimiento cuentan; Agent Depot no ignora archivos
+de bloqueo ni otros archivos locales. La versión del manifiesto sirve para mostrar
 información, pero no demuestra que el checkout coincida con la Source seleccionada.
-La evaluación de actualizaciones compara el commit instalado verificado con el commit
-disponible de la Source mediante su ascendencia en el historial en caché. Para Claude,
-Agent Depot lee los archivos de estado de plugins y marketplaces. El Host posee lo
-que está instalado. Agent Depot posee el registro de selección y el recibo de lo que
-delegó. Mientras un Package está seleccionado o confirmado como instalado, sus
+La evaluación de actualizaciones compara el commit de un checkout limpio con el
+commit disponible de la Source mediante la ascendencia en el historial en caché.
+Para Claude, Agent Depot lee los archivos de estado de plugins y marketplaces. El
+Host posee lo que está instalado. Agent Depot posee el registro de selección y el
+recibo de lo que delegó. Mientras un Package está seleccionado o confirmado como instalado, sus
 Skills declarados no pueden adoptarse ni instalarse por separado. Un descriptor
 descubierto, por sí solo, no reserva sus Skills.
 
@@ -866,9 +870,11 @@ evidencia de versión que Agent Depot registró. La evidencia en vivo procede de
 Depot lee y nunca escribe. Un archivo de Host ausente es una vista vacía. Un archivo
 desviado o ilegible deja la búsqueda afectada en `unknown` y nunca lanza una
 excepción. Un paquete Git de Pi cuyo manifiesto no declara versión aún puede tener evidencia
-de commit verificada. Si Agent Depot no puede verificar el checkout, la versión
-instalada no está disponible. El estado de actualización es `cannot assess`, no
-`current`.
+de commit verificada. Si Agent Depot verifica la identidad del checkout, pero detecta
+cambios locales, puede mostrar la versión del manifiesto de `HEAD`, pero no comparar
+el checkout para buscar actualizaciones. Si no puede verificar la raíz, el origen o
+`HEAD`, la versión instalada no está disponible. En ambos casos, el estado de
+actualización es `cannot assess`, no `current`.
 
 Una actualización registra una versión nueva solo cuando el estado del Host cambió de
 una forma que Agent Depot puede verificar, es decir, cuando las dos observaciones

@@ -21,11 +21,14 @@ export function packageVersionLabel(evidence: PackageVersionEvidence | undefined
 export function installedEvidenceLabel(evidence: InstalledBundleEvidence): string {
   switch (evidence.kind) {
     case "installed": {
+      if (evidence.version !== undefined) {
+        const qualifier = evidence.reason === undefined ? "" : " (HEAD; local changes)";
+        return `installed ${evidence.version}${qualifier}`;
+      }
       if (evidence.reason !== undefined) {
         const reason = evidence.reason.includes("local modifications") ? "local changes" : evidence.reason;
         return `installed (version unavailable: ${reason})`;
       }
-      if (evidence.version !== undefined) return `installed ${evidence.version}`;
       if (evidence.commit !== undefined) return `installed at ${evidence.commit.slice(0, 7)}`;
       return "installed with no version evidence";
     }

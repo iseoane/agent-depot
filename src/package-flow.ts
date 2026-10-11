@@ -808,7 +808,7 @@ function verifiedEvidence(
   observed: InstalledBundleEvidence,
   available: PackageVersionEvidence | undefined,
 ): PackageVersionEvidence | undefined {
-  if (observed.kind !== "installed") {
+  if (observed.kind !== "installed" || observed.reason !== undefined) {
     return undefined;
   }
   if (observed.commit !== undefined) {
