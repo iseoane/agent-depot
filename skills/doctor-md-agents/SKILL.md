@@ -116,7 +116,7 @@ python3 "$SKILL_ROOT/scripts/scan_corrections.py" --out "$REPORT_DIR" \
   --days <90, or N from --days> <--repo PATH... | --all-conversations>
 ```
 
-This reads the raw session logs directly — every session in the window, not just the sampled ones — and writes `$REPORT_DIR/corrections.json`: each user turn that looks like a correction, with session id, timestamp, cwd, branch, the matched pattern, the user's words, and a short excerpt of what the agent had just done. It also groups them into rough keyword clusters.
+This reads raw Claude Code, Codex and Pi session logs directly — every discovered session in the window, not just the sampled ones — and writes `$REPORT_DIR/corrections.json`: each user turn that looks like a correction, with session id, timestamp, cwd, branch, the matched pattern, the user's words, and a short excerpt of what the agent had just done. Pi project scope comes from the session header's `cwd`; its active parent-linked entry branch is read, while only user and assistant message text can contribute corrections. The report lists each supported source's status and file count, including missing sources. Grok Build and ZCode are not supported by this corrections pass; they are not counted as zero-correction sources. Use `source_status` as the coverage record. Carry missing or empty sources and `unsupported_sources` into the report notes; never describe this pass as all local history.
 
 Not every `user` turn was typed by a human. Sub-agents, audit harnesses, judges and other skills all write turns that the log records as `user`, and they are long, templated and repeated verbatim across hundreds of sessions — left unfiltered they drown the real corrections. The script drops them by shape, not by name: turns above `--max-turn-chars`, turns whose normalized text repeats across `--template-threshold` or more distinct sessions, and turns carrying the self-session sentinel. Read `stats.turns_dropped_*` in the output: if the dropped counts dwarf the kept ones, say so — it means this corpus is mostly machine-driven and the corrections signal is thin.
 
@@ -216,6 +216,7 @@ Write `$REPORT_DIR/report.json`:
   "harness": "<from inventory.json, or 'n/a'>",
   "scope": "<repo name, project list, or 'all conversations'>",
   "windows": {"corrections_days": 90, "adherence_days": 45},
+  "correction_sources": {"claude": "scanned|no_recent_sessions|not_found", "codex": "scanned|no_recent_sessions|not_found", "pi": "scanned|no_recent_sessions|not_found", "unsupported": ["grok", "zcode"]},
   "stats": {
     "files": 0, "rules": 0, "est_tokens": 0,
     "sessions_scanned": 0, "sessions_judged": 0,

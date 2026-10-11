@@ -35,7 +35,7 @@ try {
   // Source maps point at ../../src (not shipped); skill tests and fixtures are dev-only.
   const devOnly = files.filter((file) => /\.map$/u.test(file) || /(^|\/)test_[^/]*\.py$/u.test(file) || /(^|\/)testdata\//u.test(file));
   assert.deepEqual(devOnly, [], `dev-only files in tarball: ${devOnly.join(", ")}`);
-  for (const required of ["dist/src/cli.js", "package.json", "README.md", "LICENSE", "CHANGELOG.md", "resources/pi/agents-panel/index.ts", "resources/pi/agents-panel/contract.ts", "skills/doctor-md-agents/SKILL.md", "skills/agent-depot-apprecipe/SKILL.md", "skills/agent-depot-apprecipe/assets/example.md"]) {
+  for (const required of ["dist/src/cli.js", "package.json", "README.md", "LICENSE", "CHANGELOG.md", "resources/pi/agents-panel/index.ts", "resources/pi/agents-panel/contract.ts", "skills/doctor-md-agents/SKILL.md", "skills/doctor-md-agents/scripts/scan_corrections.py", "skills/doctor-md-skill/SKILL.md", "skills/doctor-md-skill/references/supported-harnesses.md", "skills/doctor-md-skill/scripts/collect_sessions.py", "skills/doctor-md-skill/scripts/detect_machine_sessions.py", "skills/agent-depot-apprecipe/SKILL.md", "skills/agent-depot-apprecipe/assets/example.md"]) {
     assert.ok(files.includes(required), `missing from tarball: ${required}`);
   }
 

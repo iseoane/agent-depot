@@ -17,9 +17,11 @@ def write_jsonl(path, records):
 
 
 def run_scan(claude_home, out_dir, **kwargs):
-    argv = ["--out", str(out_dir), "--claude-home", str(claude_home),
-            "--codex-home", str(Path(out_dir) / "no-codex-here")]
-    for key, value in kwargs.items():
+    options = {"claude_home": claude_home,
+               "codex_home": Path(out_dir) / "no-codex-here",
+               "pi_home": Path(out_dir) / "no-pi-here", **kwargs}
+    argv = ["--out", str(out_dir)]
+    for key, value in options.items():
         flag = "--" + key.replace("_", "-")
         if value is True:
             argv.append(flag)
@@ -36,6 +38,15 @@ def now_iso(offset_days=0):
 
 
 class BreakingCaseTests(unittest.TestCase):
+    def test_no_supported_history_source_is_not_reported_as_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            with self.assertRaises(SystemExit) as raised:
+                run_scan(Path(tmp) / "no-claude", out_dir)
+
+            self.assertEqual(raised.exception.code, 1)
+            self.assertFalse((out_dir / "corrections.json").exists())
+
     def test_tool_result_only_user_record_is_ignored(self):
         with tempfile.TemporaryDirectory() as tmp:
             claude_home = Path(tmp) / "claude"
@@ -110,6 +121,51 @@ class BreakingCaseTests(unittest.TestCase):
             self.assertEqual(corr["pattern"], "no, usa")
             self.assertIn("pnpm", corr["text"])
             self.assertIn("npm install", corr["preceding"])
+
+
+class PiSessionTests(unittest.TestCase):
+    def test_pi_only_scan_finds_in_scope_corrections_and_reports_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pi_home = root / "pi"
+            in_repo = root / "repo-a"
+            out_repo = root / "repo-b"
+            path = pi_home / "sessions" / "--repo-a" / "session-a.jsonl"
+            write_jsonl(path, [
+                {"type": "session", "id": "session-a", "cwd": str(in_repo), "timestamp": now_iso()},
+                {"type": "message", "id": "a1", "parentId": None, "timestamp": now_iso(), "message": {
+                    "role": "assistant", "content": [{"type": "text", "text": "I used npm install."}]}},
+                {"type": "message", "id": "stale", "parentId": "a1", "timestamp": now_iso(), "message": {
+                    "role": "user", "content": [{"type": "text", "text": "no uses npm, usa yarn"}]}},
+                {"type": "message", "id": "u1", "parentId": "a1", "timestamp": now_iso(), "message": {
+                    "role": "user", "content": [{"type": "text", "text": "no, usa pnpm instead"}]}},
+                {"type": "message", "id": "tool", "parentId": "u1", "timestamp": now_iso(), "message": {
+                    "role": "toolResult", "content": [{"type": "text", "text": "no uses npm, usa yarn"}]}},
+                {"type": "branch_summary", "id": "summary", "parentId": "tool",
+                 "timestamp": now_iso(), "text": "no uses npm, usa yarn"},
+            ])
+            other = pi_home / "sessions" / "--repo-b" / "session-b.jsonl"
+            write_jsonl(other, [
+                {"type": "session", "id": "session-b", "cwd": str(out_repo), "timestamp": now_iso()},
+                {"type": "message", "timestamp": now_iso(), "message": {
+                    "role": "user", "content": [{"type": "text", "text": "no uses npm, usa yarn"}]}},
+            ])
+
+            report = run_scan(root / "no-claude", root / "out", pi_home=pi_home,
+                              repo=str(in_repo))
+
+            self.assertEqual(report["sources"], ["pi"])
+            self.assertEqual(report["source_status"]["claude"]["status"], "not_found")
+            self.assertEqual(report["source_status"]["codex"]["status"], "not_found")
+            self.assertEqual(report["source_status"]["pi"]["status"], "scanned")
+            self.assertEqual(report["unsupported_sources"], ["grok", "zcode"])
+            self.assertEqual(report["stats"]["sessions_in_scope"], 1)
+            self.assertEqual(report["stats"]["corrections_found"], 1)
+            self.assertEqual(report["corrections"][0]["session_id"], "session-a")
+            self.assertEqual(report["corrections"][0]["preceding"], "I used npm install.")
+            self.assertNotIn("yarn", json.dumps(report))
+            self.assertTrue((root / "out" / "corrections.json").is_file())
+            self.assertEqual(list(root.rglob("corrections.json")), [root / "out" / "corrections.json"])
 
 
 class WindowAndRepoTests(unittest.TestCase):

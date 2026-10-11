@@ -437,6 +437,24 @@ class CodexReader(Reader):
         return self._meta or {"id": self.path.stem, "cwd": None, "started_at": first_ts}
 
 
+def pi_active_entry_ids(records):
+    """Return Pi's active session-entry ancestry when parent links are complete."""
+    entries = [record for record in records if record.get("type") != "session"]
+    if not entries or any(
+        not entry.get("id") or "parentId" not in entry for entry in entries
+    ):
+        return None
+    by_id = {entry["id"]: entry for entry in entries}
+    active = set()
+    current = entries[-1]["id"]
+    while current is not None:
+        if current in active or current not in by_id:
+            return None
+        active.add(current)
+        current = by_id[current].get("parentId")
+    return active
+
+
 class PiReader(Reader):
     key = "pi"
 
@@ -472,10 +490,16 @@ class PiReader(Reader):
             self._meta["started_at"] = self._meta.get("started_at") or ts
 
     def events(self):
-        for obj in read_jsonl(self.path):
+        records = list(read_jsonl(self.path))
+        active_ids = pi_active_entry_ids(records)
+        for obj in records:
+            kind = obj.get("type")
+            if kind not in ("session", "message"):
+                continue
+            if kind == "message" and active_ids is not None and obj.get("id") not in active_ids:
+                continue
             if obj.get("timestamp"):
                 yield Event(STAMP, obj["timestamp"])
-            kind = obj.get("type")
             if kind == "session":
                 self._read_header(obj)
             elif kind == "message" and isinstance(obj.get("message"), dict):

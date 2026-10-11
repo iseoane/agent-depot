@@ -14,6 +14,14 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def write_pi_session(pi_home, project, session_id, records):
+    path = Path(pi_home) / "sessions" / project / f"{session_id}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = {"type": "session", "id": session_id, "cwd": f"/{project}", "timestamp": now_iso()}
+    path.write_text("\n".join(json.dumps(record) for record in [header, *records]), encoding="utf-8")
+    return path
+
+
 def write_claude_session(claude_home, project, session_id, user_texts, extra_record=None):
     """Write a minimal Claude Code JSONL session with one user turn per
     entry in `user_texts`, each followed by a matching assistant reply so
@@ -115,6 +123,39 @@ class TemplateDetectionTests(unittest.TestCase):
             self.assertEqual(stats["flagged_templated"], 0)
             self.assertEqual(dropped_templates, [])
             self.assertEqual(flagged, [])
+
+
+class PiSessionTests(unittest.TestCase):
+    def test_ignores_pi_records_outside_active_message_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pi_home = Path(tmp) / "pi"
+            write_pi_session(pi_home, "repo", "pi-session", [
+                {"type": "message", "id": "u1", "parentId": None, "timestamp": now_iso(),
+                 "message": {"role": "user", "content": [{"type": "text", "text": "hello"}]}},
+                {"type": "message", "id": "a1", "parentId": "u1", "timestamp": now_iso(),
+                 "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}},
+                {"type": "message", "id": "stale", "parentId": "a1", "timestamp": now_iso(),
+                 "message": {"role": "user", "content": [{
+                     "type": "text", "text": dms.MACHINE_SESSION_SENTINEL + "\nScore this transcript."}]}},
+                {"type": "message", "id": "active", "parentId": "a1", "timestamp": now_iso(),
+                 "message": {"role": "user", "content": [{"type": "text", "text": "normal request"}]}},
+                {"type": "branch_summary", "id": "summary", "parentId": "active",
+                 "timestamp": now_iso(), "text": dms.MACHINE_SESSION_SENTINEL},
+                {"type": "message", "id": "tool", "parentId": "summary", "timestamp": now_iso(),
+                 "message": {"role": "toolResult", "content": [{"type": "text", "text": "tool output"}]}},
+            ])
+
+            records = dms.collect_candidates(
+                {"claude_home": Path(tmp) / "no-claude", "codex_home": Path(tmp) / "no-codex",
+                 "pi_home": pi_home, "grok_home": Path(tmp) / "no-grok",
+                 "zcode_home": Path(tmp) / "no-zcode"},
+                datetime.now(timezone.utc).replace(year=2000),
+            )
+
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]["session_key"], "pi:pi-session")
+            self.assertEqual(records[0]["user_turns"], ["hello", "normal request"])
+            self.assertFalse(records[0]["has_sentinel"])
 
 
 class SentinelTests(unittest.TestCase):
