@@ -14,6 +14,8 @@ This file is the single source of truth for harness support in `doctor-md-skill`
 
 At startup, identify the harness executing the skill from the runtime context. Do not infer it from conversation files found on disk.
 
+Pi session parsing uses the session header's `cwd` for project scope and follows the active entry's `parentId` ancestry when the entry links form a valid tree. Non-message entries establish the branch path but do not become transcript turns; tool-result messages are not user turns. Older or incomplete logs without valid parent links are read in recorded message order, so their inactive branches cannot be distinguished.
+
 If the executing harness is not listed above, or cannot be identified confidently, stop before creating a report directory or reading conversation history. Tell the user:
 
 > doctor-md-skill currently supports Claude Code, Codex, Pi, Grok Build, and ZCode. This run appears to be using an unsupported harness, so no conversations were read.
