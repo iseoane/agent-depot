@@ -520,16 +520,28 @@ test("records persist the observed host version evidence", async () => {
   });
 });
 
-test("an unverifiable host observation writes no verified evidence", async () => {
-  await withHarness({ files: piFiles() }, async (harness) => {
+test("a dirty checkout displays its HEAD version without recording it as verified", async () => {
+  await withHarness({ files: piFiles("1.0.0") }, async (harness) => {
     const selection = piSelection();
     harness.setRunner(async () => {
       harness.setPiPackages([PI_IDENTITY]);
+      harness.setPiCheckoutEvidence({
+        version: "1.0.0",
+        issue: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
+      });
       return okResult();
     });
     const plan = await harness.operations.planLifecycle(selection, "install");
     await harness.operations.approve(selection, "install");
-    assert.equal((await harness.operations.executeLifecycle(plan, true)).status, "installed");
+    const result = await harness.operations.executeLifecycle(plan, true);
+    assert.equal(result.status, "installed");
+    if (result.status === "installed") {
+      assert.deepEqual(result.verified, {
+        kind: "installed",
+        version: "1.0.0",
+        reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
+      });
+    }
     assert.equal((await harness.operations.list())[0]!.verified, undefined);
   });
 });

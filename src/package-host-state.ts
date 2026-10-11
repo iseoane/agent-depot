@@ -43,11 +43,11 @@ export interface PiInstallRecord {
   readonly objectForm: boolean;
   /** True when the entry's shape could not be decoded; matching must degrade to unknown. */
   readonly drifted: boolean;
-  /** The checkout's actual Git HEAD, validated against its configured repository. */
+  /** The clean checkout's Git HEAD, validated against its configured repository. */
   readonly checkoutCommit?: string;
-  /** Version from package.json at that same clean HEAD. */
+  /** Version declared by package.json at HEAD, even when local changes block update comparison. */
   readonly checkoutVersion?: string;
-  /** An installed settings entry whose checkout could not be safely verified. */
+  /** An installed settings entry whose checkout cannot provide update evidence. */
   readonly checkoutIssue?: string;
 }
 
@@ -278,7 +278,7 @@ function findPiInstalled(
       return unknownEvidence("Pi project-scoped and subdirectory package checkouts are not supported for version evidence");
     }
     if (match.checkoutIssue !== undefined) {
-      return installedEvidence(undefined, undefined, match.checkoutIssue);
+      return installedEvidence(match.checkoutVersion, undefined, match.checkoutIssue);
     }
     if (match.checkoutCommit === undefined) {
       return installedEvidence(undefined, undefined, `Pi reports this Package installed, but its checkout could not be verified. Version and update assessment are unavailable; inspect the configured checkout before updating.`);
@@ -402,12 +402,17 @@ async function readPiCheckoutEvidence(checkoutPath: string, sourceIdentity: stri
       return unavailable("the Git checkout origin does not match the selected Pi package Source");
     }
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(commit)) return unavailable("the Pi checkout HEAD is not a full Git commit");
-    if (status !== "") return unavailable("the Pi Git checkout has local modifications");
     const packageJson: unknown = JSON.parse(manifest);
-    if (!isRecord(packageJson) || typeof packageJson.version !== "string" || packageJson.version.trim() === "") {
-      return { commit: commit.toLowerCase() };
+    const version = isRecord(packageJson) && typeof packageJson.version === "string" && packageJson.version.trim() !== ""
+      ? packageJson.version
+      : undefined;
+    if (status !== "") {
+      return {
+        ...(version === undefined ? {} : { version }),
+        issue: `Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.`,
+      };
     }
-    return { commit: commit.toLowerCase(), version: packageJson.version };
+    return { commit: commit.toLowerCase(), ...(version === undefined ? {} : { version }) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     const reason = message.includes("timed out")

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { classifyUpdate } from "../src/package-host-plans.js";
 import { runProcess } from "../src/process-runner.js";
 import type { BundleDescriptor, PackageSelection } from "../src/package-model.js";
 import {
@@ -502,7 +503,7 @@ test("a clean Pi checkout yields its HEAD and package manifest version", async (
   }
 });
 
-test("Pi checkout origin mismatch and local modifications preserve installed membership but block version evidence", async () => {
+test("Pi checkout origin mismatch blocks version evidence while local modifications only block commit evidence", async () => {
   const fixture = await piCheckoutFixture();
   try {
     await git(fixture.checkoutPath, ["remote", "set-url", "origin", "https://github.com/other/repo"]);
@@ -524,11 +525,85 @@ test("Pi checkout origin mismatch and local modifications preserve installed mem
     await git(fixture.checkoutPath, ["remote", "set-url", "origin", fixture.url]);
     await writeFile(path.join(fixture.checkoutPath, "untracked.txt"), "local change", "utf8");
     const modified = findInstalledBundle(await readView(), piDescriptor("repo"), piSelection(fixture.url));
-    assert.equal(modified.kind, "installed");
-    if (modified.kind === "installed") {
-      assert.equal(modified.version, undefined);
-      assert.match(modified.reason ?? "", /local modifications/u);
-      assert.match(modified.reason ?? "", /unavailable/u);
+    assert.deepEqual(modified, {
+      kind: "installed",
+      version: "1.2.3",
+      reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
+    });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a modified tracked Pi lockfile keeps the HEAD version but no update identity", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    await writeFile(path.join(fixture.checkoutPath, "package-lock.json"), '{"lockfileVersion":3,"local":true}\n', "utf8");
+    const view = await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    });
+    assert.deepEqual(findInstalledBundle(view, piDescriptor("repo"), piSelection(fixture.url)), {
+      kind: "installed",
+      version: "1.2.3",
+      reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
+    });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a modified working-tree Pi manifest cannot replace HEAD version evidence", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    await writeFile(path.join(fixture.checkoutPath, "package.json"), JSON.stringify({ name: "repo", version: "2.0.0" }), "utf8");
+    const view = await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    });
+    const installed = findInstalledBundle(view, piDescriptor("repo"), piSelection(fixture.url));
+    assert.deepEqual(installed, {
+      kind: "installed",
+      version: "1.2.3",
+      reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
+    });
+    assert.equal(classifyUpdate(
+      installed,
+      { kind: "manifest-version", version: "2.0.0", declaredBy: "bundle" },
+      "b".repeat(40),
+    ), "unknown");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("an untracked Pi manifest cannot provide installed version evidence", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    await git(fixture.checkoutPath, ["rm", "package.json"]);
+    await git(fixture.checkoutPath, ["commit", "-m", "remove manifest"]);
+    await writeFile(path.join(fixture.checkoutPath, "package.json"), JSON.stringify({ name: "repo", version: "9.9.9" }), "utf8");
+    const view = await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    });
+    const evidence = findInstalledBundle(view, piDescriptor("repo"), piSelection(fixture.url));
+    assert.equal(evidence.kind, "installed");
+    if (evidence.kind === "installed") {
+      assert.equal(evidence.version, undefined);
+      assert.match(evidence.reason ?? "", /checkout could not be read safely/u);
     }
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
@@ -588,7 +663,8 @@ async function piCheckoutFixture(): Promise<{
   await git(checkoutPath, ["config", "user.email", "fixture@example.test"]);
   await git(checkoutPath, ["config", "user.name", "Fixture"]);
   await git(checkoutPath, ["remote", "add", "origin", url]);
-  await git(checkoutPath, ["add", "package.json"]);
+  await writeFile(path.join(checkoutPath, "package-lock.json"), '{"lockfileVersion":3}\n', "utf8");
+  await git(checkoutPath, ["add", "package.json", "package-lock.json"]);
   await git(checkoutPath, ["commit", "-m", "fixture"]);
   const commit = await gitOutput(checkoutPath, ["rev-parse", "HEAD"]);
   return { root, home, agentDirectory, checkoutPath, settingsPath, url, source, commit };

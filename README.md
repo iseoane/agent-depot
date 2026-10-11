@@ -703,14 +703,18 @@ state from Host-owned files. Agent Depot reads those files and never writes them
 For Pi, the `packages` setting in `~/.pi/agent/settings.json` identifies a
 configured package. Agent Depot then verifies the checkout under
 `$PI_CODING_AGENT_DIR/git` (or `~/.pi/agent/git` when unset): the checkout root,
-`origin`, clean working tree, `HEAD` commit, and `package.json` at that commit. A
-missing, dirty, unsafe, or mismatched checkout leaves the package installed but its
-version unavailable. A manifest version is display evidence, not proof that the
-checkout matches the selected Source. Update assessment compares the verified
-installed commit with the available Source commit using ancestry in the cached
-Source history. For Claude, Agent Depot reads the plugin and marketplace state
-files. The Host owns what is installed. Agent Depot owns the selection record and
-the receipt for what it delegated. While a Package is selected or confirmed
+`origin`, `HEAD` commit, and `package.json` at that commit. If the root, origin, or
+`HEAD` cannot be verified, the package remains installed but its version is
+unavailable. If local changes make the checkout dirty, Agent Depot still displays
+the version from `HEAD` but withholds the commit, so Updates reports `cannot assess`.
+Installations and `package inspect` mark that label as `(HEAD; local changes)`.
+Tracked and untracked changes both count; Agent Depot does not ignore lockfiles or
+other local files. A manifest version is display evidence, not proof that the
+checkout matches the selected Source. Update assessment compares a clean checkout's
+commit with the available Source commit using ancestry in the cached Source history.
+For Claude, Agent Depot reads the plugin and marketplace state files. The Host owns
+what is installed. Agent Depot owns the selection record and the receipt for what it
+delegated. While a Package is selected or confirmed
 installed, its declared Skills cannot be adopted or installed separately. A
 discovered descriptor alone does not reserve its Skills.
 
@@ -794,8 +798,11 @@ evidence Agent Depot recorded. Live evidence comes from
 Agent Depot reads and never writes. A missing Host file is an empty view. A
 drifted or undecodable file leaves the affected lookup `unknown` and never throws.
 A Pi git package with no version in its manifest can still have verified commit
-evidence. If Agent Depot cannot verify its checkout, the installed version is
-unavailable. The update status is `cannot assess`, not `current`.
+evidence. If Agent Depot verifies the checkout identity but finds local changes, it
+can display the manifest version from `HEAD` but cannot use that checkout for update
+comparison. If it cannot verify the checkout root, origin, or `HEAD`, the installed
+version is unavailable. In either case, the update status is `cannot assess`, not
+`current`.
 
 An update records a new version only when the Host state changed in a way Agent
 Depot can verify, meaning the two observations agree on a version or a

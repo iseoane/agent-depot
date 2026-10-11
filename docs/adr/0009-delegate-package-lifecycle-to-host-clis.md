@@ -53,8 +53,8 @@ The complementary direction is a refusal. Selecting or installing a Package whos
 
 ## Amendment: separate Pi membership from version evidence (2026-10-07)
 
-A Pi `packages` setting proves the host has configured a Package. It does not prove its checked-out version. Agent Depot resolves Pi's documented Git install directory and verifies the checkout's repository root, `origin`, clean state, `HEAD`, and manifest version from that commit.
+A Pi `packages` setting proves the host has configured a Package. It does not prove its checked-out version. Agent Depot resolves Pi's documented Git install directory and verifies the checkout's repository root, `origin`, `HEAD`, and manifest version from that commit.
 
-A matching settings entry remains installed when the checkout is missing, dirty, or cannot be verified. Agent Depot keeps the Package out of Catalog and keeps its Skills host-owned. Installations reports that the version is unavailable, and Updates reports `cannot assess`. Agent Depot does not treat the settings pin or `lastDelegatedCommit` as installed-version evidence, and it does not discard or modify local checkout changes.
+A matching settings entry remains installed when the checkout is missing, dirty, or cannot be verified. Agent Depot keeps the Package out of Catalog and keeps its Skills host-owned. If the root, origin, or `HEAD` cannot be verified, Installations reports that the version is unavailable. If the checkout identity is verified but local files are modified, Installations and `package inspect` display the version declared by `HEAD:package.json` with the label `(HEAD; local changes)`, while Updates reports `cannot assess`. Dirty tracked and untracked files both block update comparison; Agent Depot does not ignore lockfiles, treat the settings pin or `lastDelegatedCommit` as installed-version evidence, or modify local checkout changes.
 
-When the checkout is clean and its origin matches the selected Source, Agent Depot compares its actual `HEAD` with the resolved Source commit. The manifest version remains useful display evidence, but matching version strings cannot override a commit mismatch.
+When the checkout is clean and its origin matches the selected Source, Agent Depot compares its actual `HEAD` with the resolved Source commit. Matching manifest version strings cannot override a commit mismatch.

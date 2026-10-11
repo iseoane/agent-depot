@@ -471,7 +471,8 @@ function describeEvidence(evidence: InstalledBundleEvidence): string {
   switch (evidence.kind) {
     case "installed": {
       if (evidence.version !== undefined) {
-        return `installed ${evidence.version}`;
+        const qualifier = evidence.reason === undefined ? "" : " (HEAD; local changes)";
+        return `installed ${evidence.version}${qualifier}`;
       }
       if (evidence.commit !== undefined) {
         return `installed commit ${evidence.commit}`;
