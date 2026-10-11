@@ -134,7 +134,7 @@ const USAGE = [
   "  agent-depot update check --scope <project|user-global> [--package <selection>...]",
   "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>... | --app <name>... | --package <selection>...) [--yes] [--confirm-path <relative-path>...]",
   "    Apps and Packages run after Skills; --all --scope project skips Apps and Packages.",
-  "  agent-depot self-update [--yes] (npm global installations only; otherwise prints manual guidance)",
+  "  agent-depot self update [--yes] (npm global installations only; otherwise prints manual guidance)",
   "  agent-depot skill remove <id|path>... [--yes]",
   "  agent-depot skill remove <id|path> --host <host>... [--yes]",
   "  agent-depot skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]",
@@ -212,7 +212,10 @@ const COMMANDS = new Map<string, CommandHandler>([
     return 0;
   }],
   ["update", (values, { operations, dependencies, output }) => runUpdate(values, operations, dependencies, output)],
-  ["self-update", (values, { dependencies, output }) => runSelfUpdate(values, dependencies, output)],
+  ["self", async (values, { dependencies, output }) => {
+    if (values[0] !== "update") throw new CliUsageError("Usage: agent-depot self update [--yes]");
+    return runSelfUpdate(values.slice(1), dependencies, output);
+  }],
   ["skill", async (values, { operations, dependencies, output }) => {
     if (values[0] === "remove") {
       await runSkillRemoval(values.slice(1), operations, dependencies, output);
@@ -947,7 +950,7 @@ async function runSelfUpdate(
   output: (line: string) => void,
 ): Promise<number> {
   if (argv.length > 1 || (argv.length === 1 && argv[0] !== "--yes")) {
-    throw new CliUsageError("Usage: agent-depot self-update [--yes]");
+    throw new CliUsageError("Usage: agent-depot self update [--yes]");
   }
   const confirmed = argv[0] === "--yes";
   const selfUpdate = selfUpdateOperationsFor(dependencies);

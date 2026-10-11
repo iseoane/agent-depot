@@ -76,8 +76,8 @@ pnpm dlx @iseoane/agent-depot@latest tui
 Comprueba y actualiza una instalación global de npm con Agent Depot:
 
 ```sh
-agent-depot self-update
-agent-depot self-update --yes
+agent-depot self update
+agent-depot self update --yes
 ```
 
 El primer comando consulta el registro público de npm y previsualiza una versión más
@@ -87,7 +87,8 @@ coincide con el directorio global que informa npm. Para las demás instalaciones
 incluidas las de pnpm, npx, locales de proyecto, mediante enlace o de procedencia
 desconocida, muestra instrucciones manuales. La actualización invoca npm sin shell,
 desactiva los scripts del paquete y no solicita privilegios elevados ni cambia la
-configuración de npm.
+configuración de npm. Si npm falla durante la instalación, el paquete global puede
+quedar actualizado solo en parte; Agent Depot no puede revertir los cambios de npm.
 
 Un Agent Depot en ejecución nunca degrada los Skills integrados: un Skill instalado
 por un Agent Depot más reciente se notifica como no actualizable (actualiza primero

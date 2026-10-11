@@ -73,8 +73,8 @@ pnpm dlx @iseoane/agent-depot@latest tui
 Check and update an npm global installation with Agent Depot:
 
 ```sh
-agent-depot self-update
-agent-depot self-update --yes
+agent-depot self update
+agent-depot self update --yes
 ```
 
 The first command checks the public npm registry and previews a newer version without
@@ -83,7 +83,8 @@ Agent Depot supports this flow only when its loaded package directory matches th
 global directory reported by npm. It prints manual guidance for other installations,
 including pnpm, npx, project-local, linked, and unknown installations. The update uses
 npm without a shell, disables package lifecycle scripts, and never requests elevated
-privileges or changes npm configuration.
+privileges or changes npm configuration. If npm fails during installation, the global
+package may be left partially updated; Agent Depot cannot roll back npm's changes.
 
 A running Agent Depot never downgrades built-in Skills: a Skill installed by a newer
 Agent Depot is reported as not updatable (update Agent Depot first).

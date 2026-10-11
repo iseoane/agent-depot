@@ -77,7 +77,7 @@ try {
   const help = agentDepot("--help");
   assert.match(help.output, /Usage:[\s\S]*agent-depot tui/u);
 
-  const selfUpdate = agentDepot("self-update", "--yes");
+  const selfUpdate = agentDepot("self", "update", "--yes");
   assert.equal(selfUpdate.status, 0, selfUpdate.output);
   assert.match(selfUpdate.output, /Self-update is unavailable/u,
     "the temporary project installation must never be treated as a global npm installation");

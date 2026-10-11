@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `agent-depot self-update [--yes]` checks the npm registry and updates only a verified npm global installation after an explicit preview confirmation. Other installation methods receive manual guidance.
+- `agent-depot self update [--yes]` checks the npm registry and updates only a verified npm global installation after an explicit preview confirmation. Other installation methods receive manual guidance.
 
 ## [0.5.1] - 2026-10-07
 

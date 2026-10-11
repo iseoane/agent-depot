@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import { runCli } from "../src/cli.js";
+import { createPortableExecutableResolver } from "../src/executable-resolution.js";
+import { runProcess } from "../src/process-runner.js";
 import { createSelfUpdateOperations, type SelfUpdateOperations } from "../src/self-update.js";
 
 interface Fixture {
@@ -58,6 +60,56 @@ function operations(
     },
   });
 }
+
+test("checks current status with the real npm CLI and a temporary global prefix without installing", async (t) => {
+  const setup = await fixture();
+  t.after(() => rm(setup.root, { recursive: true, force: true }));
+  const prefix = path.join(setup.root, "npm-prefix");
+  const previousPrefix = process.env.npm_config_prefix;
+  process.env.npm_config_prefix = prefix;
+  t.after(() => {
+    if (previousPrefix === undefined) delete process.env.npm_config_prefix;
+    else process.env.npm_config_prefix = previousPrefix;
+  });
+
+  const resolveExecutable = createPortableExecutableResolver();
+  const npm = await resolveExecutable("npm");
+  if (npm.blocked || npm.executable === undefined) {
+    t.skip("npm is not available as a runnable executable");
+    return;
+  }
+  const target = await realpath(npm.executable).catch(() => undefined);
+  if (target === undefined || path.basename(target) !== "npm-cli.js" || path.basename(path.dirname(target)) !== "bin" || path.basename(path.dirname(path.dirname(target))) !== "npm") {
+    t.skip("npm does not resolve to the verified npm CLI script on this platform");
+    return;
+  }
+
+  const rootResult = await runProcess(npm.executable, ["root", "--global", "--silent", "--logs-max=0", "--no-update-notifier"], {
+    captureStdout: true,
+    maxOutputBytes: 4096,
+    timeoutMs: 30_000,
+  });
+  assert.equal(rootResult.code, 0, rootResult.stderr);
+  const globalRoot = rootResult.stdout.toString("utf8").trim();
+  assert.ok(globalRoot.startsWith(`${setup.root}${path.sep}`));
+  const packageRoot = path.join(globalRoot, "@iseoane", "agent-depot");
+  await mkdir(packageRoot, { recursive: true });
+  const before = await readdir(packageRoot);
+  const fetchUrls: string[] = [];
+  const selfUpdate = createSelfUpdateOperations({
+    packageName: "@iseoane/agent-depot",
+    packageVersion: "0.5.1",
+    packageRoot,
+    fetch: async (input) => {
+      fetchUrls.push(String(input));
+      return new Response(JSON.stringify({ version: "0.5.1" }), { status: 200 });
+    },
+  });
+
+  assert.deepEqual(await selfUpdate.check(), { kind: "current", current: "0.5.1", latest: "0.5.1" });
+  assert.deepEqual(fetchUrls, ["https://registry.npmjs.org/@iseoane%2Fagent-depot/latest"]);
+  assert.deepEqual(await readdir(packageRoot), before);
+});
 
 test("checks npm global provenance before reading the registry and pins a confirmed update", async (t) => {
   const setup = await fixture();
@@ -163,7 +215,7 @@ test("previews without applying until --yes and gives manual guidance when unsup
   };
   const dependencies = { selfUpdateOperations: available, stdout: (line: string) => output.push(line), stderr: (line: string) => errors.push(line) };
 
-  assert.equal(await runCli(["self-update"], dependencies), 1);
+  assert.equal(await runCli(["self", "update"], dependencies), 1);
   assert.match(output.join("\n"), /Preview: update Agent Depot from 0\.5\.1 to 0\.6\.0/u);
   assert.match(output.join("\n"), /--ignore-scripts.*--registry=https:\/\/registry\.npmjs\.org/u);
   assert.match(errors.join("\n"), /rerun with --yes/u);
@@ -171,7 +223,7 @@ test("previews without applying until --yes and gives manual guidance when unsup
 
   output.length = 0;
   errors.length = 0;
-  assert.equal(await runCli(["self-update", "--yes"], dependencies), 0);
+  assert.equal(await runCli(["self", "update", "--yes"], dependencies), 0);
   assert.deepEqual(calls, ["0.6.0"]);
 
   output.length = 0;
@@ -179,7 +231,7 @@ test("previews without applying until --yes and gives manual guidance when unsup
     async check() { return { kind: "current", current: "0.6.0", latest: "0.6.0" }; },
     async apply(version) { calls.push(version); },
   };
-  assert.equal(await runCli(["self-update"], {
+  assert.equal(await runCli(["self", "update"], {
     selfUpdateOperations: current,
     stdout: (line: string) => output.push(line),
     stderr: (line: string) => errors.push(line),
@@ -192,7 +244,7 @@ test("previews without applying until --yes and gives manual guidance when unsup
     async check() { return { kind: "unsupported", reason: "unknown manager" }; },
     async apply() { throw new Error("unsupported update must not run"); },
   };
-  assert.equal(await runCli(["self-update", "--yes"], {
+  assert.equal(await runCli(["self", "update", "--yes"], {
     selfUpdateOperations: unsupported,
     stdout: (line: string) => output.push(line),
     stderr: (line: string) => errors.push(line),
@@ -206,7 +258,7 @@ test("previews without applying until --yes and gives manual guidance when unsup
     async check() { return { kind: "available", current: "0.5.1", latest: "0.6.0" }; },
     async apply() { throw new Error("npm global update exited with code 1"); },
   };
-  assert.equal(await runCli(["self-update", "--yes"], {
+  assert.equal(await runCli(["self", "update", "--yes"], {
     selfUpdateOperations: failedUpdate,
     stdout: (line: string) => output.push(line),
     stderr: (line: string) => errors.push(line),
@@ -224,8 +276,12 @@ test("reports npm update failures instead of claiming success", async (t) => {
   assert.equal(setup.calls.at(-1)?.args[0], "install");
 });
 
-test("rejects unknown self-update arguments", async () => {
+test("rejects unsupported self subcommands and update options", async () => {
   const errors: string[] = [];
-  assert.equal(await runCli(["self-update", "--force"], { stderr: (line) => errors.push(line) }), 1);
-  assert.match(errors.join("\n"), /Usage: agent-depot self-update/u);
+  assert.equal(await runCli(["self", "update", "--force"], { stderr: (line) => errors.push(line) }), 1);
+  assert.match(errors.join("\n"), /Usage: agent-depot self update/u);
+
+  errors.length = 0;
+  assert.equal(await runCli(["self", "check"], { stderr: (line) => errors.push(line) }), 1);
+  assert.match(errors.join("\n"), /Usage: agent-depot self update/u);
 });
