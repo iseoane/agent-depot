@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { GitSource } from "../git-source.js";
@@ -73,6 +73,7 @@ function errorText(error: unknown): string {
 }
 
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange }: SourcesViewProps) {
+  const { columns } = useWindowSize();
   const height = useListHeight(listHeight, 9);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
@@ -143,7 +144,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   sourcesRef.current = sources;
   const rowsRef = useRef<readonly SourceRow[]>([]);
   const recipes = useSourcesRecipes({
-    operations, environment, onCapturingChange,
+    operations, environment, onCapturingChange, compact: columns < 64,
     highlightedFile: () => {
       const rows = rowsRef.current;
       const row = rows[resolveIndex(rows, selectionRef.current)];
@@ -313,6 +314,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
 
   const window = computeWindow(rows.length, selected, height);
+  if (columns < 64 && recipes.capturing) return <Box flexDirection="column">{recipes.panel}</Box>;
 
   return (
     <Box flexDirection="column">

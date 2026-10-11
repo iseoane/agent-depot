@@ -5,8 +5,25 @@ import { render } from "ink-testing-library";
 
 import { BUILT_IN_SOURCE, type Source, type SourceOperations } from "../src/sources.js";
 import { SourcesView } from "../src/tui/sources-view.js";
+import { formatHeaderTabs, headerTabRowCount } from "../src/tui/header-layout.js";
 import { computeWindow, pageStep } from "../src/tui/window.js";
 import { waitForFrame } from "./wait-for-frame.js";
+
+test("80-column tab layout keeps every numbered destination on one line", () => {
+  const tabs = formatHeaderTabs("catalog", 76);
+  assert.equal(headerTabRowCount(76), 1);
+  for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
+    assert.ok(tabs.includes(destination), `80-column tab row lost ${destination}: ${tabs}`);
+  }
+});
+
+test("40-column tab layout wraps without dropping any numbered destination", () => {
+  const tabs = formatHeaderTabs("catalog", 36);
+  assert.equal(headerTabRowCount(36), 3);
+  for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
+    assert.ok(tabs.includes(destination), `40-column tab rows lost ${destination}:\n${tabs}`);
+  }
+});
 
 test("computeWindow shows everything without an indicator when the list fits", () => {
   assert.deepEqual(computeWindow(5, 2, 10), { start: 0, end: 5, indicator: undefined });

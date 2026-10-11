@@ -183,7 +183,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
 }
 
 /** Renders App prompts using the existing checklist and preview-confirm panels. */
-export function AppPanel({ mode }: { readonly mode: AppMode }) {
+export function AppPanel({ mode, columns }: { readonly mode: AppMode; readonly columns?: number }) {
   if (mode.kind === "app-busy") return <BorderPanel title="App lifecycle"><Text>{mode.label}</Text></BorderPanel>;
   if (mode.kind === "app-hosts") {
     return (
@@ -197,10 +197,20 @@ export function AppPanel({ mode }: { readonly mode: AppMode }) {
   if (mode.kind === "app-approve") {
     return <PreviewConfirm title="Recipe approval · does not install" lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`} />;
   }
+  const compact = columns !== undefined && columns < 64;
+  const executable = mode.plan.executable;
+  const compactExecutable = executable && executable.length > Math.max(columns ?? 64, 1)
+    ? `…/${executable.split(/[\\/]/u).at(-1)}`
+    : executable;
   return (
     <PreviewConfirm
       title={mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`}
-      lines={[
+      lines={compact ? [
+        `App: ${appName(mode.plan.entry)} · ${mode.plan.action}`,
+        ...(mode.plan.argv ? [`argv: ${JSON.stringify(mode.plan.argv)}`] : []),
+        ...(mode.plan.argv ? [`Executable: ${compactExecutable ?? `${JSON.stringify(mode.plan.argv[0])} not found in PATH`}`] : []),
+        ...(mode.plan.warning ? [mode.plan.warning] : []),
+      ] : [
         `Environment: ${mode.plan.environment}`,
         `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,
         ...appStepLines(mode.plan),

@@ -188,6 +188,8 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const window = computeWindow(rows.length, index, height);
   const selectedCount = leavesOf(roots).filter((skill) => marks.marked.has(skillKey(skill))).length;
 
+  if (appMode !== undefined && columns < 64) return <AppPanel mode={appMode} columns={columns} />;
+
   return (
     <Box flexDirection="column">
       {state.warnings.map((warning) => <Text key={warning} color={theme.warning}>{warning}</Text>)}
@@ -198,7 +200,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       ))}
       <CatalogSelectionHelp row={rows[index]} height={helpLines} />
       <ListFooter indicator={window.indicator} selectedCount={selectedCount} message={message} />
-      {appMode ? <AppPanel mode={appMode} /> : <ActionPanel mode={action} />}
+      {appMode ? <AppPanel mode={appMode} columns={columns} /> : <ActionPanel mode={action} />}
     </Box>
   );
 }

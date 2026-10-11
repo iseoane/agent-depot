@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn as spawnProcess } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -346,6 +346,8 @@ test("the Catalog keeps numbered destinations and Packages readable in a narrow 
     assert.ok(narrowCatalog.split("\n").length <= 17, `40-column PTY frame exceeded 17 rows:\n${narrowCatalog}`);
     session.resize(80, 24);
     const resized = await session.waitFor(/Package agent-depot-package/u, screen => screen.split("\n").length >= 24);
+    assert.match(resized, /AGENT DEPOT/u);
+    assert.match(resized, /v0\.5\.2/u);
     for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
       assert.ok(resized.includes(destination), `resized header lost ${destination}:\n${resized}`);
     }
@@ -376,19 +378,22 @@ test("a non-interactive run exits 1 with a clean message", { timeout: 60_000 }, 
   assert.equal(stderr.trim(), "Error: agent-depot tui requires an interactive terminal");
 });
 
-test("the TUI keeps recipe approval separate from confirmed App installation and updates", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+test("the narrow TUI keeps recipe approval separate from confirmed App installation and updates", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
   const fixture = await fakeAppFixture(sandbox);
   const session = new TuiSession({
     PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
     XDG_STATE_HOME: path.join(sandbox, "state"),
     XDG_CONFIG_HOME: path.join(sandbox, "config"),
     XDG_CACHE_HOME: path.join(sandbox, "cache"),
-  });
+  }, 40, 17);
   try {
     await session.waitFor(/n add ·/u);
-    await session.send("j", /fixture-app.*needs approval/u);
-    await session.send("\r", /Approve fixture-app\? y\/n/u);
-    await session.send("y", /fixture-app.*approved/u);
+    await session.send("j", /fixture-app[\s\S]*needs approval/u);
+    const approval = await session.send("\r", /Approve fixture-app\? y\/n/u);
+    assert.match(approval, /Recipe approval · does not install/u);
+    assert.match(approval, /Approve fixture-app\? y\/n/u);
+    assert.ok(approval.split("\n").length <= 17, `approval panel exceeded the 17-row PTY:\n${approval}`);
+    await session.send("y", /fixture-app[\s\S]*approved/u);
     await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
 
     await session.send("\t", /▶ \[2\] Catalog/u);
@@ -398,11 +403,23 @@ test("the TUI keeps recipe approval separate from confirmed App installation and
     await session.send("j", />\s+App fixture-app\s+not installed/u);
     await session.send("i", /App install confirmation/u);
     assert.match(session.screen, /argv: \["depot-e2e-app","install"\]/u);
+    assert.match(session.screen, /install fixture-app\? y\/n/u);
+    assert.ok(session.screen.split("\n").length === 17, `confirmation exceeded the 17-row PTY:\n${session.screen}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "preview must not execute the recipe");
-    await session.send("y", /fixture-app: installed/u);
+    const installed = await session.send("y", /fixture-app: installed/u);
+    assert.ok(installed.split("\n").length <= 17, `result exceeded the 17-row PTY:\n${installed}`);
+    assert.match(installed, /Result · complete/u);
+    for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
+      assert.ok(installed.includes(destination), `install result lost ${destination}:\n${installed}`);
+    }
     assert.equal(await readFile(fixture.state, "utf8"), "1.0.0");
+    const appRecords = await readdir(path.join(fixture.stateDirectory, "app-installations"));
+    assert.equal(appRecords.length, 1, `successful install did not write the App installation record: ${appRecords.join(", ")}`);
 
-    await session.send("3", /Apps \(user-global\) \(1\)/u);
+    await session.send("3", />\s+Managed \(user-global\)/u);
+    await session.send("j", />\s+Managed \(project\)/u);
+    await session.send("j", />\s+Unmanaged \(user-global\)/u);
+    await session.send("j", />\s+▸ Apps \(user-global\) \(1\)/u);
     const updates = await session.send("4", /App: fixture-app/u);
     assert.match(updates, /1\.0\.0/u);
     assert.match(updates, /2\.0\.0/u);

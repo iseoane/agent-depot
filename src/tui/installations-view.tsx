@@ -1,8 +1,8 @@
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createAppOperations } from "../app-flow.js";
-import { handleAppKey, isAppMode, startAppAction } from "./app-actions.js";
+import { AppPanel, handleAppKey, isAppMode, startAppAction } from "./app-actions.js";
 import { handlePackageKey, isPackageMode } from "./package-actions.js";
 import type { SourceOperations } from "../sources.js";
 import type { InstalledSkills } from "./catalog-installs.js";
@@ -43,6 +43,7 @@ type LoadState =
   | { readonly status: "ready"; readonly data: InstallationsData };
 
 export function InstallationsView({ operations, environment, onCapturingChange, listHeight }: InstallationsViewProps) {
+  const { columns } = useWindowSize();
   const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
   const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
@@ -89,8 +90,12 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     if (checked.current.has(identity)) return;
     checked.current.add(identity);
     const generation = loadGeneration.current;
-    void apps.inspect(entry).then(inspection => {
-      if (!mounted.current || generation !== loadGeneration.current) return;
+    void apps.approvalStatus(entry).then(approval => {
+      if (approval.status !== "approved") return undefined;
+      return apps.inspect(entry);
+    }).then(inspection => {
+      if (!inspection || !mounted.current || generation !== loadGeneration.current) return;
+      if (inspection.status === "unknown") checked.current.delete(identity);
       setState(previous => previous.status !== "ready" ? previous : {
         ...previous,
         data: {
@@ -166,6 +171,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
 
   if (state.status === "loading") return <Text>Loading installations...</Text>;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
+  if (columns < 64 && isAppMode(mode)) return <AppPanel mode={mode} columns={columns} />;
   const ready = state.data;
   const window = computeWindow(rows.length, index, height);
   const listed = rows.slice(window.start, window.end);

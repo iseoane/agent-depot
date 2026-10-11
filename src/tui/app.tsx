@@ -6,6 +6,7 @@ import type { SourceOperations } from "../sources.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
 import { InstallationsView } from "./installations-view.js";
+import { formatHeaderTabs, TABS, type ViewName } from "./header-layout.js";
 import { useKeys } from "./keys.js";
 import { ProfileView } from "./profile-view.js";
 import { SourcesView, sourceRowHints } from "./sources-view.js";
@@ -20,16 +21,6 @@ export interface AppProps {
   /** Invoked once when the user asks to quit. */
   readonly onExit?: () => void;
 }
-
-type ViewName = "sources" | "catalog" | "installations" | "updates" | "profile";
-
-const TABS: readonly (readonly [ViewName, string])[] = [
-  ["sources", "[1] Sources"],
-  ["catalog", "[2] Catalog"],
-  ["installations", "[3] Installations"],
-  ["updates", "[4] Updates"],
-  ["profile", "[5] Profile"],
-];
 
 /** Sources derives its own hints from the selected row, so it is excluded here. */
 function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boolean): string {
@@ -47,16 +38,13 @@ function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boo
 
 function Header({ view, columns }: { readonly view: ViewName; readonly columns: number }) {
   const innerWidth = Math.max(columns - 4, 1);
-  const tabRows = columns < 64 ? [TABS.slice(0, 2), TABS.slice(2, 4), TABS.slice(4)] : [TABS];
   return (
     <Box borderStyle="round" borderColor={theme.group} paddingX={1} flexDirection="column" width={columns}>
       <Box width={innerWidth} justifyContent="space-between">
         <Text bold>AGENT DEPOT</Text>
         {AGENT_DEPOT_PACKAGE_VERSION === undefined ? null : <Text>v{AGENT_DEPOT_PACKAGE_VERSION}</Text>}
       </Box>
-      <Text wrap="truncate-end">
-        {tabRows.map(tabs => tabs.map(([name, label]) => `${view === name ? "▶ " : ""}${label}`).join("  ")).join("\n")}
-      </Text>
+      <Text wrap="truncate-end">{formatHeaderTabs(view, innerWidth)}</Text>
     </Box>
   );
 }
@@ -126,7 +114,9 @@ export function App({ operations, environment, onExit }: AppProps) {
           />
         )}
       </Box>
-      <Text color={theme.muted}>{capturing ? "Enter submit · Esc cancel · y/n confirm · space toggle" : view === "sources" ? sourcesHints : hintsOf(view, catalogSourceId !== undefined)}</Text>
+      <Text color={theme.muted}>{capturing
+        ? columns < 64 ? "Enter submit · Esc cancel" : "Enter submit · Esc cancel · y/n confirm · space toggle"
+        : view === "sources" ? sourcesHints : hintsOf(view, catalogSourceId !== undefined)}</Text>
     </Box>
   );
 }

@@ -37,6 +37,7 @@ interface RecipeSectionOptions {
   readonly environment?: TuiEnvironment;
   readonly onCapturingChange?: (value: boolean) => void;
   readonly highlightedFile: () => string | undefined;
+  readonly compact: boolean;
 }
 
 /**
@@ -47,6 +48,7 @@ export function useSourcesRecipes({
   environment,
   onCapturingChange,
   highlightedFile,
+  compact,
 }: RecipeSectionOptions) {
   const homeDirectory = environment?.homeDirectory;
   const appEnvironment = environment?.appEnvironment;
@@ -79,12 +81,21 @@ export function useSourcesRecipes({
         setMode({
           kind: "approve",
           entry, removeAfterApproval,
-          lines: [
-            `File: ${entry.file}`,
-            `Platform: ${entry.recipe?.platform ?? "all"}`,
-            `Status: ${status}`,
-            ...steps.flatMap(step => [step.step, ...appStepLines(step)]),
-          ],
+          lines: compact
+            ? [
+                `${appName(entry)} ${entry.recipe?.platform ?? "all"} · ${status}`,
+                ...steps.filter(step => ["install", "update", "uninstall", "version"].includes(step.step))
+                  .map(step => `${step.step}: ${step.argv?.join(" ") ?? ("manual" in step ? step.manual : "declared")}`),
+                ...(steps.some(step => !["install", "update", "uninstall", "version"].includes(step.step))
+                  ? ["Also declares: latest and Host steps"]
+                  : []),
+              ]
+            : [
+                `File: ${entry.file}`,
+                `Platform: ${entry.recipe?.platform ?? "all"}`,
+                `Status: ${status}`,
+                ...steps.flatMap(step => [step.step, ...appStepLines(step)]),
+              ],
         });
       }
     } catch (error) {
@@ -288,7 +299,11 @@ export function useSourcesRecipes({
       {mode.kind === "install" ? <ActionPanel mode={mode.action} /> : null}
       {mode.kind === "busy" ? <BorderPanel title="App recipe workflow"><Text>Working...</Text></BorderPanel> : null}
       {mode.kind === "approve" ? (
-        <PreviewConfirm title="Recipe approval · does not install" lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`} />
+        <PreviewConfirm
+          title="Recipe approval · does not install"
+          lines={mode.lines}
+          question={compact ? `Approve ${appName(mode.entry)}? y/n` : `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`}
+        />
       ) : null}
       {mode.kind === "uninstall-question" ? (
         <BorderPanel title="Uninstall before recipe removal">
@@ -307,5 +322,5 @@ export function useSourcesRecipes({
       ) : null}
     </Box>
   );
-  return { rows, handleKey, startAdd, reload, clearMessage: () => { setError(undefined); setNotice(undefined); }, panel, directory: apps.directory };
+  return { rows, handleKey, startAdd, reload, clearMessage: () => { setError(undefined); setNotice(undefined); }, panel, directory: apps.directory, capturing: mode.kind !== "browse" };
 }

@@ -1,8 +1,10 @@
 import { useWindowSize } from "ink";
 
+import { headerTabRowCount } from "./header-layout.js";
+
 /** Rows assumed when the terminal size is unknown (for example under test renderers). */
 export const FALLBACK_TERMINAL_ROWS = 24;
-/** Wide header and footer rows; narrow headers use three tab rows and therefore add two. */
+/** Header borders, title, one tab row and footer; extra tab rows are added per terminal width. */
 export const APP_CHROME_ROWS = 5;
 const MINIMUM_ROWS = 3;
 
@@ -37,6 +39,6 @@ export function pageStep(height: number): number {
 export function useListHeight(override: number | undefined, reserved: number): number {
   const { rows, columns } = useWindowSize();
   if (override !== undefined) return Math.max(override, 1);
-  const chromeRows = APP_CHROME_ROWS + (columns < 64 ? 2 : 0);
+  const chromeRows = APP_CHROME_ROWS + headerTabRowCount(Math.max(columns - 4, 1)) - 1;
   return Math.max((rows || FALLBACK_TERMINAL_ROWS) - chromeRows - reserved, MINIMUM_ROWS);
 }

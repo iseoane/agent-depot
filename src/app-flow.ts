@@ -226,15 +226,20 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   async function inspect(entry: AppEntry, cached?: { installedVersion?: string }): Promise<AppInspection> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
-    const approval = await approvalProblem(entry);
-    if (approval) return approval;
     if (cached?.installedVersion) {
       return { status: "installed", installedVersion: cached.installedVersion, evidence: "recorded" };
     }
-    const { executable, blocked } = await resolve(entry.recipe.version.argv[0]);
-    if (!executable || blocked) {
-      return { status: "unknown", executable, reason: blocked ? WINDOWS_EXECUTABLE_WARNING : "Version executable is unavailable" };
+    const approval = await approvalProblem(entry);
+    if (approval) return approval;
+    let resolution: Awaited<ReturnType<typeof resolve>>;
+    try {
+      resolution = await resolve(entry.recipe.version.argv[0]);
+    } catch (error) {
+      return { status: "unknown", reason: error instanceof Error ? error.message : String(error) };
     }
+    const { executable, blocked } = resolution;
+    if (blocked) return { status: "unknown", executable, reason: WINDOWS_EXECUTABLE_WARNING };
+    if (!executable) return { status: "not installed", reason: "Version executable is unavailable" };
     let installedVersion: string | undefined;
     let result: Awaited<ReturnType<typeof runner>>;
     try {
@@ -247,7 +252,8 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     } catch (error) {
       return { status: "unknown", executable, reason: error instanceof Error ? error.message : String(error) };
     }
-    if (result.code !== 0 || result.signal) return { status: "not installed", executable };
+    if (result.signal) return { status: "unknown", executable, reason: `Version command terminated by signal ${result.signal}` };
+    if (result.code !== 0) return { status: "not installed", executable };
     if (!installedVersion || result.outputTooLarge) {
       return { status: "unknown", executable, reason: result.outputTooLarge ? "Version output exceeded the limit" : "Version output did not match the recipe" };
     }

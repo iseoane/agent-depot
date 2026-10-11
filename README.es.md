@@ -20,8 +20,9 @@ Qué hace:
 - **Instalaciones existentes**: informa de los Skills no gestionados que ya hay en
   disco, adopta los que coinciden exactamente con una Source o los elimina mediante
   una ruta explícita.
-- **Apps**: instala, actualiza y desinstala aplicaciones globales de usuario mediante
-  App recipes escritas por el usuario que deben aprobarse antes de ejecutarse.
+- **Apps**: gestiona aplicaciones globales de usuario mediante App recipes escritas
+  por el usuario. Aprobar una receta autoriza sus comandos, pero no instala la App;
+  la instalación tiene su propia previsualización y confirmación.
 - **Packages**: instala, actualiza y desinstala bundles nativos del Host (paquetes de
   Pi y plugins de Claude Code) delegando el ciclo de vida en la CLI de cada Host y
   leyendo evidencia de instalación y versión propiedad del Host. Un bundle
@@ -508,29 +509,31 @@ La TUI es un front end de [Ink](https://github.com/vadimdemedes/ink) (React para
 terminales) sobre las mismas operaciones que la CLI. Necesita Node.js >= 24 y un
 terminal interactivo; en caso contrario, `tui` falla con un error. Usa la pantalla
 alternativa del terminal y vuelve a la pantalla anterior al salir. Se adapta al
-redimensionado del terminal. Cambia de vista con `1`-`5` y sal con `q` (no mientras
-haya un aviso abierto). Las listas se desplazan cuando superan la altura del
-terminal. En Sources, Catalog, Installations y Updates, `j`/`k` o las flechas mueven
+redimensionado del terminal. El encabezado con bordes muestra la versión activa del
+paquete en ejecución y las cinco vistas numeradas. Cambia de vista con `1`-`5` o Tab/Shift+Tab,
+y sal con `q` (no mientras haya un aviso abierto). Las listas se desplazan cuando
+superan la altura del terminal. En Sources, Catalog, Installations y Updates,
+`j`/`k` o las flechas mueven
 una fila; `PageUp` y `PageDown` avanzan una página visible.
 
 | Vista | Propósito |
 | --- | --- |
 | 1 Sources | Sources de Git (sus skills y Packages) y recetas App del usuario en una sola lista, con tipos `skills`/`app` y acciones contextuales. |
-| 2 Catalog | Skills y Packages disponibles, agrupados por Source. Los Packages que el Host confirma como instalados se ocultan; los que solo están seleccionados siguen visibles. Un Skill propiedad de un Package activo conserva el contraste normal y muestra una insignia breve; no se puede marcar ni instalar por separado. Sitúa el cursor encima para ver el motivo. |
-| 3 Installations | Lo que hay en disco: instalaciones gestionadas (globales de usuario y de proyecto), selecciones de Packages y skills globales de usuario no gestionados. |
-| 4 Updates | Skills y Packages gestionados con una versión más reciente disponible, para el ámbito global de usuario y de proyecto. |
-| 5 Import/Export | Transferir las elecciones portables de Sources globales de usuario, las selecciones de Skills, las App recipes y las selecciones de Packages. |
+| 2 Catalog | Skills y Packages disponibles, además de App recipes aplicables y aprobadas cuya ausencia se ha verificado. La instalación de una App tiene una previsualización y confirmación separadas. Las recetas inválidas o sin aprobar permanecen en Sources; un estado desconocido nunca se trata como ausencia. Los Packages que el Host confirma como instalados se ocultan; los que solo están seleccionados siguen visibles. Los Skills propiedad de Packages conservan su comportamiento actual. |
+| 3 Installations | Apps cuya instalación está confirmada, instalaciones de Skills gestionadas (globales de usuario y de proyecto), selecciones de Packages y Skills globales de usuario no gestionados. Un registro de instalación de App permanece visible aunque caduque la aprobación de la receta, pero sus acciones siguen exigiendo aprobación vigente. |
+| 4 Updates | Skills gestionados, Apps instaladas y Packages con una versión más reciente disponible, para el ámbito global de usuario y de proyecto. Las Apps desconocidas o no verificadas no se tratan como instaladas. |
+| 5 Profile | Exportar o importar las elecciones portables de Sources globales de usuario, selecciones de Skills, App recipes y selecciones de Packages. |
 
 Teclas por vista (los avisos también aceptan `Esc` para cancelar y `y`/`n` para
 confirmar):
 
 | Vista | Teclas |
 | --- | --- |
-| Sources | `j`/`k` recorren Sources de Git y recetas App, sin cambiar de sección con Tab. `Enter` abre el Catálogo de una Source de Git (sus skills y Packages) o previsualiza/aprueba una receta. `n` añade una Source de Git reutilizable o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Git. |
-| Catalog | `Enter`/flechas expandir y contraer, `space` alternar el Skill disponible resaltado, `a` alternar todos los Skills disponibles de la Source resaltada que coincidan con el filtro actual, `i` instalar los Skills marcados que coincidan con el filtro o el Skill disponible resaltado, o previsualizar el Package resaltado, `/` filtrar, `s` alternar una Source o todas (si se abrió desde una Source). Las marcas de otras Sources se conservan. |
-| Installations | `Enter`/flechas expandir y contraer, `u` desinstalar (todos los Hosts o los Hosts elegidos) o eliminar un skill no gestionado, `h` o `i` añadir Hosts a una instalación, `A` o `Enter` adoptar un skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo). En una fila de Package: `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala, `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
+| Sources | `j`/`k` recorren Sources de Git y recetas App. `Enter` abre el Catálogo de una Source de Git o previsualiza/aprueba una receta App. Aprobarla no instala la App. `n` añade una Source reutilizable o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Git. |
+| Catalog | `Enter`/flechas expandir y contraer, `space` alternar el Skill disponible resaltado, `a` alternar todos los Skills disponibles de la Source resaltada que coincidan con el filtro actual, `i` instalar Skills marcados o el Skill resaltado, previsualizar el Package resaltado o previsualizar la instalación de una App aprobada cuya ausencia se conoce. Confirma la instalación de la App por separado con `y`. `/` filtra y `s` alterna una Source o todas. Las marcas de otras Sources se conservan. |
+| Installations | `Enter`/flechas expandir y contraer, `u` desinstalar una App o Skill instalada (con el flujo admitido) o eliminar un Skill no gestionado, `h` o `i` añadir Hosts a una instalación de Skill, `A` o `Enter` adoptar un Skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo). En una fila de App, `u` previsualiza la desinstalación y `h` selecciona setup/teardown; las recetas modificadas requieren una nueva aprobación. En una fila de Package: `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala, `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
 | Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualizar las marcas, `r` comprobar de nuevo, las flechas pliegan el grupo "cannot be checked". Sus filas son informativas y no se pueden marcar para actualizar. Un Package marcado se une al lote y se aprueba antes de ejecutar su actualización. |
-| Import/Export | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
+| Profile | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
 
 Al eliminar una receta App se comprueban su comando de versión aprobado y su
 seguimiento. Si la App está instalada o sigue registrada, la TUI ofrece el flujo

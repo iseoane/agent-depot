@@ -16,10 +16,10 @@ Recipes live in `apps/` beside environment-local `sources.json`; private atomic 
 
 ## Consequences
 
-- Users must supply recipes matching their actual install channel; Agent Depot does not provide an App catalog or infer artifact ownership.
+- Users must supply recipes matching their actual install channel; Agent Depot does not ship built-in App recipes or infer artifact ownership. The TUI Catalog is a view of applicable approved recipes known to be absent, not a Git Source or a second recipe registry.
 - Agent Depot tracks App identity and installed version, not filesystem provenance or rollback of App-created artifacts. A successful version check does not prove Host wiring is correct.
 - Declared owned-skill names/globs only exclude skills from unmanaged adoption/removal; they do not verify those paths.
-- CLI and TUI use shared core flows, and Apps join existing Installations and Updates views. Project-scoped Apps and per-project steps remain out of scope.
+- CLI and TUI use shared core flows. Installations and Updates include only Apps with verified version evidence or a matching installed-App record. A matching record remains evidence of installation if its recipe later needs approval again, but every recipe command still requires current approval. Project-scoped Apps and per-project steps remain out of scope.
 - Update-selection CLI grammar and teardown-before-uninstall are resolved below. Other open questions are in `.scratch/apps/spec.md`; recipe placement, approval and WSL environment boundaries are resolved.
 
 ## Lifecycle implementation decisions (ticket 03)
@@ -127,6 +127,11 @@ still needs its matching approval.
 The add guide has exactly two routes: the built-in `agent-depot-apprecipe` Skill
 (install if missing through the existing Catalog flow, then show an agent prompt),
 or manual JSON authoring in the displayed `apps/` directory using
-`agent-depot app schema`. Lifecycle actions otherwise stay in Installations and
-Updates; the optional uninstall prerequisite for recipe removal reuses that same
-core without silently uninstalling an App.
+`agent-depot app schema`. Sources registers and approves user-owned recipes. Catalog
+offers installation only for an applicable approved recipe whose version executable
+is absent or whose version command reports absence; preview and install confirmation
+remain separate. A blocked executable, resolver or spawn failure, signal, oversized
+output, or version-pattern mismatch is unknown, not proof of absence. Installations
+manages confirmed installed Apps, and Updates checks installed Apps only. Recipe
+approval alone never establishes installation. The optional uninstall prerequisite
+for recipe removal reuses the shared core without silently uninstalling an App.

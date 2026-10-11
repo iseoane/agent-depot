@@ -88,7 +88,7 @@ test("a recipe whose version command cannot run is not removable", async () => {
     });
     const [entry] = await apps.load();
     await apps.approve(entry);
-    await assert.rejects(planAppRecipeRemoval(apps, entry), /Cannot verify App state \(unknown\)/u);
+    await assert.rejects(planAppRecipeRemoval(apps, entry), /version command for demo did not run/u);
     assert.equal(await readFile(file, "utf8"), content);
   } finally { await rm(home, { recursive: true, force: true }); }
 });

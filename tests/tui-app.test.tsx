@@ -201,6 +201,8 @@ test("the bordered header contains the tabs before the page and keeps the viewpo
     assert.ok(frame.includes(destination), `missing numbered destination ${destination}:\n${frame}`);
   }
   assert.ok(frame.includes("▶ [1] Sources"), `active view lacks its separate marker:\n${frame}`);
+  assert.ok(lines.some(line => ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"].every(tab => line.includes(tab))),
+    `80-column header truncated a destination instead of wrapping it:\n${frame}`);
   assert.ok(topBorder >= 0 && tabs > topBorder && bottomBorder > tabs && page > bottomBorder, `unexpected layout:\n${frame}`);
   assert.equal(lines.length, 24, "the header keeps the app inside Ink's full-screen viewport");
   unmount();
