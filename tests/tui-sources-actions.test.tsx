@@ -262,7 +262,7 @@ test("App ignores q and view keys sent in the same burst as a capturing key", as
   stdin.write("2");
   const frame = await waitForFrame(lastFrame, /URL: q2/);
   assert.equal(exits, 0);
-  assert.match(frame, /\[1 Sources\]/);
+  assert.match(frame, /▶ \[1\] Sources/);
   unmount();
 });
 
@@ -285,7 +285,7 @@ test("App does not quit or switch views while an action is busy", async () => {
   release?.();
   const frame = await waitForFrame(lastFrame, /Refreshed Git Source/);
   assert.equal(exits, 0);
-  assert.match(frame, /\[1 Sources\]/);
+  assert.match(frame, /▶ \[1\] Sources/);
   unmount();
 });
 

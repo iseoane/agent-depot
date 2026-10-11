@@ -1,11 +1,11 @@
-import { Box, Text, type Key } from "ink";
+import { Text, type Key } from "ink";
 
 import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
 import { answerYesNo, hostChecklistKey } from "./mode-keys.js";
-import { HostChecklist, PreviewConfirm } from "./panel-parts.js";
+import { BorderPanel, HostChecklist, PreviewConfirm } from "./panel-parts.js";
 
 interface Request {
   readonly entry: AppEntry;
@@ -15,6 +15,7 @@ interface Request {
 
 /** App interaction modes capture keys inside the existing Installations view. */
 export type AppMode =
+  | { readonly kind: "app-busy"; readonly label: string }
   | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[] }
   | {
       readonly kind: "app-hosts";
@@ -31,16 +32,19 @@ export type AppMode =
       readonly failures: number;
     };
 
-export const APP_KINDS: readonly AppMode["kind"][] = ["app-approve", "app-hosts", "app-confirm", "app-manual"];
+export const APP_KINDS: readonly AppMode["kind"][] = ["app-busy", "app-approve", "app-hosts", "app-confirm", "app-manual"];
 
 /** Narrows the view's mode without asserting a partial mode is an App mode. */
 export function isAppMode(mode: { readonly kind: string }): mode is AppMode {
   return APP_KINDS.some(kind => kind === mode.kind);
 }
 
+export type AppActionHost = Pick<ManageContext, "browse" | "setMessage" | "isMounted" | "finish" | "unmark">
+  & { setMode(mode: AppMode): void };
+
 export interface AppContext {
   readonly apps: AppOperations;
-  readonly manage: ManageContext;
+  readonly manage: AppActionHost;
 }
 
 /** Recipe name, falling back to the file identity for invalid recipes. */
@@ -68,7 +72,7 @@ async function prepareNext(
   failures = 0,
 ): Promise<void> {
   const { manage, apps } = context;
-  manage.setMode({ kind: "busy", label: "Preparing App step..." });
+  manage.setMode({ kind: "app-busy", label: "Preparing App step..." });
   // Independent planning failures never stop the remaining marked Apps.
   const [request, ...remaining] = requests;
   if (!request) {
@@ -98,7 +102,7 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
     if (input === "approve") {
       const entry = entries[0];
       if (!entry) throw new Error("No App selected");
-      manage.setMode({ kind: "busy", label: "Preparing recipe approval..." });
+      manage.setMode({ kind: "app-busy", label: "Preparing recipe approval..." });
       const steps = await apps.preview(entry);
       if (manage.isMounted()) {
         manage.setMode({ kind: "app-approve", entry, lines: steps.flatMap(step => [step.step, ...appStepLines(step)]) });
@@ -121,7 +125,7 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
 
 async function execute(context: AppContext, mode: Extract<AppMode, { kind: "app-confirm" | "app-manual" }>): Promise<void> {
   const { manage, apps } = context;
-  manage.setMode({ kind: "busy", label: "Running App step..." });
+  manage.setMode({ kind: "app-busy", label: "Running App step..." });
   let manualRequired = false;
   const [outcome] = await runBatch([mode.plan], async plan => {
     const result = mode.kind === "app-manual"
@@ -144,6 +148,7 @@ async function execute(context: AppContext, mode: Extract<AppMode, { kind: "app-
 /** Applies checklist and y/n keys, continuing independent batch steps after cancellation or failure. */
 export function handleAppKey(context: AppContext, mode: AppMode, input: string, key: Key): void {
   const { manage, apps } = context;
+  if (mode.kind === "app-busy") return;
   const cancel = () => {
     manage.browse();
     manage.setMessage({ kind: "ok", text: "App action cancelled" });
@@ -165,7 +170,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
       void execute(context, mode);
       return;
     }
-    manage.setMode({ kind: "busy", label: "Approving recipe..." });
+    manage.setMode({ kind: "app-busy", label: "Approving recipe..." });
     void apps.approve(mode.entry).then(
       () => manage.finish({ kind: "ok", text: `Approved ${appName(mode.entry)}` }),
       error => manage.finish({ kind: "error", text: errorText(error) }),
@@ -179,22 +184,22 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
 
 /** Renders App prompts using the existing checklist and preview-confirm panels. */
 export function AppPanel({ mode }: { readonly mode: AppMode }) {
+  if (mode.kind === "app-busy") return <BorderPanel title="App lifecycle"><Text>{mode.label}</Text></BorderPanel>;
   if (mode.kind === "app-hosts") {
     return (
-      <Box flexDirection="column">
-        <Text>
-          App Host steps: checked = setup, unchecked = teardown. Wiring is not tracked.
-          Space/1-{mode.choices.length} toggle, j/k move, Enter continue, Esc cancel.
-        </Text>
+      <BorderPanel title="App Host steps">
+        <Text>Checked = setup. Unchecked = teardown. Wiring is not tracked.</Text>
+        <Text>Space/1-{mode.choices.length} toggle · j/k move · Enter continue · Esc cancel</Text>
         <HostChecklist choices={mode.choices} cursor={mode.cursor} selected={mode.selected} />
-      </Box>
+      </BorderPanel>
     );
   }
   if (mode.kind === "app-approve") {
-    return <PreviewConfirm lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n`} />;
+    return <PreviewConfirm title="Recipe approval · does not install" lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`} />;
   }
   return (
     <PreviewConfirm
+      title={mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`}
       lines={[
         `Environment: ${mode.plan.environment}`,
         `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,

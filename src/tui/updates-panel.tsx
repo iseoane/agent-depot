@@ -43,7 +43,9 @@ export function EntryLine({ entry, selected, checked, view, showUnknown }: {
     return (
       <Box flexDirection="column">
         <Text {...rowStyle(selected)}>{cursor}    {row.path}  {row.scope}</Text>
-        <Text color={theme.muted}>{"        "}{row.reason}</Text>
+        <Text color={theme.muted}>{"        "}{row.kind === "package" && /local modifications|local changes/i.test(row.reason)
+          ? `Update comparison unavailable: ${row.reason}`
+          : row.reason}</Text>
       </Box>
     );
   }

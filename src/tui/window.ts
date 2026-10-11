@@ -2,8 +2,8 @@ import { useWindowSize } from "ink";
 
 /** Rows assumed when the terminal size is unknown (for example under test renderers). */
 export const FALLBACK_TERMINAL_ROWS = 24;
-/** Lines the shell itself uses: title, tab bar, separator and footer hint. */
-export const APP_CHROME_ROWS = 4;
+/** Wide header and footer rows; narrow headers use three tab rows and therefore add two. */
+export const APP_CHROME_ROWS = 5;
 const MINIMUM_ROWS = 3;
 
 export interface ListWindow {
@@ -35,7 +35,8 @@ export function pageStep(height: number): number {
  * view's own `reserved` lines. `override` fixes the height for tests.
  */
 export function useListHeight(override: number | undefined, reserved: number): number {
-  const { rows } = useWindowSize();
+  const { rows, columns } = useWindowSize();
   if (override !== undefined) return Math.max(override, 1);
-  return Math.max((rows || FALLBACK_TERMINAL_ROWS) - APP_CHROME_ROWS - reserved, MINIMUM_ROWS);
+  const chromeRows = APP_CHROME_ROWS + (columns < 64 ? 2 : 0);
+  return Math.max((rows || FALLBACK_TERMINAL_ROWS) - chromeRows - reserved, MINIMUM_ROWS);
 }

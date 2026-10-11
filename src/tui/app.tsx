@@ -9,7 +9,7 @@ import { InstallationsView } from "./installations-view.js";
 import { useKeys } from "./keys.js";
 import { ProfileView } from "./profile-view.js";
 import { SourcesView, sourceRowHints } from "./sources-view.js";
-import { separatorLine, theme } from "./theme.js";
+import { theme } from "./theme.js";
 import { UpdatesView } from "./updates-view.js";
 
 export interface AppProps {
@@ -24,11 +24,11 @@ export interface AppProps {
 type ViewName = "sources" | "catalog" | "installations" | "updates" | "profile";
 
 const TABS: readonly (readonly [ViewName, string])[] = [
-  ["sources", "1 Sources"],
-  ["catalog", "2 Catalog"],
-  ["installations", "3 Installations"],
-  ["updates", "4 Updates"],
-  ["profile", "5 Import/Export"],
+  ["sources", "[1] Sources"],
+  ["catalog", "[2] Catalog"],
+  ["installations", "[3] Installations"],
+  ["updates", "[4] Updates"],
+  ["profile", "[5] Profile"],
 ];
 
 /** Sources derives its own hints from the selected row, so it is excluded here. */
@@ -43,6 +43,22 @@ function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boo
     case "updates":
       return "j/k move · space mark · a all · Enter preview · r check again · q quit";
   }
+}
+
+function Header({ view, columns }: { readonly view: ViewName; readonly columns: number }) {
+  const innerWidth = Math.max(columns - 4, 1);
+  const tabRows = columns < 64 ? [TABS.slice(0, 2), TABS.slice(2, 4), TABS.slice(4)] : [TABS];
+  return (
+    <Box borderStyle="round" borderColor={theme.group} paddingX={1} flexDirection="column" width={columns}>
+      <Box width={innerWidth} justifyContent="space-between">
+        <Text bold>AGENT DEPOT</Text>
+        {AGENT_DEPOT_PACKAGE_VERSION === undefined ? null : <Text>v{AGENT_DEPOT_PACKAGE_VERSION}</Text>}
+      </Box>
+      <Text wrap="truncate-end">
+        {tabRows.map(tabs => tabs.map(([name, label]) => `${view === name ? "▶ " : ""}${label}`).join("  ")).join("\n")}
+      </Text>
+    </Box>
+  );
 }
 
 export function App({ operations, environment, onExit }: AppProps) {
@@ -60,9 +76,13 @@ export function App({ operations, environment, onExit }: AppProps) {
   const [sourcesHints, setSourcesHints] = useState(sourceRowHints(undefined));
   const showView = (next: ViewName) => setView(next);
 
-  useKeys((input) => {
+  useKeys((input, key) => {
     if (capturingRef.current) return;
-    if (input === "q") {
+    if (key.tab) {
+      const current = TABS.findIndex(([name]) => name === view);
+      const direction = key.shift ? -1 : 1;
+      showView(TABS[(current + direction + TABS.length) % TABS.length]![0]);
+    } else if (input === "q") {
       onExit?.();
       exit();
     } else if (input === "1") showView("sources");
@@ -74,15 +94,7 @@ export function App({ operations, environment, onExit }: AppProps) {
 
   return (
     <Box flexDirection="column" height={rows}>
-      <Text bold color={theme.accent}>Agent Depot{AGENT_DEPOT_PACKAGE_VERSION === undefined ? "" : ` v${AGENT_DEPOT_PACKAGE_VERSION}`}</Text>
-      <Text>
-        {TABS.map(([name, label], position) => (
-          <Text key={name} color={view === name ? theme.accent : theme.inactive} bold={view === name}>
-            {position > 0 ? " " : ""}{view === name ? `[${label}]` : ` ${label} `}
-          </Text>
-        ))}
-      </Text>
-      <Text color={theme.muted}>{separatorLine(columns)}</Text>
+      <Header view={view} columns={columns} />
       <Box flexDirection="column" flexGrow={1}>
         {view === "sources" ? (
           <SourcesView

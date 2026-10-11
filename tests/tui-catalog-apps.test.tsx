@@ -1,0 +1,108 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+
+import { renderExpanded } from "./render-expanded.js";
+import { createAppOperations } from "../src/app-flow.js";
+import { defaultProjectManifestPath, ProjectManifestStore } from "../src/project-manifest.js";
+import { createSourceOperations } from "../src/sources.js";
+import { CatalogView } from "../src/tui/catalog-view.js";
+import type { TuiEnvironment } from "../src/tui/environment.js";
+import { waitForFrame } from "./wait-for-frame.js";
+
+const RECIPE = {
+  name: "gentle-shell",
+  platform: "linux",
+  install: { argv: ["npm", "install", "-g", "gentle-shell"] },
+  update: { argv: ["npm", "update", "-g", "gentle-shell"] },
+  uninstall: { argv: ["npm", "uninstall", "-g", "gentle-shell"] },
+  version: { argv: ["gentle-shell", "--version"], pattern: "(\\d+\\.\\d+\\.\\d+)" },
+};
+
+test("Catalog installs an approved App recipe only after preview confirmation", async (t) => {
+  const home = await mkdtemp(path.join(tmpdir(), "agent-depot-catalog-app-home-"));
+  const project = await mkdtemp(path.join(tmpdir(), "agent-depot-catalog-app-project-"));
+  const state = await mkdtemp(path.join(tmpdir(), "agent-depot-catalog-app-state-"));
+  const recipesDirectory = path.join(state, "apps");
+  await mkdir(recipesDirectory, { recursive: true });
+  t.after(async () => {
+    await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true })));
+  });
+
+  let installed = false;
+  const commands: string[] = [];
+  const appEnvironment = {
+    homeDirectory: home,
+    recipesDirectory,
+    resolveExecutable: async (name: string) => name === "missing-app" ? undefined : `/test-bin/${name}`,
+    runner: async (command: string, args: readonly string[]) => {
+      commands.push(`${path.basename(command)} ${args.join(" ")}`.trim());
+      if (command.endsWith("/gentle-shell")) {
+        return { code: installed ? 0 : 1, signal: null, stdout: Buffer.from(installed ? "1.2.3" : "not installed"), stderr: "", outputTooLarge: false };
+      }
+      if (command.endsWith("/npm") && args[0] === "install") {
+        installed = true;
+        return { code: 0, signal: null, stdout: Buffer.from("installed"), stderr: "", outputTooLarge: false };
+      }
+      throw new Error(`Unexpected recipe command: ${command} ${args.join(" ")}`);
+    },
+  };
+  await writeFile(path.join(recipesDirectory, "gentle-shell.json"), JSON.stringify(RECIPE));
+  await writeFile(path.join(recipesDirectory, "missing-app.json"), JSON.stringify({
+    ...RECIPE,
+    name: "missing-app",
+    version: { argv: ["missing-app", "--version"], pattern: "(\\d+\\.\\d+\\.\\d+)" },
+  }));
+  await writeFile(path.join(recipesDirectory, "needs-approval.json"), JSON.stringify({ ...RECIPE, name: "needs-approval" }));
+
+  const apps = createAppOperations(appEnvironment);
+  const entries = await apps.load();
+  await apps.approve(entries.find(entry => entry.recipe?.name === "gentle-shell")!);
+  await apps.approve(entries.find(entry => entry.recipe?.name === "missing-app")!);
+  const operations = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
+  const environment: TuiEnvironment = {
+    homeDirectory: home,
+    projectRoot: project,
+    appEnvironment,
+    projectManifestStore: new ProjectManifestStore(defaultProjectManifestPath(project)),
+  };
+  const view = await renderExpanded(
+    <CatalogView operations={operations} environment={environment} />,
+  );
+  try {
+    let frame = await waitForFrame(view.lastFrame, /Apps \(user-global\) \(1\)/);
+    assert.doesNotMatch(frame, /missing-app|needs-approval/);
+    assert.ok(!commands.some(command => command.startsWith("npm install")), "loading and preview do not install an App");
+
+    for (let move = 0; move < 10 && !/^> [▸▾] Apps \(user-global\) \(1\)$/m.test(frame); move += 1) {
+      view.stdin.write("j");
+      frame = await waitForFrame(view.lastFrame, candidate => candidate !== frame);
+    }
+    assert.match(frame, /^> [▸▾] Apps \(user-global\) \(1\)$/m);
+    if (/> ▸ Apps \(user-global\) \(1\)/.test(frame)) {
+      view.stdin.write("\r");
+      frame = await waitForFrame(view.lastFrame, /App gentle-shell {2}not installed/);
+    }
+    for (let move = 0; move < 3 && !/^>\s+App gentle-shell {2}not installed$/m.test(frame); move += 1) {
+      view.stdin.write("j");
+      frame = await waitForFrame(view.lastFrame, candidate => candidate !== frame);
+    }
+    assert.match(frame, /^>\s+App gentle-shell {2}not installed$/m);
+    view.stdin.write("i");
+    frame = await waitForFrame(view.lastFrame, /App install confirmation/);
+    assert.match(frame, /argv: \["npm","install","-g","gentle-shell"\]/);
+    assert.match(frame, /install gentle-shell\? y\/n/);
+    assert.ok(!commands.some(command => command.startsWith("npm install")), "the preview is separate from execution");
+
+    view.stdin.write("y");
+    frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("gentle-shell: installed 1.2.3") && !/gentle-shell\s+not installed/.test(candidate));
+    assert.match(frame, /Result · complete/);
+    assert.equal((await apps.trackedApps()).find(record => record.name === "gentle-shell")?.installedVersion, "1.2.3");
+    assert.ok(commands.some(command => command === "npm install -g gentle-shell"));
+    assert.doesNotMatch(frame, /gentle-shell\s+not installed/);
+  } finally {
+    view.unmount();
+  }
+});

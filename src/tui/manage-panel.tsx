@@ -62,6 +62,7 @@ function HostsPreview({ plan }: { readonly plan: BulkHostPlan }) {
 /** Renders the prompt of a manage mode: host lists, previews and confirmations. */
 export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
   switch (mode.kind) {
+    case "app-busy":
     case "app-approve":
     case "app-hosts":
     case "app-confirm":

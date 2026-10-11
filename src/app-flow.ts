@@ -27,7 +27,7 @@ export interface AppApprovalStatus {
 }
 
 export interface AppInspection {
-  readonly status: "invalid" | "not applicable here" | "needs approval" | "installed" | "not installed";
+  readonly status: "invalid" | "not applicable here" | "needs approval" | "installed" | "not installed" | "unknown";
   readonly installedVersion?: string;
   readonly executable?: string;
   readonly reason?: string;
@@ -228,25 +228,29 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     if (!entry.applicable) return { status: "not applicable here" };
     const approval = await approvalProblem(entry);
     if (approval) return approval;
-    if (cached) return cached.installedVersion
-      ? { status: "installed", installedVersion: cached.installedVersion, evidence: "recorded" }
-      : { status: "not installed" };
+    if (cached?.installedVersion) {
+      return { status: "installed", installedVersion: cached.installedVersion, evidence: "recorded" };
+    }
     const { executable, blocked } = await resolve(entry.recipe.version.argv[0]);
     if (!executable || blocked) {
-      return { status: "not installed", executable, reason: blocked ? WINDOWS_EXECUTABLE_WARNING : undefined };
+      return { status: "unknown", executable, reason: blocked ? WINDOWS_EXECUTABLE_WARNING : "Version executable is unavailable" };
     }
     let installedVersion: string | undefined;
+    let result: Awaited<ReturnType<typeof runner>>;
     try {
-      const result = await runner(executable, entry.recipe.version.argv.slice(1), {
+      result = await runner(executable, entry.recipe.version.argv.slice(1), {
         cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
       });
       installedVersion = result.code === 0 && !result.signal && !result.outputTooLarge
         ? new RegExp(entry.recipe.version.pattern).exec(result.stdout.toString("utf8"))?.[1]
         : undefined;
-    } catch {
-      return { status: "not installed", executable };
+    } catch (error) {
+      return { status: "unknown", executable, reason: error instanceof Error ? error.message : String(error) };
     }
-    if (!installedVersion) return { status: "not installed", executable };
+    if (result.code !== 0 || result.signal) return { status: "not installed", executable };
+    if (!installedVersion || result.outputTooLarge) {
+      return { status: "unknown", executable, reason: result.outputTooLarge ? "Version output exceeded the limit" : "Version output did not match the recipe" };
+    }
     await reconcileTracked(entry, installedVersion);
     return { status: "installed", executable, installedVersion, evidence: "verified" };
   }

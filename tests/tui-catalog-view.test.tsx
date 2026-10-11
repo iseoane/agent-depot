@@ -149,7 +149,7 @@ test("CatalogView shows a loading state", () => {
   const { lastFrame, unmount } = render(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(() => new Promise(() => undefined))} sourceId="builtin:agent-depot" />,
   );
-  assert.match(lastFrame() ?? "", /Loading skills/);
+  assert.match(lastFrame() ?? "", /Loading catalog/);
   unmount();
 });
 
@@ -767,10 +767,10 @@ test("CatalogView keeps Package rows reachable and explains owned Skills without
     assert.doesNotMatch(selectedLine(owned) ?? "", /provided by the pi Package/);
     assert.match(owned, /Install or update the\s+Package from its Package row/);
     stdin.write(" ");
-    const markRefusal = await waitForFrame(lastFrame, /Package-owned Skills cannot be marked/);
+    const markRefusal = await waitForFrame(lastFrame, frame => /Package-owned Skills cannot be\s+marked/.test(frame.replaceAll("│", "")));
     assert.doesNotMatch(markRefusal, /1 selected/);
     stdin.write("i");
-    const installRefusal = await waitForFrame(lastFrame, /Install or update the pi Package\s+pstack-pi/);
+    const installRefusal = await waitForFrame(lastFrame, frame => /Install or update the pi Package\s+pstack-pi/.test(frame.replaceAll("│", "")));
     assert.doesNotMatch(installRefusal, /Host \(space\/1-4 toggle/);
   } finally {
     unmount();

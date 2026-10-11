@@ -1,4 +1,5 @@
 import type { Key } from "ink";
+import type { AppEntry, AppInspection, AppOperations } from "../app-flow.js";
 import { useCallback, useEffect, useReducer, useRef, useState, type MutableRefObject } from "react";
 
 import { packageSelectionFor, selectionKey, type BundleDescriptor } from "../package-model.js";
@@ -15,6 +16,15 @@ export type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly bundles: readonly BundleEntry[]; readonly activeBundles: readonly BundleDescriptor[]; readonly warnings: readonly string[]; readonly sources: readonly Source[] };
+
+export interface CatalogAppRow {
+  readonly entry: AppEntry;
+  readonly inspection: AppInspection;
+}
+
+export type CatalogAppsState =
+  | { readonly status: "loading" }
+  | { readonly status: "ready"; readonly rows: readonly CatalogAppRow[]; readonly error?: string };
 
 /** Discovers the Skills of one Source, or of all of them, and again whenever those inputs or `reloadKey` change. */
 export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean, env: TuiEnvironment, reloadKey = 0): LoadState {
@@ -89,6 +99,32 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
     };
   }, [operations, sourceId, all, env, reloadKey]);
   return state;
+}
+
+export function useCatalogApps(apps: AppOperations): { readonly state: CatalogAppsState; readonly reload: () => Promise<void> } {
+  const [state, setState] = useState<CatalogAppsState>({ status: "loading" });
+  const generation = useRef(0);
+  const reload = useCallback(async () => {
+    const current = ++generation.current;
+    setState({ status: "loading" });
+    try {
+      const rows = await Promise.all((await apps.load()).filter(entry => entry.applicable).map(async (entry) => ({
+        entry,
+        inspection: await apps.inspect(entry),
+      })));
+      if (generation.current === current) setState({
+        status: "ready",
+        rows: rows.filter(row => row.inspection.status === "not installed"),
+      });
+    } catch (error) {
+      if (generation.current === current) setState({ status: "ready", rows: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  }, [apps]);
+  useEffect(() => {
+    void reload();
+    return () => { generation.current += 1; };
+  }, [reload]);
+  return { state, reload };
 }
 
 export interface InstalledState {

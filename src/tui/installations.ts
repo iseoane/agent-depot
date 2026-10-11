@@ -162,13 +162,11 @@ export async function loadInstallations(
   let appsError: string | undefined;
   try {
     const tracked = await appOperations.trackedApps();
-    apps = await Promise.all((await appOperations.load()).filter(entry => entry.applicable).map(async entry => ({
-      entry,
-      inspection: await appOperations.inspect(entry, {
-        installedVersion: tracked.find(record => record.name === entry.recipe?.name
-          && record.recipeFile === entry.canonicalFile)?.installedVersion,
-      }),
-    })));
+    apps = (await Promise.all((await appOperations.load()).filter(entry => entry.applicable).map(async entry => {
+      const record = tracked.find(item => item.name === entry.recipe?.name && item.recipeFile === entry.canonicalFile);
+      const inspection = await appOperations.inspect(entry, record === undefined ? undefined : { installedVersion: record.installedVersion });
+      return { entry, inspection };
+    }))).filter(row => row.inspection.status === "installed");
   } catch (error) {
     appsError = errorText(error);
   }

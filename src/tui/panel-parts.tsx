@@ -1,7 +1,18 @@
 import { Box, Text } from "ink";
+import type { ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
+
+/** A titled, color-independent boundary for a focused interaction or result. */
+export function BorderPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {
+  return (
+    <Box borderStyle="round" borderColor={theme.group} paddingX={1} flexDirection="column">
+      <Text bold>{title}</Text>
+      {children}
+    </Box>
+  );
+}
 
 /** The `> [x] 1 name` rows of a checklist; the caller renders the header. */
 export function ChecklistLines<T>({ choices, cursor, isSelected, keyOf, label }: {
@@ -50,21 +61,26 @@ export function ListFooter({ indicator, selectedCount, message }: {
     <>
       {indicator ? <Text color={theme.muted}>{indicator}</Text> : null}
       {selectedCount > 0 ? <Text color={theme.muted}>{selectedCount} selected</Text> : null}
-      {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
+      {message ? (
+        <BorderPanel title={message.kind === "error" ? "Result · failed" : "Result · complete"}>
+          <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text>
+        </BorderPanel>
+      ) : null}
     </>
   );
 }
 
 /** A preview followed by a y/n question. */
-export function PreviewConfirm({ lines, question, warnFirst }: {
+export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst }: {
+  readonly title?: string;
   readonly lines: readonly string[];
   readonly question: string;
   readonly warnFirst?: boolean;
 }) {
   return (
-    <Box flexDirection="column">
+    <BorderPanel title={title}>
       <PreviewLines lines={lines} warnFirst={warnFirst} />
       <Text>{question}</Text>
-    </Box>
+    </BorderPanel>
   );
 }

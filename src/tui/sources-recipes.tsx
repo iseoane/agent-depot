@@ -12,7 +12,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { appName, appStepLines } from "./app-actions.js";
 import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
-import { PreviewConfirm } from "./panel-parts.js";
+import { BorderPanel, PreviewConfirm } from "./panel-parts.js";
 import { answerYesNo } from "./mode-keys.js";
 import { theme } from "./theme.js";
 
@@ -267,38 +267,42 @@ export function useSourcesRecipes({
       {error ? <Text color={theme.error}>{error}</Text> : null}
       {notice ? <Text color={theme.success}>{notice}</Text> : null}
       {mode.kind === "guide" ? (
-        <Text>
-          {"1 With the AI skill · install if missing, then copy the prompt\n"}
-          {"2 Manual · write a recipe using the schema\nn or Esc closes"}
-        </Text>
+        <BorderPanel title="Add an App recipe">
+          <Text>1 With the AI skill · install if missing, then copy the prompt</Text>
+          <Text>2 Manual · write a recipe using the schema</Text>
+          <Text>n or Esc closes</Text>
+        </BorderPanel>
       ) : null}
       {mode.kind === "manual" ? (
-        <Text>
-          Write a JSON recipe in {apps.directory}{"\n"}
-          Schema: agent-depot app schema · n or Esc closes
-        </Text>
+        <BorderPanel title="Write an App recipe">
+          <Text>Write a JSON recipe in {apps.directory}</Text>
+          <Text>Schema: agent-depot app schema · n or Esc closes</Text>
+        </BorderPanel>
       ) : null}
       {mode.kind === "prompt" ? (
-        <Text>
-          Use the agent-depot-apprecipe skill to create the recipe for &lt;app&gt;{"\n"}
-          Recipes: {apps.directory} · n or Esc closes
-        </Text>
+        <BorderPanel title="App recipe authoring prompt">
+          <Text>Use the agent-depot-apprecipe skill to create the recipe for &lt;app&gt;</Text>
+          <Text>Recipes: {apps.directory} · n or Esc closes</Text>
+        </BorderPanel>
       ) : null}
       {mode.kind === "install" ? <ActionPanel mode={mode.action} /> : null}
-      {mode.kind === "busy" ? <Text>Working...</Text> : null}
+      {mode.kind === "busy" ? <BorderPanel title="App recipe workflow"><Text>Working...</Text></BorderPanel> : null}
       {mode.kind === "approve" ? (
-        <PreviewConfirm lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n`} />
+        <PreviewConfirm title="Recipe approval · does not install" lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`} />
       ) : null}
       {mode.kind === "uninstall-question" ? (
-        <Text>App {appName(mode.removal.entry)} is installed or tracked{mode.removal.installedVersion ? ` (${mode.removal.installedVersion})` : ""}. Uninstall it before removing the recipe? y/n (n cancels removal)</Text>
+        <BorderPanel title="Uninstall before recipe removal">
+          <Text>App {appName(mode.removal.entry)} is installed or tracked{mode.removal.installedVersion ? ` (${mode.removal.installedVersion})` : ""}.</Text>
+          <Text>Uninstall it before removing the recipe? y/n (n cancels removal)</Text>
+        </BorderPanel>
       ) : null}
       {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (
-        <PreviewConfirm lines={appStepLines(mode.plan)} question={mode.kind === "uninstall-manual"
+        <PreviewConfirm title={mode.kind === "uninstall-manual" ? "App manual uninstall" : "App uninstall confirmation"} lines={appStepLines(mode.plan)} question={mode.kind === "uninstall-manual"
           ? "Complete the manual uninstall, then check now? y/n"
           : `Uninstall ${appName(mode.removal.entry)}? y/n`} />
       ) : null}
       {mode.kind === "remove" ? (
-        <PreviewConfirm lines={[`Delete recipe: ${mode.removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."]}
+        <PreviewConfirm title="Recipe removal" lines={[`Delete recipe: ${mode.removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."]}
           question={`Remove recipe for ${appName(mode.removal.entry)}? y/n`} />
       ) : null}
     </Box>

@@ -6,6 +6,7 @@ import { test, type TestContext } from "node:test";
 
 import { render } from "ink-testing-library";
 
+import { createAppOperations } from "../src/app-flow.js";
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
   defaultProjectManifestPath,
@@ -15,6 +16,7 @@ import {
 import { skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
+import { InstallationsView } from "../src/tui/installations-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
@@ -97,30 +99,73 @@ async function revealSkill(lastFrame: () => string | undefined, stdin: Stdin): P
   await moveDownTo(lastFrame, stdin, /> .*portable\/demo/);
 }
 
+test("an approved recipe without verified installed state is not an Installation", async (t) => {
+  const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-uninstalled-app-home-"));
+  const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-uninstalled-app-project-"));
+  const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-uninstalled-app-state-"));
+  const recipes = path.join(state, "apps");
+  await mkdir(recipes, { recursive: true });
+  t.after(async () => {
+    await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true })));
+  });
+  await writeFile(path.join(recipes, "gentle-shell-linux.json"), JSON.stringify({
+    name: "gentle-shell",
+    platform: "linux",
+    install: { argv: ["npm", "install", "-g", "gentle-shell"] },
+    update: { argv: ["npm", "update", "-g", "gentle-shell"] },
+    uninstall: { argv: ["npm", "uninstall", "-g", "gentle-shell"] },
+    version: { argv: ["gentle-shell", "--version"], pattern: "(\\\\d+\\\\.\\\\d+\\\\.\\\\d+)" },
+  }));
+  const appEnvironment = {
+    homeDirectory: home,
+    recipesDirectory: recipes,
+    resolveExecutable: async () => undefined,
+  };
+  const appOperations = createAppOperations(appEnvironment);
+  const [entry] = await appOperations.load();
+  assert.ok(entry);
+  await appOperations.approve(entry);
+  const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
+  const operations: SourceOperations = { ...real, discoverSkills: async () => [demo] };
+  const environment: TuiEnvironment = {
+    homeDirectory: home,
+    projectRoot: project,
+    appEnvironment,
+    projectManifestStore: new ProjectManifestStore(path.join(project, "agent-depot.json")),
+  };
+  const view = render(<InstallationsView operations={operations} environment={environment} />);
+  try {
+    const frame = await waitForFrame(view.lastFrame, /Managed \(user-global\)|Unmanaged/);
+    assert.doesNotMatch(frame, /Apps \(user-global\)|gentle-shell/);
+  } finally {
+    view.unmount();
+  }
+});
+
 test("key 3 opens the Installations view, listed in the header and footer hints", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   stdin.write("3");
   const frame = await waitForFrame(lastFrame, /Managed \(user-global\) \(1\)/);
-  assert.match(frame, /\[3 Installations\]/);
+  assert.match(frame, /▶ \[3\] Installations/);
   assert.match(frame, /A adopt/);
-  assert.match(frame, /2 Catalog/);
+  assert.match(frame, /\[2\] Catalog/);
   stdin.write("1");
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   unmount();
 });
 
 test("u on a user-global installation runs the uninstall flow inside the Installations view", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   stdin.write("3");
   await waitForFrame(lastFrame, /Managed \(user-global\) \(1\)/);
   await revealSkill(lastFrame, stdin);
   stdin.write("u");
   const frame = await waitForFrame(lastFrame, /Uninstall demo\? y\/n/);
-  assert.match(frame, /\[3 Installations\]/);
+  assert.match(frame, /▶ \[3\] Installations/);
   assert.match(frame, /removes the whole user-global installation/);
   unmount();
 });
@@ -128,13 +173,13 @@ test("u on a user-global installation runs the uninstall flow inside the Install
 test("h on an installation with missing hosts opens the host checklist without leaving the view", async (t) => {
   const f = await fixture(t, ["pi"]);
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   stdin.write("3");
   await waitForFrame(lastFrame, /Managed \(user-global\) \(1\)/);
   await revealSkill(lastFrame, stdin);
   stdin.write("h");
   const frame = await waitForFrame(lastFrame, /Add hosts to demo/);
-  assert.match(frame, /\[3 Installations\]/);
+  assert.match(frame, /▶ \[3\] Installations/);
   assert.match(frame, /\[ \] 1 claude/);
   unmount();
 });
@@ -152,7 +197,7 @@ test("q and number keys are blocked while the adoption flow captures keys", asyn
   const { lastFrame, stdin, unmount } = render(
     <App operations={operations} environment={f.environment} onExit={() => { exits += 1; }} />,
   );
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   stdin.write("3");
   await waitForFrame(lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await moveDownTo(lastFrame, stdin, /> .*Unmanaged \(user-global\)/);
@@ -165,7 +210,7 @@ test("q and number keys are blocked while the adoption flow captures keys", asyn
   stdin.write("1");
   const frame = await waitForFrame(lastFrame, /\[x\] 1 pi/);
   assert.equal(exits, 0);
-  assert.match(frame, /\[3 Installations\]/);
+  assert.match(frame, /▶ \[3\] Installations/);
   stdin.write("\u001B");
   await waitForFrame(lastFrame, /Adoption cancelled/);
   unmount();

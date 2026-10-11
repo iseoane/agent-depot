@@ -24,9 +24,11 @@ export type Entry =
 export function describeUnknownReasons(rows: readonly UpdateRow[]): string {
   const newer = rows.filter((row) => /^installed by a newer agent depot/i.test(row.reason)).length;
   const pinned = rows.filter((row) => /^pinned to agent depot/i.test(row.reason)).length;
+  const localChanges = rows.filter((row) => row.kind === "package" && /local modifications|local changes/i.test(row.reason)).length;
   const parts = [
     ...(newer > 0 ? [`${newer} installed by a newer Agent Depot`] : []),
     ...(pinned > 0 ? [`${pinned} pinned to another Agent Depot`] : []),
+    ...(localChanges > 0 ? [`${localChanges} Package update comparison unavailable because the checkout has local changes`] : []),
   ];
   return parts.length === 0 ? "" : ` (${parts.join(", ")})`;
 }

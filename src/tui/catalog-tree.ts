@@ -1,4 +1,5 @@
 import type { SkillCandidate } from "../skill-discovery.js";
+import type { CatalogAppRow } from "./catalog-state.js";
 import type { Source } from "../sources.js";
 import { githubTreeLocation } from "../git-source.js";
 import { bundleRoot, type BundleDescriptor, type PackageSelection } from "../package-model.js";
@@ -21,7 +22,8 @@ export type NodeData =
   | { readonly kind: "source"; readonly sourceId: string; readonly label: string; readonly count: number }
   | { readonly kind: "group"; readonly label: string }
   | { readonly kind: "bundle"; readonly entry: BundleEntry }
-  | { readonly kind: "skill"; readonly skill: SkillCandidate; readonly ownedBy?: BundleDescriptor };
+  | { readonly kind: "skill"; readonly skill: SkillCandidate; readonly ownedBy?: BundleDescriptor }
+  | { readonly kind: "app"; readonly row: CatalogAppRow };
 
 export type CatalogNode = TreeNode<NodeData>;
 
@@ -54,6 +56,7 @@ export function buildTree(
   sources: readonly Source[] = [],
   bundles: readonly BundleEntry[] = [],
   activeDescriptors: readonly BundleDescriptor[] = [],
+  apps: readonly CatalogAppRow[] = [],
 ): readonly CatalogNode[] {
   const labels = new Map(sources.map((source) => [source.id, sourceLabel(source)]));
   const active = new Set(activeDescriptors);
@@ -61,7 +64,7 @@ export function buildTree(
   for (const skill of skills) bySource.set(skill.sourceId, [...(bySource.get(skill.sourceId) ?? []), skill]);
   const bundlesBySource = new Map<string, BundleEntry[]>();
   for (const bundle of bundles) bundlesBySource.set(bundle.sourceId, [...(bundlesBySource.get(bundle.sourceId) ?? []), bundle]);
-  return [...new Set([...bySource.keys(), ...bundlesBySource.keys()])].map((sourceId): CatalogNode => {
+  const sourcesTree = [...new Set([...bySource.keys(), ...bundlesBySource.keys()])].map((sourceId): CatalogNode => {
     const members = bySource.get(sourceId) ?? [];
     const sourceBundles = bundlesBySource.get(sourceId) ?? [];
     const owned = packageOwnedSkillMatcher(sourceBundles.map((entry) => entry.descriptor).filter((descriptor) => active.has(descriptor)));
@@ -81,15 +84,29 @@ export function buildTree(
       ],
     };
   });
+  return apps.length === 0 ? sourcesTree : [...sourcesTree, {
+    id: "apps:user-global",
+    data: { kind: "group", label: `Apps (user-global) (${apps.length})` },
+    children: apps.map((row): CatalogNode => ({ id: `app:${row.entry.file}`, data: { kind: "app", row } })),
+  }];
 }
 
-function allSourceIds(roots: readonly CatalogNode[]): Expanded {
-  return new Set(roots.filter((root) => (root.children?.length ?? 0) > 0).map((root) => root.id));
+function allExpandableIds(roots: readonly CatalogNode[]): Expanded {
+  const ids = new Set<string>();
+  const visit = (nodes: readonly CatalogNode[]) => {
+    for (const node of nodes) {
+      if ((node.children?.length ?? 0) === 0) continue;
+      ids.add(node.id);
+      visit(node.children!);
+    }
+  };
+  visit(roots);
+  return ids;
 }
 
 /** Filtering opens matching Sources; otherwise all groups start collapsed. */
 export function openByDefault(nodes: readonly CatalogNode[], query: string): Expanded {
-  return query === "" ? defaultExpanded() : allSourceIds(nodes);
+  return query === "" ? defaultExpanded() : allExpandableIds(nodes);
 }
 
 export function describeRow(row: VisibleRow<NodeData>): string {
@@ -99,6 +116,7 @@ export function describeRow(row: VisibleRow<NodeData>): string {
   if (data.kind === "bundle") {
     return `Package ${data.entry.descriptor.name} (${data.entry.descriptor.host})  ${packageVersionLabel(data.entry.descriptor.version)}`;
   }
+  if (data.kind === "app") return `App ${data.row.entry.recipe?.name ?? data.row.entry.file}  ${data.row.inspection.status}`;
   return `${data.skill.name}  ${truncateDescription(data.skill.description)}`;
 }
 

@@ -158,7 +158,7 @@ test("platform selection rejects applicable duplicates and isolates WSL executab
     let entries = await apps.load();
     assert.equal(entries.filter(entry => entry.applicable).length, 1);
     await apps.approve(entries[0]!);
-    assert.equal((await apps.inspect(entries[0]!)).status, "not installed");
+    assert.equal((await apps.inspect(entries[0]!)).status, "unknown");
     assert.equal(calls, 0);
     await writeFile(path.join(root, "two.json"), JSON.stringify({
       ...recipe,
@@ -202,7 +202,7 @@ test("a duplicate added after approval blocks even a previously loaded entry", a
   }
 });
 
-test("version spawn failure, non-zero exit, oversized output and unmatched output mean not installed", async () => {
+test("a non-zero version-command exit proves absence; unavailable checks remain unknown", async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), "app-test-"));
   const root = path.join(fixture, "workspace");
   await mkdir(root);
@@ -226,7 +226,7 @@ test("version spawn failure, non-zero exit, oversized output and unmatched outpu
       });
       const [entry] = await apps.load();
       await apps.approve(entry!);
-      assert.equal((await apps.inspect(entry!)).status, "not installed", outcome);
+      assert.equal((await apps.inspect(entry!)).status, outcome === "exit" ? "not installed" : "unknown", outcome);
     }
   } finally {
     await rm(fixture, {
@@ -281,7 +281,7 @@ test("WSL skips Windows PATH hits and spawns the Linux shim rather than its real
     assert.equal((await apps.inspect(entry!)).executable, path.join(linux, "example"));
     assert.equal(calls, 2);
     await rm(path.join(linux, "example"));
-    assert.equal((await apps.inspect(entry!)).status, "not installed");
+    assert.equal((await apps.inspect(entry!)).status, "unknown");
     assert.equal(calls, 2);
   } finally {
     if (previousPath === undefined)
@@ -393,7 +393,7 @@ test("WSL mount boundaries and previews distinguish Windows drive mounts", async
       const versionPreview = (await apps.preview(entry!)).find(step => step.step === "version")!;
       assert.equal(versionPreview.warning, executable === "/mnt/c/x" ? "will not run (Windows executable on WSL)" : undefined);
       await apps.approve(entry!);
-      assert.equal((await apps.inspect(entry!)).status, executable === "/mnt/c/x" ? "not installed" : "installed");
+      assert.equal((await apps.inspect(entry!)).status, executable === "/mnt/c/x" ? "unknown" : "installed");
       assert.equal(calls, executable === "/mnt/c/x" ? 0 : 1);
     }
   } finally {

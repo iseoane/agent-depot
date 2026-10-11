@@ -6,6 +6,7 @@ import { packageOwnedSkillAction } from "./catalog-ownership.js";
 import { looseLeavesOf, skillKey, type NodeData } from "./catalog-tree.js";
 import type { CatalogFilterControls } from "./catalog-state.js";
 import type { PackageTarget } from "./package-actions.js";
+import type { AppEntry } from "../app-flow.js";
 import { navigateTree, type TreeNavigation } from "./tree-navigation.js";
 import { toggleNode, type VisibleRow } from "./tree.js";
 import { toggledMark, type Marks, type ViewMessage } from "./view-state.js";
@@ -23,6 +24,8 @@ export interface CatalogBrowseContext {
   readonly toggleAll: () => void;
   /** Starts the shared Package lifecycle for the highlighted bundle. */
   readonly startPackage: (target: PackageTarget) => void;
+  /** Starts the shared App lifecycle for an approved, verified-absent recipe. */
+  readonly startApp: (entry: AppEntry) => void;
   setMessage(message: ViewMessage | undefined): void;
   setAction(mode: ActionMode): void;
 }
@@ -74,6 +77,11 @@ function markRepository(context: CatalogBrowseContext, row: Row | undefined, vis
 /** `i`: installs the highlighted bundle, or the marked Skills that are listed, or the highlighted one. */
 function chooseHosts(context: CatalogBrowseContext, row: Row): void {
   const data = row.node.data;
+  if (data.kind === "app") {
+    context.setMessage(undefined);
+    context.startApp(data.row.entry);
+    return;
+  }
   // A bundle row is not markable, so it acts on itself and never picks up a Skill mark.
   if (data.kind === "bundle") {
     context.setMessage(undefined);
@@ -108,6 +116,6 @@ export function handleCatalogBrowseKey(context: CatalogBrowseContext, input: str
   else if (input === "s" && context.canWiden) context.toggleAll();
   else if (input === " " && row) markRow(context, row);
   else if (input === "a") markRepository(context, row, snapshot.visible);
-  else if (input === "i" && context.ready && row) chooseHosts(context, row);
+  else if (input === "i" && row && (context.ready || row.node.data.kind === "app")) chooseHosts(context, row);
 }
 

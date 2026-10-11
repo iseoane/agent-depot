@@ -15,7 +15,6 @@ import { sourceIdForUrl } from "../../src/git-source.js";
 
 // Compiled location: dist/tests/e2e -> the built CLI is dist/src/cli.js.
 const CLI = fileURLToPath(new URL("../../src/cli.js", import.meta.url));
-// Terminal escape sequences are control characters by definition.
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\-_])/gu;
 const TIMEOUT_MS = 30_000;
@@ -43,8 +42,16 @@ class TuiSession {
   private readonly exited: Promise<number>;
   private exit: { exitCode: number; signal?: number } | undefined;
   private rawLength = 0;
+  private columns: number;
+  private rows: number;
+  private cursorX = 0;
+  private cursorY = 0;
+  private cells: string[][];
 
   constructor(environment: NodeJS.ProcessEnv = {}, cols = 110, rows = 40) {
+    this.columns = cols;
+    this.rows = rows;
+    this.cells = Array.from({ length: rows }, () => []);
     // Ink renders only the final frame when it detects CI (`CI` / `CONTINUOUS_INTEGRATION`), which leaves an
     // interactive PTY blank. The session is a real terminal, so hide the CI markers from the child.
     const inherited: NodeJS.ProcessEnv = {
@@ -66,6 +73,7 @@ class TuiSession {
     this.terminal.onData((data) => {
       this.output += data;
       this.rawLength += data.length;
+      this.updateScreen(data);
     });
     this.exited = new Promise((resolve) =>
       this.terminal.onExit(({ exitCode, signal }) => {
@@ -77,7 +85,7 @@ class TuiSession {
 
   /** Text rendered since the last `send` (or since spawn), ANSI stripped. */
   get screen(): string {
-    return this.output.replace(ANSI, "");
+    return this.cells.map(line => line.join("").replace(/\s+$/u, "")).join("\n");
   }
 
   get terminalOutput(): string {
@@ -97,7 +105,83 @@ class TuiSession {
   }
 
   resize(cols: number, rows: number): void {
+    this.columns = cols;
+    this.rows = rows;
+    this.cells = Array.from({ length: rows }, (_, index) => this.cells[index]?.slice(0, cols) ?? []);
+    this.cursorX = Math.min(this.cursorX, cols - 1);
+    this.cursorY = Math.min(this.cursorY, rows - 1);
     this.terminal.resize(cols, rows);
+  }
+
+  private updateScreen(chunk: string): void {
+    const clearLine = (mode: number) => {
+      const start = mode === 0 ? this.cursorX : 0;
+      const end = mode === 1 ? this.cursorX + 1 : this.columns;
+      for (let column = start; column < end; column += 1) this.cells[this.cursorY]![column] = " ";
+    };
+    const lineFeed = () => {
+      this.cursorY += 1;
+      if (this.cursorY >= this.rows) {
+        this.cells.shift();
+        this.cells.push([]);
+        this.cursorY = this.rows - 1;
+      }
+    };
+    for (let index = 0; index < chunk.length;) {
+      if (chunk[index] === "\u001b") {
+        if (chunk[index + 1] === "[") {
+          let end = index + 2;
+          while (end < chunk.length && (chunk.charCodeAt(end) < 0x40 || chunk.charCodeAt(end) > 0x7e)) end += 1;
+          if (end >= chunk.length) break;
+          const final = chunk[end]!;
+          const raw = chunk.slice(index + 2, end);
+          const params = raw.replace(/^\?/u, "").split(";").map(value => Number(value) || 0);
+          const amount = params[0] || 1;
+          if (final === "H" || final === "f") {
+            this.cursorY = Math.min(Math.max((params[0] || 1) - 1, 0), this.rows - 1);
+            this.cursorX = Math.min(Math.max((params[1] || 1) - 1, 0), this.columns - 1);
+          } else if (final === "A") this.cursorY = Math.max(this.cursorY - amount, 0);
+          else if (final === "B") this.cursorY = Math.min(this.cursorY + amount, this.rows - 1);
+          else if (final === "C") this.cursorX = Math.min(this.cursorX + amount, this.columns - 1);
+          else if (final === "D") this.cursorX = Math.max(this.cursorX - amount, 0);
+          else if (final === "G") this.cursorX = Math.min(Math.max(amount - 1, 0), this.columns - 1);
+          else if (final === "d") this.cursorY = Math.min(Math.max(amount - 1, 0), this.rows - 1);
+          else if (final === "K") clearLine(params[0] ?? 0);
+          else if (final === "J" && (params[0] === 2 || params[0] === 3)) {
+            this.cells = Array.from({ length: this.rows }, () => []);
+            this.cursorX = 0;
+            this.cursorY = 0;
+          }
+          index = end + 1;
+          continue;
+        }
+        if (chunk[index + 1] === "]") {
+          const bell = chunk.indexOf("\u0007", index + 2);
+          const terminator = chunk.indexOf("\u001b\\", index + 2);
+          const end = bell < 0 ? terminator : terminator < 0 ? bell : Math.min(bell, terminator);
+          index = end < 0 ? chunk.length : end + (chunk[end] === "\u0007" ? 1 : 2);
+          continue;
+        }
+        index += 2;
+        continue;
+      }
+      const character = String.fromCodePoint(chunk.codePointAt(index)!);
+      index += character.length;
+      if (character === "\r") this.cursorX = 0;
+      else if (character === "\n") lineFeed();
+      else if (character === "\b") this.cursorX = Math.max(this.cursorX - 1, 0);
+      else if (character === "\t") this.cursorX = Math.min(Math.floor(this.cursorX / 8 + 1) * 8, this.columns - 1);
+      else if (character >= " ") {
+        if (this.cursorX >= this.columns) {
+          this.cursorX = 0;
+          lineFeed();
+        }
+        this.cells[this.cursorY]![this.cursorX] = character;
+        const codePoint = character.codePointAt(0)!;
+        const wide = codePoint >= 0x1100 && (codePoint <= 0x115f || codePoint >= 0x2e80);
+        this.cursorX += wide ? 2 : 1;
+      }
+    }
   }
 
   /** Child state for failure messages: exit code/signal and total raw chars received since spawn. */
@@ -109,9 +193,9 @@ class TuiSession {
   async waitFor(expected: RegExp, ready: (screen: string) => boolean = () => true): Promise<string> {
     const deadline = Date.now() + TIMEOUT_MS;
     for (;;) {
-      const screen = this.screen;
+      const screen = this.output.replace(ANSI, "");
       assert.doesNotMatch(screen, /Error:|TypeError/u, `TUI reported an error:\n${screen}`);
-      if (expected.test(screen) && ready(screen)) return screen;
+      if (expected.test(screen) && ready(screen)) return this.screen;
       if (this.exit) {
         assert.fail(`TUI exited early while waiting for ${String(expected)}; ${this.diagnostics}; screen:\n${screen}`);
       }
@@ -146,9 +230,9 @@ class TuiSession {
 test("the TUI walks every view in a real terminal and quits cleanly", { timeout: 120_000 }, async () => {
   const session = new TuiSession();
   try {
-    await session.waitFor(/Agent Depot[\s\S]*n add ·/u);
+    await session.waitFor(/AGENT DEPOT[\s\S]*n add ·/u);
     assert.ok(session.terminalOutput.includes("\u001B[?1049h"), "the TUI starts in Ink's alternate screen");
-    const initialFrame = session.screen.slice(session.screen.lastIndexOf("Agent Depot"));
+    const initialFrame = session.screen.slice(session.screen.lastIndexOf("╭"));
     assert.ok(initialFrame.split("\n").length >= 40, `startup did not fill the 40-row PTY:\n${initialFrame}`);
 
     const catalog = await session.send("2", /▸ builtin:agent-depot \(3\)/u);
@@ -167,7 +251,8 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
     assert.match(updates, /Updates \(scope: all\)/u);
 
     const profile = await session.send("5", /e export · i import/u);
-    assert.match(profile, /5 Import\/Export/u);
+    assert.match(profile, /Portable user-global Profile/u);
+    assert.match(profile, /▶ \[5\] Profile/u);
 
     const sources = await session.send("1", /builtin:agent-depot/u);
     assert.match(sources, /n add ·/u);
@@ -181,7 +266,7 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
     await session.send("/", /Enter submit · Esc cancel/u);
     const filtered = await session.send("agents", /doctor-md-agents/u);
     // Ink repaints whole frames, each starting with the header: judge the last one only.
-    assert.doesNotMatch(filtered.split("Agent Depot").pop() ?? "", /doctor-md-skill/u);
+    assert.doesNotMatch(filtered.split("AGENT DEPOT").pop() ?? "", /doctor-md-skill/u);
     await session.send("\u001b", /j\/k move/u);
 
     session.press("q");
@@ -192,7 +277,7 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
   }
 });
 
-test("active Pi and Claude Package owners stay readable in a narrow real terminal", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+test("the Catalog keeps numbered destinations and Packages readable in a narrow real terminal", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), "depot-catalog-owners-"));
   const home = path.join(root, "home");
   const repository = path.join(root, "pstack");
@@ -249,29 +334,23 @@ test("active Pi and Claude Package owners stay readable in a narrow real termina
 
   const session = new TuiSession(env, 40, 17);
   try {
-    await session.waitFor(/n add ·/u);
+    const narrowHeader = await session.waitFor(/n add ·/u);
+    assert.match(narrowHeader, /AGENT DEPOT/u, `40-column header lost its title:\n${narrowHeader}`);
+    assert.match(narrowHeader, /v0\.5\.2/u, `40-column header lost the package version:\n${narrowHeader}`);
+    for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
+      assert.ok(narrowHeader.includes(destination), `40-column header lost ${destination}:\n${narrowHeader}`);
+    }
     await session.send("2", /example.test\/packages\/pstack \(3\)/u);
-    await session.send("j", /> ▸ example.test\/packages\/pstack/u);
-    await session.send("\r", /▾ example.test\/packages\/pstack/u);
-    await session.send("j", />\s+▸ Packages \(2\)/u);
-    await session.send("\r", /Package agent-depot-package/u);
-    const pi = await session.send("jjj", /Package-owned Skill: provided by the pi[\s\S]*?force-wrapping/u);
-    const piFrame = pi.split("Agent Depot").at(-1) ?? pi;
-    assert.ok(piFrame.split("\n").length <= 17, `40-column PTY frame exceeded 17 rows:\n${piFrame}`);
-    assert.match(pi, /\d+–\d+ of \d+/u);
-    assert.match(pi, /j\/k move/u);
+    await session.send("/", /Enter submit · Esc cancel/u);
+    const narrowCatalog = await session.send("pstack", /Package agent-depot-package/u);
+    assert.ok(narrowCatalog.split("\n").length <= 17, `40-column PTY frame exceeded 17 rows:\n${narrowCatalog}`);
     session.resize(80, 24);
-    session.press("j");
-    const claude = await session.waitFor(
-      /Package-owned Skill: provided by the claude[\s\S]*?force-wrapping/u,
-      screen => {
-        const frame = screen.slice(screen.lastIndexOf("Agent Depot"));
-        return frame.includes("j/k move") && frame.split("\n").length >= 24;
-      },
-    );
-    assert.match(claude, /j\/k move/u);
-    const resizedFrame = claude.slice(claude.lastIndexOf("Agent Depot"));
-    assert.ok(resizedFrame.split("\n").length >= 24, `resize did not fill the 24-row PTY:\n${resizedFrame}`);
+    const resized = await session.waitFor(/Package agent-depot-package/u, screen => screen.split("\n").length >= 24);
+    for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
+      assert.ok(resized.includes(destination), `resized header lost ${destination}:\n${resized}`);
+    }
+    assert.ok(resized.split("\n").length >= 24, `resize did not fill the 24-row PTY:\n${resized}`);
+    await session.send("\r", /j\/k move/u);
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally {
@@ -297,7 +376,7 @@ test("a non-interactive run exits 1 with a clean message", { timeout: 60_000 }, 
   assert.equal(stderr.trim(), "Error: agent-depot tui requires an interactive terminal");
 });
 
-test("the TUI approves and installs an App, then offers its update", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+test("the TUI keeps recipe approval separate from confirmed App installation and updates", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
   const fixture = await fakeAppFixture(sandbox);
   const session = new TuiSession({
     PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
@@ -307,20 +386,26 @@ test("the TUI approves and installs an App, then offers its update", { timeout: 
   });
   try {
     await session.waitFor(/n add ·/u);
-    await session.send("3", /Apps \(user-global\) \(1\)/u);
-    await assert.rejects(readFile(fixture.log), { code: "ENOENT" });
-    // Empty Managed/global, Managed/project and Unmanaged roots precede Apps.
-    await session.send("jjj", /> ▸ Apps \(user-global\)/u);
-    await session.send("\r", /fixture-app/u);
-    await session.send("j", /> .*fixture-app/u);
+    await session.send("j", /fixture-app.*needs approval/u);
     await session.send("\r", /Approve fixture-app\? y\/n/u);
-    await session.send("y", /Approved fixture-app/u);
-    await session.send("i", /install fixture-app\? y\/n/u);
+    await session.send("y", /fixture-app.*approved/u);
+    await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
+
+    await session.send("\t", /▶ \[2\] Catalog/u);
+    await session.send("/", /Enter submit · Esc cancel/u);
+    await session.send("fixture-app", /Filter: fixture-app/u);
+    await session.send("\r", /j\/k move/u);
+    await session.send("j", />\s+App fixture-app\s+not installed/u);
+    await session.send("i", /App install confirmation/u);
+    assert.match(session.screen, /argv: \["depot-e2e-app","install"\]/u);
+    assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "preview must not execute the recipe");
     await session.send("y", /fixture-app: installed/u);
     assert.equal(await readFile(fixture.state, "utf8"), "1.0.0");
+
+    await session.send("3", /Apps \(user-global\) \(1\)/u);
     const updates = await session.send("4", /App: fixture-app/u);
-    assert.match(updates, /1\.0\.0/);
-    assert.match(updates, /2\.0\.0/);
+    assert.match(updates, /1\.0\.0/u);
+    assert.match(updates, /2\.0\.0/u);
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally { session.kill(); }

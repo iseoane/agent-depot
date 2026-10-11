@@ -7,23 +7,24 @@ import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
 import type { FilterState } from "./catalog-filter.js";
 import { describeRow, truncateDescription, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
 import { isPackageMode, PackagePanel } from "./package-actions.js";
-import { HostChecklist, PreviewLines } from "./panel-parts.js";
+import { BorderPanel, HostChecklist, PreviewLines } from "./panel-parts.js";
 import { rowStyle } from "./theme.js";
 import type { VisibleRow } from "./tree.js";
 import { theme } from "./theme.js";
 
 /** Scope and counts, the filter line, and why the list may be empty. */
-export function CatalogHeader({ scope, listed, installable, total, filter }: {
+export function CatalogHeader({ scope, listed, installable, total, appCount, filter }: {
   readonly scope: string;
   readonly listed: number;
   readonly installable: number;
   readonly total: number;
+  readonly appCount: number;
   readonly filter: FilterState;
 }) {
   return (
     <>
       <Text color={theme.muted}>
-        Scope: {scope}  {listed} of {installable}
+        Scope: {scope}  {listed} of {installable} Skills  ·  {appCount} Apps
       </Text>
       {filter.editing || filter.query !== "" ? (
         <Text>Filter: {filter.query}{filter.editing ? "_" : ""}</Text>
@@ -79,22 +80,22 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       return null;
     case "host":
       return (
-        <Box flexDirection="column">
-          <Text>Install {describeSkills(mode.skills)}. Host (space/1-4 toggle, j/k move, Enter continue, Esc cancel):</Text>
+        <BorderPanel title={`Skill selection · ${mode.skills.length} selected`}>
+          <Text>Install {describeSkills(mode.skills)}. Host (space/1-4 toggle · j/k move · Enter continue · Esc cancel)</Text>
           <HostChecklist choices={HOST_CHOICES} cursor={mode.cursor} selected={mode.selected} />
-        </Box>
+        </BorderPanel>
       );
     case "scope":
-      return <Text>Scope: {SCOPE_CHOICES.map((scope, i) => `${i + 1} ${scope}`).join("  ")}  (Esc cancel)</Text>;
+      return <BorderPanel title="Skill installation scope"><Text>{SCOPE_CHOICES.map((scope, i) => `${i + 1} ${scope}`).join("  ")}  (Esc cancel)</Text></BorderPanel>;
     case "version":
-      return <Text>Version: 1 latest  2 fixed  (Esc cancel)</Text>;
+      return <BorderPanel title="Skill version policy"><Text>1 latest  2 fixed  (Esc cancel)</Text></BorderPanel>;
     case "fixed":
-      return <Text>Fixed version: {mode.value}_  (Enter confirm, Esc cancel)</Text>;
+      return <BorderPanel title="Fixed Skill version"><Text>{mode.value}_  (Enter confirm, Esc cancel)</Text></BorderPanel>;
     case "confirm-install": {
       const ready = mode.items.filter((item) => item.prepared !== undefined);
       const single = mode.items.length === 1;
       return (
-        <Box flexDirection="column">
+        <BorderPanel title={`Skill install preview · ${ready.length} ready`}>
           {mode.items.map(({ skill, prepared, error }) =>
             prepared === undefined ? (
               <Text key={skillKey(skill)} color={theme.error}>Cannot install {skill.name}: {error}</Text>
@@ -106,18 +107,20 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
             ))}
           {ready.some((item) => item.prepared?.runsExternalCommand) ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
           <Text>Install {describeSkills(ready.map((item) => item.skill))}? y/n</Text>
-        </Box>
+        </BorderPanel>
       );
     }
     case "confirm-exposure": {
       const names = mode.items.filter((item) => item.prepared?.additionalHostExposure).map((item) => item.skill.name);
       return (
-        <Text color={theme.warning}>
-          {names.length === 1 ? `An identical ${names[0]} already exists` : `Identical copies of ${names.join(", ")} already exist`}; adding the missing Host location needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
-        </Text>
+        <BorderPanel title={`Skill Host exposure · ${names.length} confirmation`}>
+          <Text color={theme.warning}>
+            {names.length === 1 ? `An identical ${names[0]} already exists` : `Identical copies of ${names.join(", ")} already exist`}; adding the missing Host location needs separate confirmation. Confirm? y/n
+          </Text>
+        </BorderPanel>
       );
     }
     case "busy":
-      return <Text>{mode.label}</Text>;
+      return <BorderPanel title="Skill install"><Text>{mode.label}</Text></BorderPanel>;
   }
 }

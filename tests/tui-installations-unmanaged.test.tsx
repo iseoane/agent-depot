@@ -234,7 +234,7 @@ test("a location that changed after the preview is kept and the others are still
   await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
   await writeFile(path.join(agents, "SKILL.md"), `${SKILL_MD}edited after the preview\n`, "utf8");
   view.stdin.write("y");
-  const done = await waitForFrame(view.lastFrame, /Failed .*changed before\s+deletion/s);
+  const done = await waitForFrame(view.lastFrame, frame => /Failed .*changed\s+before\s+deletion/s.test(frame.replaceAll("│", "")));
   assert.match(done, /Removed /);
   assert.equal(await exists(agents), true);
   assert.equal(await exists(claude), false);

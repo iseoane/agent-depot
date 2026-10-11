@@ -88,9 +88,9 @@ async function choose(view: View, hostKeys: readonly string[], scopeKey: string,
   await waitForFrame(view.lastFrame, /Host \(space/);
   for (const hostKey of hostKeys) await step(view, hostKey);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Scope:/);
+  await waitForFrame(view.lastFrame, /Skill installation scope/);
   view.stdin.write(scopeKey);
-  await waitForFrame(view.lastFrame, /Version:/);
+  await waitForFrame(view.lastFrame, /Skill version policy/);
   view.stdin.write(versionKey);
 }
 

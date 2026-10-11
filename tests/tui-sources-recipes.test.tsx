@@ -106,9 +106,9 @@ test("recipe add guide offers exactly AI and manual routes, and AI reuses confir
   await waitForFrame(view.lastFrame, /Install agent-depot-apprecipe. Host/);
   view.stdin.write("1");
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Scope/);
+  await waitForFrame(view.lastFrame, /Skill installation scope/);
   view.stdin.write("2");
-  await waitForFrame(view.lastFrame, /Version/);
+  await waitForFrame(view.lastFrame, /Skill version policy/);
   view.stdin.write("1");
   frame = await waitForFrame(view.lastFrame, /Install.*y\/n/);
   assert.match(frame, /agent-depot-apprecipe/);
@@ -172,12 +172,12 @@ test("recipe guide captures global number and quit keys in the shell", async t =
   assert.doesNotMatch(startup, /Tab section/);
   view.stdin.write("n2q");
   const frame = await waitForFrame(view.lastFrame, /agent-depot app schema/);
-  assert.match(frame, /\[1 Sources\]/);
+  assert.match(frame, /▶ \[1\] Sources/);
   assert.equal(exited, false);
   view.stdin.write("\u001b");
   await waitForFrame(view.lastFrame, frame => !frame.includes("agent-depot app schema"));
   view.stdin.write("2");
-  await waitForFrame(view.lastFrame, /\[2 Catalog\]/);
+  await waitForFrame(view.lastFrame, /▶ \[2\] Catalog/);
 });
 
 test("core approval status is explicit and reads no executables, commands or latest", async t => {
@@ -293,11 +293,11 @@ for (const stage of ["host", "scope", "version", "confirm"] as const) {
       if (stage !== "host") {
         view.stdin.write("1");
         view.stdin.write("\r");
-        await waitForFrame(view.lastFrame, /Scope:/);
+        await waitForFrame(view.lastFrame, /Skill installation scope/);
       }
       if (stage === "version" || stage === "confirm") {
         view.stdin.write("2");
-        await waitForFrame(view.lastFrame, /Version:/);
+        await waitForFrame(view.lastFrame, /Skill version policy/);
       }
       if (stage === "confirm") {
         view.stdin.write("1");

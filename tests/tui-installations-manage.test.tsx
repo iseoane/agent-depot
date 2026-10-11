@@ -247,17 +247,12 @@ test("u and h ignore group rows and project installations stay read-only", async
 });
 
 
-for (const input of ["i", "u", "h"]) {
-  test(`Skill ${input} keeps its existing flow when the Apps group is present`, async t => {
-    const f = await fixture(t, ["pi"], true);
-    const view = await mount(f);
-    t.after(() => view.unmount());
-    await revealSkill(view);
-    assert.match(view.lastFrame()!, /Apps \(user-global\) \(1\)/);
-    view.stdin.write(input);
-    await waitForFrame(view.lastFrame, input === "u" ? /Uninstall demo\? y\/n/ : /Add hosts to demo/);
-    view.stdin.write(ESC);
-    await waitForFrame(view.lastFrame, /cancelled/);
-    assert.deepEqual(await hostsOf(f.operations), ["pi"]);
-  });
-}
+test("unapproved App recipes do not appear as Installations alongside managed Skills", async t => {
+  const f = await fixture(t, ["pi"], true);
+  const view = await mount(f);
+  t.after(() => view.unmount());
+  await revealSkill(view);
+  assert.doesNotMatch(view.lastFrame()!, /Apps \(user-global\)/);
+  assert.match(view.lastFrame()!, /portable\/demo/);
+  assert.deepEqual(await hostsOf(f.operations), ["pi"]);
+});

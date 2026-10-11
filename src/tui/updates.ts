@@ -240,7 +240,7 @@ export async function loadUpdateRows(
   } catch (error) {
     appError = errorText(error);
   }
-  for (const check of appChecks) {
+  for (const check of appChecks.filter(candidate => candidate.inspection.status === "installed")) {
     rows.push({
       kind: "app",
       key: `app:${check.entry.file}`,

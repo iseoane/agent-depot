@@ -105,7 +105,7 @@ for (const [label, content, reason] of [
     assert.deepEqual(await createAppOperations(f.environment.appEnvironment).load(), []);
     assert.equal((await f.operations.listSources()).length, 1);
     f.view.stdin.write("1");
-    await waitForFrame(f.view.lastFrame, /\[1 Sources\]/);
+    await waitForFrame(f.view.lastFrame, /▶ \[1\] Sources/);
   });
 }
 
@@ -268,7 +268,7 @@ for (const action of ["export", "import"] as const) {
     f.view.stdin.write("\r");
     f.view.stdin.write("q12345");
     const captured = await waitForFrame(f.view.lastFrame, /Profile path: q12345_/);
-    assert.match(captured, /\[5 Import\/Export\]/);
+    assert.match(captured, /▶ \[5\] Profile/);
     assert.equal(f.exits(), 0);
     f.view.stdin.write("\u007f");
     await waitForFrame(f.view.lastFrame, /Profile path: q1234_/);
@@ -414,7 +414,7 @@ test("busy import ignores view, quit, cancel, toggle and action keys until the r
   await new Promise(resolve => setTimeout(resolve, 50));
   const busy = f.view.lastFrame()!;
   assert.match(busy, /Loading Profile/);
-  assert.match(busy, /\[5 Import\/Export\]/);
+  assert.match(busy, /▶ \[5\] Profile/);
   assert.doesNotMatch(busy, /Profile path:/);
   assert.equal(f.exits(), 0);
   release();

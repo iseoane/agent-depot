@@ -593,9 +593,9 @@ test("key 4 opens the Updates view; q and number keys are ignored while confirmi
   await seedProject(f, [{ name: "one", state: "outdated" }]);
   let exited = false;
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} onExit={() => { exited = true; }} />);
-  await waitForFrame(lastFrame, /4 Updates/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   press(stdin, "4");
-  await waitForFrame(lastFrame, /\[4 Updates\]/);
+  await waitForFrame(lastFrame, /▶ \[4\] Updates/);
   await waitForFrame(lastFrame, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
@@ -603,19 +603,19 @@ test("key 4 opens the Updates view; q and number keys are ignored while confirmi
   press(stdin, "q");
   press(stdin, "1");
   const frame = await waitForFrame(lastFrame, /Apply 1 update/);
-  assert.match(frame, /\[4 Updates\]/);
+  assert.match(frame, /▶ \[4\] Updates/);
   assert.equal(exited, false);
   press(stdin, "n");
   await waitForFrame(lastFrame, /Update cancelled/);
   press(stdin, "1");
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   unmount();
 });
 
 test("the footer names the scope keys and the check", async (t) => {
   const f = await fixture(t);
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
-  await waitForFrame(lastFrame, /4 Updates/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   press(stdin, "4");
   // While the sources refresh the view captures keys, so the footer shows the check key once it is done.
   const frame = await waitForFrame(lastFrame, /r check again/);
@@ -1006,7 +1006,7 @@ test("an unknown Package is folded with its reason and is never offered as an up
     checkUpdates: async () => [{
       installed: packageRecord,
       status: "unknown",
-      reason: "the host reports no usable version evidence",
+      reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
     }],
     planLifecycle: async () => {
       calls.push("plan");
@@ -1016,9 +1016,10 @@ test("an unknown Package is folded with its reason and is never offered as an up
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   t.after(() => { view.unmount(); view.cleanup(); });
   const folded = await waitForFrame(view.lastFrame, /1 cannot be checked/);
+  assert.match(folded, /Package update comparison unavailable because the checkout has local\s+changes/);
   assert.ok(!folded.includes("Package: pi plugins/pstack"), "an unknown Package is never offered as an update");
   press(view.stdin, ENTER);
-  const open = await waitForFrame(view.lastFrame, /the host reports no usable version evidence/);
+  const open = await waitForFrame(view.lastFrame, /Update comparison unavailable: Pi reports this Package installed/);
   assert.match(open, /Package: pi plugins\/pstack/);
   assert.ok(!open.includes("1 selected"));
   assert.deepEqual(calls, []);
