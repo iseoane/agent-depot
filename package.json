@@ -1,6 +1,6 @@
 {
   "name": "@iseoane/agent-depot",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "A cross-platform catalog for reusable coding-agent skills.",
   "license": "MIT",
   "author": "iseoane",
@@ -67,7 +67,9 @@
     "typescript-eslint": "^8.70.1"
   },
   "pi": {
-    "extensions": ["./resources/pi/agents-panel/index.ts"]
+    "extensions": [
+      "./resources/pi/agents-panel/index.ts"
+    ]
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",

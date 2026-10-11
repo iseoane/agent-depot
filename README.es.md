@@ -907,6 +907,10 @@ evidencia del estado instalado. Para Pi, combina el ajuste de solo lectura con
 evidencia del checkout verificado. Para Claude, lee los archivos de estado del Host.
 Nunca escribe esos archivos.
 
+## Panel de agentes de Pi
+
+Agent Depot también incluye una extensión de Pi con el panel `/agents`. Muestra estado, actividad y consumo medido desde un proveedor conectado, con los agentes en ejecución primero y los más nuevos antes que los antiguos. Es un Package, no un Skill ni una App. Instalarlo junto a pstack requiere el adaptador coordinado de snapshots para evitar dos comandos `/agents`; sin proveedor, informa de que no hay datos disponibles. Consulta los [detalles de instalación y del proveedor](docs/pi-agents-panel.md).
+
 ## Exportar un Profile global de usuario
 
 Exporta las elecciones portables a otra máquina o guárdalas en git:
