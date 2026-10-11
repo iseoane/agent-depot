@@ -7,9 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-11
+
 ### Added
 
-- `agent-depot self update [--yes]` checks the npm registry and updates only a verified npm global installation after an explicit preview confirmation. Other installation methods receive manual guidance.
+- `agent-depot self update [--yes]` checks npm and updates only a verified npm global installation after explicit confirmation. Other installation methods receive manual guidance; downgrades are refused.
+- A Pi Package containing the `/agents` panel, with a versioned snapshot-provider contract, measured telemetry, active-first newest-first ordering and stable selection. Migrating from the former pstack panel requires the coordinated adapter described in `docs/pi-agents-panel.md`.
+- Manual npm trusted publishing through GitHub Actions OIDC, with version, source commit and tarball integrity checks, without stored npm tokens.
+
+### Changed
+
+- Agent instructions use focused context pointers and a disclosed workflow guide. English and Spanish usage docs describe current Package ownership, TUI controls and delegated-command safety limits.
+
+### Fixed
+
+- `doctor-md-agents` analyzes Pi correction history and reports missing or unsupported sources explicitly. `doctor-md-skill` follows the active Pi session branch rather than scoring abandoned branches.
+- Installed Pi Packages with local changes display the version declared at verified Git HEAD, qualified as HEAD-only evidence. Local modifications still prevent update assessment and never become persisted verified installation evidence.
+- TUI tests wait for a complete resized frame and unmount views before deleting their temporary state, avoiding CI teardown races.
 
 ## [0.5.1] - 2026-10-07
 

@@ -833,6 +833,10 @@ installed-state evidence. For Pi, it combines the read-only settings entry with
 verified checkout evidence. For Claude, it reads Host state files. Agent Depot
 never writes those Host files.
 
+## Pi agents panel
+
+Agent Depot also contains a Pi extension with an `/agents` panel. It displays agent status, activity and measured usage from a connected provider, placing running agents first and newer agents before older ones. This is a Package, not a Skill or App. Installing it alongside pstack requires the coordinated snapshot adapter to avoid duplicate `/agents` commands; without a provider, it reports unavailable data. See [installation and provider details](docs/pi-agents-panel.md).
+
 ## Export a user-global Profile
 
 Export portable choices to another machine or keep them in git:
