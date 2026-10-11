@@ -22,25 +22,29 @@ async function fixture(t: TestContext) {
   await writeFile(file, JSON.stringify(recipe));
   const commands: string[] = [];
   const fetches: string[] = [];
+  const views: { unmount: () => void }[] = [];
   const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory: directory, platform: "linux",
     resolveExecutable: async name => `/usr/bin/${name}`,
     runner: async (_exe, args) => { commands.push(args.join(" ")); throw new Error("No recipe command should run"); },
     fetch: async () => { fetches.push("latest"); throw new Error("No latest lookup should run"); } };
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") });
-  t.after(() => rm(home, { recursive: true, force: true }));
-  const mount = (listHeight?: number, onOpenCatalog?: SourcesViewProps["onOpenCatalog"]) => {
-    const view = render(
-      <SourcesView
-        onOpenCatalog={onOpenCatalog}
-        listHeight={listHeight}
-        operations={operations}
-        environment={{ homeDirectory: home, projectRoot: home, appEnvironment }}
-      />,
-    );
-    t.after(() => view.unmount());
+  t.after(async () => {
+    for (const view of views) view.unmount();
+    await rm(home, { recursive: true, force: true });
+  });
+  const track = <T extends { unmount: () => void }>(view: T): T => {
+    views.push(view);
     return view;
   };
-  return { mount, directory, file, commands, fetches, apps: createAppOperations(appEnvironment), operations, home };
+  const mount = (listHeight?: number, onOpenCatalog?: SourcesViewProps["onOpenCatalog"]) => track(render(
+    <SourcesView
+      onOpenCatalog={onOpenCatalog}
+      listHeight={listHeight}
+      operations={operations}
+      environment={{ homeDirectory: home, projectRoot: home, appEnvironment }}
+    />,
+  ));
+  return { mount, track, directory, file, commands, fetches, apps: createAppOperations(appEnvironment), operations, home };
 }
 
 test("Sources lists every recipe status and path without running commands or fetching latest", async t => {
@@ -161,9 +165,8 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
 test("recipe guide captures global number and quit keys in the shell", async t => {
   const f = await fixture(t);
   let exited = false;
-  const view = render(<App operations={f.operations} environment={{ homeDirectory: f.home, projectRoot: f.home,
-    appEnvironment: { recipesDirectory: f.directory, homeDirectory: f.home } }} onExit={() => { exited = true; }} />);
-  t.after(() => view.unmount());
+  const view = f.track(render(<App operations={f.operations} environment={{ homeDirectory: f.home, projectRoot: f.home,
+    appEnvironment: { recipesDirectory: f.directory, homeDirectory: f.home } }} onExit={() => { exited = true; }} />));
   const startup = await waitForFrame(view.lastFrame, frame => frame.includes("needs approval") && frame.includes("Enter preview/approve"));
   assert.match(startup.split("\n").at(-1) ?? "", /Enter preview\/approve/);
   assert.doesNotMatch(startup, /Tab section/);
