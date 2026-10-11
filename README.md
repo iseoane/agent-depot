@@ -70,12 +70,21 @@ npx @iseoane/agent-depot@latest tui
 pnpm dlx @iseoane/agent-depot@latest tui
 ```
 
-A global install is updated with the package manager that installed it:
+Check and update an npm global installation with Agent Depot:
 
 ```sh
-npm install --global @iseoane/agent-depot@latest
-pnpm add --global @iseoane/agent-depot@latest
+agent-depot self update
+agent-depot self update --yes
 ```
+
+The first command checks the public npm registry and previews a newer version without
+updating. The second repeats the check, previews its exact target, and applies it.
+Agent Depot supports this flow only when its loaded package directory matches the
+global directory reported by npm. It prints manual guidance for other installations,
+including pnpm, npx, project-local, linked, and unknown installations. The update uses
+npm without a shell, disables package lifecycle scripts, and never requests elevated
+privileges or changes npm configuration. If npm fails during installation, the global
+package may be left partially updated; Agent Depot cannot roll back npm's changes.
 
 A running Agent Depot never downgrades built-in Skills: a Skill installed by a newer
 Agent Depot is reported as not updatable (update Agent Depot first).

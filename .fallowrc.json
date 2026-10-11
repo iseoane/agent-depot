@@ -54,7 +54,8 @@
           "src/profile-export.ts",
           "src/profile-import.ts",
           "src/app-schema.ts",
-          "src/profile.ts"
+          "src/profile.ts",
+          "src/self-update.ts"
         ]
       },
       {
