@@ -71,14 +71,17 @@ test("Enter previews every step; only y approves and changed content needs appro
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
   view.stdin.write("\r");
-  let frame = await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
-  for (const step of ["install", "remove", "version", "latest", "setup"]) assert.ok(frame.includes(`["demo","${step}"]`), frame);
+  let frame = await waitForFrame(view.lastFrame, /Scroll to end before y/);
   assert.ok(frame.includes(f.file));
   assert.match(frame, /Platform: all/);
+  assert.match(frame, /argv: \[/);
+  assert.match(frame, /"demo",/);
   view.stdin.write("n");
   await waitForFrame(view.lastFrame, frame => !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "needs approval");
   view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /approved/);
@@ -148,6 +151,8 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
   view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   await writeFile(f.file, JSON.stringify({ ...recipe, platform: "windows" }));
   view.stdin.write("y");
@@ -156,6 +161,8 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   await waitForFrame(view.lastFrame, /not applicable here/);
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /Platform: windows/);
+  view.stdin.write("j".repeat(100));
+  await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, frame => frame.includes("Recipe changed, invalid or not applicable") && !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "not applicable here");
@@ -260,6 +267,8 @@ test("one cursor dispatches contextual actions for Skill Sources and App recipes
   assert.doesNotMatch(frame, /> \[.\] git:/);
   view.stdin.write(" a");
   view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  view.stdin.write("j".repeat(100));
   frame = await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   assert.doesNotMatch(frame, /selected|remove Git Source/);
   assert.deepEqual(opened, []);

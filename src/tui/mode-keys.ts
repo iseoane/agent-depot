@@ -10,6 +10,13 @@ export function moveCursor(cursor: number, length: number, input: string, key: K
   return undefined;
 }
 
+/** The preview line reached by a scroll or page key. */
+export function movePreviewCursor(cursor: number, length: number, input: string, key: Key, pageSize: number): number | undefined {
+  const step = key.pageDown ? pageSize : key.pageUp ? -pageSize : 0;
+  if (step !== 0) return Math.min(Math.max(cursor + step, 0), Math.max(length - 1, 0));
+  return moveCursor(cursor, length, input, key);
+}
+
 /** `selected` with `choice` flipped, always in the order of `choices`. */
 export function toggleChoice<T>(choices: readonly T[], selected: readonly T[], choice: T): T[] {
   return choices.filter((candidate) => candidate === choice ? !selected.includes(candidate) : selected.includes(candidate));

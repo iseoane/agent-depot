@@ -141,8 +141,10 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     assert.match(frame, /^>\s+App gentle-shell {2}not installed$/m);
     view.stdin.write("i");
     frame = await waitForFrame(view.lastFrame, /App install confirmation/);
-    assert.match(frame, /argv: \["npm","install","-g","gentle-shell"\]/);
-    assert.match(frame, /install gentle-shell\? y\/n/);
+    assert.match(frame, /argv: \[/);
+    assert.match(frame, /"npm"/);
+    assert.match(frame, /"gentle-shell"/);
+    assert.match(frame, /Scroll to end before y/);
     assert.ok(!commands.some(command => command.startsWith("npm install")), "the preview is separate from execution");
 
     view.stdin.write("n");
@@ -150,7 +152,12 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     assert.ok(!commands.some(command => command.startsWith("npm install")), "declining the preview must not install");
     view.stdin.write("i");
     frame = await waitForFrame(view.lastFrame, /App install confirmation/);
-    assert.match(frame, /install gentle-shell\? y\/n/);
+    assert.match(frame, /Scroll to end before y/);
+    view.stdin.write("y");
+    frame = await waitForFrame(view.lastFrame, /Scroll to end before y/);
+    assert.ok(!commands.some(command => command.startsWith("npm install")), "consent is blocked until the full preview is reviewed");
+    await reviewPreviewToEnd(view.lastFrame, view.stdin);
+    frame = await waitForFrame(view.lastFrame, /install gentle-shell\? y\/n/);
     view.stdin.write("y");
     frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("gentle-shell: installed 1.2.3") && !/gentle-shell\s+not installed/.test(candidate));
     assert.match(frame, /Result · complete/);
@@ -161,3 +168,14 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     view.unmount();
   }
 });
+
+async function reviewPreviewToEnd(lastFrame: () => string | undefined, stdin: { write(data: string): void }): Promise<void> {
+  for (let moves = 0; moves < 100; moves += 1) {
+    const frame = lastFrame() ?? "";
+    const progress = frame.match(/Review (\d+) of (\d+)/u);
+    if (progress && progress[1] === progress[2]) return;
+    stdin.write("j");
+    await waitForFrame(lastFrame, next => /Review \d+ of \d+/u.test(next) && next !== frame);
+  }
+  assert.fail("preview cursor never reached its final line");
+}

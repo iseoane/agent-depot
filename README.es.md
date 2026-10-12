@@ -535,6 +535,8 @@ confirmar):
 | Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualizar las marcas, `r` comprobar de nuevo, las flechas pliegan el grupo "cannot be checked". Sus filas son informativas y no se pueden marcar para actualizar. Un Package marcado se une al lote y se aprueba antes de ejecutar su actualización. |
 | Profile | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
 
+Las previsualizaciones de recetas App y las confirmaciones del ciclo de vida muestran todas las declaraciones y los términos de ejecución en un panel desplazable. Usa `j`, `k`, las flechas, `PageUp` o `PageDown`. Confirma solo después de llegar a la última página.
+
 Al eliminar una receta App se comprueban su comando de versión aprobado y su
 seguimiento. Si la App está instalada o sigue registrada, la TUI ofrece el flujo
 existente de desinstalación: `n` cancela la eliminación y un fallo conserva la

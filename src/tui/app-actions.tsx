@@ -4,7 +4,7 @@ import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
-import { answerYesNo, hostChecklistKey } from "./mode-keys.js";
+import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
 import { BorderPanel, HostChecklist, PreviewConfirm } from "./panel-parts.js";
 
 interface Request {
@@ -16,7 +16,7 @@ interface Request {
 /** App interaction modes capture keys inside the existing Installations view. */
 export type AppMode =
   | { readonly kind: "app-busy"; readonly label: string }
-  | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[] }
+  | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number; readonly pageSize: number }
   | {
       readonly kind: "app-hosts";
       readonly entries: readonly AppEntry[];
@@ -30,6 +30,8 @@ export type AppMode =
       readonly remaining: readonly Request[];
       readonly results: readonly string[];
       readonly failures: number;
+      readonly cursor: number;
+      readonly pageSize: number;
     };
 
 export const APP_KINDS: readonly AppMode["kind"][] = ["app-busy", "app-approve", "app-hosts", "app-confirm", "app-manual"];
@@ -45,6 +47,7 @@ export type AppActionHost = Pick<ManageContext, "browse" | "setMessage" | "isMou
 export interface AppContext {
   readonly apps: AppOperations;
   readonly manage: AppActionHost;
+  readonly previewPageSize: number;
 }
 
 /** Recipe name, falling back to the file identity for invalid recipes. */
@@ -56,12 +59,49 @@ export function appStepLines(step: {
   readonly executable?: string;
   readonly cwd: string;
   readonly warning?: string;
+  readonly environment?: string;
+  readonly declaration?: string;
+  readonly pattern?: string;
 }): string[] {
+  const argv = step.argv;
   return [
-    ...(step.argv ? [`argv: ${JSON.stringify(step.argv)}`, `Executable: ${step.executable ?? `${JSON.stringify(step.argv[0])} not found in PATH`}`] : []),
+    ...(argv ? [
+      "argv: [",
+      ...argv.map((argument, index) => `  ${JSON.stringify(argument)}${index < argv.length - 1 ? "," : ""}`),
+      "]",
+      `Executable: ${step.executable ?? `${JSON.stringify(argv[0])} not found in PATH`}`,
+    ] : []),
     ...(step.manual ? [`Manual: ${step.manual}`] : []),
+    ...(step.declaration ? [step.declaration] : []),
+    ...(step.pattern ? [`Version pattern: ${step.pattern}`] : []),
+    ...(step.environment ? [`Environment: ${step.environment}`] : []),
     `Working directory: ${step.cwd}`,
     ...(step.warning ? [step.warning] : []),
+  ];
+}
+
+type AppPreviewStep = Parameters<typeof appStepLines>[0] & { readonly step: string };
+
+export function appRecipePreviewLines(entry: AppEntry, status: string, steps: readonly AppPreviewStep[]): string[] {
+  const recipe = entry.recipe;
+  return [
+    `File: ${entry.file}`,
+    `Name: ${recipe?.name ?? entry.file}`,
+    `Platform: ${recipe?.platform ?? "all"}`,
+    `Status: ${status}`,
+    ...(recipe?.homepage ? [`Homepage: ${recipe.homepage}`] : []),
+    ...(recipe?.skills ? [`Owned Skills: ${JSON.stringify(recipe.skills)}`] : []),
+    ...steps.flatMap(step => [step.step, ...appStepLines(step)]),
+  ];
+}
+
+function appPreviewLines(mode: Extract<AppMode, { kind: "app-approve" | "app-confirm" | "app-manual" }>): readonly string[] {
+  if (mode.kind === "app-approve") return mode.lines;
+  return [
+    `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,
+    ...(mode.plan.previousVersion ? [`Previous version: ${mode.plan.previousVersion}`] : []),
+    ...(mode.plan.latestVersion ? [`Latest version: ${mode.plan.latestVersion}`] : []),
+    ...appStepLines(mode.plan),
   ];
 }
 
@@ -70,6 +110,7 @@ async function prepareNext(
   requests: readonly Request[],
   results: readonly string[] = [],
   failures = 0,
+  pageSize = context.previewPageSize,
 ): Promise<void> {
   const { manage, apps } = context;
   manage.setMode({ kind: "app-busy", label: "Preparing App step..." });
@@ -84,7 +125,7 @@ async function prepareNext(
     if (manage.isMounted()) {
       manage.setMode({
         kind: !plan.argv && plan.manual ? "app-manual" : "app-confirm",
-        plan, remaining, results, failures,
+        plan, remaining, results, failures, cursor: 0, pageSize,
       });
     }
   } catch (error) {
@@ -103,9 +144,9 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
       const entry = entries[0];
       if (!entry) throw new Error("No App selected");
       manage.setMode({ kind: "app-busy", label: "Preparing recipe approval..." });
-      const steps = await apps.preview(entry);
+      const [steps, approval] = await Promise.all([apps.preview(entry), apps.approvalStatus(entry)]);
       if (manage.isMounted()) {
-        manage.setMode({ kind: "app-approve", entry, lines: steps.flatMap(step => [step.step, ...appStepLines(step)]) });
+        manage.setMode({ kind: "app-approve", entry, lines: appRecipePreviewLines(entry, approval.status, steps), cursor: 0, pageSize: context.previewPageSize });
       }
     } else if (input === "h") {
       const choices = PROJECT_HOSTS.filter(host => entries.some(entry => entry.recipe?.setup?.[host] || entry.recipe?.teardown?.[host]));
@@ -165,7 +206,20 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
       if (!requests.length) manage.setMessage({ kind: "error", text: "No declared steps for this selection" });
       else void prepareNext(context, requests);
     }
-  } else answerYesNo(input, key, () => {
+  } else {
+    const lines = appPreviewLines(mode);
+    const cursor = movePreviewCursor(mode.cursor, lines.length, input, key, mode.pageSize);
+    if (cursor !== undefined) {
+      manage.setMode({ ...mode, cursor });
+      return;
+    }
+    if (input === "n" || key.escape) {
+      if (mode.kind === "app-confirm" || mode.kind === "app-manual") {
+        void prepareNext(context, mode.remaining, [...mode.results, `${appName(mode.plan.entry)}: cancelled`], mode.failures);
+      } else cancel();
+      return;
+    }
+    if (input !== "y" || mode.cursor + mode.pageSize < lines.length) return;
     if (mode.kind !== "app-approve") {
       void execute(context, mode);
       return;
@@ -175,15 +229,11 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
       () => manage.finish({ kind: "ok", text: `Approved ${appName(mode.entry)}` }),
       error => manage.finish({ kind: "error", text: errorText(error) }),
     );
-  }, () => {
-    if (mode.kind === "app-confirm" || mode.kind === "app-manual") {
-      void prepareNext(context, mode.remaining, [...mode.results, `${appName(mode.plan.entry)}: cancelled`], mode.failures);
-    } else cancel();
-  });
+  }
 }
 
 /** Renders App prompts using the existing checklist and preview-confirm panels. */
-export function AppPanel({ mode, columns }: { readonly mode: AppMode; readonly columns?: number }) {
+export function AppPanel({ mode }: { readonly mode: AppMode }) {
   if (mode.kind === "app-busy") return <BorderPanel title="App lifecycle"><Text>{mode.label}</Text></BorderPanel>;
   if (mode.kind === "app-hosts") {
     return (
@@ -194,30 +244,20 @@ export function AppPanel({ mode, columns }: { readonly mode: AppMode; readonly c
       </BorderPanel>
     );
   }
-  if (mode.kind === "app-approve") {
-    return <PreviewConfirm title="Recipe approval · does not install" lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`} />;
-  }
-  const compact = columns !== undefined && columns < 64;
-  const executable = mode.plan.executable;
-  const compactExecutable = executable && executable.length > Math.max(columns ?? 64, 1)
-    ? `…/${executable.split(/[\\/]/u).at(-1)}`
-    : executable;
+  const lines = appPreviewLines(mode);
+  const reviewed = mode.cursor + mode.pageSize >= lines.length;
   return (
     <PreviewConfirm
-      title={mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`}
-      lines={compact ? [
-        `App: ${appName(mode.plan.entry)} · ${mode.plan.action}`,
-        ...(mode.plan.argv ? [`argv: ${JSON.stringify(mode.plan.argv)}`] : []),
-        ...(mode.plan.argv ? [`Executable: ${compactExecutable ?? `${JSON.stringify(mode.plan.argv[0])} not found in PATH`}`] : []),
-        ...(mode.plan.warning ? [mode.plan.warning] : []),
-      ] : [
-        `Environment: ${mode.plan.environment}`,
-        `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,
-        ...appStepLines(mode.plan),
-      ]}
-      question={mode.kind === "app-manual"
-        ? "Manual step done, check now? y/n"
-        : `${mode.plan.action} ${appName(mode.plan.entry)}? y/n`}
+      title={mode.kind === "app-approve" ? "Recipe approval · does not install"
+        : mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`}
+      lines={lines}
+      cursor={mode.cursor}
+      pageSize={mode.pageSize}
+      question={reviewed
+        ? mode.kind === "app-approve" ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
+          : mode.kind === "app-manual" ? "Manual step done, check now? y/n"
+            : `${mode.plan.action} ${appName(mode.plan.entry)}? y/n`
+        : "Scroll to end before y; n cancels."}
     />
   );
 }

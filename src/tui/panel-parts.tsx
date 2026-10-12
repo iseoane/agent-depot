@@ -1,8 +1,9 @@
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import type { ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
+import { computeWindow } from "./window.js";
 
 /** A titled, color-independent boundary for a focused interaction or result. */
 export function BorderPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {
@@ -71,15 +72,24 @@ export function ListFooter({ indicator, selectedCount, message }: {
 }
 
 /** A preview followed by a y/n question. */
-export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst }: {
+export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst, cursor, pageSize }: {
   readonly title?: string;
   readonly lines: readonly string[];
   readonly question: string;
   readonly warnFirst?: boolean;
+  readonly cursor?: number;
+  readonly pageSize?: number;
 }) {
+  const { rows } = useWindowSize();
+  const visibleLines = pageSize ?? Math.max((rows || 24) - 12, 1);
+  const window = cursor === undefined ? { start: 0, end: lines.length, indicator: undefined }
+    : computeWindow(lines.length, cursor, visibleLines);
+  const shown = lines.slice(window.start, window.end);
   return (
     <BorderPanel title={title}>
-      <PreviewLines lines={lines} warnFirst={warnFirst} />
+      <PreviewLines lines={shown} warnFirst={warnFirst && window.start === 0} />
+      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {cursor === undefined ? null : <Text color={theme.muted}>Review {cursor + 1} of {lines.length} · j/k · PgUp/PgDn</Text>}
       <Text>{question}</Text>
     </BorderPanel>
   );

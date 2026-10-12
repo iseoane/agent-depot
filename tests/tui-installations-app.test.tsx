@@ -194,6 +194,20 @@ test("a changed recipe keeps a recorded Installation visible but blocks lifecycl
   assert.equal((await fixture.apps.trackedApps())[0]?.installedVersion, "1.0.0");
 });
 
+test("a malformed recipe keeps its recorded Installation visible and blocks actions", async t => {
+  const fixture = await appFixture(t, true, async (_apps, recipeFile) => {
+    await writeFile(recipeFile, "{ malformed JSON");
+  });
+  const listed = await waitForFrame(fixture.view.lastFrame, /demo {2}1\.0\.0 \(recorded\)/);
+  assert.match(listed, /invalid recipe:|invalid JSON/i);
+  await selectInstalledApp(fixture.view);
+  fixture.view.stdin.write("u");
+  const blocked = await waitForFrame(fixture.view.lastFrame, /invalid recipe|invalid JSON/i);
+  assert.match(blocked, /demo {2}1\.0\.0 \(recorded\)/);
+  assert.deepEqual(fixture.commands, []);
+  assert.equal((await fixture.apps.trackedApps())[0]?.installedVersion, "1.0.0");
+});
+
 test("manual App setup and teardown remain separate confirmed Host actions", async t => {
   const fixture = await appFixture(t, true);
   await selectInstalledApp(fixture.view);
@@ -201,7 +215,7 @@ test("manual App setup and teardown remain separate confirmed Host actions", asy
   await waitForFrame(fixture.view.lastFrame, /Checked = setup/i);
   fixture.view.stdin.write("\r");
   const setup = await waitForFrame(fixture.view.lastFrame, /setup demo\? y\/n/);
-  assert.match(setup, /argv: \["demo","setup"\]/);
+  assert.match(setup, /argv: \[[\s\S]*"demo",[\s\S]*"setup"/);
   fixture.view.stdin.write("y");
   await waitForFrame(fixture.view.lastFrame, /demo: completed/);
   assert.ok(fixture.commands.includes("setup"));
@@ -278,11 +292,11 @@ test("App marks remain active when the cursor moves to an unmarked Skill", async
   await waitForFrame(fixture.view.lastFrame, /1 Apps marked/);
   await moveUpTo(fixture.view.lastFrame, fixture.view.stdin, /> .*sample/);
   fixture.view.stdin.write("i");
-  const preview = await waitForFrame(fixture.view.lastFrame, /install demo\? y\/n/);
-  assert.match(preview, /1 Apps marked/);
+  await waitForFrame(fixture.view.lastFrame, /install demo\? y\/n/);
   assert.ok(!fixture.commands.includes("install"));
   fixture.view.stdin.write("n");
-  await waitForFrame(fixture.view.lastFrame, /demo: cancelled/);
+  const frame = await waitForFrame(fixture.view.lastFrame, /demo: cancelled/);
+  assert.match(frame, /1 Apps marked/);
 });
 
 for (const action of ["i", "u", "h"] as const) {

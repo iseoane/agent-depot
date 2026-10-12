@@ -578,7 +578,11 @@ test("approval preview includes exactly all argv and only the version reaches th
         ["teardown.claude", ["example", "teardown", "claude"]],
       ];
       assert.deepEqual(preview.filter(step => step.argv).map(step => [step.step, step.argv]), expected);
-      assert.ok(preview.every(step => step.cwd === home && step.executable === "/usr/bin/example"));
+      const latestDeclaration = "npm" in latest ? `Latest npm package: ${latest.npm}`
+        : "github" in latest ? `Latest GitHub repository: ${latest.github}` : undefined;
+      assert.equal(preview.find(step => step.step === "latest")?.declaration, latestDeclaration);
+      assert.ok(preview.every(step => step.cwd === home && step.environment !== undefined));
+      assert.ok(preview.filter(step => step.argv).every(step => step.executable === "/usr/bin/example"));
       assert.equal(executed.length, 0);
     }
     await writeFile(file, JSON.stringify(recipe));

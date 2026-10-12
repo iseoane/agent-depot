@@ -227,6 +227,15 @@ class TuiSession {
   }
 }
 
+async function scrollPreviewToEnd(session: TuiSession, ready: RegExp): Promise<string> {
+  let visited = session.screen;
+  for (let move = 0; move < 200; move += 1) {
+    if (ready.test(session.screen)) return visited + session.screen;
+    visited += await session.send("\u001b[6~", new RegExp(`${ready.source}|j\\/k · PgUp\\/PgDn`, ready.flags));
+  }
+  assert.fail(`preview did not reach confirmation:\n${session.screen}`);
+}
+
 test("the TUI walks every view in a real terminal and quits cleanly", { timeout: 120_000 }, async () => {
   const session = new TuiSession();
   try {
@@ -378,6 +387,68 @@ test("a non-interactive run exits 1 with a clean message", { timeout: 60_000 }, 
   assert.equal(stderr.trim(), "Error: agent-depot tui requires an interactive terminal");
 });
 
+test("narrow recipe approval keeps all execution terms reachable before consent", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const fixtureRoot = path.join(sandbox, "preview-terms");
+  const fixture = await fakeAppFixture(fixtureRoot);
+  const home = path.join(fixtureRoot, "approval-home");
+  const state = path.join(fixtureRoot, "approval-state");
+  const recipes = path.join(state, "agent-depot", "apps");
+  await mkdir(recipes, { recursive: true });
+  const approvalRecipe = {
+    ...fixture.recipe,
+    name: "review-all-terms",
+    install: { argv: ["depot-e2e-app", "install", "separate", "argv", "--danger=host-setup-tail"], manual: "Install manually without dropping this full instruction" },
+    update: { manual: "Manual update instruction must remain completely reviewable, including its final words" },
+    latest: { argv: ["depot-e2e-app", "latest", "latest-selector-unchanged"], pattern: "(\\d+\\.\\d+\\.\\d+)" },
+    setup: { pi: { argv: ["depot-e2e-app", "setup", "pi", "host-setup-tail"] } },
+    teardown: { pi: { manual: "Host teardown instruction tail must remain visible" } },
+  };
+  const recipeFile = path.join(recipes, "review-all-terms.json");
+  await writeFile(recipeFile, JSON.stringify(approvalRecipe));
+  const session = new TuiSession({
+    PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_STATE_HOME: state,
+    XDG_CONFIG_HOME: path.join(fixtureRoot, "approval-config"),
+    XDG_CACHE_HOME: path.join(fixtureRoot, "approval-cache"),
+  }, 40, 17);
+  try {
+    await session.waitFor(/n add ·/u);
+    await session.send("j", /review-all-terms[\s\S]*needs approval/u);
+    let preview = await session.send("\r", /Scroll to end before y/u);
+    assert.match(preview, /File:/u);
+    assert.doesNotMatch(preview, /latest-selector-unchanged|Host teardown instruction/u);
+    session.press("y");
+    assert.match(session.screen, /Scroll to end before y/u);
+    await assert.rejects(readdir(path.join(state, "agent-depot", "app-approvals")), { code: "ENOENT" });
+    for (let move = 0; move < 80 && !/Approve review-all-terms\? y\/n/u.test(session.screen); move += 1) {
+      preview += await session.send("\u001b[6~", /j\/k · PgUp\/PgDn/u);
+    }
+    assert.match(session.screen, /Approve review-all-terms\? y\/n/u);
+    preview += session.screen;
+    const reviewed = preview.split("\n").map(line => line.replace(/^.*?│/u, "").replace(/│.*$/u, "").trim()).join(" ");
+    const continuous = reviewed.replace(/\s/gu, "");
+    const argv = ["depot-e2e-app", "install", "separate", "argv", "--danger=host-setup-tail"];
+    let position = continuous.indexOf("argv:[");
+    for (const argument of argv) {
+      position = continuous.indexOf(JSON.stringify(argument), position + 1);
+      assert.notEqual(position, -1, `approval omitted or reordered argv value ${JSON.stringify(argument)}:\n${reviewed}`);
+    }
+    assert.ok(continuous.includes("latest-selector-unchanged"));
+    assert.ok(continuous.includes("setup"));
+    assert.ok(continuous.includes("Hostteardowninstructiontailmustremainvisible"));
+    assert.ok(continuous.includes("Installmanually"));
+    assert.ok(continuous.includes("fullinstruction"));
+    assert.ok(continuous.includes(home.replace(/\s/gu, "")), `full approval cwd was not reachable:\n${reviewed}`);
+    assert.ok(continuous.includes("Environment:linux".replace(/\s/gu, "")));
+    await assert.rejects(readFile(fixture.log), { code: "ENOENT" });
+    await session.send("y", /review-all-terms[\s\S]*approved/u);
+  } finally {
+    session.kill();
+  }
+});
+
 test("the narrow TUI keeps recipe approval separate from confirmed App installation and updates", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
   const fixture = await fakeAppFixture(sandbox);
   const session = new TuiSession({
@@ -389,10 +460,11 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
   try {
     await session.waitFor(/n add ·/u);
     await session.send("j", /fixture-app[\s\S]*needs approval/u);
-    const approval = await session.send("\r", /Approve fixture-app\? y\/n/u);
+    await session.send("\r", /Scroll to end before y/u);
+    const approval = await scrollPreviewToEnd(session, /Approve fixture-app\? y\/n/u);
     assert.match(approval, /Recipe approval · does not install/u);
     assert.match(approval, /Approve fixture-app\? y\/n/u);
-    assert.ok(approval.split("\n").length <= 17, `approval panel exceeded the 17-row PTY:\n${approval}`);
+    assert.ok(session.screen.split("\n").length <= 17, `approval panel exceeded the 17-row PTY:\n${session.screen}`);
     await session.send("y", /fixture-app[\s\S]*approved/u);
     await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
 
@@ -401,9 +473,15 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     await session.send("fixture-app", /Filter: fixture-app/u);
     await session.send("\r", /j\/k move/u);
     await session.send("j", />\s+App fixture-app\s+not installed/u);
-    await session.send("i", /App install confirmation/u);
-    assert.match(session.screen, /argv: \["depot-e2e-app","install"\]/u);
-    assert.match(session.screen, /install fixture-app\? y\/n/u);
+    await session.send("i", /Scroll to end before y/u);
+    const installPreview = await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u);
+    const continuousInstallPreview = installPreview.replace(/\s/gu, "");
+    assert.ok(continuousInstallPreview.includes("argv:["));
+    assert.ok(continuousInstallPreview.includes("Executable:"));
+    assert.ok(continuousInstallPreview.includes("depot-e2e-app"));
+    assert.ok(!continuousInstallPreview.includes("Executable:…"), `install preview abbreviated the executable path:\n${installPreview}`);
+    assert.ok(continuousInstallPreview.includes("Environment:linux"));
+    assert.ok(continuousInstallPreview.includes(homeDirectory.replace(/\s/gu, "")), `install preview omitted the full working directory:\n${installPreview}`);
     assert.ok(session.screen.split("\n").length === 17, `confirmation exceeded the 17-row PTY:\n${session.screen}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "preview must not execute the recipe");
     const installed = await session.send("y", /fixture-app: installed/u);
@@ -420,6 +498,18 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     await session.send("j", />\s+Managed \(project\)/u);
     await session.send("j", />\s+Unmanaged \(user-global\)/u);
     await session.send("j", />\s+▸ Apps \(user-global\) \(1\)/u);
+    await session.send("\r", />\s+▾ Apps \(user-global\) \(1\)/u);
+    await session.send("j", />\s+\[ \]\s+fixture-app\s+1\.0\.0/u);
+    session.resize(80, 24);
+    await session.waitFor(/j\/k move/u, screen => screen.split("\n").length >= 24);
+    const uninstallPreview = await session.send("u", /uninstall fixture-app\? y\/n/u);
+    const continuousUninstallPreview = uninstallPreview.replace(/\s/gu, "");
+    assert.ok(continuousUninstallPreview.includes("Executable:"));
+    assert.ok(continuousUninstallPreview.includes("depot-e2e-app"));
+    assert.ok(continuousUninstallPreview.includes("Environment:linux"));
+    assert.ok(continuousUninstallPreview.includes(homeDirectory.replace(/\s/gu, "")), `80x24 preview omitted the complete working directory:\n${uninstallPreview}`);
+    assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"uninstall"')), "preview must not run uninstall");
+    await session.send("n", /fixture-app: cancelled/u);
     const updates = await session.send("4", /App: fixture-app/u);
     assert.match(updates, /1\.0\.0/u);
     assert.match(updates, /2\.0\.0/u);

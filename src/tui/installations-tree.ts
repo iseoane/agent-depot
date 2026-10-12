@@ -93,10 +93,11 @@ export function describeNode(row: VisibleRow<NodeData>): string {
   if (data.kind === "package") return data.row.name;
   if (data.kind === "app") {
     const { entry, inspection } = data.row;
-    const name = entry.recipe?.name ?? entry.file;
-    if (inspection.status === "invalid") return `${name}  invalid recipe: ${inspection.reason}`;
+    const name = entry.recipe?.name ?? data.row.name ?? entry.file;
+    if (inspection.status === "invalid" && inspection.evidence !== "recorded") return `${name}  invalid recipe: ${inspection.reason}`;
     const version = inspection.installedVersion ?? inspection.status;
-    return `${name}  ${version}${inspection.evidence === "recorded" ? " (recorded)" : ""}`;
+    const invalid = inspection.status === "invalid" ? ` · invalid recipe: ${inspection.reason}` : "";
+    return `${name}  ${version}${inspection.evidence === "recorded" ? " (recorded)" : ""}${invalid}`;
   }
   return `${data.group.name} [${data.group.hosts.join(", ")}]`;
 }

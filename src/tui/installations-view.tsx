@@ -1,4 +1,4 @@
-import { Box, Text, useWindowSize } from "ink";
+import { Box, Text } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createAppOperations } from "../app-flow.js";
@@ -43,7 +43,6 @@ type LoadState =
   | { readonly status: "ready"; readonly data: InstallationsData };
 
 export function InstallationsView({ operations, environment, onCapturingChange, listHeight }: InstallationsViewProps) {
-  const { columns } = useWindowSize();
   const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
   const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
@@ -158,20 +157,20 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     packages,
     startAdoption: (group) => void startAdoption(adoption, group),
     setMessage,
-    startApps: (entries, input) => void startAppAction({ apps, manage }, entries, input),
+    startApps: (entries, input) => void startAppAction({ apps, manage, previewPageSize: Math.max(height - 3, 1) }, entries, input),
   };
 
   useKeys((input, key) => {
     const current = modeRef.current;
     if (current.kind === "browse") handleBrowseKey(browse, input, key);
     else if (isPackageMode(current)) handlePackageKey({ packages, manage }, current, input, key);
-    else if (isAppMode(current)) handleAppKey({ apps, manage }, current, input, key);
+    else if (isAppMode(current)) handleAppKey({ apps, manage, previewPageSize: Math.max(height - 3, 1) }, current, input, key);
     else if (!handleManageKey(manage, current, input, key)) handleAdoptionKey(adoption, current, input, key);
   });
 
   if (state.status === "loading") return <Text>Loading installations...</Text>;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
-  if (columns < 64 && isAppMode(mode)) return <AppPanel mode={mode} columns={columns} />;
+  if (isAppMode(mode)) return <AppPanel mode={mode} />;
   const ready = state.data;
   const window = computeWindow(rows.length, index, height);
   const listed = rows.slice(window.start, window.end);

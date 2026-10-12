@@ -144,7 +144,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   sourcesRef.current = sources;
   const rowsRef = useRef<readonly SourceRow[]>([]);
   const recipes = useSourcesRecipes({
-    operations, environment, onCapturingChange, compact: columns < 64,
+    operations, environment, onCapturingChange, previewPageSize: Math.max(height - 3, 1),
     highlightedFile: () => {
       const rows = rowsRef.current;
       const row = rows[resolveIndex(rows, selectionRef.current)];

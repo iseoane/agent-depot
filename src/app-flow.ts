@@ -112,17 +112,21 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   );
 
   async function read(file: string): Promise<AppEntry> {
+    let canonicalFile: string;
+    let content: Buffer;
     try {
-      const canonicalFile = await realpath(file);
-      const content = await readFile(canonicalFile);
-      const recipe = parseAppRecipe(JSON.parse(content.toString("utf8")));
-      const currentPlatform = platform === "win32" ? "windows" : platform;
-      return {
-        file, canonicalFile, recipe, hash: createHash("sha256").update(content).digest("hex"),
-        applicable: recipe.platform === undefined || recipe.platform === currentPlatform,
-      };
+      canonicalFile = await realpath(file);
+      content = await readFile(canonicalFile);
     } catch (error) {
       return { file, applicable: true, error: error instanceof Error ? error.message : String(error) };
+    }
+    const hash = createHash("sha256").update(content).digest("hex");
+    try {
+      const recipe = parseAppRecipe(JSON.parse(content.toString("utf8")));
+      const currentPlatform = platform === "win32" ? "windows" : platform;
+      return { file, canonicalFile, recipe, hash, applicable: recipe.platform === undefined || recipe.platform === currentPlatform };
+    } catch (error) {
+      return { file, canonicalFile, hash, applicable: true, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -168,14 +172,21 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       ...Object.entries({
         install: recipe.install, update: recipe.update, uninstall: recipe.uninstall, version: recipe.version,
       }),
-      ...(recipe.latest && "argv" in recipe.latest ? [["latest", recipe.latest] as const] : []),
+      ...(recipe.latest ? [["latest", recipe.latest] as const] : []),
       ...Object.entries(recipe.setup ?? {}).map(([host, step]) => [`setup.${host}`, step] as const),
       ...Object.entries(recipe.teardown ?? {}).map(([host, step]) => [`teardown.${host}`, step] as const),
     ];
     return Promise.all(steps.map(async ([step, value]) => {
-      const resolution = value.argv ? await resolve(value.argv[0]) : undefined;
+      const resolution = "argv" in value && value.argv ? await resolve(value.argv[0]) : undefined;
       return {
-        step, ...value, executable: resolution?.executable, cwd: home,
+        step,
+        ...("argv" in value && value.argv ? { argv: value.argv } : {}),
+        ...("manual" in value && value.manual ? { manual: value.manual } : {}),
+        ...("npm" in value ? { declaration: `Latest npm package: ${value.npm}` } : {}),
+        ...("github" in value ? { declaration: `Latest GitHub repository: ${value.github}` } : {}),
+        ...("pattern" in value ? { pattern: value.pattern } : {}),
+        executable: resolution?.executable, cwd: home,
+        environment: isWsl ? "linux (WSL)" : platform,
         warning: resolution?.blocked ? WINDOWS_EXECUTABLE_WARNING : undefined,
       };
     }));

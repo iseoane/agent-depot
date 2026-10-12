@@ -487,6 +487,8 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` preview the marks, `r` check again, arrows fold the "cannot be checked" group. Rows in that group are informational and cannot be marked for an update. A marked Package joins the batch and is approved before its update runs. |
 | Profile | `e` export, `i` import; enter a file path, `space` toggle choices, `a` toggle all, `Enter` preview, `y` apply; `j`/`k` scroll previews and results |
 
+App recipe previews and App lifecycle confirmations show every declaration and execution term in a scrollable panel. Use `j`, `k`, the arrow keys, `PageUp`, or `PageDown`. Confirm only after the panel reaches its final page.
+
 Removing an App recipe checks its approved version command and tracked state.
 If the App is installed or tracked, the TUI offers the existing uninstall flow;
 `n` cancels removal and a failed uninstall keeps the recipe. After verified
