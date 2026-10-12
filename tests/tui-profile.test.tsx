@@ -35,9 +35,9 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
   const f = await fixture(t);
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
-  const checklist = await waitForFrame(f.view.lastFrame, /Apps: demo/);
-  assert.match(checklist, /\[x\].*Apps: demo/);
-  assert.match(checklist, /Excluded built-in Source[\s\S]*not\s+selectable/);
+  const checklist = await waitForFrame(f.view.lastFrame, /demo \(all platforms\)/);
+  assert.match(checklist, /\[x\] 1 demo \(all platforms\)/);
+  assert.match(checklist, /Not transferred because it is always present: built-in Source/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Profile path:/);
   const file = path.join(f.home, "out.json");
@@ -50,7 +50,7 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
   assert.equal(parseProfile(JSON.parse(await readFile(file, "utf8"))).apps[0]?.name, "demo");
   const original = await readFile(file, "utf8");
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /Apps: demo/);
+  await waitForFrame(f.view.lastFrame, /demo \(all platforms\)/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Profile path:/);
   f.view.stdin.write(file);
@@ -120,10 +120,10 @@ test("invalid import errors remain usable and long export lists are windowed", a
   const view = render(<ProfileView operations={f.operations} environment={f.environment} listHeight={3} />);
   t.after(() => view.unmount());
   view.stdin.write("e");
-  const frame = await waitForFrame(view.lastFrame, /of 21/);
+  const frame = await waitForFrame(view.lastFrame, /of 23/);
   assert.ok(frame.split("\n").length < 12);
   view.stdin.write("j".repeat(20));
-  await waitForFrame(view.lastFrame, /19–21 of 21/);
+  await waitForFrame(view.lastFrame, /21–23 of 23/);
 });
 
 test("import previews recorded method argv and unregistered Sources; declining writes nothing", async t => {
@@ -157,11 +157,47 @@ test("export renders real group headers and plain exclusions rather than synthet
   });
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
-  const frame = await waitForFrame(f.view.lastFrame, /Skills: demo/);
-  for (const group of ["Sources", "Skills", "Apps", "Excluded"]) assert.match(frame, new RegExp(`^${group}$`, "m"));
-  assert.match(frame, /\[x\].*Sources: https:\/\/example.com\/skills.git/);
-  assert.match(frame, /\[x\].*Skills: demo/);
-  assert.doesNotMatch(frame, /\[ \].*Excluded built-in/);
+  const frame = await waitForFrame(f.view.lastFrame, /\[x\] 1 demo/);
+  for (const group of ["Sources", "Skills", "Apps", "Export notes"]) assert.match(frame, new RegExp(`^.*${group} \\(`, "m"));
+  assert.match(frame, /\[x\] 1 https:\/\/example.com\/skills.git/);
+  assert.match(frame, /\[x\] 1 demo/);
+  assert.match(frame, /Not transferred because it is always present: built-in Source/);
+  assert.doesNotMatch(frame, /\[ \].*Not transferred/);
+});
+
+test("export group selection and numbering survive scrolling, collapse, expansion and resize", async t => {
+  const f = await fixture(t);
+  const source = await f.operations.addGitSource("https://example.com/stable.git");
+  for (let index = 1; index <= 6; index++) await f.operations.addUserGlobalInstallation!({
+    source: { kind: "external", url: source.url }, path: `skill-${index}`,
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: `.agents/skills/skill-${index}`, adopted: false },
+  });
+  const view = render(<ProfileView operations={f.operations} environment={f.environment} listHeight={4} />);
+  t.after(() => view.unmount());
+  view.stdin.write("e");
+  await waitForFrame(view.lastFrame, /Skills \(6\)/);
+  const step = async (key: string) => {
+    const before = view.lastFrame();
+    view.stdin.write(key);
+    return waitForFrame(view.lastFrame, frame => frame !== before);
+  };
+  let frame = view.lastFrame() ?? "";
+  for (let index = 0; index < 12 && !/> \[x\] 4 skill-4/.test(frame); index++) frame = await step("j");
+  assert.match(frame, /> \[x\] 4 skill-4/);
+  frame = await step(" ");
+  assert.match(frame, /> \[ \] 4 skill-4/);
+  for (let index = 0; index < 12 && !/> ▾ Skills/.test(frame); index++) frame = await step("k");
+  assert.match(frame, /> ▾ Skills/);
+  const collapsed = await step("\r");
+  assert.match(collapsed, /▸ Skills \(6\)/);
+  assert.doesNotMatch(collapsed, /skill-4/);
+  view.stdin.write("\r");
+  let expanded = await waitForFrame(view.lastFrame, /▾ Skills \(6\)/);
+  for (let index = 0; index < 8 && !/\[ \] 4 skill-4/.test(expanded); index++) expanded = await step("j");
+  assert.match(expanded, /\[ \] 4 skill-4/);
+  for (let index = 0; index < 8 && !/\[x\] 6 skill-6/.test(expanded); index++) expanded = await step("j");
+  assert.match(expanded, /\[x\] 6 skill-6/);
 });
 
 test("Packages appear in the export checklist and import previews the recorded selection", async t => {
@@ -172,8 +208,8 @@ test("Packages appear in the export checklist and import previews the recorded s
   const view = render(<ProfileView operations={operations} environment={{ homeDirectory: home, packages: exporter }} />);
   t.after(() => view.unmount());
   view.stdin.write("e");
-  const checklist = await waitForFrame(view.lastFrame, /Packages: Package pi plugins\/demo/);
-  assert.match(checklist, /\[x\].*Packages: Package pi plugins\/demo \(latest\)/);
+  const checklist = await waitForFrame(view.lastFrame, /Package pi plugins\/demo/);
+  assert.match(checklist, /\[x\] 1 Package pi plugins\/demo \(latest\)/);
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /Profile path:/);
   const file = path.join(home, "out.json");
@@ -212,17 +248,17 @@ test("space and all toggle export choices; an empty selection stops before the f
   await f.operations.addGitSource("https://example.com/skills.git");
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /\[x\].*Sources:/);
+  await waitForFrame(f.view.lastFrame, /\[x\] 1 https:\/\/example.com\/skills.git/);
   f.view.stdin.write(" ");
-  const partial = await waitForFrame(f.view.lastFrame, /\[ \].*Sources:/);
-  assert.match(partial, /\[x\].*Apps: demo/);
+  const partial = await waitForFrame(f.view.lastFrame, /\[ \] 1 https:\/\/example.com\/skills.git/);
+  assert.match(partial, /\[x\] 1 demo \(all platforms\)/);
   f.view.stdin.write("a");
-  await waitForFrame(f.view.lastFrame, /\[ \].*Apps: demo/);
+  await waitForFrame(f.view.lastFrame, /\[ \] 1 demo \(all platforms\)/);
   f.view.stdin.write("a");
-  const all = await waitForFrame(f.view.lastFrame, /\[x\].*Sources:/);
-  assert.match(all, /\[x\].*Apps: demo/);
+  const all = await waitForFrame(f.view.lastFrame, /\[x\] 1 https:\/\/example.com\/skills.git/);
+  assert.match(all, /\[x\] 1 demo \(all platforms\)/);
   f.view.stdin.write("a");
-  await waitForFrame(f.view.lastFrame, /\[ \].*Apps: demo/);
+  await waitForFrame(f.view.lastFrame, /\[ \] 1 demo \(all platforms\)/);
   f.view.stdin.write("\r");
   const empty = await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
   assert.doesNotMatch(empty, /Profile path:|Apply Profile/);
@@ -233,7 +269,7 @@ test("browse hints do not advertise scrolling; result summaries do", async t => 
   const browse = f.view.lastFrame()!;
   assert.doesNotMatch(browse, /j\/k scroll/);
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /Excluded built-in/);
+  await waitForFrame(f.view.lastFrame, /Not transferred because it is always present/);
   f.view.stdin.write("\r");
   const result = await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
   assert.match(result, /j\/k scroll/);
@@ -252,7 +288,7 @@ async function importFile(view: ReturnType<typeof render>, file: string): Promis
 
 async function browse(view: ReturnType<typeof render>): Promise<string> {
   return waitForFrame(view.lastFrame, frame => frame.includes("e export · i import · q quit") &&
-    !frame.includes("Enter submit") && !frame.includes("j/k move"));
+    !frame.includes("Enter submit") && !frame.includes("j/k move · Enter/right expand"));
 }
 
 for (const action of ["export", "import"] as const) {
@@ -261,7 +297,7 @@ for (const action of ["export", "import"] as const) {
     await f.operations.addGitSource("https://example.com/skills.git");
     if (action === "export") {
       f.view.stdin.write("e");
-      await waitForFrame(f.view.lastFrame, /Sources: https:/);
+      await waitForFrame(f.view.lastFrame, /https:\/\//);
       f.view.stdin.write("\r");
     } else f.view.stdin.write("i");
     await waitForFrame(f.view.lastFrame, /Profile path: _/);
@@ -286,9 +322,9 @@ test("Esc cancels both checklists and a fresh path prompt starts empty", async t
   const f = await fixture(t);
   await f.operations.addGitSource("https://example.com/skills.git");
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /Sources: https:/);
+  await waitForFrame(f.view.lastFrame, /https:\/\//);
   f.view.stdin.write("\u001b");
-  assert.doesNotMatch(await browse(f.view), /\[x\]|Excluded built-in/);
+  assert.doesNotMatch(await browse(f.view), /\[x\]|Not transferred because it is always present/);
   const file = path.join(f.home, "cancel.json");
   await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
     sources: [], skills: [], apps: [recipe] }));
@@ -310,9 +346,9 @@ test("unchecking an exported Source recomputes the subset's omitted-Source warni
     installation: { path: ".agents/skills/demo", adopted: false },
   });
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /\[x\].*Skills: demo/);
+  await waitForFrame(f.view.lastFrame, /\[x\] 1 demo/);
   f.view.stdin.write(" ");
-  await waitForFrame(f.view.lastFrame, /\[ \].*Sources:/);
+  await waitForFrame(f.view.lastFrame, /\[ \] 1 https:\/\/example.com\/skills.git/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Profile path: _/);
   const file = path.join(f.home, "subset.json");
@@ -425,27 +461,22 @@ test("busy import ignores view, quit, cancel, toggle and action keys until the r
   assert.equal(f.exits(), 0);
 });
 
-test("export navigation stays on visible choices instead of entering excluded rows", async t => {
+test("export keeps notes visible without letting them change resource selection", async t => {
   const f = await fixture(t);
   for (const name of ["first", "second"]) {
     await writeFile(path.join(f.directory, `${name}.json`), JSON.stringify({ ...recipe, name }));
   }
   f.view.stdin.write("e");
-  const initial = await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
-  assert.match(initial, /Excluded built-in Source/);
-  f.view.stdin.write("j");
-  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: second/);
-  // At the last choice, repeated down keys must leave space toggling that choice.
-  f.view.stdin.write("jjj ");
-  const last = await waitForFrame(f.view.lastFrame, /> \[ \].*Apps: second/);
-  assert.match(last, /\[x\].*Apps: first/);
+  const initial = await waitForFrame(f.view.lastFrame, /> \[x\] 1 first/);
+  assert.match(initial, /Not transferred because it is always present: built-in Source/);
+  f.view.stdin.write("j ");
+  await waitForFrame(f.view.lastFrame, /> \[ \] 2 second/);
+  f.view.stdin.write("jjj");
+  const notes = await waitForFrame(f.view.lastFrame, /Not transferred because it is always present/);
+  assert.match(notes, /\[ \] 2 second/);
+  assert.match(notes, /\[x\] 1 first/);
   f.view.stdin.write("k");
-  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
-  f.view.stdin.write("\u001b[B");
-  await waitForFrame(f.view.lastFrame, /> \[ \].*Apps: second/);
-  f.view.stdin.write("\u001b[B");
-  f.view.stdin.write(" ");
-  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: second/);
-  f.view.stdin.write("\u001b[A");
-  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
+  await waitForFrame(f.view.lastFrame, /> ▾ Export notes/);
+  f.view.stdin.write("k ");
+  await waitForFrame(f.view.lastFrame, /> \[x\] 2 second/);
 });

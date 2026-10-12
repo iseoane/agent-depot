@@ -74,7 +74,9 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
   assert.ok(preview?.includes(ansi(122, 162, 247, "  proposed changes:")), "CLI proposed changes label is blue");
   assert.ok(preview?.includes(ansi(192, 202, 245, " replace 2 managed files")), "CLI proposed changes value is light");
   assert.ok(preview?.includes(ansi(224, 175, 104, "Apply 1 update? ")), "question text is warning yellow");
-  assert.ok(preview?.includes(`${ansi(158, 206, 106, "y")}${ansi(86, 95, 137, "/")}${ansi(247, 118, 142, "n")}`), "confirmation keys keep green, gray and red roles");
+  assert.ok(preview?.includes(`\u001b[1m${ansi(158, 206, 106, "y")}`), "affirmative key is bold green");
+  assert.ok(preview?.includes(ansi(86, 95, 137, "/")), "separator remains gray");
+  assert.ok(preview?.includes(ansi(247, 118, 142, "n")), "negative key remains red");
   assert.ok(preview?.includes(ansi(86, 95, 137, " · note")), "question suffix remains gray");
   assert.ok(prompt?.includes(ansi(224, 175, 104, "Refresh these Sources?")), "shared DecisionPrompt text is warning yellow");
   assert.ok(header?.includes(ansi(255, 46, 154, "AGENT DEPOT")), "brand is bold fuchsia");

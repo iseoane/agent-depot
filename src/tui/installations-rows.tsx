@@ -54,7 +54,7 @@ export function TreeRowLine({ row, selected, marked }: {
       {item.kind === "app" ? <AppDetails row={item.row} /> : null}
       {item.kind === "package" ? <PackageDetails row={item.row} /> : null}
       {item.kind === "unmanaged" && describeLinks(item.group) !== "" ? (
-        <Text color={theme.marker}>{"  "}{describeLinks(item.group)}</Text>
+        <Text color={theme.success}>{"  "}{describeLinks(item.group)}</Text>
       ) : null}
     </Text>
   );

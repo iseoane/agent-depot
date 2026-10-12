@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAppOperations } from "../app-flow.js";
 import {
-  buildProfileExport, describeProfilePackage, profileExportPreview, writeProfileExport,
+  buildProfileExport, describeProfileExportExclusion, describeProfilePackage, profileExportPreview, writeProfileExport,
   type ProfileExportDiagnostic, type ProfileExportPlan,
 } from "../profile-export.js";
 import {
@@ -16,42 +16,71 @@ import type { SourceOperations } from "../sources.js";
 import type { TuiEnvironment } from "./environment.js";
 import { packageOperationsOf } from "./environment.js";
 import { useKeys } from "./keys.js";
-import { answerYesNo, moveCursor, toggleChoice } from "./mode-keys.js";
-import { ChecklistLines, PreviewConfirm, PreviewLines } from "./panel-parts.js";
+import { answerYesNo, moveCursor, movePreviewCursor, toggleChoice } from "./mode-keys.js";
+import { PreviewConfirm, PreviewLines } from "./panel-parts.js";
+import { theme } from "./theme.js";
 import { computeWindow, useListHeight } from "./window.js";
 
 /** Input ownership and the stages of the two Profile workflows. */
 type Mode = "browse" | "busy" | "export-list" | "import-list" | "export-path" | "import-path" | "confirm" | "results";
 
-/** A choice's original block/index identity, or a non-selectable export diagnostic. */
+/** A choice keeps its source identity and ordinal even when its group is collapsed or offscreen. */
 interface Row {
+  readonly id: string;
   readonly block: "sources" | "skills" | "apps" | "packages" | "excluded";
   readonly index: number;
+  readonly ordinal?: number;
   readonly label: string;
   readonly selectable: boolean;
 }
 
+interface GroupRow {
+  readonly kind: "group";
+  readonly id: string;
+  readonly label: string;
+}
+type DisplayRow = Row | GroupRow;
+
+const EXPORT_BLOCKS = ["sources", "skills", "apps", "packages", "excluded"] as const;
+
 function rowsFromExport(plan: ProfileExportPlan): readonly Row[] {
   return [
     ...plan.profile.sources.map((value, index): Row => ({
-      block: "sources", index, label: `Sources: ${value.url}`, selectable: true,
+      id: `sources:${value.url}`, block: "sources", index, ordinal: index + 1,
+      label: value.url, selectable: true,
     })),
     ...plan.profile.skills.map((value, index): Row => ({
-      block: "skills", index, label: `Skills: ${value.path}`, selectable: true,
+      id: `skills:${JSON.stringify([value.source, value.path])}`, block: "skills", index, ordinal: index + 1,
+      label: value.path, selectable: true,
     })),
     ...plan.profile.apps.map((value, index): Row => ({
-      block: "apps", index, label: `Apps: ${value.name} (${value.platform ?? "all platforms"})`, selectable: true,
+      id: `apps:${JSON.stringify([value.name, value.platform ?? null])}`, block: "apps", index, ordinal: index + 1,
+      label: `${value.name} (${value.platform ?? "all platforms"})`, selectable: true,
     })),
     ...plan.profile.packages.map((value, index): Row => ({
-      block: "packages", index, label: `Packages: ${describeProfilePackage(value)}`, selectable: true,
+      id: `packages:${JSON.stringify(value)}`, block: "packages", index, ordinal: index + 1,
+      label: describeProfilePackage(value), selectable: true,
     })),
     ...plan.exclusions.map((item, index): Row => ({
-      block: "excluded", index, label: `Excluded ${item.label}: ${item.reason}`, selectable: false,
+      id: `excluded:${index}`, block: "excluded", index, label: describeProfileExportExclusion(item), selectable: false,
     })),
     ...plan.warnings.filter(warning => warning.kind === "load").map((warning, index): Row => ({
-      block: "excluded", index: plan.exclusions.length + index, label: warning.message, selectable: false,
+      id: `warning:${index}`, block: "excluded", index: plan.exclusions.length + index,
+      label: warning.message, selectable: false,
     })),
   ];
+}
+
+function exportDisplayRows(rows: readonly Row[], expanded: ReadonlySet<string>): readonly DisplayRow[] {
+  return EXPORT_BLOCKS.flatMap((block): readonly DisplayRow[] => {
+    const choices = rows.filter(row => row.block === block);
+    if (!choices.length) return [];
+    const id = `group:${block}`;
+    const label = block === "excluded" ? `Export notes (${choices.length})`
+      : `${block.charAt(0).toUpperCase()}${block.slice(1)} (${choices.length})`;
+    const group: GroupRow = { kind: "group", id, label };
+    return expanded.has(id) ? [group, ...choices] : [group];
+  });
 }
 
 /** The four import blocks in one indexed list, so the checklist and the confirmation share positions. */
@@ -61,7 +90,7 @@ function planEntries(plan: ProfileImportPlan): readonly ProfileImportEntry[] {
 
 function rowsFromPlan(plan: ProfileImportPlan): readonly Row[] {
   return planEntries(plan).map((item, index) => ({
-    block: item.block, index,
+    id: `${item.block}:${index}`, block: item.block, index, ordinal: index + 1,
     label: `${item.status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`,
     selectable: item.status === "add",
   }));
@@ -105,6 +134,12 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     setModeState(next);
   };
   const [rows, setRows] = useState<readonly Row[]>([]);
+  const [expandedGroups, setExpandedGroupsState] = useState<ReadonlySet<string>>(new Set());
+  const expandedGroupsRef = useRef<ReadonlySet<string>>(new Set());
+  const setExpandedGroups = (next: ReadonlySet<string>) => {
+    expandedGroupsRef.current = next;
+    setExpandedGroupsState(next);
+  };
   const [selected, setSelectedState] = useState<readonly Row[]>([]);
   const selectedRef = useRef<readonly Row[]>([]);
   const select = (next: readonly Row[]) => {
@@ -148,7 +183,14 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const loadRows = (next: readonly Row[], nextMode: Mode) => {
     setRows(next);
     select(next.filter(row => row.selectable));
-    cursorTo(0);
+    const open = nextMode === "export-list"
+      ? new Set(EXPORT_BLOCKS.map(block => `group:${block}`))
+      : new Set<string>();
+    setExpandedGroups(open);
+    const firstChoice = nextMode === "export-list"
+      ? exportDisplayRows(next, open).findIndex(row => !("kind" in row) && row.selectable)
+      : 0;
+    cursorTo(Math.max(firstChoice, 0));
     setMode(nextMode);
   };
   const chosenProfile = (): Profile => {
@@ -232,7 +274,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
         });
       }, () => setMode("browse"));
       if (input === "y" || input === "n" || key.escape) return;
-      const next = moveCursor(cursorRef.current, lines.length, input, key);
+      const next = movePreviewCursor(cursorRef.current, lines.length, input, key, height);
       if (next !== undefined) cursorTo(Math.max(0, next));
       return;
     }
@@ -240,13 +282,25 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       setMode("browse");
       return;
     }
-    // Export diagnostics follow the checklist, but never own its cursor.
-    // Import same/conflict rows still draw a cursor so their differences can be reviewed.
-    const checklistLength = rows.filter(row => row.block !== "excluded").length;
-    const next = moveCursor(cursorRef.current, checklistLength, input, key);
+    const visibleRows = current === "export-list" ? exportDisplayRows(rows, expandedGroupsRef.current) : rows;
+    const currentRow = visibleRows[cursorRef.current];
+    const next = moveCursor(cursorRef.current, visibleRows.length, input, key);
     if (next !== undefined) cursorTo(Math.max(0, next));
-    else if (input === " " && rows[cursorRef.current]?.selectable) {
-      select(toggleChoice(rows, selectedRef.current, rows[cursorRef.current]!));
+    else if (current === "export-list" && currentRow && "kind" in currentRow && currentRow.kind === "group" &&
+      (key.return || key.rightArrow || key.leftArrow)) {
+      if (key.return && !selectedRef.current.length) {
+        showLines(["Nothing selected; nothing written."], "results");
+        return;
+      }
+      const open = new Set(expandedGroupsRef.current);
+      if (key.return) {
+        if (open.has(currentRow.id)) open.delete(currentRow.id);
+        else open.add(currentRow.id);
+      } else if (key.rightArrow) open.add(currentRow.id);
+      else open.delete(currentRow.id);
+      setExpandedGroups(open);
+    } else if (input === " " && currentRow && !("kind" in currentRow) && currentRow.selectable) {
+      select(toggleChoice(rows, selectedRef.current, currentRow));
     } else if (input === "a") select(selectedRef.current.length ? [] : rows.filter(row => row.selectable));
     else if (key.return) {
       if (current === "export-list") {
@@ -268,28 +322,34 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     }
   });
   const listing = mode === "export-list" || mode === "import-list";
-  const window = computeWindow(listing ? rows.length : lines.length, cursor, height);
+  const displayRows: readonly DisplayRow[] = mode === "export-list" ? exportDisplayRows(rows, expandedGroups) : rows;
+  const window = computeWindow(listing ? displayRows.length : lines.length, cursor, height);
+  const visibleRows = displayRows.slice(window.start, window.end);
+  const precedingGroup = displayRows.slice(0, window.start).filter((row): row is GroupRow => "kind" in row).at(-1);
+  const firstVisible = visibleRows[0];
+  const indexedRows = visibleRows.map((row, index) => ({ row, index: window.start + index }));
+  const renderedRows = firstVisible !== undefined && !("kind" in firstVisible) && precedingGroup
+    ? [{ row: precedingGroup, index: undefined }, ...indexedRows]
+    : indexedRows;
   return <Box flexDirection="column">
     <Text bold>Portable user-global Profile · e export · i import</Text>
     {mode === "busy" ? <Text>Loading Profile…</Text> : null}
     {mode.endsWith("-path") ? <Text>Profile path: {text}_</Text> : null}
-    {listing ? (["sources", "skills", "apps", "packages", "excluded"] as const).map(block => {
-      const choices = rows.slice(window.start, window.end).filter(row => row.block === block);
-      if (!choices.length) return null;
-      return <Box key={block} flexDirection="column">
-        <Text bold>{block === "excluded" ? "Excluded" : block[0]!.toUpperCase() + block.slice(1)}</Text>
-        {block === "excluded" ? <PreviewLines lines={choices.map(row => `${row.label} (not selectable)`)} /> :
-          <ChecklistLines choices={choices} cursor={choices.indexOf(rows[cursor]!)}
-            isSelected={row => selected.includes(row)} keyOf={row => `${row.block}:${row.index}`}
-            label={row => `${row.label}${row.selectable ? "" : " (not selectable)"}`} />}
-      </Box>;
+    {listing ? renderedRows.map(({ row, index }) => {
+      const marker = index === cursor ? "> " : "  ";
+      if ("kind" in row) {
+        const open = expandedGroups.has(row.id);
+        return <Text key={row.id} color={theme.group} bold>{marker}{open ? "▾" : "▸"} {row.label}</Text>;
+      }
+      if (row.block === "excluded") return <Text key={row.id} color={theme.value}>{marker}{row.label}</Text>;
+      return <Text key={row.id}>{marker}[{selected.some(choice => choice.id === row.id) ? "x" : " "}] {row.ordinal ?? row.index + 1} {row.label}{row.selectable ? "" : " (not selectable)"}</Text>;
     }) : null}
-    {mode === "confirm" ? <PreviewConfirm lines={lines.slice(window.start, window.end)} question="Apply Profile? (y/n) · j/k scroll" /> : null}
+    {mode === "confirm" ? <PreviewConfirm lines={lines} cursor={cursor} question="Apply Profile? (y/n) · arrows/PgUp/PgDn page · j/k line" /> : null}
     {mode === "results" ? <>
       <PreviewLines lines={lines.slice(window.start, window.end)} />
       <Text>j/k scroll</Text>
     </> : null}
-    {window.indicator && (listing || mode === "confirm" || mode === "results") ? <Text>{window.indicator}</Text> : null}
-    {listing ? <Text>j/k move · space toggle · a all · Enter preview · Esc cancel</Text> : null}
+    {window.indicator && (listing || mode === "results") ? <Text>{window.indicator}</Text> : null}
+    {listing ? <Text>j/k move · Enter/right expand, left collapse · space toggle · a all · Enter preview · Esc cancel</Text> : null}
   </Box>;
 }

@@ -104,7 +104,7 @@ test("export includes only portable managed state and recipes without running co
   assert.deepEqual(result.profile.skills, [{ source: { kind: "builtin", id: "builtin:agent-depot" },
     path: "doctor-md-agents", version: { policy: "latest" }, hosts: ["pi", "claude"] }]);
   assert.deepEqual(result.profile.apps, [recipe]);
-  assert.match(result.preview.join("\n"), /built-in Source.*always present/);
+  assert.match(result.preview.join("\n"), /Not transferred because it is always present: built-in Source/);
   assert.doesNotMatch(serializeProfile(result.profile), /installation|adopted|approvals/);
 });
 
@@ -485,8 +485,8 @@ test("export exposes classified exclusions and warnings while preserving the CLI
   assert.deepEqual(result.warnings, [{ kind: "source", message: "WARNING: Skill demo references Source https://example.com/omitted.git not included in profile" }]);
   assert.deepEqual(result.preview, [
     "Preview: export portable user-global profile", "Skill demo [pi] (latest)",
-    "Excluded built-in Source: always present (built-in Skill selections remain portable)",
-    "Excluded installation location and version evidence for Skill demo: machine-specific",
+    "Not transferred because it is always present: built-in Source",
+    "Omitted machine-specific installation details for Skill demo",
     "WARNING: Skill demo references Source https://example.com/omitted.git not included in profile",
   ]);
 });

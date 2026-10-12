@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn as spawnProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -14,6 +14,7 @@ import { fakeAppFixture } from "../fake-app-fixture.js";
 import pty from "@homebridge/node-pty-prebuilt-multiarch";
 import { createAppOperations } from "../../src/app-flow.js";
 import { sourceIdForUrl } from "../../src/git-source.js";
+import { createSourceOperations } from "../../src/sources.js";
 
 // Compiled location: dist/tests/e2e -> the built CLI is dist/src/cli.js.
 const CLI = fileURLToPath(new URL("../../src/cli.js", import.meta.url));
@@ -253,6 +254,12 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
   const url = "https://example.test/xeo-palette/skills.git";
   const paletteHome = path.join(sandbox, "palette-home");
   await mkdir(paletteHome);
+  const symlinkTarget = path.join(paletteHome, "portable-skill");
+  await mkdir(symlinkTarget);
+  await writeFile(path.join(symlinkTarget, "SKILL.md"), "---\nname: palette-link\ndescription: Palette fixture\n---\n");
+  const symlinkPath = path.join(paletteHome, ".agents", "skills", "palette-link");
+  await mkdir(path.dirname(symlinkPath), { recursive: true });
+  await symlink(symlinkTarget, symlinkPath);
   const fixture = await fakeAppFixture(path.join(paletteHome, ".local"));
   await writeFile(fixture.file, JSON.stringify({
     name: "fixture-app",
@@ -284,7 +291,7 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "▶ [1] Sources")), "the active header tab retains Xeo accent pink");
     assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " refresh Git Source")), "field values use Xeo brightText");
     assert.ok(session.terminalOutput.includes(ansiColor(224, 175, 104, "Refresh these Sources?")), "the decision question prefix uses Xeo warning yellow");
-    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "y")), "yes uses Xeo success green");
+    assert.ok(session.terminalOutput.includes(`\u001b[1m${ansiColor(158, 206, 106, "y")}`), "yes uses bold Xeo success green");
     assert.ok(session.terminalOutput.includes(ansiColor(247, 118, 142, "n")), "no uses Xeo error red");
     await session.send("n", /LOCATION \/ STATUS/u);
     assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "skills")), "Sources resource types use Xeo blue");
@@ -297,7 +304,7 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     assert.match(appApproval, /File:/u);
     assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "Version pattern:")), "App recipe field names use Xeo blue");
     assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " linux")), "App recipe values use Xeo brightText");
-    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "y")), "App approval yes uses Xeo green");
+    assert.ok(session.terminalOutput.includes(`\u001b[1m${ansiColor(158, 206, 106, "y")}`), "App approval yes uses bold Xeo success green");
     assert.ok(session.terminalOutput.includes(ansiColor(247, 118, 142, "n")), "App approval no uses Xeo red");
     await session.send("y", /approved/u);
     assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "approved")), "approved recipe status uses the success color");
@@ -310,7 +317,7 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     await session.send("j", /fixture-app/u);
     assert.ok(session.screen.split("\n").length <= 17, `Catalog exceeded a 40x17 PTY:\n${session.screen}`);
     session.resize(80, 24);
-    const appInstall = await session.send("i", /App install confirmation/u);
+    const appInstall = await session.send("i", /argv:/u);
     assert.match(appInstall, /argv:/u);
     assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "argv:")), "App install field names use Xeo blue");
     assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " [")), "App install values use Xeo brightText");
@@ -324,6 +331,11 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     await session.send("j", /Managed \(project\)/u);
     await session.send("j", /Unmanaged \(user-global\)/u);
     await session.send("j", /Apps \(user-global\)/u);
+    await session.send("k", /Unmanaged \(user-global\)/u);
+    await session.send("\r", /symlink/u);
+    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "  symlink →")), "unmanaged Skill symlink markers use green");
+    await session.send("j", /symlink →/u);
+    await session.send("j", /Apps \(user-global\)/u);
     if (!session.screen.includes("fixture-app")) await session.send("\r", /fixture-app/u);
     const installations = session.screen;
     assert.match(installations, /fixture-app/u);
@@ -331,6 +343,64 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     const selectedApp = await session.send("\x1b[B", /fixture-app/u);
     assert.ok(selectedApp.split("\n").length <= 17, `Installations exceeded a 40x17 PTY:\n${selectedApp}`);
     assert.ok(session.terminalOutput.includes(ansiColor(255, 158, 100, "1.0.0")), "the Installations App version segment uses Xeo bright yellow");
+    session.press("q");
+    assert.equal(await session.exitCode(), 0);
+  } finally {
+    session.kill();
+  }
+});
+
+test("Profile export groups keep identities and ordinals stable across PTY resize and collapse", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const home = path.join(sandbox, "profile-groups-home");
+  await mkdir(home);
+  const statePath = path.join(home, ".local", "state", "agent-depot", "sources.json");
+  await mkdir(path.dirname(statePath), { recursive: true });
+  const operations = createSourceOperations({ homeDirectory: home, statePath });
+  const source = await operations.addGitSource("https://example.test/profile-groups.git");
+  for (let index = 1; index <= 8; index++) await operations.addUserGlobalInstallation!({
+    source: { kind: "external", url: source.url }, path: `skill-${index}`,
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: `.agents/skills/skill-${index}`, adopted: false },
+  });
+  const environment = {
+    HOME: home, USERPROFILE: home,
+    XDG_STATE_HOME: path.join(home, ".local", "state"),
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+    XDG_CACHE_HOME: path.join(home, ".cache"),
+    PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
+  };
+  const session = new TuiSession(environment, 80, 24);
+  try {
+    await session.waitFor(/builtin:agent-depot/u);
+    await session.send("5", /Portable user-global Profile/u);
+    await session.send("e", /Skills \(8\)/u);
+    await session.send("j", /▾ Skills \(8\)/u);
+    await session.send("j", /> \[x\] 1 skill-1/u);
+    await session.send("j", /> \[x\] 2 skill-2/u);
+    await session.send("j", /> \[x\] 3 skill-3/u);
+    await session.send("j", /> \[x\] 4 skill-4/u);
+    await session.send(" ", /> \[ \] 4 skill-4/u);
+    await session.send("\x1b[A", /> \[x\] 3 skill-3/u);
+    await session.send("\x1b[A", /> \[x\] 2 skill-2/u);
+    await session.send("\x1b[A", /> \[x\] 1 skill-1/u);
+    await session.send("\x1b[A", /> ▾ Skills \(8\)/u);
+    await session.send("\r", /▸ Skills \(8\)/u);
+    assert.doesNotMatch(session.screen, /> \[x\] 4 skill-4/u);
+    await session.send("\x1b[C", /> ▾ Skills \(8\)/u);
+    session.resize(40, 17);
+    await session.send("j", /> \[x\] 1 skill-1/u);
+    await session.send("j", /> \[x\] 2 skill-2/u);
+    await session.send("j", /> \[x\] 3 skill-3/u);
+    await session.send("j", /> \[ \] 4 skill-4/u);
+    assert.ok(session.screen.split("\n").length <= 17, `Profile exceeded a 40x17 PTY:\n${session.screen}`);
+    session.resize(80, 24);
+    assert.match(session.screen, /> \[ \] 4 skill-4/u);
+    await session.send("\r", /Profile path:/u);
+    const output = path.join(home, "profile.json");
+    await session.send(output, /profile\.json_/u);
+    await session.send("\r", /Apply Profile/u);
+    await session.send("\x1b[6~", /PgUp\/PgDn page/u);
+    await session.send("n", /e export · i import/u);
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally {
@@ -865,9 +935,9 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await exporting.waitFor(/n add ·/u);
     await exporting.send("5", /e export · i import/u);
     const checklist = await exporting.send("e", /Enter preview/u);
-    assert.match(checklist, /Sources: https:\/\/example.test\/profile\/source.git/u);
-    assert.match(checklist, /Skills: skills\/alpha/u);
-    assert.match(checklist, /Apps: fixture-app \(windows\)/u);
+    assert.match(checklist, /\[x\] 1 https:\/\/example.test\/profile\/source.git/u);
+    assert.match(checklist, /\[x\] 2 skills\/alpha/u);
+    assert.match(checklist, /\[x\] 2 fixture-app \(windows\)/u);
     await exporting.send("\r", /Profile path:/u);
     await exporting.send(file, /profile.json/u);
     await exporting.send("\r", /Apply Profile\? \(y\/n\)/u);

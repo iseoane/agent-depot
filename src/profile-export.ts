@@ -180,6 +180,16 @@ function sourceWarnings(profile: Profile): readonly ProfileExportWarning[] {
   ];
 }
 
+/** Describes whether an export diagnostic removes a selection or only omits machine-local metadata. */
+export function describeProfileExportExclusion(item: ProfileExportExclusion): string {
+  if (item.reason === "machine-specific") {
+    const label = item.label.replace(/^installation location and version evidence for /u, "");
+    return `Omitted machine-specific installation details for ${label}`;
+  }
+  if (item.reason.startsWith("always present")) return `Not transferred because it is always present: ${item.label}`;
+  return `Excluded ${item.label}: ${item.reason}`;
+}
+
 /** Shared preview for a frontend-selected subset; Source warnings are recomputed. */
 export function profileExportPreview(profile: Profile, diagnostics: readonly ProfileExportDiagnostic[] = []): readonly string[] {
   return ["Preview: export portable user-global profile",
@@ -187,7 +197,7 @@ export function profileExportPreview(profile: Profile, diagnostics: readonly Pro
     ...profile.skills.map(skill => `Skill ${skill.path} [${skill.hosts.join(", ")}] (${skill.version.policy})`),
     ...profile.apps.map(recipe => `App recipe ${recipe.name} (${recipe.platform ?? "all platforms"}; no approval)`),
     ...profile.packages.map(selection => `${describeProfilePackage(selection)}; no receipt, no installed state`),
-    ...diagnostics.flatMap(item => "block" in item ? [`Excluded ${item.label}: ${item.reason}`] : item.kind === "load" ? [item.message] : []),
+    ...diagnostics.flatMap(item => "block" in item ? [describeProfileExportExclusion(item)] : item.kind === "load" ? [item.message] : []),
     ...sourceWarnings(profile).map(warning => warning.message)];
 }
 
