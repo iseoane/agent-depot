@@ -5,7 +5,7 @@ import { loadAppOwnedSkillFilter } from "./app-owned-skills.js";
 import { sourceIdForUrl } from "./git-source.js";
 import { bundleRoot, describeCoordinates, type PackageSelection } from "./package-model.js";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "./project-manifest.js";
-import { parseProfile, PROFILE_FORMAT, serializeProfile, type Profile, type ProfilePackageOperations } from "./profile.js";
+import { parseProfile, PROFILE_FORMAT, PROFILE_FORMAT_V2, serializeProfile, type Profile, type ProfilePackageOperations, type ProfileReplica } from "./profile.js";
 import { formatVersionPolicy } from "./skill-install.js";
 import type { SourceOperations } from "./sources.js";
 import { scanUserGlobalSkillInventory } from "./user-global-skill-inventory.js";
@@ -29,7 +29,7 @@ export interface ProfileExportOptions extends ProfileFilters {
 }
 
 export interface ProfileExportExclusion {
-  readonly block: "sources" | "skills" | "apps" | "packages";
+  readonly block: "sources" | "skills" | "apps" | "packages" | "replicas";
   readonly label: string;
   readonly reason: string;
 }
@@ -44,6 +44,8 @@ export interface ProfileExportPlan {
   readonly warnings: readonly ProfileExportWarning[];
   readonly preview: readonly string[];
 }
+
+export const SKILL_EXPORT_EXPLANATION = "Selected Skills keep their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel.";
 
 export function selectProfileItems<T>(items: readonly T[], requested: readonly string[] | undefined, disabled: boolean | undefined,
   names: (item: T) => readonly string[], block: string): readonly T[] {
@@ -69,7 +71,25 @@ export function packageFilterNames(selection: PackageSelection): readonly string
 
 /** One Package line, shared by the export preview and the import plan label. */
 export function describeProfilePackage(selection: PackageSelection): string {
-  return `Package ${describeCoordinates(selection)} (${formatVersionPolicy(selection.version)})`;
+  return `Package ${describeCoordinates(selection)} from ${profileSourceIdentity(selection.source)} (${formatVersionPolicy(selection.version)}; saved selection)`;
+}
+
+export function describeProfileSkill(skill: Profile["skills"][number]): string {
+  return `Skill ${skill.path} from ${profileSourceIdentity(skill.source)} (${skill.version.policy})`;
+}
+
+export function describeProfileReplica(replica: ProfileReplica): string {
+  switch (replica.kind) {
+    case "skill": return `Installed Skill ${replica.path} from ${profileSourceIdentity(replica.source)}`;
+    case "app": return `Installed App ${replica.name} (${replica.platform ?? "all platforms"})`;
+    case "package": return `Installed Package ${describeCoordinates(replica.selection)} from ${profileSourceIdentity(replica.selection.source)}`;
+  }
+}
+
+function profileSourceIdentity(source: Profile["skills"][number]["source"]): string {
+  if (source.kind === "builtin") return "Agent Depot (built-in Source)";
+  if ("url" in source) return source.url;
+  return source.path;
 }
 
 function validateOne<Block extends "sources" | "skills" | "apps" | "packages">(block: Block, item: unknown): Profile[Block][number] {
@@ -118,6 +138,7 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
     }
   }
   const skills: Profile["skills"][number][] = [];
+  const replicas: ProfileReplica[] = [];
   for (const skill of installations) {
     if (owned(path.posix.basename(skill.installation?.path ?? skill.path))) {
       exclude("skills", `Skill ${skill.path}`, "App-owned");
@@ -127,16 +148,32 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
     const selection = { source, path: skillPath, version, hosts, ...(methods ? { methods } : {}) };
     try {
       skills.push(validateOne("skills", selection));
-      if (skill.installation) exclude("skills", `installation location and version evidence for Skill ${skill.path}`, "machine-specific");
+      replicas.push({ kind: "skill", source: skill.source, path: skill.path });
     } catch (error) {
       exclude("skills", `Skill ${skill.path}`, `not portable (${error instanceof Error ? error.message : String(error)})`);
     }
   }
   const recipes: Profile["apps"][number][] = [];
+  let appInstallations: Awaited<ReturnType<AppOperations["trackedApps"]>> = [];
+  try { appInstallations = await apps.trackedApps(warn); }
+  catch (error) { warn(`App installation records could not be read: ${error instanceof Error ? error.message : String(error)}`); }
   for (const entry of entries) {
     try {
       if (entry.error) throw new Error(entry.error);
       recipes.push(validateOne("apps", entry.recipe));
+      const tracked = entry.recipe && entry.canonicalFile && appInstallations.find(record =>
+        record.name === entry.recipe!.name && path.resolve(record.recipeFile) === path.resolve(entry.canonicalFile!));
+      const inspection = await apps.inspectForExport(entry);
+      if (inspection.status === "installed" && entry.recipe) {
+        replicas.push({ kind: "app", name: entry.recipe.name,
+          ...(entry.recipe.platform === undefined ? {} : { platform: entry.recipe.platform }) });
+      } else if (tracked && inspection.status !== "not installed") {
+        exclude("replicas", `App ${entry.recipe!.name} (${entry.recipe!.platform ?? "all platforms"})`,
+          `a tracked install record exists, but current installation state is ${inspection.status}${inspection.reason ? ` (${inspection.reason})` : ""}; not marked for replication`);
+      } else if (tracked && inspection.status === "not installed") {
+        exclude("replicas", `App ${entry.recipe!.name} (${entry.recipe!.platform ?? "all platforms"})`,
+          "the current version probe reports not installed; stale tracking does not create replica intent");
+      }
     } catch (error) {
       exclude("apps", `App recipe ${path.basename(entry.file)}`, error instanceof Error ? error.message : String(error));
     }
@@ -145,6 +182,17 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
   for (const record of selectedPackages) {
     try {
       packages.push(validateOne("packages", record.selection));
+      try {
+        const inspection = await options.packageOperations?.inspect(record.selection);
+        if (inspection?.installed.kind === "installed") replicas.push({ kind: "package", selection: record.selection });
+        else if (inspection?.installed.kind === "unknown") {
+          exclude("replicas", describeProfilePackage(record.selection),
+            `host installation state is unknown, so it is not marked for replication (${inspection.installed.reason})`);
+        }
+      } catch (error) {
+        exclude("replicas", describeProfilePackage(record.selection),
+          `host installation state could not be read, so it is not marked for replication (${error instanceof Error ? error.message : String(error)})`);
+      }
     } catch (error) {
       exclude("packages", describeProfilePackage(record.selection),
         `not portable (${error instanceof Error ? error.message : String(error)})`);
@@ -159,8 +207,8 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
       exclude("skills", `unmanaged Skill ${name}`, "not tracked");
     }
   }
-  const profile = parseProfile({ format: PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
-    sources: portableSources, skills, apps: recipes, packages });
+  const profile = parseProfile({ format: replicas.length ? PROFILE_FORMAT_V2 : PROFILE_FORMAT, agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
+    sources: portableSources, skills, apps: recipes, packages, ...(replicas.length ? { replicas } : {}) });
   return {
     profile,
     exclusions: diagnostics.filter((item): item is ProfileExportExclusion => "block" in item),
@@ -182,10 +230,6 @@ function sourceWarnings(profile: Profile): readonly ProfileExportWarning[] {
 
 /** Describes whether an export diagnostic removes a selection or only omits machine-local metadata. */
 export function describeProfileExportExclusion(item: ProfileExportExclusion): string {
-  if (item.reason === "machine-specific") {
-    const label = item.label.replace(/^installation location and version evidence for /u, "");
-    return `Omitted machine-specific installation details for ${label}`;
-  }
   if (item.reason.startsWith("always present")) return `Not transferred because it is always present: ${item.label}`;
   return `Excluded ${item.label}: ${item.reason}`;
 }
@@ -193,10 +237,12 @@ export function describeProfileExportExclusion(item: ProfileExportExclusion): st
 /** Shared preview for a frontend-selected subset; Source warnings are recomputed. */
 export function profileExportPreview(profile: Profile, diagnostics: readonly ProfileExportDiagnostic[] = []): readonly string[] {
   return ["Preview: export portable user-global profile",
+    SKILL_EXPORT_EXPLANATION,
     ...profile.sources.map(source => `Source ${sourceIdForUrl(source.url)} ${source.url} (included: ${source.included})`),
     ...profile.skills.map(skill => `Skill ${skill.path} [${skill.hosts.join(", ")}] (${skill.version.policy})`),
-    ...profile.apps.map(recipe => `App recipe ${recipe.name} (${recipe.platform ?? "all platforms"}; no approval)`),
-    ...profile.packages.map(selection => `${describeProfilePackage(selection)}; no receipt, no installed state`),
+    ...profile.apps.map(recipe => `App recipe ${recipe.name} (${recipe.platform ?? "all platforms"}; approval not transferred)`),
+    ...profile.packages.map(selection => `${describeProfilePackage(selection)}; no receipt or installed evidence`),
+    ...profile.replicas.map(replica => `Replica intent ${describeProfileReplica(replica)}; no installed state or approval is transferred`),
     ...diagnostics.flatMap(item => "block" in item ? [describeProfileExportExclusion(item)] : item.kind === "load" ? [item.message] : []),
     ...sourceWarnings(profile).map(warning => warning.message)];
 }

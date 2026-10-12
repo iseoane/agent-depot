@@ -865,11 +865,17 @@ Stdout contains JSON only; stderr shows the preview and exclusion reasons.
 `--out` requires a new file (existing files and symlinks are not replaced).
 Profiles contain canonical Git URLs with discovery inclusion, recorded Skill
 version policies/Hosts/user methods, complete App recipes, including recipes for
-other platforms, and Package selections as declarations only: their Source, host
-coordinates and version policy. CLI export always writes `included: true`; discovery choices are transient, while
+other platforms, and Package selections as declarations only: their full Source
+origin, host coordinates and version policy. A v2 Profile may also contain identity-only
+replica intent for Skills, Apps, and Packages confirmed installed on the exporting
+machine. It does not carry installed state, receipts, approvals, or local paths.
+The current parser reads legacy v1 files; v1-only older readers reject v2 files.
+CLI export always writes `included: true`; discovery choices are transient, while
 the TUI may pass explicit inclusion choices to the shared export core.
-Export neither refreshes Sources nor runs App commands, and a Package receipt never
-travels in a Profile.
+Export neither refreshes Sources nor runs lifecycle commands. It may run the existing
+approved App version probe and read-only Package inspection to determine current
+replica intent; unknown state is not treated as installed, and inspection does not
+reconcile records. Package receipts never travel in a Profile.
 
 Local paths and obvious credentials are not portable. Nonportable/invalid items
 are excluded with reasons, as are unmanaged/App-owned and project Skills,
@@ -923,8 +929,12 @@ so omitting their Source block does not force registration; the preview names
 unregistered Sources that will be fetched without registering. Existing Source
 rows explain when discovery inclusion differs but is not imported.
 
-The **5 Import/Export** TUI tab offers grouped checklists and the same shared-core
-previews as the CLI. Exclusions and conflicts cannot be selected. Export creates
+The **5 Import/Export** TUI tab starts with a collapsed **Sources** parent. It
+contains nested Source choices, Skills, Apps, and Packages groups; resource rows show
+their Source identities. **Installed replicas** and export notes are separate groups.
+It uses the same shared-core previews as the CLI. Replica intent is
+informational only; import never approves or installs Apps or Packages from it.
+Exclusions and conflicts cannot be selected. Export creates
 a new file only; empty exports write nothing (CLI reports an error). Import adds missing choices without replacing existing ones.
 Imported recipes remain unapproved and Apps are never installed by import.
 Imported Package selections are recorded without installing a bundle and without

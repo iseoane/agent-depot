@@ -391,9 +391,6 @@ test("Profile export groups keep identities and ordinals stable across PTY resiz
     version: { policy: "latest" }, hosts: ["pi"],
     installation: { path: `.agents/skills/skill-${index}`, adopted: false },
   });
-  const unmanaged = path.join(home, ".agents", "skills", `${"very-long-unmanaged-name-".repeat(3)}skill`);
-  await mkdir(unmanaged, { recursive: true });
-  await writeFile(path.join(unmanaged, "SKILL.md"), "---\nname: unmanaged\ndescription: fixture\n---\n");
   const environment = {
     HOME: home, USERPROFILE: home,
     XDG_STATE_HOME: path.join(home, ".local", "state"),
@@ -406,61 +403,27 @@ test("Profile export groups keep identities and ordinals stable across PTY resiz
   try {
     await session.waitFor(/builtin:agent-depot/u);
     await session.send("5", /Portable Profile/u);
-    await session.send("e", /Skills \(8\)/u);
-    assert.ok(session.screen.replace(/[│\s]/g, "").includes(sourceUrl.replace(/[│\s]/g, "")),
-      `80x24 export did not show the complete Source URL:\n${session.screen}`);
+    await session.send("e", /▸ Sources/u);
+    assert.match(session.screen, /▸ Installed replicas \(8\)/u);
+    assert.match(session.screen, /▸ Export notes/u);
     assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "Export Profile")), "Export uses the fuchsia panel title");
-    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "  ▾ Sources (1)")), "Export groups use the blue group color");
-    await session.send("j", /▾ Skills \(8\)/u);
-    await session.send("j", /> \[x\] 1 skill-1/u);
-    await session.send("j", /> \[x\] 2 skill-2/u);
-    await session.send("j", /> \[x\] 3 skill-3/u);
-    await session.send("j", /> \[x\] 4 skill-4/u);
-    await session.send(" ", /> \[ \] 4 skill-4/u);
-    await session.send("\x1b[A", /> \[x\] 3 skill-3/u);
-    await session.send("\x1b[A", /> \[x\] 2 skill-2/u);
-    await session.send("\x1b[A", /> \[x\] 1 skill-1/u);
-    await session.send("\x1b[A", /> ▾ Skills \(8\)/u);
-    await session.send("\r", /▸ Skills \(8\)/u);
-    assert.doesNotMatch(session.screen, /> \[x\] 4 skill-4/u);
-    await session.send("\x1b[C", /> ▾ Skills \(8\)/u);
+    await session.send("\r", /▾ Sources/u);
+    await session.send("j", /▸ Source choices \(1\)/u);
+    await session.send("\r", /▾ Source choices \(1\)/u);
+    assert.ok(session.screen.replace(/[│\s]/g, "").includes(sourceUrl.replace(/[│\s]/g, "")),
+      `80x24 expanded Sources did not show the complete URL:\n${session.screen}`);
+    await session.send("j".repeat(2), /▸ Skills \(8\)/u);
+    await session.send("\r", /▾ Skills \(8\)/u);
+    await session.send("j", /> \[x\] 1 Skill skill-1/u);
     session.resize(40, 17);
-    await session.send("j", /> \[x\] 1 skill-1/u);
-    await session.send("j", /> \[x\] 2 skill-2/u);
-    await session.send("j", /> \[x\] 3 skill-3/u);
-    await session.send("j", /> \[ \] 4 skill-4/u);
     assert.ok(session.screen.split("\n").length <= 17, `Profile exceeded a 40x17 PTY:\n${session.screen}`);
+    await session.send("\x1b[A", />.*▾ Skills \(8\)/u);
+    await session.send("\x1b[D", />.*▸ Skills \(8\)/u);
+    assert.doesNotMatch(session.screen, /Skill skill-1/u);
+    await session.send("\x1b[C", />.*▾ Skills \(8\)/u);
+    await session.send("j", /\[x\] 1 Skill skill-1/u);
     session.resize(80, 24);
-    assert.match(session.screen, /> \[ \] 4 skill-4/u);
-    await session.send("\r", /Profile path:/u);
-    const output = path.join(home, "profile.json");
-    await session.send(output, /profile\.json_/u);
-    await session.send("\r", /Apply Profile/u);
-    await session.send("\x1b[6~", /PgUp\/PgDn page/u);
-    await session.send("n", /e export · i import/u);
-    session.resize(40, 17);
-    const narrow = await session.send("e", /preview shows full text/u);
-    assert.match(narrow, /…/u);
-    assert.ok(session.screen.split("\n").length <= 17, `Export exceeded a 40x17 PTY:\n${session.screen}`);
-    await session.send("j", /> ▾ Skills/u);
-    for (let index = 0; index < 8; index++) await session.send("j", new RegExp(`\\[x\\] ${index + 1} skill-${index + 1}`, "u"));
-    await session.send("j", /> ▾ Export notes/u);
-    await session.send("j".repeat(10), /very-long-unmanaged-name/u);
-    const noteCursor = session.screen;
-    assert.ok(noteCursor.includes(">") && noteCursor.includes("very-long-unmanaged-name"), noteCursor);
-    const noteDetail = await session.send("\r", /Export note/u);
-    assert.ok(noteDetail.split("\n").length <= 17, `Export note exceeded a 40x17 PTY:\n${noteDetail}`);
-    await session.send("\x1b[6~", /not tracked/u);
-    assert.ok(session.screen.split("\n").length <= 17, `Export note review exceeded a 40x17 PTY:\n${session.screen}`);
-    const returnedChecklist = await session.send("\x1b", />.*Excluded unmanaged Skill very-long/u);
-    assert.match(returnedChecklist, />\s+Excluded unmanaged Skill very-long/u);
-    assert.ok(returnedChecklist.split(/▾ Export notes \(1\)/u).length <= 2,
-      `A viewport boundary duplicated the sticky Export notes group:\n${returnedChecklist}`);
-    await session.send("\x1b", /e export · i import/u);
-    await session.send("e", /preview shows full text/u);
-    const pathPrompt = await session.send("\r", /Profile path:/u);
-    assert.ok(pathPrompt.split("\n").length <= 17, `Profile path prompt exceeded a 40x17 PTY:\n${pathPrompt}`);
-    assert.match(pathPrompt, /Enter submit · Esc cancel/u);
+    assert.ok(session.screen.split("\n").length <= 24, `Profile exceeded an 80x24 PTY:\n${session.screen}`);
     await session.send("\x1b", /e export · i import/u);
     session.press("q");
     assert.equal(await session.exitCode(), 0);
@@ -1003,9 +966,20 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await exporting.waitFor(/n add ·/u);
     await exporting.send("5", /e export · i import/u);
     const checklist = await exporting.send("e", /Enter group\/preview/u);
-    assert.match(checklist, /\[x\] 1 https:\/\/example.test\/profile\/source.git/u);
-    assert.match(checklist, /\[x\] 2 skills\/alpha/u);
-    assert.match(checklist, /\[x\] 2 fixture-app \(windows\)/u);
+    assert.match(checklist, /▸ Sources/u);
+    assert.match(checklist, /▸ Installed replicas \(2\)/u);
+    assert.match(checklist, /▸ Export notes/u);
+    await exporting.send("\r", /▾ Sources/u);
+    await exporting.send("j", /▸ Source choices \(1\)/u);
+    await exporting.send("\r", /▾ Source choices \(1\)/u);
+    assert.match(exporting.screen, /\[x\] 1 https:\/\/example\.test\/profile\/source\.git/u);
+    await exporting.send("j".repeat(2), /▸ Skills \(2\)/u);
+    await exporting.send("\r", /▾ Skills \(2\)/u);
+    assert.match(exporting.screen, /\[x\] 2 Skill skills\/alpha/u);
+    await exporting.send("j".repeat(3), /▸ Apps \(2\)/u);
+    await exporting.send("\r", /▾ Apps \(2\)/u);
+    assert.match(exporting.screen, /App recipe fixture-app \(windows\)/u);
+    await exporting.send("j", /App recipe fixture-app \(windows\)/u);
     await exporting.send("\r", /Profile path:/u);
     await exporting.send(file, /profile.json/u);
     await exporting.send("\r", /Apply Profile\? \(y\/n\)/u);

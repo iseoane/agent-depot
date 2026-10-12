@@ -84,7 +84,9 @@ test("Profile files carry a Package selection through the real state layout with
       bundleVersion: "2.0.0" });
     const targetApps = createAppOperations({ recipesDirectory: path.join(b.home, "apps") });
     const plan = await buildProfileImport(profile, target.sourceOperations, targetApps, {}, target.operations);
-    assert.deepEqual(plan.packages.map(item => [item.label, item.status]), [["Package pi . (latest)", "add"]]);
+    assert.deepEqual(plan.packages.map(item => [item.label, item.status]), [[
+      "Package pi . from https://example.test/demo-bundle (latest; saved selection)", "add",
+    ]]);
     const results = await applyProfileImport(plan, target.sourceOperations, targetApps, true, () => {},
       { homeDirectory: b.home, packageOperations: target.operations });
     assert.deepEqual(results.map(result => [result.item.block, result.status]), [["sources", "skipped"], ["packages", "added"]]);

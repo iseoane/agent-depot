@@ -4,7 +4,8 @@ import stringWidth from "string-width";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAppOperations } from "../app-flow.js";
 import {
-  buildProfileExport, describeProfileExportExclusion, describeProfilePackage, profileExportPreview, writeProfileExport,
+  buildProfileExport, describeProfileExportExclusion, describeProfilePackage, describeProfileReplica, describeProfileSkill,
+  profileExportPreview, SKILL_EXPORT_EXPLANATION, writeProfileExport,
   type ProfileExportDiagnostic, type ProfileExportPlan,
 } from "../profile-export.js";
 import {
@@ -28,7 +29,7 @@ type Mode = "browse" | "busy" | "export-list" | "import-list" | "export-path" | 
 /** A choice keeps its source identity and ordinal even when its group is collapsed or offscreen. */
 interface Row {
   readonly id: string;
-  readonly block: "sources" | "skills" | "apps" | "packages" | "excluded";
+  readonly block: "sources" | "skills" | "apps" | "packages" | "replicas" | "excluded";
   readonly index: number;
   readonly ordinal?: number;
   readonly label: string;
@@ -39,10 +40,9 @@ interface GroupRow {
   readonly kind: "group";
   readonly id: string;
   readonly label: string;
+  readonly depth: number;
 }
 type DisplayRow = Row | GroupRow;
-
-const EXPORT_BLOCKS = ["sources", "skills", "apps", "packages", "excluded"] as const;
 
 function rowsFromExport(plan: ProfileExportPlan): readonly Row[] {
   return [
@@ -52,19 +52,25 @@ function rowsFromExport(plan: ProfileExportPlan): readonly Row[] {
     })),
     ...plan.profile.skills.map((value, index): Row => ({
       id: `skills:${JSON.stringify([value.source, value.path])}`, block: "skills", index, ordinal: index + 1,
-      label: value.path, selectable: true,
+      label: describeProfileSkill(value), selectable: true,
     })),
     ...plan.profile.apps.map((value, index): Row => ({
       id: `apps:${JSON.stringify([value.name, value.platform ?? null])}`, block: "apps", index, ordinal: index + 1,
-      label: `${value.name} (${value.platform ?? "all platforms"})`, selectable: true,
+      label: `App recipe ${value.name} (${value.platform ?? "all platforms"})`, selectable: true,
     })),
     ...plan.profile.packages.map((value, index): Row => ({
       id: `packages:${JSON.stringify(value)}`, block: "packages", index, ordinal: index + 1,
       label: describeProfilePackage(value), selectable: true,
     })),
+    ...plan.profile.replicas.map((value, index): Row => ({
+      id: `replicas:${JSON.stringify(value)}`, block: "replicas", index, ordinal: index + 1,
+      label: describeProfileReplica(value), selectable: true,
+    })),
     ...plan.exclusions.map((item, index): Row => ({
       id: `excluded:${index}`, block: "excluded", index, label: describeProfileExportExclusion(item), selectable: false,
     })),
+    { id: "skill-export-explanation", block: "excluded", index: -1,
+      label: SKILL_EXPORT_EXPLANATION, selectable: false },
     ...plan.warnings.filter(warning => warning.kind === "load").map((warning, index): Row => ({
       id: `warning:${index}`, block: "excluded", index: plan.exclusions.length + index,
       label: warning.message, selectable: false,
@@ -73,15 +79,23 @@ function rowsFromExport(plan: ProfileExportPlan): readonly Row[] {
 }
 
 function exportDisplayRows(rows: readonly Row[], expanded: ReadonlySet<string>): readonly DisplayRow[] {
-  return EXPORT_BLOCKS.flatMap((block): readonly DisplayRow[] => {
-    const choices = rows.filter(row => row.block === block);
-    if (!choices.length) return [];
-    const id = `group:${block}`;
-    const label = block === "excluded" ? `Export notes (${choices.length})`
-      : `${block.charAt(0).toUpperCase()}${block.slice(1)} (${choices.length})`;
-    const group: GroupRow = { kind: "group", id, label };
-    return expanded.has(id) ? [group, ...choices] : [group];
-  });
+  const choices = (block: Row["block"]) => rows.filter(row => row.block === block);
+  const group = (id: string, label: string, depth: number, children: readonly DisplayRow[]): DisplayRow[] => {
+    if (!children.length) return [];
+    const header: GroupRow = { kind: "group", id, label, depth };
+    return expanded.has(id) ? [header, ...children] : [header];
+  };
+  const sourceChildren = [
+    ...group("group:sources", `Source choices (${choices("sources").length})`, 1, choices("sources")),
+    ...group("group:skills", `Skills (${choices("skills").length})`, 1, choices("skills")),
+    ...group("group:apps", `Apps (${choices("apps").length})`, 1, choices("apps")),
+    ...group("group:packages", `Packages (${choices("packages").length})`, 1, choices("packages")),
+  ];
+  return [
+    ...group("group:sources-root", "Sources", 0, sourceChildren),
+    ...group("group:replicas", `Installed replicas (${choices("replicas").length})`, 0, choices("replicas")),
+    ...group("group:excluded", `Export notes (${choices("excluded").length})`, 0, choices("excluded")),
+  ];
 }
 
 interface PhysicalListWindow {
@@ -167,6 +181,10 @@ function rowsFromPlan(plan: ProfileImportPlan): readonly Row[] {
     label: `${item.status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`,
     selectable: item.status === "add",
   }));
+}
+
+function hasChosenResource(profile: Profile): boolean {
+  return profile.sources.length + profile.skills.length + profile.apps.length + profile.packages.length > 0;
 }
 
 function selectedPlanEntries(plan: ProfileImportPlan, selected: readonly Row[]): readonly ProfileImportEntry[] {
@@ -265,9 +283,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const loadRows = (next: readonly Row[], nextMode: Mode) => {
     setRows(next);
     select(next.filter(row => row.selectable));
-    const open = nextMode === "export-list"
-      ? new Set(EXPORT_BLOCKS.map(block => `group:${block}`))
-      : new Set<string>();
+    const open = new Set<string>();
     setExpandedGroups(open);
     const firstChoice = nextMode === "export-list"
       ? exportDisplayRows(next, open).findIndex(row => !("kind" in row) && row.selectable)
@@ -284,6 +300,15 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       skills: profile!.skills.filter((_, index) => isChosen("skills", index)),
       apps: profile!.apps.filter((_, index) => isChosen("apps", index)),
       packages: profile!.packages.filter((_, index) => isChosen("packages", index)),
+      replicas: profile!.replicas.filter((replica, index) => {
+        if (!isChosen("replicas", index)) return false;
+        if (replica.kind === "skill") return profile!.skills.some((skill, skillIndex) =>
+          isChosen("skills", skillIndex) && skill.path === replica.path && JSON.stringify(skill.source) === JSON.stringify(replica.source));
+        if (replica.kind === "app") return profile!.apps.some((app, appIndex) =>
+          isChosen("apps", appIndex) && app.name === replica.name && app.platform === replica.platform);
+        return profile!.packages.some((selection, packageIndex) =>
+          isChosen("packages", packageIndex) && JSON.stringify(selection) === JSON.stringify(replica.selection));
+      }),
     };
   };
   useKeys((input, key) => {
@@ -383,7 +408,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     if (next !== undefined) cursorTo(Math.max(0, next));
     else if (current === "export-list" && currentRow && "kind" in currentRow && currentRow.kind === "group" &&
       (key.return || key.rightArrow || key.leftArrow)) {
-      if (key.return && !selectedRef.current.length) {
+      if (key.return && !hasChosenResource(chosenProfile())) {
         showLines(["Nothing selected; nothing written."], "results");
         return;
       }
@@ -402,7 +427,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       showLines(wrapListText(currentRow.label, Math.max((terminalColumns || 80) - 8, 1)), "detail");
     } else if (key.return) {
       if (current === "export-list") {
-        if (!selectedRef.current.length) {
+        if (!hasChosenResource(chosenProfile())) {
           showLines(["Nothing selected; nothing written."], "results");
         } else prompt("export-path");
       } else void run(async () => {
@@ -422,7 +447,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const listing = mode === "export-list" || mode === "import-list";
   const displayRows: readonly DisplayRow[] = mode === "export-list" ? exportDisplayRows(rows, expandedGroups) : rows;
   const rowHeights = displayRows.map(row => {
-    const prefixWidth = "kind" in row ? 4 : row.block === "excluded" ? 2
+    const prefixWidth = "kind" in row ? stringWidth(`> ${" ".repeat(row.depth * 2)}▸ `) : row.block === "excluded" ? 2
       : stringWidth(`> [ ] ${row.ordinal ?? row.index + 1} `);
     const label = !("kind" in row) && row.block !== "excluded" && !row.selectable
       ? `${row.label} (not selectable)` : row.label;
@@ -441,7 +466,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     const marker = index === cursor ? "> " : "  ";
     if ("kind" in row) {
       const open = expandedGroups.has(row.id);
-      const prefix = `${marker}${open ? "▾" : "▸"} `;
+      const prefix = `${marker}${" ".repeat(row.depth * 2)}${open ? "▾" : "▸"} `;
       const width = Math.max(panelWidth - stringWidth(prefix), 1);
       const label = fitListLines(wrapListText(row.label, width), remainingRows, width)
         .join(`\n${" ".repeat(stringWidth(prefix))}`);

@@ -6,6 +6,7 @@ import type {
   PackageLifecyclePlan,
   PackageLifecycleResult,
   PackageSelection,
+  InstalledBundleEvidence,
 } from "../src/package-model.js";
 import type { GitSource } from "../src/git-source.js";
 import { createPackageOperations, type PackageOperations } from "../src/package-flow.js";
@@ -58,6 +59,7 @@ export function fakePackageOperations(options: {
   readonly recorded?: readonly InstalledPackage[];
   readonly commands?: readonly PackageCommand[];
   readonly result?: PackageLifecycleResult;
+  readonly installed?: InstalledBundleEvidence;
 } = {}): { readonly operations: PackageOperations; readonly evidence: PackagePortEvidence } {
   const approvals: PackageAction[] = [];
   const plans: PackageAction[] = [];
@@ -75,7 +77,7 @@ export function fakePackageOperations(options: {
       throw new Error("The profile port never discovers bundles");
     },
     async inspect() {
-      throw new Error("The profile port never inspects bundles");
+      return { installed: options.installed ?? { kind: "absent" }, approval: "needs approval" };
     },
     async approvalStatus() {
       throw new Error("The profile port never reads approval status");

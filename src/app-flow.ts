@@ -234,7 +234,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   }
 
   /** A supplied cache checks recipe approval without running version; omit it for a live check. */
-  async function inspect(entry: AppEntry, cached?: { installedVersion?: string }): Promise<AppInspection> {
+  async function inspectEntry(entry: AppEntry, cached: { installedVersion?: string } | undefined, reconcileTracking: boolean): Promise<AppInspection> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
     if (cached?.installedVersion) {
@@ -268,8 +268,14 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     if (!installedVersion || result.outputTooLarge) {
       return { status: "unknown", executable, reason: result.outputTooLarge ? "Version output exceeded the limit" : "Version output did not match the recipe" };
     }
-    await reconcileTracked(entry, installedVersion);
+    if (reconcileTracking) await reconcileTracked(entry, installedVersion);
     return { status: "installed", executable, installedVersion, evidence: "verified" };
+  }
+  async function inspect(entry: AppEntry, cached?: { installedVersion?: string }): Promise<AppInspection> {
+    return await inspectEntry(entry, cached, true);
+  }
+  async function inspectForExport(entry: AppEntry): Promise<AppInspection> {
+    return await inspectEntry(entry, undefined, false);
   }
   async function checkUpdate(entry: AppEntry): Promise<AppUpdateCheck> {
     const inspection = await inspect(entry);
@@ -537,7 +543,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  return { directory, approvalStatus, checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
+  return { directory, approvalStatus, checkUpdate, load, preview, approve, inspect, inspectForExport, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;

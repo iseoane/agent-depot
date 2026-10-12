@@ -5,23 +5,32 @@ import type { PackageOperations } from "./package-flow.js";
 import { selectionKey, type PackageCoordinates, type PackageSelection } from "./package-model.js";
 import { containsCredentialArgument, parseProjectManifest, ProjectManifestError, type ProjectSkillSelection } from "./project-manifest.js";
 
-export const PROFILE_FORMAT = "agent-depot-profile/v1" as const;
+export const PROFILE_FORMAT_V1 = "agent-depot-profile/v1" as const;
+export const PROFILE_FORMAT_V2 = "agent-depot-profile/v2" as const;
+export const PROFILE_FORMAT = PROFILE_FORMAT_V1;
 export interface ProfileSource {
   readonly url: string;
   readonly included: boolean;
 }
 
 /** The Package flow surface a portable Profile reads on export and replays on import. */
-export type ProfilePackageOperations = Pick<PackageOperations, "list" | "approve" | "planLifecycle" | "executeLifecycle">;
+export type ProfilePackageOperations = Pick<PackageOperations, "list" | "approve" | "planLifecycle" | "executeLifecycle" | "inspect">;
+
+export type ProfileReplica =
+  | { readonly kind: "skill"; readonly source: ProjectSkillSelection["source"]; readonly path: string }
+  | { readonly kind: "app"; readonly name: string; readonly platform?: AppRecipe["platform"] }
+  | { readonly kind: "package"; readonly selection: PackageSelection };
 
 export interface Profile {
-  readonly format: typeof PROFILE_FORMAT;
+  readonly format: typeof PROFILE_FORMAT_V1 | typeof PROFILE_FORMAT_V2;
   readonly agentDepotVersion: string;
   readonly sources: readonly ProfileSource[];
   readonly skills: readonly Omit<ProjectSkillSelection, "installation">[];
   readonly apps: readonly AppRecipe[];
   /** Additive since v1. A profile written before Packages existed omits the key and parses as an empty list. */
   readonly packages: readonly PackageSelection[];
+  /** Identity-only intent for resources proven installed on the exporting machine. */
+  readonly replicas: readonly ProfileReplica[];
 }
 
 function object(value: unknown, keys: readonly string[], field: string): Record<string, unknown> {
@@ -140,8 +149,10 @@ function parseProfilePackage(value: unknown, field: string): PackageSelection {
 
 /** Portable profile parsing shares the manifest and recipe safety contracts. */
 export function parseProfile(value: unknown): Profile {
-  const root = object(value, ["format", "agentDepotVersion", "sources", "skills", "apps", "packages"], "profile");
-  if (root.format !== PROFILE_FORMAT) throw new Error("profile.format: unsupported profile version");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("profile: expected an object");
+  const format = (value as Record<string, unknown>).format;
+  if (format !== PROFILE_FORMAT_V1 && format !== PROFILE_FORMAT_V2) throw new Error("profile.format: unsupported profile version");
+  const root = object(value, ["format", "agentDepotVersion", "sources", "skills", "apps", "packages", "replicas"], "profile");
   if (typeof root.agentDepotVersion !== "string" || !/^\d+\.\d+\.\d+(?:[-+][\w.+-]+)?$/u.test(root.agentDepotVersion)) {
     throw new Error("profile.agentDepotVersion: expected a package version");
   }
@@ -186,8 +197,22 @@ export function parseProfile(value: unknown): Profile {
     assertPortableText(selection, field);
     return selection;
   });
+  const replicas = root.replicas === undefined
+    ? []
+    : list(root.replicas, "replicas").map((value, index) => parseProfileReplica(value, `replicas[${index}]`));
+  if (format === PROFILE_FORMAT_V2 && root.replicas === undefined) throw new Error("replicas: required for profile v2");
+  if (format === PROFILE_FORMAT_V1 && replicas.length > 0) throw new Error("replicas: non-empty replica intent requires profile v2");
   rejectDuplicates(sources, source => source.url, "sources");
   rejectDuplicates(packages, selectionKey, "packages");
+  rejectDuplicates(replicas, replicaIdentity, "replicas");
+  replicas.forEach((replica, index) => {
+    const exists = replica.kind === "skill"
+      ? parsedSkills.some(skill => skillIdentity(skill) === JSON.stringify([replica.source, replica.path]))
+      : replica.kind === "app"
+        ? apps.some(app => app.name === replica.name && app.platform === replica.platform)
+        : packages.some(selection => selectionKey(selection) === selectionKey(replica.selection));
+    if (!exists) throw new Error(`replicas[${index}]: does not reference a profile resource`);
+  });
   apps.forEach((app, index) => {
     if (apps.slice(0, index).some(previous => previous.name === app.name &&
       (previous.platform === undefined || app.platform === undefined || previous.platform === app.platform))) {
@@ -199,15 +224,58 @@ export function parseProfile(value: unknown): Profile {
   const sortedSkills = [...parsedSkills].sort((a, b) => compare(JSON.stringify([a.source, a.path]), JSON.stringify([b.source, b.path])));
   apps.sort((a, b) => compare(a.name, b.name) || compare(a.platform ?? "", b.platform ?? ""));
   packages.sort((a, b) => compare(selectionKey(a), selectionKey(b)));
-  return { format: PROFILE_FORMAT, agentDepotVersion: root.agentDepotVersion, sources, skills: sortedSkills, apps, packages };
+  replicas.sort((a, b) => compare(replicaIdentity(a), replicaIdentity(b)));
+  return { format, agentDepotVersion: root.agentDepotVersion, sources, skills: sortedSkills, apps, packages, replicas };
 }
 
 /**
  * An empty Package block is omitted, so an export with no Packages stays readable
  * by an Agent Depot version that predates the block.
  */
+function skillIdentity(skill: Pick<ProjectSkillSelection, "source" | "path">): string {
+  return JSON.stringify([skill.source, skill.path]);
+}
+
+function replicaIdentity(replica: ProfileReplica): string {
+  switch (replica.kind) {
+    case "skill": return JSON.stringify([replica.kind, replica.source, replica.path]);
+    case "app": return JSON.stringify([replica.kind, replica.name, replica.platform ?? null]);
+    case "package": return JSON.stringify([replica.kind, selectionKey(replica.selection)]);
+  }
+}
+
+function parseProfileReplica(value: unknown, field: string): ProfileReplica {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${field}: expected an object`);
+  const kind = (value as Record<string, unknown>).kind;
+  if (kind === "skill") {
+    const record = object(value, ["kind", "source", "path"], field);
+    const [skill] = parseProjectManifest({ version: 1, skills: [
+      { source: record.source, path: record.path, version: { policy: "latest" }, hosts: ["pi"] },
+    ] }, "profile").skills;
+    return { kind, source: skill!.source, path: skill!.path };
+  }
+  if (kind === "app") {
+    const record = object(value, ["kind", "name", "platform"], field);
+    if (typeof record.name !== "string" || record.name.length === 0) throw new Error(`${field}.name: expected a non-empty string`);
+    const platform = record.platform;
+    if (platform !== undefined && platform !== "linux" && platform !== "windows" && platform !== "darwin") {
+      throw new Error(`${field}.platform: unsupported platform`);
+    }
+    return { kind, name: record.name, ...(platform === undefined ? {} : { platform }) };
+  }
+  if (kind === "package") {
+    const record = object(value, ["kind", "selection"], field);
+    return { kind, selection: parseProfilePackage(record.selection, `${field}.selection`) };
+  }
+  throw new Error(`${field}.kind: expected "skill", "app" or "package"`);
+}
+
 export function serializeProfile(profile: Profile): string {
-  const parsed = parseProfile(profile);
-  const { packages, ...rest } = parsed;
-  return `${JSON.stringify(packages.length === 0 ? rest : parsed, null, 2)}\n`;
+  const format = profile.replicas.length ? PROFILE_FORMAT_V2 : PROFILE_FORMAT_V1;
+  const parsed = parseProfile({ ...profile, format });
+  const { packages, replicas, ...rest } = parsed;
+  const output = { ...rest, format,
+    ...(packages.length ? { packages } : {}),
+    ...(replicas.length ? { replicas } : {}) };
+  return `${JSON.stringify(output, null, 2)}\n`;
 }

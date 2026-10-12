@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,6 +11,7 @@ import { runProfileExport, runProfileImport } from "../src/profile-cli.js";
 import { test } from "node:test";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
+import type { PackageSelection } from "../src/package-model.js";
 import { claudePackage, fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
 
 const recipe = {
@@ -31,8 +33,28 @@ const piDeclaration = { host: "pi", root: "plugins/demo",
 const claudeDeclaration = { host: "claude", marketplaceRoot: "plugins/demo", pluginName: "demo",
   source: { kind: "builtin", id: "builtin:agent-depot" }, version: { policy: "fixed", version: "0.3.0" } };
 
-test("portable profile round-trips Sources, selections and full cross-platform recipes", () => {
-  assert.deepEqual(parseProfile(JSON.parse(serializeProfile(parseProfile(profile)))), profile);
+test("portable v1 profile round-trips Sources, selections and full cross-platform recipes", () => {
+  const parsed = parseProfile(profile);
+  assert.deepEqual(parseProfile(JSON.parse(serializeProfile(parsed))), parsed);
+  assert.equal(JSON.parse(serializeProfile(parsed)).format, "agent-depot-profile/v1");
+});
+
+test("v2 replica intents are identity-only, reference declarations, and read legacy profiles", () => {
+  const replicaProfile = parseProfile({ ...profile, format: "agent-depot-profile/v2", replicas: [
+    { kind: "skill", source: profile.skills[0]!.source, path: "doctor-md-agents" },
+    { kind: "app", name: "tool", platform: "windows" },
+  ] });
+  const serialized = serializeProfile(replicaProfile);
+  assert.equal(JSON.parse(serialized).format, "agent-depot-profile/v2");
+  assert.deepEqual(parseProfile(JSON.parse(serialized)), replicaProfile);
+  assert.throws(() => parseProfile({ ...profile, format: "agent-depot-profile/v2" }), /replicas: required/);
+  assert.throws(() => parseProfile({ ...profile, replicas: [{ kind: "app", name: "tool" }] }), /requires profile v2/);
+  assert.throws(() => parseProfile({ ...profile, format: "agent-depot-profile/v2", replicas: [
+    { kind: "app", name: "missing" },
+  ] }), /does not reference a profile resource/);
+  assert.throws(() => parseProfile({ ...profile, format: "agent-depot-profile/v2", replicas: [
+    { kind: "app", name: "tool", approval: "approved" },
+  ] }), /replicas\[0\]\.approval: unsupported profile field/);
 });
 
 test("Package declarations round-trip canonically and an older profile parses as an empty list", () => {
@@ -43,7 +65,7 @@ test("Package declarations round-trip canonically and an older profile parses as
   assert.equal(serializeProfile(parsed), serializeProfile(parseProfile(JSON.parse(serializeProfile(parsed)))));
   const older = { ...profile } as Partial<typeof profile>;
   delete older.packages;
-  assert.deepEqual(parseProfile(older), { ...profile, packages: [] });
+  assert.deepEqual(parseProfile(older), { ...profile, packages: [], replicas: [] });
   assert.deepEqual(Object.keys(JSON.parse(serializeProfile(parseProfile(older)))),
     ["format", "agentDepotVersion", "sources", "skills", "apps"]);
   assert.deepEqual(Object.keys(JSON.parse(serializeProfile(parsed))),
@@ -72,7 +94,7 @@ test("Package declarations refuse receipts, machine paths and non-canonical coor
 
 test("profile rejects unknown fields, versions and nonportable content with field paths", () => {
   for (const [value, reason] of [
-    [{ ...profile, format: "agent-depot-profile/v2" }, /profile.format/],
+    [{ ...profile, format: "agent-depot-profile/v3" }, /profile.format/],
     [{ ...profile, approvals: [] }, /profile.approvals/],
     [{ ...profile, sources: [{ url: "/home/user/repo", included: false }] }, /sources\[0\].url/],
     [{ ...profile, skills: [{ ...profile.skills[0], installation: { path: "local" } }] }, /skills\[0\].installation/],
@@ -84,7 +106,7 @@ test("profile rejects unknown fields, versions and nonportable content with fiel
   ] as const) assert.throws(() => parseProfile(value), reason);
 });
 
-test("export includes only portable managed state and recipes without running commands", async t => {
+test("export includes portable managed state without running App lifecycle commands", async t => {
   const home = await mkdtemp(path.join(tmpdir(), "ad-profile-"));
   t.after(() => rm(home, { recursive: true, force: true }));
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
@@ -95,8 +117,12 @@ test("export includes only portable managed state and recipes without running co
     version: { policy: "latest" }, hosts: ["pi", "claude"],
     installation: { path: ".agents/skills/doctor-md-agents", adopted: false },
   });
+  const versionProbes: string[][] = [];
   const apps = createAppOperations({ recipesDirectory: path.join(home, "apps"),
-    runner: async () => { throw new Error("must not execute"); } });
+    runner: async (_command, args) => {
+      versionProbes.push([...args]);
+      throw new Error("fixture executable should be unavailable");
+    }, resolveExecutable: async () => undefined });
   await mkdir(apps.directory);
   await writeFile(path.join(apps.directory, "tool.json"), JSON.stringify(recipe));
   const result = await buildProfileExport(operations, apps, { homeDirectory: home });
@@ -104,6 +130,8 @@ test("export includes only portable managed state and recipes without running co
   assert.deepEqual(result.profile.skills, [{ source: { kind: "builtin", id: "builtin:agent-depot" },
     path: "doctor-md-agents", version: { policy: "latest" }, hosts: ["pi", "claude"] }]);
   assert.deepEqual(result.profile.apps, [recipe]);
+  assert.deepEqual(result.profile.replicas, [{ kind: "skill", source: { kind: "builtin", id: "builtin:agent-depot" }, path: "doctor-md-agents" }]);
+  assert.deepEqual(versionProbes, []);
   assert.match(result.preview.join("\n"), /Not transferred because it is always present: built-in Source/);
   assert.doesNotMatch(serializeProfile(result.profile), /installation|adopted|approvals/);
 });
@@ -116,9 +144,71 @@ test("export writes Package declarations without receipts or installed state", a
   const { operations: packageOperations, evidence } = fakePackageOperations({ recorded: [installedPackage] });
   const result = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations });
   assert.deepEqual(result.profile.packages, [piPackage]);
+  assert.deepEqual(result.profile.replicas, []);
   assert.doesNotMatch(serializeProfile(result.profile), /installId|lastDelegatedCommit|verified|receipt|approval/);
-  assert.match(result.preview.join("\n"), /Package pi plugins\/demo \(latest\); no receipt, no installed state/);
+  assert.match(result.preview.join("\n"), /Package pi plugins\/demo from https:\/\/example\.test\/demo\.git \(latest; saved selection\); no receipt or installed evidence/);
   assert.deepEqual([evidence.listed, evidence.approvals.length, evidence.plans.length, evidence.executions.length], [1, 0, 0, 0]);
+});
+
+test("approved App recipes are available choices, but only a tracked installation becomes replica intent", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-app-replica-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const gentleShell = { ...recipe, name: "gentle-shell", platform: "linux" as const,
+    version: { argv: ["gentle-shell", "--version"], pattern: "(.*)" } };
+  let installedNow = false;
+  const versionCalls: string[] = [];
+  const apps = createAppOperations({ homeDirectory: home, recipesDirectory: path.join(home, "apps"),
+    resolveExecutable: async name => name === "gentle-shell" ? "/fixture/gentle-shell" : undefined,
+    runner: async (_command, args) => {
+      versionCalls.push(args.join(" "));
+      return { code: installedNow ? 0 : 1, signal: null, stdout: Buffer.from("1.2.3"), stderr: "", outputTooLarge: false };
+    } });
+  await mkdir(apps.directory, { recursive: true });
+  await writeFile(path.join(apps.directory, "gentle-shell.json"), JSON.stringify(gentleShell));
+  const entry = (await apps.load())[0]!;
+  await apps.approve(entry);
+  const installationDirectory = path.join(home, "app-installations");
+  await mkdir(installationDirectory, { recursive: true });
+  const record = { name: "gentle-shell", recipeFile: entry.canonicalFile, installedVersion: "9.9.9" };
+  const filename = `${createHash("sha256").update(record.name).digest("hex")}.json`;
+  await writeFile(path.join(installationDirectory, filename), JSON.stringify(record));
+  const absent = await buildProfileExport(operations, apps, { homeDirectory: home });
+  assert.deepEqual(absent.profile.apps.map(app => app.name), ["gentle-shell"]);
+  assert.deepEqual(absent.profile.replicas, []);
+  assert.match(absent.preview.join("\n"), /App recipe gentle-shell \(linux; approval not transferred\)/);
+  assert.match(absent.preview.join("\n"), /current version probe reports not installed; stale tracking does not create replica intent/);
+
+  installedNow = true;
+  const installed = await buildProfileExport(operations, apps, { homeDirectory: home });
+  assert.deepEqual(installed.profile.replicas, [{ kind: "app", name: "gentle-shell", platform: "linux" }]);
+  assert.equal(JSON.parse(serializeProfile(installed.profile)).format, "agent-depot-profile/v2");
+  assert.doesNotMatch(serializeProfile(installed.profile), /1\.2\.3|recipeFile|app-installations|approval/);
+  assert.deepEqual(versionCalls, ["--version", "--version"]);
+  assert.equal((await apps.trackedApps())[0]?.installedVersion, "9.9.9", "read-only export inspection must not reconcile tracking");
+});
+
+test("a saved Package selection becomes replica intent only when host evidence says installed", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-package-replica-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
+  const pstack: PackageSelection = { host: "pi", root: "plugins/pstack",
+    source: { kind: "external", url: "https://github.com/michael-denyer/pstack-claude" },
+    version: { policy: "latest" } };
+  const saved = { ...installedPackage, selection: pstack };
+  const { operations: packageOperations } = fakePackageOperations({ recorded: [saved],
+    installed: { kind: "installed", reason: "Pi settings match; checkout evidence unavailable" } });
+  const result = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations });
+  assert.deepEqual(result.profile.packages, [pstack]);
+  assert.deepEqual(result.profile.replicas, [{ kind: "package", selection: pstack }]);
+  assert.match(result.preview.join("\n"), /Installed Package pi plugins\/pstack from https:\/\/github\.com\/michael-denyer\/pstack-claude/);
+  assert.doesNotMatch(serializeProfile(result.profile), /installId|lastDelegatedCommit|verifiedAt|checkout evidence/);
+
+  const unknownOperations = fakePackageOperations({ recorded: [saved], installed: { kind: "unknown", reason: "Pi settings.json cannot be read" } });
+  const unknown = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations: unknownOperations.operations });
+  assert.deepEqual(unknown.profile.replicas, []);
+  assert.match(unknown.preview.join("\n"), /host installation state is unknown.*Pi settings\.json cannot be read/);
 });
 
 test("Package filters follow the Source and Skill filter conventions", async t => {
@@ -151,7 +241,7 @@ test("export reports a recorded Package whose coordinates are not portable inste
   const { operations: packageOperations } = fakePackageOperations({ recorded: [local] });
   const result = await buildProfileExport(operations, apps, { homeDirectory: home, packageOperations });
   assert.deepEqual(result.profile.packages, []);
-  assert.deepEqual(result.exclusions.filter(item => item.block === "packages"), [{ block: "packages", label: "Package pi /abs/bundle (latest)",
+  assert.deepEqual(result.exclusions.filter(item => item.block === "packages"), [{ block: "packages", label: "Package pi /abs/bundle from https://example.test/demo.git (latest; saved selection)",
     reason: "not portable (packages[0].root: expected a canonical Source-relative directory)" }]);
   assert.throws(() => requireProfileExportSelection(result.profile), /Nothing selected; nothing written/);
 });
@@ -191,7 +281,7 @@ test("CLI Package filters parse on export and import and need Package operations
   const imported: string[] = [];
   assert.equal(await runProfileImport([file, "--yes"], operations, apps, line => imported.push(line),
     { homeDirectory: home, packageOperations: importOperations }), 0);
-  assert.deepEqual(imported.filter(line => /^(?:added|skipped|failed):/u.test(line)), ["added: Package pi plugins/demo (latest)"]);
+  assert.deepEqual(imported.filter(line => /^(?:added|skipped|failed):/u.test(line)), ["added: Package pi plugins/demo from https://example.test/demo.git (latest; saved selection)"]);
   await assert.rejects(runProfileImport([file], operations, apps, () => {}, { homeDirectory: home }),
     /Profile import requires Package operations/);
 });
@@ -397,7 +487,8 @@ test("export reports named unmanaged Skills and only real exclusions", async t =
   const apps = createAppOperations({ recipesDirectory: path.join(home, "apps") });
   const options = { homeDirectory: home, noSources: true };
   const empty = await buildProfileExport(operations, apps, options);
-  assert.deepEqual(empty.preview, ["Preview: export portable user-global profile"]);
+  assert.deepEqual(empty.preview, ["Preview: export portable user-global profile",
+    "Selected Skills keep their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel."]);
   const skill = path.join(home, ".agents", "skills", "unmanaged-tool");
   await mkdir(skill, { recursive: true });
   await writeFile(path.join(skill, "SKILL.md"), "---\nname: unmanaged-tool\ndescription: A tool\n---\nInstructions\n");
@@ -479,14 +570,15 @@ test("export exposes classified exclusions and warnings while preserving the CLI
   assert.ok("exclusions" in result);
   assert.deepEqual(result.exclusions, [
     { block: "sources", label: "built-in Source", reason: "always present (built-in Skill selections remain portable)" },
-    { block: "skills", label: "installation location and version evidence for Skill demo", reason: "machine-specific" },
   ]);
   assert.ok("warnings" in result);
   assert.deepEqual(result.warnings, [{ kind: "source", message: "WARNING: Skill demo references Source https://example.com/omitted.git not included in profile" }]);
   assert.deepEqual(result.preview, [
-    "Preview: export portable user-global profile", "Skill demo [pi] (latest)",
+    "Preview: export portable user-global profile",
+    "Selected Skills keep their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel.",
+    "Skill demo [pi] (latest)",
+    "Replica intent Installed Skill demo from https://example.com/omitted.git; no installed state or approval is transferred",
     "Not transferred because it is always present: built-in Source",
-    "Omitted machine-specific installation details for Skill demo",
     "WARNING: Skill demo references Source https://example.com/omitted.git not included in profile",
   ]);
 });

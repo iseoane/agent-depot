@@ -942,12 +942,18 @@ los enlaces simbólicos no se reemplazan). Los Profiles contienen URL de Git
 canónicas con su inclusión en el descubrimiento, las políticas de versión/Hosts/
 métodos de usuario registrados de los Skills, recipes de App completas, incluidas
 las recipes de otras plataformas, y selecciones de Package solo como declaraciones:
-su Source, coordenadas de Host y política de versión. La exportación por CLI siempre
-escribe
-`included: true`; las elecciones de descubrimiento son transitorias, mientras que la
+su origen Source completo, coordenadas de Host y política de versión. Un Profile v2
+también puede incluir intención de réplica, solo con la identidad de Skills, Apps y
+Packages cuya instalación se confirmó en la máquina de origen. No incluye estado de
+instalación, recibos, aprobaciones ni rutas locales. El parser actual lee los
+Profiles v1 anteriores; los lectores antiguos que solo admiten v1 rechazan los v2.
+La exportación por CLI siempre escribe `included: true`; las elecciones de descubrimiento son transitorias, mientras que la
 TUI puede pasar elecciones de inclusión explícitas al núcleo de exportación
-compartido. La exportación no refresca Sources ni ejecuta comandos de Apps, y un
-recibo de Package nunca viaja en un Profile.
+compartido. La exportación no refresca Sources ni ejecuta comandos del ciclo de vida.
+Puede ejecutar la sonda existente de versión de App aprobada e inspeccionar Packages
+sin escritura para determinar la intención de réplica actual; un estado desconocido no
+se considera instalado y la inspección no reconcilia registros. Los recibos de Package
+nunca viajan en un Profile.
 
 Las rutas locales y las credenciales evidentes no son portables. Los elementos no
 portables o inválidos se excluyen con sus motivos, al igual que los Skills no
@@ -1011,9 +1017,13 @@ registro; la previsualización nombra las Sources no registradas que se obtendr�
 registrarse. Las filas de Sources existentes explican cuándo la inclusión en el
 descubrimiento difiere pero no se importa.
 
-La pestaña **5 Import/Export** de la TUI ofrece listas de verificación agrupadas y
-las mismas previsualizaciones del núcleo compartido que la CLI. Las exclusiones y los
-conflictos no pueden seleccionarse. La exportación solo crea un archivo nuevo; las
+La pestaña **5 Import/Export** de la TUI empieza con el grupo padre **Sources**
+contraído. Dentro contiene grupos anidados para elecciones de Source, Skills, Apps y
+Packages; cada recurso muestra la identidad de su Source. **Installed replicas** y las
+notas de exportación son grupos separados. Usa las mismas previsualizaciones del núcleo
+compartido que la CLI. La intención de réplica solo informa; importar nunca
+aprueba ni instala Apps o Packages a partir de ella. Las exclusiones y los conflictos
+no pueden seleccionarse. La exportación solo crea un archivo nuevo; las
 exportaciones vacías no escriben nada (la CLI informa de un error). La importación
 añade las elecciones que faltan sin reemplazar las existentes. Las recipes importadas
 permanecen sin aprobar y la importación nunca instala Apps. Las selecciones de Package

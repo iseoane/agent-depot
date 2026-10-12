@@ -5,7 +5,7 @@ This context defines the product language for discovering, installing, and updat
 ## Language
 
 **Profile**:
-A portable collection of user-global Source discovery choices, managed Skill selections and App recipes that can be exported and added on another machine without replacing existing choices or transferring approvals or installed state.
+A portable collection of user-global Source discovery choices, managed Skill selections, App recipes, Package selections, and optional identity-only replica intent for resources confirmed installed on the exporting machine. Replica intent never transfers installed state or approval, and import never installs from it. Profiles can be exported and added on another machine without replacing existing choices.
 _Avoid_: Backup, sync (a Profile transfers choices, not machine state)
 
 **Host**:
