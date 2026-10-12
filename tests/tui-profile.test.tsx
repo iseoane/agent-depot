@@ -183,11 +183,9 @@ test("export panel stays inside a resized terminal with wrapped choices and conf
   assert.match(frame, /Export Profile/);
   assert.match(frame, /…/);
   assert.match(frame, /preview shows full text/);
-  for (let index = 0; index < 12 && !frame.replace(/[│\s]/g, "").includes("very-long-unmanaged-name-"); index++) {
-    const before = frame;
-    view.stdin.write("j");
-    frame = await waitForFrame(view.lastFrame, next => next !== before);
-  }
+  view.stdin.write("j".repeat(8));
+  frame = await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line =>
+    line.includes(">") && line.includes("very-long")));
   assert.ok(frame.split("\n").length <= 17, frame);
   assert.ok(frame.replace(/[│\s]/g, "").includes("very-long-unmanaged-name-"), frame);
   assert.match(frame, /preview shows full text/);
@@ -200,7 +198,15 @@ test("export panel stays inside a resized terminal with wrapped choices and conf
   const detailTail = await waitForFrame(view.lastFrame, /not tracked/);
   assert.ok(detailTail.split("\n").length <= 17, detailTail);
   view.stdin.write("\u001b");
-  await waitForFrame(view.lastFrame, /Export Profile/);
+  frame = await waitForFrame(view.lastFrame, frame => frame.includes("Export Profile") &&
+    frame.split("\n").some(line => line.includes("> ") && line.includes("Excluded unmanaged Skill very-long")));
+  assert.match(frame, />\s+Excluded unmanaged Skill very-long/);
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 24 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 24 });
+  view.stdout.emit("resize");
+  frame = await waitForFrame(view.lastFrame, frame => frame.includes("Export Profile") && frame.includes(" of "));
+  assert.ok(frame.split("\n").length <= 24, frame);
+  assert.match(frame, /preview shows full text/);
   Object.defineProperty(view.stdout, "rows", { configurable: true, value: 24 });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: 80 });
   view.stdout.emit("resize");
@@ -255,6 +261,7 @@ test("export group selection and numbering survive scrolling, collapse, expansio
   let frame = view.lastFrame() ?? "";
   for (let index = 0; index < 12 && !/> \[x\] 4 skill-4/.test(frame); index++) frame = await step("j");
   assert.match(frame, /> \[x\] 4 skill-4/);
+  assert.equal([...frame.matchAll(/▾ Skills \(6\)/g)].length, 1, frame);
   frame = await step(" ");
   assert.match(frame, /> \[ \] 4 skill-4/);
   for (let index = 0; index < 12 && !/> ▾ Skills/.test(frame); index++) frame = await step("k");

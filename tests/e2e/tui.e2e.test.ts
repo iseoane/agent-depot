@@ -424,7 +424,10 @@ test("Profile export groups keep identities and ordinals stable across PTY resiz
     assert.ok(noteDetail.split("\n").length <= 17, `Export note exceeded a 40x17 PTY:\n${noteDetail}`);
     await session.send("\x1b[6~", /not tracked/u);
     assert.ok(session.screen.split("\n").length <= 17, `Export note review exceeded a 40x17 PTY:\n${session.screen}`);
-    await session.send("\x1b", /Export Profile/u);
+    const returnedChecklist = await session.send("\x1b", />.*Excluded unmanaged Skill very-long/u);
+    assert.match(returnedChecklist, />\s+Excluded unmanaged Skill very-long/u);
+    assert.ok(returnedChecklist.split(/▾ Export notes \(1\)/u).length <= 2,
+      `A viewport boundary duplicated the sticky Export notes group:\n${returnedChecklist}`);
     await session.send("\x1b", /e export · i import/u);
     await session.send("e", /preview shows full text/u);
     const pathPrompt = await session.send("\r", /Profile path:/u);

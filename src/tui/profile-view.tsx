@@ -148,9 +148,10 @@ function physicalListWindow(rows: readonly DisplayRow[], rowHeights: readonly nu
     return { start, end };
   };
   let range = build(height);
-  const stickyGroup = range.start > 0 && !("kind" in rows[range.start]!) &&
-    (rowHeights[range.start] ?? 1) < height && rows.slice(0, range.start).some(row => "kind" in row);
-  if (stickyGroup) range = build(Math.max(height - 1, 1));
+  const needsStickyGroup = (start: number) => start > 0 && !("kind" in rows[start]!) &&
+    (rowHeights[start] ?? 1) < height && rows.slice(0, start).some(row => "kind" in row);
+  if (needsStickyGroup(range.start)) range = build(Math.max(height - 1, 1));
+  const stickyGroup = needsStickyGroup(range.start);
   const hidden = range.start > 0 || range.end < rows.length;
   return { ...range, indicator: hidden ? `${range.start + 1}–${range.end} of ${rows.length}` : undefined, stickyGroup };
 }
@@ -227,6 +228,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const [text, setText] = useState("");
   const typed = useRef("");
   const [lines, setLines] = useState<readonly string[]>([]);
+  const detailReturnId = useRef<string | undefined>(undefined);
   const [profile, setProfile] = useState<Profile>();
   const [plan, setPlan] = useState<ProfileImportPlan>();
   const diagnostics = useRef<readonly ProfileExportDiagnostic[]>([]);
@@ -237,8 +239,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const listingHint = mode === "export-list"
     ? "j/k · Enter group/preview · ←/→ group · space · a all · Esc"
     : "j/k move · space toggle · a all · Enter preview · Esc";
+  const renderedListingHint = mode === "export-list" ? `${listingHint} · preview shows full text` : listingHint;
   const titleRows = Math.max(Math.ceil(stringWidth("Export Profile") / panelWidth), 1);
-  const hintRows = Math.max(Math.ceil(stringWidth(listingHint) / panelWidth), 1);
+  const hintRows = Math.max(Math.ceil(stringWidth(renderedListingHint) / panelWidth), 1);
   const height = useListHeight(listHeight, 4 + titleRows + hintRows);
   const showLines = (next: readonly string[], nextMode: "confirm" | "detail" | "results") => {
     setLines(next);
@@ -335,6 +338,10 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     }
     if (current === "detail") {
       if (key.escape) {
+        const returnIndex = exportDisplayRows(rows, expandedGroupsRef.current)
+          .findIndex(row => !("kind" in row) && row.id === detailReturnId.current);
+        cursorTo(Math.max(returnIndex, 0));
+        detailReturnId.current = undefined;
         setMode("export-list");
         return;
       }
@@ -391,6 +398,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       select(toggleChoice(rows, selectedRef.current, currentRow));
     } else if (input === "a") select(selectedRef.current.length ? [] : rows.filter(row => row.selectable));
     else if (current === "export-list" && key.return && currentRow && !("kind" in currentRow) && currentRow.block === "excluded") {
+      detailReturnId.current = currentRow.id;
       showLines(wrapListText(currentRow.label, Math.max((terminalColumns || 80) - 8, 1)), "detail");
     } else if (key.return) {
       if (current === "export-list") {
@@ -458,7 +466,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   return <Box flexDirection="column">
     {listing ? <BorderPanel title={mode === "export-list" ? "Export Profile" : "Import Profile"}>
       {listContent}
-      <Text color={theme.legend}>{mode === "export-list" ? `${listingHint} · preview shows full text` : listingHint}</Text>
+      <Text color={theme.legend}>{renderedListingHint}</Text>
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
     </BorderPanel> : null}
     {mode !== "confirm" && mode !== "detail" && !listing ? <BorderPanel title="Portable Profile">
