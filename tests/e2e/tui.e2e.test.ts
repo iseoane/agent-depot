@@ -650,8 +650,14 @@ test("the Catalog keeps numbered destinations and Packages readable in a narrow 
     await session.send("/", /Enter submit · Esc cancel/u);
     const narrowCatalog = await session.send("pstack", /Package agent-depot-package/u);
     assert.ok(narrowCatalog.split("\n").length <= 17, `40-column PTY frame exceeded 17 rows:\n${narrowCatalog}`);
+    const destinations = ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"];
+    const outputBeforeResize = session.terminalOutput.length;
     session.resize(80, 24);
-    const resized = await session.waitFor(/Package agent-depot-package/u, screen => screen.split("\n").length >= 24);
+    const resized = await session.waitFor(/Package agent-depot-package/u, () => {
+      const currentScreen = session.screen;
+      return session.terminalOutput.length > outputBeforeResize && currentScreen.split("\n").length >= 24 &&
+        currentScreen.split("\n").some(line => destinations.every(destination => line.includes(destination)));
+    });
     assert.match(resized, /AGENT DEPOT/u);
     assert.match(resized, /v0\.5\.2/u);
     for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
