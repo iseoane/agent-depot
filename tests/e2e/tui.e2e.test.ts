@@ -201,15 +201,17 @@ class TuiSession {
 
   async waitFor(expected: RegExp, ready: (screen: string) => boolean = () => true): Promise<string> {
     const deadline = Date.now() + TIMEOUT_MS;
+    const rawLengthBeforeWait = this.rawLength;
     for (;;) {
-      const screen = this.output.replace(ANSI, "");
-      assert.doesNotMatch(screen, /Error:|TypeError/u, `TUI reported an error:\n${screen}`);
-      if (expected.test(screen) && ready(screen)) return this.screen;
+      const output = this.output.replace(ANSI, "");
+      const currentScreen = this.screen;
+      assert.doesNotMatch(output, /Error:|TypeError/u, `TUI reported an error:\n${output}`);
+      if (this.rawLength > rawLengthBeforeWait && expected.test(currentScreen) && ready(currentScreen)) return currentScreen;
       if (this.exit) {
-        assert.fail(`TUI exited early while waiting for ${String(expected)}; ${this.diagnostics}; screen:\n${screen}`);
+        assert.fail(`TUI exited early while waiting for ${String(expected)}; ${this.diagnostics}; output:\n${output}; current screen:\n${currentScreen}`);
       }
       if (Date.now() >= deadline) {
-        assert.fail(`Timed out waiting for ${String(expected)}; ${this.diagnostics}; screen:\n${screen}`);
+        assert.fail(`Timed out waiting for ${String(expected)}; ${this.diagnostics}; output:\n${output}; current screen:\n${currentScreen}`);
       }
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -328,7 +330,7 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     const trackedFile = path.join(trackedDirectory, `${createHash("sha256").update("fixture-app").digest("hex")}.json`);
     await writeFile(trackedFile, JSON.stringify({ name: "fixture-app", recipeFile: fixture.file, installedVersion: "1.0.0" }));
     await session.send("3", /Apps \(user-global\)/u);
-    await session.send("j", /Managed \(project\)/u);
+    await session.send("j", />\s+Managed \(project\)/u);
     await session.send("j", /Unmanaged \(user-global\)/u);
     await session.send("j", /Apps \(user-global\)/u);
     await session.send("k", /Unmanaged \(user-global\)/u);
