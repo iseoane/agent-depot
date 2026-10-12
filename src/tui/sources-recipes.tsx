@@ -12,7 +12,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { appName, appRecipePreviewLines, appStepLines } from "./app-actions.js";
 import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
-import { BorderPanel, PreviewConfirm } from "./panel-parts.js";
+import { BorderPanel, DecisionPrompt, PreviewConfirm } from "./panel-parts.js";
 import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
 import { previewViewport, type PreviewChrome } from "./preview-window.js";
 import { theme } from "./theme.js";
@@ -321,7 +321,7 @@ export function useSourcesRecipes({
       {mode.kind === "uninstall-question" ? (
         <BorderPanel title="Uninstall before recipe removal">
           <Text>App {appName(mode.removal.entry)} is installed or tracked{mode.removal.installedVersion ? ` (${mode.removal.installedVersion})` : ""}.</Text>
-          <Text>Uninstall it before removing the recipe? y/n (n cancels removal)</Text>
+          <Text><DecisionPrompt>Uninstall it before removing the recipe?</DecisionPrompt><Text color={theme.legend}>(n cancels removal)</Text></Text>
         </BorderPanel>
       ) : null}
       {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (() => {

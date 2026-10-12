@@ -22,7 +22,7 @@ export function FieldLine({ label, value }: { readonly label: string; readonly v
 export function DecisionPrompt({ children }: { readonly children: ReactNode }) {
   return (
     <Text>
-      {children} <Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text>
+      <Text color={theme.accent}>{children}</Text> <Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text>
     </Text>
   );
 }
@@ -61,7 +61,8 @@ const PREVIEW_FIELD_LABELS = [
   "App:", "Environment:", "Version:", "argv:", "Executable:", "Manual:",
   "Declaration:", "Version pattern:", "Working directory:", "Previous version:",
   "Latest version:", "Package:", "Host:", "Source:", "Scope:", "Coordinates:", "Origin:",
-  "Available:", "Approval:", "Path:",
+  "Available:", "Approval:", "Path:", "Blast radius:", "Warning:", "  target:", "  proposed changes:",
+  "  external command:", "  external cwd:", "  external target:",
 ] as const;
 
 function previewField(line: string): { readonly label: string; readonly value: string } | undefined {
@@ -125,13 +126,7 @@ export function PreviewConfirm({ title = "Confirmation", lines, question, warnFi
       {viewport ? <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · j/k · PgUp/PgDn</Text> : null}
       {question.includes("y/n") ? (() => {
         const marker = question.indexOf("y/n");
-        return (
-          <Text>
-            {question.slice(0, marker)}
-            <Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text>
-            <Text color={theme.legend}>{question.slice(marker + 3)}</Text>
-          </Text>
-        );
+        return <Text><Text color={theme.accent}>{question.slice(0, marker)}</Text><Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text><Text color={theme.legend}>{question.slice(marker + 3)}</Text></Text>;
       })() : <Text color={theme.legend}>{question}</Text>}
     </BorderPanel>
   );

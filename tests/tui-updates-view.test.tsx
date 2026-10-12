@@ -742,7 +742,8 @@ test("a Skill that became locally modified after the preview is not overwritten"
   await writeFile(path.join(f.project, ".agents/skills/one/SKILL.md"), "edited after the preview", "utf8");
   press(stdin, "y");
   const done = await waitForFrame(lastFrame, /1 updated, 1 failed/);
-  assert.match(done, /Failed portable\/one:[\s\S]*modified after the\s+preview/);
+  const unwrapped = done.replace(/[│╭╮╰╯]/gu, " ").replace(/\s+/gu, " ");
+  assert.match(unwrapped, /Failed portable\/one:.*modified after the preview/);
   assert.equal(await f.read(f.project, ".agents/skills/one"), "edited after the preview", "the new local edit survives");
   assert.equal(await f.read(f.project, ".agents/skills/two"), newText("two"));
   unmount();

@@ -36,12 +36,12 @@ function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boo
   }
 }
 
-function Header({ view, columns }: { readonly view: ViewName; readonly columns: number }) {
+export function Header({ view, columns }: { readonly view: ViewName; readonly columns: number }) {
   const innerWidth = Math.max(columns - 4, 1);
   return (
-    <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column" width={columns}>
+    <Box borderStyle="round" borderColor={theme.accent} paddingX={1} flexDirection="column" width={columns}>
       <Box width={innerWidth} justifyContent="space-between">
-        <Text color={theme.title} bold>AGENT DEPOT</Text>
+        <Text color={theme.accent} bold>AGENT DEPOT</Text>
         {AGENT_DEPOT_PACKAGE_VERSION === undefined ? null : <Text color={theme.value}>v{AGENT_DEPOT_PACKAGE_VERSION}</Text>}
       </Box>
       <Box flexDirection="column">

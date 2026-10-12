@@ -4,7 +4,7 @@ import { AppPanel } from "./app-actions.js";
 import { PackagePanel } from "./package-actions.js";
 import type { BulkHostPlan, BulkUninstallPlan, SkippedTarget } from "./bulk-actions.js";
 import type { ManageMode } from "./manage-actions.js";
-import { ChecklistLines, HostChecklist, PreviewConfirm, PreviewLines } from "./panel-parts.js";
+import { ChecklistLines, DecisionPrompt, HostChecklist, PreviewConfirm, PreviewLines } from "./panel-parts.js";
 import { theme } from "./theme.js";
 
 const plural = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
@@ -39,7 +39,7 @@ function PlanPreview({ entries, skipped, question }: {
         </Box>
       ))}
       <SkippedLines skipped={skipped} />
-      <Text>{question}</Text>
+      <DecisionPrompt>{question}</DecisionPrompt>
     </Box>
   );
 }
@@ -51,12 +51,12 @@ function UninstallPreview({ plan }: { readonly plan: BulkUninstallPlan }) {
     lines: item.kind === "managed" ? item.prepared.plan.preview : item.prepared.preview,
     warnFirst: item.kind === "unmanaged",
   }));
-  return <PlanPreview entries={entries} skipped={plan.skipped} question={`Uninstall ${plural(plan.items.length)}? y/n`} />;
+  return <PlanPreview entries={entries} skipped={plan.skipped} question={`Uninstall ${plural(plan.items.length)}?`} />;
 }
 
 function HostsPreview({ plan }: { readonly plan: BulkHostPlan }) {
   const entries = plan.items.map((item): PlanEntry => ({ id: item.id, label: item.label, lines: item.prepared.preview, warnFirst: false }));
-  return <PlanPreview entries={entries} skipped={plan.skipped} question={`Add hosts to ${plural(plan.items.length)}? y/n`} />;
+  return <PlanPreview entries={entries} skipped={plan.skipped} question={`Add hosts to ${plural(plan.items.length)}?`} />;
 }
 
 /** Renders the prompt of a manage mode: host lists, previews and confirmations. */
@@ -89,7 +89,7 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
     case "confirm-host-exposure":
       return (
         <Text color={theme.warning}>
-          Adding hosts exposes the installed {mode.skill.name} to more hosts and needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
+          Adding hosts exposes the installed {mode.skill.name} to more hosts and needs separate confirmation (CLI: --confirm-additional-host). <DecisionPrompt>Confirm?</DecisionPrompt>
         </Text>
       );
     case "confirm-host-remove":
@@ -128,7 +128,7 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
     case "confirm-bulk-exposure":
       return (
         <Text color={theme.warning}>
-          Adding hosts exposes the installed {mode.plan.items.map((item) => item.label).join(", ")} to more hosts and needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
+          Adding hosts exposes the installed {mode.plan.items.map((item) => item.label).join(", ")} to more hosts and needs separate confirmation (CLI: --confirm-additional-host). <DecisionPrompt>Confirm?</DecisionPrompt>
         </Text>
       );
     case "busy":

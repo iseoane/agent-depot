@@ -8,6 +8,18 @@ import type { UpdatesMode } from "./updates-mode.js";
 import { formatAgo, previewLineText, type UpdatesData } from "./updates.js";
 import { updateModePreviewChrome, updateModePreviewLines, updateModeQuestion } from "./updates-preview.js";
 
+function updateResultField(line: string, defaultOk: boolean): { readonly ok: boolean; readonly label: string | undefined; readonly value: string } {
+  if (line.startsWith("Update summary: ")) {
+    const successful = /^Update summary: \d+ updated, 0 failed$/.test(line);
+    return { ok: successful, label: "Update summary:", value: line.slice("Update summary: ".length) };
+  }
+  if (line.startsWith("Updated ")) return { ok: true, label: "Updated", value: line.slice("Updated ".length) };
+  if (line.startsWith("Failed ")) return { ok: false, label: "Failed", value: line.slice("Failed ".length) };
+  if (line.startsWith("Cancelled ")) return { ok: false, label: "Cancelled", value: line.slice("Cancelled ".length) };
+  if (line === "Update cancelled") return { ok: true, label: undefined, value: line };
+  return { ok: defaultOk, label: undefined, value: line };
+}
+
 /** What the last check found out: its age, how the sources were refreshed, and what failed. */
 export function CheckStatus({ data, now }: { readonly data: UpdatesData; readonly now: number }) {
   const errors = data.results.filter((result) => result.error !== undefined);
@@ -17,11 +29,11 @@ export function CheckStatus({ data, now }: { readonly data: UpdatesData; readonl
         <Text color={theme.legend}> · </Text><Text color={theme.value}>{describeRefresh(data)}</Text>
       </Text>
       {data.refresh.failed.map((failure) => (
-        <Text key={failure.source} color={theme.warning}>Refresh failed for {failure.source}: {failure.reason}</Text>
+        <Text key={failure.source}><Text color={theme.warning}>[WARN] </Text><FieldLine label="Refresh failed for" value={`${failure.source}: ${failure.reason}`} /></Text>
       ))}
-      {data.appError ? <Text color={theme.error}>Error (Apps): {data.appError}</Text> : null}
-      {data.packageError ? <Text color={theme.error}>Error (Packages): {data.packageError}</Text> : null}
-      {errors.map((result) => <Text key={result.scope} color={theme.error}>Error ({result.scope}): {result.error}</Text>)}
+      {data.appError ? <Text><Text color={theme.error}>[FAIL] </Text><FieldLine label="Error (Apps):" value={data.appError} /></Text> : null}
+      {data.packageError ? <Text><Text color={theme.error}>[FAIL] </Text><FieldLine label="Error (Packages):" value={data.packageError} /></Text> : null}
+      {errors.map((result) => <Text key={result.scope}><Text color={theme.error}>[FAIL] </Text><FieldLine label={`Error (${result.scope}):`} value={result.error ?? ""} /></Text>)}
     </BorderPanel>
   );
 }
@@ -46,7 +58,7 @@ export function EntryLine({ entry, selected, checked, view, showUnknown }: {
   if (entry.kind === "unknown") {
     return (
       <Box flexDirection="column">
-        <Text {...rowStyle(selected)}>{cursor}    {row.path}  {row.scope}</Text>
+        <Text {...rowStyle(selected)}>{cursor}    <Text color={theme.field}>{row.path}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>{row.scope}</Text></Text>
         <Text color={theme.muted}>{"        "}{row.kind === "package" && /local modifications|local changes/i.test(row.reason)
           ? `Update comparison unavailable: ${row.reason}`
           : row.reason}</Text>
@@ -55,7 +67,7 @@ export function EntryLine({ entry, selected, checked, view, showUnknown }: {
   }
   return (
     <Text {...rowStyle(selected)}>
-      {cursor}{checked ? "[x]" : "[ ]"} {row.path}  {row.scope}  {row.policy}  {row.installed} {"->"} {row.available}
+      {cursor}{checked ? "[x]" : "[ ]"} <Text color={theme.field}>{row.path}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>{row.scope}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>{row.policy}</Text><Text color={theme.legend}>  </Text><Text color={theme.value}>{row.installed}</Text><Text color={theme.legend}> -&gt; </Text><Text color={theme.value}>{row.available}</Text>
     </Text>
   );
 }
@@ -74,9 +86,12 @@ export function UpdatesFooter({ indicator, upToDate, updatableCount, checkedCoun
       {upToDate > 0 ? <Text color={theme.muted}>{upToDate} up to date</Text> : null}
       {updatableCount > 0 ? <Text color={theme.muted}>{checkedCount} selected</Text> : null}
       {message ? (
-        <Box flexDirection="column">
-          {message.lines.map((line, position) => <Text key={position} color={message.kind === "error" ? theme.error : theme.success}>{line}</Text>)}
-        </Box>
+        <BorderPanel title="Update result">
+          {message.lines.map((line, position) => {
+            const result = updateResultField(line, message.kind === "ok");
+            return <Text key={position}><Text color={result.ok ? theme.success : theme.error}>[{result.ok ? "OK" : "FAIL"}] </Text>{result.label === undefined ? <Text color={theme.value}>{result.value}</Text> : <FieldLine label={result.label} value={result.value} />}</Text>;
+          })}
+        </BorderPanel>
       ) : null}
     </>
   );
