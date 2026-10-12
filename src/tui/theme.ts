@@ -1,17 +1,18 @@
 /** Central xeo palette for the TUI; views take every colour from here. */
 export const theme = {
-  /** Panel titles use Xeo magenta; the active tab retains the accent pink. */
-  title: "#ad8ee6",
+  /** Panel titles and active labels use Xeo accent pink. */
+  title: "#ff2e9a",
   accent: "#ff2e9a",
   /** Borders and group nodes. */
   border: "#7aa2f7",
   group: "#7aa2f7",
-  /** Field names and markers such as hosts and versions. */
-  field: "#449dab",
-  marker: "#449dab",
+  /** Field names and markers such as hosts. */
+  field: "#7aa2f7",
+  marker: "#7aa2f7",
   /** Primary and emphasized values. */
   text: "#a9b1d6",
   value: "#c0caf5",
+  version: "#ff9e64",
   success: "#9ece6a",
   warning: "#e0af68",
   error: "#f7768e",

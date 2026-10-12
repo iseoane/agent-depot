@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn as spawnProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,6 +20,10 @@ const CLI = fileURLToPath(new URL("../../src/cli.js", import.meta.url));
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\-_])/gu;
 const TIMEOUT_MS = 30_000;
+
+function ansiColor(red: number, green: number, blue: number, text: string): string {
+  return `\u001b[38;2;${red};${green};${blue}m${text}`;
+}
 
 let sandbox: string;
 let homeDirectory: string;
@@ -60,6 +65,7 @@ class TuiSession {
       XDG_STATE_HOME: path.join(homeDirectory, ".local", "state"),
       XDG_CONFIG_HOME: path.join(homeDirectory, ".config"),
       XDG_CACHE_HOME: path.join(homeDirectory, ".cache"),
+      PI_CODING_AGENT_DIR: path.join(homeDirectory, ".pi", "agent"),
       NO_COLOR: "1", FORCE_COLOR: "0", ...environment,
     };
     delete inherited.CI;
@@ -237,7 +243,7 @@ async function scrollPreviewToEnd(session: TuiSession, ready: RegExp): Promise<s
   let visited = session.screen;
   for (let move = 0; move < 200; move += 1) {
     if (ready.test(session.screen)) return `${visited}\n${session.screen}`;
-    await session.send("\u001b[6~", new RegExp(`${ready.source}|j\\/k · PgUp\\/PgDn`, ready.flags));
+    await session.send("\u001b[6~", new RegExp(`${ready.source}|arrows\\/Pg page`, ready.flags));
     visited += `\n${session.screen}`;
   }
   assert.fail(`preview did not reach confirmation:\n${session.screen}`);
@@ -262,54 +268,69 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     XDG_STATE_HOME: path.join(paletteHome, ".local", "state"),
     XDG_CONFIG_HOME: path.join(paletteHome, ".config"),
     XDG_CACHE_HOME: path.join(paletteHome, ".cache"),
+    PI_CODING_AGENT_DIR: path.join(paletteHome, ".pi", "agent"),
   };
   execFileSync(process.execPath, [CLI, "source", "add", url], { cwd: projectRoot, env: { ...process.env, ...environment }, stdio: "pipe" });
-  const session = new TuiSession({ ...environment, FORCE_COLOR: "3" }, 110, 40);
+  const session = new TuiSession({ ...environment, FORCE_COLOR: "3" }, 80, 24);
   try {
     await session.waitFor(/xeo-palette/u);
     await session.send("r", /Refresh these Sources\? y\/n/u);
     assert.match(session.screen, /Refresh Git Sources/u);
     assert.match(session.screen, /Source: refresh Git Source/u);
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;173;142;230m", "u"), "panel titles use Xeo magenta");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;255;46;154m", "u"), "the active header tab retains Xeo accent pink");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;68;157;171m", "u"), "field names use the Xeo cyan");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;192;202;245m", "u"), "field values use Xeo brightText");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;158;206;106m", "u"), "yes uses Xeo success green");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;247;118;142m", "u"), "no uses Xeo error red");
+    assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "╭")), "header border uses the fuchsia accent");
+    assert.ok(session.terminalOutput.includes(`\u001b[1m${ansiColor(255, 46, 154, "AGENT DEPOT")}`), "header name is bold fuchsia");
+    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, "v0.5.2")), "header version stays light");
+    assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "Refresh Git Sources")), "panel titles use the fuchsia accent");
+    assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "▶ [1] Sources")), "the active header tab retains Xeo accent pink");
+    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " refresh Git Source")), "field values use Xeo brightText");
+    assert.ok(session.terminalOutput.includes(ansiColor(224, 175, 104, "Refresh these Sources?")), "the decision question prefix uses Xeo warning yellow");
+    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "y")), "yes uses Xeo success green");
+    assert.ok(session.terminalOutput.includes(ansiColor(247, 118, 142, "n")), "no uses Xeo error red");
     await session.send("n", /LOCATION \/ STATUS/u);
+    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "skills")), "Sources resource types use Xeo blue");
+    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "app")), "App recipe type uses Xeo blue");
+    assert.ok(session.terminalOutput.includes(ansiColor(224, 175, 104, "needs approval")), "unapproved recipe status uses the warning color");
     assert.equal(execFileSync(process.execPath, [CLI, "source", "list"], { cwd: projectRoot, env: { ...process.env, ...environment }, encoding: "utf8" }).includes(url), true);
     await session.send("j", /fixture-app/u);
     await session.send("\r", /Recipe approval · does not install/u);
     const appApproval = await scrollPreviewToEnd(session, /Approve fixture-app\? y\/n/u);
     assert.match(appApproval, /File:/u);
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;68;157;171m", "u"), "App recipe field names use Xeo cyan");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;192;202;245m", "u"), "App recipe values use Xeo brightText");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;158;206;106m", "u"), "App approval yes uses Xeo green");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;247;118;142m", "u"), "App approval no uses Xeo red");
+    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "Version pattern:")), "App recipe field names use Xeo blue");
+    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " linux")), "App recipe values use Xeo brightText");
+    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "y")), "App approval yes uses Xeo green");
+    assert.ok(session.terminalOutput.includes(ansiColor(247, 118, 142, "n")), "App approval no uses Xeo red");
     await session.send("y", /approved/u);
+    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "approved")), "approved recipe status uses the success color");
     await session.send("2", /Apps \(user-global\)/u);
     await session.send("j", /Apps \(user-global\)/u);
     const catalog = await session.send("\r", /fixture-app/u);
     assert.match(catalog, /fixture-app/u);
+    assert.ok(session.terminalOutput.includes(ansiColor(224, 175, 104, "not installed")), "Catalog not-installed App status uses the warning color");
+    session.resize(40, 17);
     await session.send("j", /fixture-app/u);
+    assert.ok(session.screen.split("\n").length <= 17, `Catalog exceeded a 40x17 PTY:\n${session.screen}`);
+    session.resize(80, 24);
     const appInstall = await session.send("i", /App install confirmation/u);
     assert.match(appInstall, /argv:/u);
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;68;157;171m", "u"), "App install fields use Xeo cyan");
-    // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;192;202;245m", "u"), "App install values use Xeo brightText");
+    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "argv:")), "App install field names use Xeo blue");
+    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " [")), "App install values use Xeo brightText");
     assert.doesNotMatch(await readFile(fixture.log, "utf8").catch(() => ""), /install/u, "previewing does not execute the App recipe");
     await session.send("n", /fixture-app/u);
+    const trackedDirectory = path.join(paletteHome, ".local", "state", "agent-depot", "app-installations");
+    await mkdir(trackedDirectory, { recursive: true });
+    const trackedFile = path.join(trackedDirectory, `${createHash("sha256").update("fixture-app").digest("hex")}.json`);
+    await writeFile(trackedFile, JSON.stringify({ name: "fixture-app", recipeFile: fixture.file, installedVersion: "1.0.0" }));
+    await session.send("3", /Apps \(user-global\)/u);
+    await session.send("j", /Managed \(project\)/u);
+    await session.send("j", /Unmanaged \(user-global\)/u);
+    await session.send("j", /Apps \(user-global\)/u);
+    if (!session.screen.includes("fixture-app")) await session.send("\r", /fixture-app/u);
+    const installations = session.screen;
+    assert.match(installations, /fixture-app/u);
+    session.resize(40, 17);
+    const selectedApp = await session.send("\x1b[B", /fixture-app/u);
+    assert.ok(selectedApp.split("\n").length <= 17, `Installations exceeded a 40x17 PTY:\n${selectedApp}`);
+    assert.ok(session.terminalOutput.includes(ansiColor(255, 158, 100, "1.0.0")), "the Installations App version segment uses Xeo bright yellow");
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally {
@@ -328,6 +349,7 @@ test("Sources refresh requires reviewing every selected Source at narrow and wid
       XDG_STATE_HOME: path.join(home, ".local", "state"),
       XDG_CONFIG_HOME: path.join(home, ".config"),
       XDG_CACHE_HOME: path.join(home, ".cache"),
+      PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
     };
     for (const url of targets) execFileSync(process.execPath, [CLI, "source", "add", url], { cwd: projectRoot, env: { ...process.env, ...environment }, stdio: "pipe" });
     const listedSources = execFileSync(process.execPath, [CLI, "source", "list"], { cwd: projectRoot, env: { ...process.env, ...environment }, encoding: "utf8" });
@@ -367,6 +389,22 @@ test("Sources refresh requires reviewing every selected Source at narrow and wid
           indexedRows.set(index, row);
         });
       };
+      collectVisibleRows();
+      const initialCursor = Number(/Review (\d+) of/u.exec(session.screen)?.[1] ?? 0);
+      const initialRange = /(\d+)–(\d+) of/u.exec(session.screen);
+      assert.ok(initialRange, `oversized preview should expose its visible physical rows:\n${session.screen}`);
+      const pageSize = Number(initialRange[2]) - Number(initialRange[1]) + 1;
+      await session.send("\u001B[B", /Review \d+ of/u);
+      assert.equal(Number(/Review (\d+) of/u.exec(session.screen)?.[1]), Math.min(initialCursor + pageSize, total), "Down moves a whole visible page");
+      collectVisibleRows();
+      await session.send("\u001B[6~", /Review \d+ of/u);
+      assert.equal(Number(/Review (\d+) of/u.exec(session.screen)?.[1]), Math.min(initialCursor + 2 * pageSize, total), "PageDown matches the arrow page step");
+      collectVisibleRows();
+      await session.send("\u001B[A", /Review \d+ of/u);
+      assert.equal(Number(/Review (\d+) of/u.exec(session.screen)?.[1]), Math.min(initialCursor + pageSize, total), "Up reverses one visible page");
+      collectVisibleRows();
+      await session.send("\u001B[5~", /Review \d+ of/u);
+      assert.equal(Number(/Review (\d+) of/u.exec(session.screen)?.[1]), initialCursor, "PageUp returns to the same preview rows");
       collectVisibleRows();
       for (let page = 0; page < 100 && !session.screen.includes("Refresh these Sources? y/n"); page += 1) {
         await session.send("\u001B[6~", new RegExp(`Review \\d+ of ${total}`, "u"));
@@ -479,6 +517,7 @@ test("the Catalog keeps numbered destinations and Packages readable in a narrow 
     XDG_STATE_HOME: path.join(home, ".local", "state"),
     XDG_CONFIG_HOME: path.join(home, ".config"),
     XDG_CACHE_HOME: path.join(home, ".cache"),
+    PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
     GIT_CONFIG_GLOBAL: gitConfig,
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_TERMINAL_PROMPT: "0",
@@ -571,6 +610,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     XDG_STATE_HOME: state,
     XDG_CONFIG_HOME: path.join(fixtureRoot, "approval-config"),
     XDG_CACHE_HOME: path.join(fixtureRoot, "approval-cache"),
+    PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
   }, 80, 24);
   try {
     await session.waitFor(/n add ·/u);
@@ -699,6 +739,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     XDG_STATE_HOME: path.join(sandbox, "state"),
     XDG_CONFIG_HOME: path.join(sandbox, "config"),
     XDG_CACHE_HOME: path.join(sandbox, "cache"),
+    PI_CODING_AGENT_DIR: path.join(previewHome, ".pi", "agent"),
   }, 80, 24);
   try {
     await session.waitFor(/n add ·/u);
@@ -719,7 +760,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
       const progress = /Review (\d+) of (\d+)/u.exec(session.screen);
       assert.ok(progress, `resized install preview lost its row position:\n${session.screen}`);
       if (Number(progress[1]) - 1 + 10 >= Number(progress[2])) break;
-      await session.send("\u001b[6~", /j\/k · PgUp\/PgDn/u);
+      await session.send("\u001b[6~", /arrows\/Pg page/u);
       installPreview += capturedOutput(session);
     }
     const beforeInstall = session.screen;

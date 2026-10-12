@@ -66,6 +66,7 @@ export interface PackageRow {
   /** The bundle's manifest name, or its coordinate label while the bundle does not resolve. */
   readonly name: string;
   readonly installed: string;
+  readonly installedVersion?: string;
   readonly available: string;
   readonly status: PackageRowStatus;
   readonly drift?: string;
@@ -76,19 +77,15 @@ export function packageRow(record: InstalledPackage, inspection: PackageInspecti
     selection: record.selection,
     name: inspection.descriptor?.name ?? describeCoordinates(record.selection),
     installed: installedEvidenceLabel(inspection.installed),
+    ...(inspection.installed.kind === "installed" && inspection.installed.version !== undefined
+      ? { installedVersion: inspection.installed.version }
+      : inspection.installed.kind === "installed" && inspection.installed.commit !== undefined
+        ? { installedVersion: inspection.installed.commit.slice(0, 7) }
+        : {}),
     available: packageVersionLabel(inspection.available),
     status: packageRowStatus(inspection),
     ...(inspection.drift === undefined ? {} : { drift: inspection.drift }),
   };
-}
-
-/** Host, evidence and status of one row, as the Installations line prints it. */
-export function describePackageRow(row: PackageRow): string {
-  const drift = row.drift === undefined ? "" : `  drift: ${row.drift}`;
-  const status = row.status.kind === "unknown" && row.status.reason === "local changes"
-    ? "update not checked · local changes"
-    : row.status.kind === "unknown" ? "cannot assess" : packageStatusLabel(row.status.kind);
-  return `${row.selection.host}  ${row.installed}  available ${row.available}  ${status}${drift}`;
 }
 
 function packageRowStatus(inspection: PackageInspection): PackageRowStatus {

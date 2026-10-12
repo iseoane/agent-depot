@@ -44,11 +44,13 @@ try {
   const stateDirectory = path.join(sandbox, "state");
   const configDirectory = path.join(sandbox, "config");
   const cacheDirectory = path.join(sandbox, "cache");
+  const piDirectory = path.join(sandbox, "pi");
   mkdirSync(installDirectory);
   mkdirSync(homeDirectory);
   mkdirSync(stateDirectory);
   mkdirSync(configDirectory);
   mkdirSync(cacheDirectory);
+  mkdirSync(piDirectory);
   writeFileSync(path.join(installDirectory, "package.json"), JSON.stringify({ name: "pack-smoke", private: true }));
   run(npm, ["install", "--no-audit", "--no-fund", path.join(packDirectory, packed.filename)], { cwd: installDirectory });
   for (const peer of ["@earendil-works/pi-tui", "typebox"]) {
@@ -61,6 +63,7 @@ try {
   const env = {
     ...process.env, HOME: homeDirectory, USERPROFILE: homeDirectory,
     XDG_STATE_HOME: stateDirectory, XDG_CONFIG_HOME: configDirectory, XDG_CACHE_HOME: cacheDirectory,
+    PI_CODING_AGENT_DIR: piDirectory,
   };
   const agentDepot = (...args) => {
     try {

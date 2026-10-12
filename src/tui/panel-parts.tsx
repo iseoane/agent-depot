@@ -22,7 +22,7 @@ export function FieldLine({ label, value }: { readonly label: string; readonly v
 export function DecisionPrompt({ children }: { readonly children: ReactNode }) {
   return (
     <Text>
-      <Text color={theme.accent}>{children}</Text> <Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text>
+      <Text color={theme.warning}>{children}</Text> <Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text>
     </Text>
   );
 }
@@ -123,10 +123,10 @@ export function PreviewConfirm({ title = "Confirmation", lines, question, warnFi
     <BorderPanel title={title}>
       <PreviewLines lines={shown} warnFirst={warnFirst && (viewport?.start ?? 0) === 0} />
       {viewport && viewport.total > viewport.height ? <Text color={theme.muted}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
-      {viewport ? <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · j/k · PgUp/PgDn</Text> : null}
+      {viewport ? <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · arrows/Pg page</Text> : null}
       {question.includes("y/n") ? (() => {
         const marker = question.indexOf("y/n");
-        return <Text><Text color={theme.accent}>{question.slice(0, marker)}</Text><Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text><Text color={theme.legend}>{question.slice(marker + 3)}</Text></Text>;
+        return <Text><Text color={theme.warning}>{question.slice(0, marker)}</Text><Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text><Text color={theme.legend}>{question.slice(marker + 3)}</Text></Text>;
       })() : <Text color={theme.legend}>{question}</Text>}
     </BorderPanel>
   );

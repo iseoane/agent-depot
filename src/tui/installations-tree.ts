@@ -65,11 +65,6 @@ export function buildTree(data: InstallationsData): readonly InstallationNode[] 
   return roots;
 }
 
-/** Version, policy and hosts of a leaf; `adopted` / `modified` only when true (the legend explains them). */
-export function describeDetails({ selection, policy, installed }: InstallationRow): string {
-  return `${installed} (${policy})  [${selection.hosts.join(", ")}]`;
-}
-
 export function markersOf({ adopted, modified }: InstallationRow): string {
   return [adopted ? "adopted" : "", modified ? "modified" : ""].filter((flag) => flag !== "").join(" ");
 }

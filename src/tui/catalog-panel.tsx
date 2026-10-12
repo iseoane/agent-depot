@@ -51,7 +51,10 @@ export function CatalogRowLine({ row, selected, marked, installed }: {
       {selected ? "> " : "  "}{"  ".repeat(row.depth)}{data.kind === "skill" ? marked ? "[x] " : "[ ] " : ""}
       {data.kind === "skill" && ownedBy !== undefined
         ? <>{data.skill.name}<Text color={theme.marker}>{"  "}[{packageOwnerBadge(ownedBy)}]</Text>{"  "}{truncateDescription(data.skill.description)}</>
-        : describeRow(row)}
+        : data.kind === "app" ? `App ${data.row.entry.recipe?.name ?? data.row.entry.file}` : describeRow(row)}
+      {data.kind === "app" ? (
+        <><Text color={theme.legend}>{"  "}</Text><Text color={data.row.inspection.status === "not installed" ? theme.warning : theme.value}>{data.row.inspection.status}</Text></>
+      ) : null}
       {data.kind === "skill" && hasUnmanagedCopy(data.skill, installed)
         ? <Text color={theme.marker}>{"  "}{UNMANAGED_MARKER}</Text>
         : null}

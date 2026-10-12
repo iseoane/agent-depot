@@ -176,7 +176,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   const selected = resolveIndex(rows, selection);
   const selectedRow = rows[selected];
   const hints = mode.kind === "confirm" && mode.action === "refresh"
-    ? "j/k scroll · PgUp/PgDn · y refresh at end · n cancel"
+    ? "↑↓/Pg page · y refresh · n cancel"
     : sourceRowHints(selectedRow);
   useEffect(() => { onHintsChange?.(hints); }, [hints, onHintsChange]);
   const select = (index: number) => {
@@ -345,7 +345,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   return (
     <Box flexDirection="column">
       <Text color={theme.muted}>{"      "}ID  KIND  LOCATION / STATUS</Text>
-      {builtin ? <Text color={theme.muted}>{"    "}{builtin.id}  skills  included</Text> : null}
+      {builtin ? <Text>{"    "}<Text color={theme.value}>{builtin.id}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>skills</Text><Text color={theme.legend}>  </Text><Text color={theme.warning}>included</Text></Text> : null}
       {rows.length === 0 ? <Text>No sources or App recipes · n to add</Text> : null}
       {rows.slice(window.start, window.end).map((row, offset) => {
         const index = window.start + offset;
@@ -354,7 +354,12 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
           <Text key={row.id} {...rowStyle(index === selected)}>
             {index === selected ? "> " : "  "}
             {row.kind === "skills" ? (marked.has(row.id) ? "[x] " : "[ ] ") : "    "}
-            {id}  {row.kind}  {row.kind === "skills" ? row.source.url : `${row.recipe.entry.file} · ${row.recipe.status}`}
+            <Text color={theme.value}>{id}</Text><Text color={theme.legend}>  </Text>
+            <Text color={theme.field}>{row.kind}</Text><Text color={theme.legend}>  </Text>
+            {row.kind === "skills"
+              ? <Text color={theme.value}>{row.source.url}</Text>
+              : <><Text color={theme.value}>{row.recipe.entry.file}</Text><Text color={theme.legend}> · </Text>
+                  <Text color={row.recipe.status === "approved" ? theme.success : theme.warning}>{row.recipe.status}</Text></>}
           </Text>
         );
       })}
@@ -382,7 +387,7 @@ function Prompt({ mode, terminalRows = 24, terminalColumns = 80 }: { readonly mo
         <BorderPanel title="Refresh Git Sources">
           <PreviewLines lines={viewport.rows} />
           {viewport.total > viewport.height ? <Text color={theme.legend}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
-          <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · j/k · PgUp/PgDn</Text>
+          <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · arrows/Pg page</Text>
           {viewport.reachedEnd
             ? <DecisionPrompt>Refresh these Sources?</DecisionPrompt>
             : <Text color={theme.legend}>Scroll to end; n cancels.</Text>}
