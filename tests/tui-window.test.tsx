@@ -69,9 +69,12 @@ test("preview viewport wraps complete long terms and responds to the latest term
   const wide = previewViewport([line], 0, 24, 80);
   const narrow = previewViewport([line], 0, 17, 40);
   assert.equal(wide.total, 3);
-  assert.equal(narrow.total, 5);
-  const lastPage = previewViewport([line], 4, 17, 40);
-  assert.equal(lastPage.rows.join(""), line);
+  assert.equal(narrow.total, 6);
+  const firstPage = previewViewport([line], 0, 17, 40);
+  const lastPage = previewViewport([line], 5, 17, 40);
+  const visibleRows = new Map<number, string>();
+  for (const page of [firstPage, lastPage]) page.rows.forEach((row, index) => visibleRows.set(page.start + index, row));
+  assert.equal([...visibleRows.entries()].sort(([left], [right]) => left - right).map(([, row]) => row).join(""), line);
   assert.equal(lastPage.reachedEnd, true);
   assert.equal(previewViewport(["界".repeat(19)], 0, 17, 40).total, 2);
   assert.ok(lastPage.height < wide.height);

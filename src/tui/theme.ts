@@ -1,7 +1,7 @@
 /** Central xeo palette for the TUI; views take every colour from here. */
 export const theme = {
-  /** Panel titles and active tabs. */
-  title: "#ff2e9a",
+  /** Panel titles use Xeo magenta; the active tab retains the accent pink. */
+  title: "#ad8ee6",
   accent: "#ff2e9a",
   /** Borders and group nodes. */
   border: "#7aa2f7",

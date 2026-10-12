@@ -9,7 +9,9 @@ import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
 import { useSourcesRecipes, type RecipeRow } from "./sources-recipes.js";
-import { BorderPanel, DecisionPrompt, FieldLine } from "./panel-parts.js";
+import { BorderPanel, DecisionPrompt, FieldLine, PreviewLines } from "./panel-parts.js";
+import { previewViewport } from "./preview-window.js";
+import { movePreviewCursor } from "./mode-keys.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
@@ -71,6 +73,18 @@ async function refreshEach(operations: SourceOperations, targets: readonly GitSo
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function refreshPreviewLines(sources: readonly GitSource[]): string[] {
+  return sources.map(source => `Source: refresh Git Source ${source.id} from ${source.url}`);
+}
+
+function refreshViewport(mode: Extract<Mode, { readonly kind: "confirm"; readonly action: "refresh" }>, rows: number, columns: number) {
+  return previewViewport(refreshPreviewLines(mode.sources), mode.cursor, rows, columns, {
+    title: "Refresh Git Sources",
+    questions: ["Scroll to end; n cancels.", "Refresh these Sources? y/n"],
+    footerRows: 2,
+  });
 }
 
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange }: SourcesViewProps) {
@@ -161,7 +175,9 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   rowsRef.current = rows;
   const selected = resolveIndex(rows, selection);
   const selectedRow = rows[selected];
-  const hints = sourceRowHints(selectedRow);
+  const hints = mode.kind === "confirm" && mode.action === "refresh"
+    ? "j/k scroll · PgUp/PgDn · y refresh at end · n cancel"
+    : sourceRowHints(selectedRow);
   useEffect(() => { onHintsChange?.(hints); }, [hints, onHintsChange]);
   const select = (index: number) => {
     setMessage(undefined);
@@ -249,6 +265,12 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       return;
     }
     if (mode.kind === "confirm") {
+      if (mode.action === "refresh") {
+        const viewport = refreshViewport(mode, terminalRows || 24, columns || 80);
+        const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
+        if (cursor !== undefined) { dispatch({ type: "preview-cursor", cursor }); return; }
+        if (input === "y" && !viewport.reachedEnd) return;
+      }
       if (input === "y") {
         if (mode.action === "refresh") {
           const { sources: targets } = mode;
@@ -317,6 +339,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   if (state.status === "error") return <BorderPanel title="Source error"><Text color={theme.error}>{state.message}</Text></BorderPanel>;
 
   const window = computeWindow(rows.length, selected, height);
+  if (mode.kind === "confirm") return <Prompt mode={mode} terminalRows={terminalRows || 24} terminalColumns={columns || 80} />;
   if (recipes.capturing) return <Box flexDirection="column">{recipes.panel}</Box>;
 
   return (
@@ -348,17 +371,24 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   );
 }
 
-function Prompt({ mode }: { readonly mode: Mode }) {
+function Prompt({ mode, terminalRows = 24, terminalColumns = 80 }: { readonly mode: Mode; readonly terminalRows?: number; readonly terminalColumns?: number }) {
   if (mode.kind === "add-kind") return <Text>Add: 1 Git Source (skills + Packages) · 2 App recipe (Esc cancel)</Text>;
   if (mode.kind === "input") return <Text>URL: {mode.value}</Text>;
   if (mode.kind === "busy") return <BorderPanel title="Sources"><FieldLine label="Status" value="Working..." /></BorderPanel>;
   if (mode.kind === "confirm") {
-    return mode.action === "refresh" ? (
-      <BorderPanel title="Refresh Git Sources">
-        {mode.sources.map((source) => <FieldLine key={source.id} label="Source" value={`refresh Git Source ${source.id} from ${source.url}`} />)}
-        <DecisionPrompt>Refresh these Sources?</DecisionPrompt>
-      </BorderPanel>
-    ) : (
+    return mode.action === "refresh" ? (() => {
+      const viewport = refreshViewport(mode, terminalRows, terminalColumns);
+      return (
+        <BorderPanel title="Refresh Git Sources">
+          <PreviewLines lines={viewport.rows} />
+          {viewport.total > viewport.height ? <Text color={theme.legend}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
+          <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · j/k · PgUp/PgDn</Text>
+          {viewport.reachedEnd
+            ? <DecisionPrompt>Refresh these Sources?</DecisionPrompt>
+            : <Text color={theme.legend}>Scroll to end; n cancels.</Text>}
+        </BorderPanel>
+      );
+    })() : (
       <BorderPanel title="Remove Git Source">
         <FieldLine label="Source" value={`remove Git Source ${mode.source.id} from ${mode.source.url}`} />
         <DecisionPrompt>Remove this Source?</DecisionPrompt>

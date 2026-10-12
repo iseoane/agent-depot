@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { separatorLine, theme } from "../src/tui/theme.js";
 
 test("theme carries Xeo colors through explicit semantic roles", () => {
-  assert.equal(theme.title, "#ff2e9a");
+  assert.equal(theme.title, "#ad8ee6");
   assert.equal(theme.accent, "#ff2e9a");
   assert.equal(theme.border, "#7aa2f7");
   assert.equal(theme.group, "#7aa2f7");

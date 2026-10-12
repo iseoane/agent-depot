@@ -7,6 +7,8 @@ export interface PreviewChrome {
   readonly questions: readonly string[];
   /** Rows rendered by the parent view above the panel. */
   readonly reservedRows?: number;
+  /** Additional rows rendered inside the panel besides its confirmation question. */
+  readonly footerRows?: number;
 }
 
 export interface PreviewViewport {
@@ -50,13 +52,13 @@ export function previewViewport(
   terminalColumns: number,
   chrome: PreviewChrome = { title: "Confirmation", questions: ["Scroll to end before y; n cancels.", "Confirm? y/n"] },
 ): PreviewViewport {
-  const contentWidth = Math.max(terminalColumns - 4, 1);
+  const contentWidth = Math.max(terminalColumns - 8, 1);
   const wrapped = lines.flatMap((line, sourceLine) => wrapLine(line, contentWidth).map((row) => ({ row, sourceLine })));
   const previewRows = wrapped.map(({ row }) => row);
   const headerRows = headerTabRowCount(contentWidth) + 3;
   const titleRows = wrapLine(chrome.title, contentWidth).length;
   const questionRows = Math.max(...chrome.questions.map(question => wrapLine(question, contentWidth).length));
-  const panelChromeRows = 2 + titleRows + questionRows + 1;
+  const panelChromeRows = 2 + titleRows + questionRows + (chrome.footerRows ?? 1);
   const reservedRows = chrome.reservedRows !== undefined && chrome.reservedRows > 0 ? Math.ceil(chrome.reservedRows) : 0;
   const availableRows = Math.max(terminalRows - headerRows - 1 - panelChromeRows - reservedRows, 1);
   const height = previewRows.length > availableRows ? Math.max(availableRows - 1, 1) : availableRows;

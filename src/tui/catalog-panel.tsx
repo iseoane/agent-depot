@@ -7,7 +7,7 @@ import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
 import type { FilterState } from "./catalog-filter.js";
 import { describeRow, truncateDescription, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
 import { isPackageMode, PackagePanel } from "./package-actions.js";
-import { BorderPanel, HostChecklist, PreviewLines } from "./panel-parts.js";
+import { BorderPanel, DecisionPrompt, HostChecklist, PreviewLines } from "./panel-parts.js";
 import { rowStyle } from "./theme.js";
 import type { VisibleRow } from "./tree.js";
 import { theme } from "./theme.js";
@@ -106,7 +106,7 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
               </Box>
             ))}
           {ready.some((item) => item.prepared?.runsExternalCommand) ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
-          <Text>Install {describeSkills(ready.map((item) => item.skill))}? y/n</Text>
+          <DecisionPrompt>Install {describeSkills(ready.map((item) => item.skill))}?</DecisionPrompt>
         </BorderPanel>
       );
     }
@@ -115,7 +115,7 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       return (
         <BorderPanel title={`Skill Host exposure · ${names.length} confirmation`}>
           <Text color={theme.warning}>
-            {names.length === 1 ? `An identical ${names[0]} already exists` : `Identical copies of ${names.join(", ")} already exist`}; adding the missing Host location needs separate confirmation. Confirm? y/n
+            {names.length === 1 ? `An identical ${names[0]} already exists` : `Identical copies of ${names.join(", ")} already exist`}; adding the missing Host location needs separate confirmation. <DecisionPrompt>Confirm?</DecisionPrompt>
           </Text>
         </BorderPanel>
       );

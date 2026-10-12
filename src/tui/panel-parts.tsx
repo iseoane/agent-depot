@@ -56,10 +56,33 @@ export function HostChecklist({ choices, cursor, selected }: {
 }
 
 /** Preview lines; `warnFirst` colors the first one as a warning. */
-export function PreviewLines({ lines, warnFirst = false }: { readonly lines: readonly string[]; readonly warnFirst?: boolean }) {
+const PREVIEW_FIELD_LABELS = [
+  "File:", "Name:", "Platform:", "Status:", "Homepage:", "Owned Skills:",
+  "App:", "Environment:", "Version:", "argv:", "Executable:", "Manual:",
+  "Declaration:", "Version pattern:", "Working directory:", "Previous version:",
+  "Latest version:", "Package:", "Host:", "Source:", "Scope:", "Coordinates:", "Origin:",
+  "Available:", "Approval:", "Path:",
+] as const;
+
+function previewField(line: string): { readonly label: string; readonly value: string } | undefined {
+  const label = PREVIEW_FIELD_LABELS.find(candidate => line.startsWith(candidate));
+  return label === undefined ? undefined : { label, value: line.slice(label.length) };
+}
+
+export function PreviewLines({ lines, warnFirst = false }: {
+  readonly lines: readonly string[];
+  readonly warnFirst?: boolean;
+}) {
   return (
     <>
-      {lines.map((line, position) => <Text key={position} color={warnFirst && position === 0 ? theme.warning : theme.value}>{line}</Text>)}
+      {lines.map((line, position) => {
+        const field = previewField(line);
+        return field ? (
+          <Text key={position}>
+            <Text color={theme.field}>{field.label}</Text><Text color={theme.value}>{field.value}</Text>
+          </Text>
+        ) : <Text key={position} color={warnFirst && position === 0 ? theme.warning : theme.value}>{line}</Text>;
+      })}
     </>
   );
 }
@@ -93,14 +116,23 @@ export function PreviewConfirm({ title = "Confirmation", lines, question, warnFi
   readonly chrome?: PreviewChrome;
 }) {
   const { rows, columns } = useWindowSize();
-  const viewport = cursor === undefined ? undefined : previewViewport(lines, cursor, rows || 24, columns || 80, chrome ?? { title, questions: [question] });
+  const viewport = cursor === undefined ? undefined : previewViewport(lines, cursor, rows || 24, columns || 80, chrome ?? { title, questions: [question], footerRows: 2 });
   const shown = viewport?.rows ?? lines;
   return (
     <BorderPanel title={title}>
       <PreviewLines lines={shown} warnFirst={warnFirst && (viewport?.start ?? 0) === 0} />
       {viewport && viewport.total > viewport.height ? <Text color={theme.muted}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
-      {viewport ? <Text color={theme.muted}>Review {viewport.cursor + 1} of {viewport.total} · j/k · PgUp/PgDn</Text> : null}
-      <Text>{question}</Text>
+      {viewport ? <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · j/k · PgUp/PgDn</Text> : null}
+      {question.includes("y/n") ? (() => {
+        const marker = question.indexOf("y/n");
+        return (
+          <Text>
+            {question.slice(0, marker)}
+            <Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text>
+            <Text color={theme.legend}>{question.slice(marker + 3)}</Text>
+          </Text>
+        );
+      })() : <Text color={theme.legend}>{question}</Text>}
     </BorderPanel>
   );
 }

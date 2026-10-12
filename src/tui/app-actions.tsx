@@ -60,7 +60,7 @@ function appPreviewChrome(mode: Extract<AppMode, { kind: "app-approve" | "app-co
   const question = mode.kind === "app-approve" ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
     : mode.kind === "app-manual" ? "Manual step done, check now? y/n"
       : `${mode.plan.action} ${appName(mode.plan.entry)}? y/n`;
-  return { title, questions: [question, "Scroll to end before y; n cancels."] };
+  return { title, questions: [question, "Scroll to end before y; n cancels."], footerRows: 2 };
 }
 
 export function appStepLines(step: {

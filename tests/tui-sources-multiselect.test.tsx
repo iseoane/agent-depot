@@ -96,9 +96,10 @@ test("r refreshes the selected sources with one combined preview and one confirm
   await waitForFrame(lastFrame, /2 selected/);
   stdin.write("r");
   const preview = await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
-  assert.match(preview, new RegExp(`${first.id}.*${first.url.replaceAll(".", "\\.")}`));
-  assert.match(preview, new RegExp(`${third.id}.*${third.url.replaceAll(".", "\\.")}`));
-  assert.doesNotMatch(preview.slice(preview.indexOf("selected")), new RegExp(second.id));
+  const compactPreview = preview.replace(/[\s│]/gu, "");
+  assert.ok(compactPreview.includes(`${first.id} from ${first.url}`.replace(/\s/gu, "")));
+  assert.ok(compactPreview.includes(`${third.id} from ${third.url}`.replace(/\s/gu, "")));
+  assert.doesNotMatch(preview, new RegExp(second.id));
   assert.equal(preview.match(/Refresh these Sources\?/g)?.length, 1);
   assert.deepEqual(calls, []);
   stdin.write("y");

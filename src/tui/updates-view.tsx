@@ -13,6 +13,7 @@ import { handleUpdatesKey, type UpdatesKeyContext } from "./updates-keys.js";
 import { viewOf, type UpdatesMessage } from "./updates-model.js";
 import { CheckStatus, EntryLine, ModePanel, UpdatesFooter } from "./updates-panel.js";
 import { previewLineText, type UpdateScopeFilter, type UpdatesData } from "./updates.js";
+import { updateModePreviewChrome, updateModePreviewLines } from "./updates-preview.js";
 import { useKeys } from "./keys.js";
 import { BorderPanel, FieldLine } from "./panel-parts.js";
 
@@ -101,32 +102,24 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const { shown, updatable, unknown, upToDate, entries } = viewOf(data, scope, showUnknown);
   const index = Math.min(cursor, Math.max(entries.length - 1, 0));
 
-  const previewLines = (prepared: NonNullable<Extract<UpdatesMode, { kind: "preview" }>["prepared"]>) => [
-    ...prepared.lines.map(previewLineText),
-    ...prepared.appFailures,
-    ...prepared.packageFailures,
-    ...prepared.failures.map(({ item, message: failure }) => `Preview failed for ${JSON.stringify(item.id)}: ${failure}`),
-  ];
-  const previewGeometry = (current: Extract<UpdatesMode, { kind: "preview" }>) => previewViewport(
-    previewLines(current.prepared),
-    current.cursor,
-    terminalRows || 24,
-    terminalColumns || 80,
-    { title: "Update batch preview", questions: ["Scroll to end before confirming; n cancels.", "Apply this update batch? y/n"], reservedRows: 1 },
-  );
+  const previewGeometry = (current: UpdatesMode) => {
+    const cursor = "cursor" in current ? current.cursor : 0;
+    return previewViewport(
+      updateModePreviewLines(current).map(previewLineText),
+      cursor,
+      terminalRows || 24,
+      terminalColumns || 80,
+      updateModePreviewChrome(current),
+    );
+  };
 
   const keyContext: UpdatesKeyContext = {
     height,
-    previewMetrics: () => {
-      const current = modeRef.current;
-      if (current.kind !== "preview") return { length: 0, pageSize: 1 };
+    previewMetrics: current => {
       const geometry = previewGeometry(current);
       return { length: geometry.total, pageSize: geometry.height };
     },
-    previewAtEnd: () => {
-      const current = modeRef.current;
-      return current.kind === "preview" && previewGeometry(current).reachedEnd;
-    },
+    previewAtEnd: current => previewGeometry(current).reachedEnd,
     latest,
     checked: () => checkedRef.current,
     setChecked,
@@ -154,7 +147,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   return (
     <Box flexDirection="column">
-      <Text color={theme.title} bold>Updates (scope: {scope})  t all · p project · g user-global · u update</Text>
+      {showingBrowse ? <Text color={theme.title} bold>Updates (scope: {scope})  t all · p project · g user-global · u update</Text> : null}
       {state.status === "loading" ? <BorderPanel title="Update check"><FieldLine label="Status" value={state.label} /></BorderPanel> : null}
       {showingBrowse && data ? <CheckStatus data={data} now={clock()} /> : null}
       {showingBrowse && data && !hasErrors && shown.length === 0 ? <Text>No installations</Text> : null}

@@ -234,11 +234,11 @@ function capturedOutput(session: TuiSession): string {
 }
 
 async function scrollPreviewToEnd(session: TuiSession, ready: RegExp): Promise<string> {
-  let visited = capturedOutput(session);
+  let visited = session.screen;
   for (let move = 0; move < 200; move += 1) {
-    if (ready.test(session.screen)) return visited + capturedOutput(session);
+    if (ready.test(session.screen)) return `${visited}\n${session.screen}`;
     await session.send("\u001b[6~", new RegExp(`${ready.source}|j\\/k · PgUp\\/PgDn`, ready.flags));
-    visited += capturedOutput(session);
+    visited += `\n${session.screen}`;
   }
   assert.fail(`preview did not reach confirmation:\n${session.screen}`);
 }
@@ -247,22 +247,33 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
   const url = "https://example.test/xeo-palette/skills.git";
   const paletteHome = path.join(sandbox, "palette-home");
   await mkdir(paletteHome);
+  const fixture = await fakeAppFixture(path.join(paletteHome, ".local"));
+  await writeFile(fixture.file, JSON.stringify({
+    name: "fixture-app",
+    install: { argv: ["depot-e2e-app", "install"] },
+    update: { argv: ["depot-e2e-app", "update"] },
+    uninstall: { argv: ["depot-e2e-app", "uninstall"] },
+    version: fixture.recipe.version,
+  }));
   const environment = {
     HOME: paletteHome,
     USERPROFILE: paletteHome,
+    PATH: `${fixture.bin}${path.delimiter}${process.env.PATH ?? ""}`,
     XDG_STATE_HOME: path.join(paletteHome, ".local", "state"),
     XDG_CONFIG_HOME: path.join(paletteHome, ".config"),
     XDG_CACHE_HOME: path.join(paletteHome, ".cache"),
   };
   execFileSync(process.execPath, [CLI, "source", "add", url], { cwd: projectRoot, env: { ...process.env, ...environment }, stdio: "pipe" });
-  const session = new TuiSession({ ...environment, FORCE_COLOR: "3" }, 80, 24);
+  const session = new TuiSession({ ...environment, FORCE_COLOR: "3" }, 110, 40);
   try {
     await session.waitFor(/xeo-palette/u);
     await session.send("r", /Refresh these Sources\? y\/n/u);
     assert.match(session.screen, /Refresh Git Sources/u);
-    assert.match(session.screen, /Source refresh Git Source/u);
+    assert.match(session.screen, /Source: refresh Git Source/u);
     // eslint-disable-next-line no-control-regex
-    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;255;46;154m", "u"), "titles use the Xeo accent magenta");
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;173;142;230m", "u"), "panel titles use Xeo magenta");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;255;46;154m", "u"), "the active header tab retains Xeo accent pink");
     // eslint-disable-next-line no-control-regex
     assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;68;157;171m", "u"), "field names use the Xeo cyan");
     // eslint-disable-next-line no-control-regex
@@ -273,10 +284,109 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;247;118;142m", "u"), "no uses Xeo error red");
     await session.send("n", /LOCATION \/ STATUS/u);
     assert.equal(execFileSync(process.execPath, [CLI, "source", "list"], { cwd: projectRoot, env: { ...process.env, ...environment }, encoding: "utf8" }).includes(url), true);
+    await session.send("j", /fixture-app/u);
+    await session.send("\r", /Recipe approval · does not install/u);
+    const appApproval = await scrollPreviewToEnd(session, /Approve fixture-app\? y\/n/u);
+    assert.match(appApproval, /File:/u);
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;68;157;171m", "u"), "App recipe field names use Xeo cyan");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;192;202;245m", "u"), "App recipe values use Xeo brightText");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;158;206;106m", "u"), "App approval yes uses Xeo green");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;247;118;142m", "u"), "App approval no uses Xeo red");
+    await session.send("y", /approved/u);
+    await session.send("2", /Apps \(user-global\)/u);
+    await session.send("j", /Apps \(user-global\)/u);
+    const catalog = await session.send("\r", /fixture-app/u);
+    assert.match(catalog, /fixture-app/u);
+    await session.send("j", /fixture-app/u);
+    const appInstall = await session.send("i", /App install confirmation/u);
+    assert.match(appInstall, /argv:/u);
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;68;157;171m", "u"), "App install fields use Xeo cyan");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;192;202;245m", "u"), "App install values use Xeo brightText");
+    assert.doesNotMatch(await readFile(fixture.log, "utf8").catch(() => ""), /install/u, "previewing does not execute the App recipe");
+    await session.send("n", /fixture-app/u);
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally {
     session.kill();
+  }
+});
+
+test("Sources refresh requires reviewing every selected Source at narrow and wide PTY sizes", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const targets = Array.from({ length: 30 }, (_, index) => `https://example.test/refresh-window-${String(index + 1).padStart(2, "2")}.git`);
+  for (const [columns, rows] of [[40, 17], [80, 24]] as const) {
+    const home = path.join(sandbox, `many-sources-${columns}-home`);
+    await mkdir(home);
+    const environment = {
+      HOME: home,
+      USERPROFILE: home,
+      XDG_STATE_HOME: path.join(home, ".local", "state"),
+      XDG_CONFIG_HOME: path.join(home, ".config"),
+      XDG_CACHE_HOME: path.join(home, ".cache"),
+    };
+    for (const url of targets) execFileSync(process.execPath, [CLI, "source", "add", url], { cwd: projectRoot, env: { ...process.env, ...environment }, stdio: "pipe" });
+    const listedSources = execFileSync(process.execPath, [CLI, "source", "list"], { cwd: projectRoot, env: { ...process.env, ...environment }, encoding: "utf8" });
+    const sourceUrls = [...listedSources.matchAll(/https:\/\/example\.test\/refresh-window-\d+\.git/gu)].map(([url]) => url);
+    const lastTarget = sourceUrls.at(-1);
+    const session = new TuiSession(environment, columns, rows);
+    try {
+      await session.waitFor(/git:/u);
+      await session.send("a", /\d+ selected/u);
+      await session.send("r", /Refresh Git Sources/u);
+      const beforeY = session.screen;
+      session.press("y");
+      await new Promise(resolve => setTimeout(resolve, 25));
+      assert.equal(session.screen, beforeY, "y before the final target neither advances nor executes the refresh");
+
+      const total = Number(/Review \d+ of (\d+)/u.exec(session.screen)?.[1] ?? 0);
+      assert.ok(total > sourceUrls.length, `source ids and URLs wrap into complete physical rows: ${session.screen}`);
+      const indexedRows = new Map<number, string>();
+      const collectVisibleRows = () => {
+        const screenRows = session.screen.split("\n");
+        const range = /(\d+)–(\d+) of (\d+)/u.exec(session.screen);
+        const review = /Review (\d+) of (\d+)/u.exec(session.screen);
+        assert.ok(review, `preview lost its physical-row position:\n${session.screen}`);
+        assert.equal(Number(review[2]), total);
+        const first = range ? Number(range[1]) : 1;
+        const last = range ? Number(range[2]) : total;
+        const titleRow = screenRows.findIndex(row => row.includes("Refresh Git Sources"));
+        const reviewRow = screenRows.findIndex(row => /Review \d+ of \d+/u.test(row));
+        const visible = screenRows.slice(titleRow + 1, reviewRow)
+          .map(row => row.match(/^\s*│ ?(.*?)\s*│?\s*$/u)?.[1] ?? "")
+          .filter(row => row !== "" && !/^\d+–\d+ of \d+$/u.test(row));
+        assert.equal(visible.length, last - first + 1, `visible rows disagree with the indexed window ${first}–${last}:\n${session.screen}`);
+        visible.forEach((row, offset) => {
+          const index = first + offset;
+          const previous = indexedRows.get(index);
+          assert.ok(previous === undefined || previous === row, `physical row ${index} changed between windows`);
+          indexedRows.set(index, row);
+        });
+      };
+      collectVisibleRows();
+      for (let page = 0; page < 100 && !session.screen.includes("Refresh these Sources? y/n"); page += 1) {
+        await session.send("\u001B[6~", new RegExp(`Review \\d+ of ${total}`, "u"));
+        collectVisibleRows();
+      }
+      assert.match(session.screen, /Refresh these Sources\? y\/n/u);
+      assert.ok(lastTarget, `expected registered Sources, got ${session.screen}`);
+      const expectedLastLine = `Source: refresh Git Source ${sourceIdForUrl(lastTarget)} from ${lastTarget}`;
+      const reviewedSources: string[] = [];
+      for (const [, row] of [...indexedRows].sort(([left], [right]) => left - right)) {
+        if (row.startsWith("Source: refresh Git Source ")) reviewedSources.push(row);
+        else if (reviewedSources.length > 0) reviewedSources[reviewedSources.length - 1] += row;
+      }
+      assert.ok(reviewedSources.includes(expectedLastLine), `reviewed physical rows did not reconstruct the exact final source target:\n${JSON.stringify([...indexedRows])}`);
+      await session.send("n", /\[x\] git:/u);
+      session.press("q");
+      assert.equal(await session.exitCode(), 0);
+    } finally {
+      session.kill();
+    }
   }
 });
 
@@ -470,12 +580,30 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
       return visible.includes("Approve") && visible.includes("y/n");
     };
     let preview = await session.send("\r", /Scroll to end before y/u);
+    const collectRows = (rows: Map<number, string>) => {
+      const screenRows = session.screen.split("\n");
+      const range = /(\d+)–(\d+) of (\d+)/u.exec(session.screen);
+      const review = /Review (\d+) of (\d+)/u.exec(session.screen);
+      assert.ok(review, `approval preview lost its physical-row position:\n${session.screen}`);
+      const first = range ? Number(range[1]) : 1;
+      const last = range ? Number(range[2]) : Number(review[2]);
+      const titleRow = screenRows.findIndex(row => row.includes("Recipe approval · does not install"));
+      const reviewRow = screenRows.findIndex(row => /Review \d+ of \d+/u.test(row));
+      const visible = screenRows.slice(titleRow + 1, reviewRow)
+        .map(row => row.match(/^\s*│ ?(.*?)\s*│?\s*$/u)?.[1] ?? "")
+        .filter(row => row !== "" && !/^\d+–\d+ of \d+$/u.test(row));
+      assert.equal(visible.length, last - first + 1, `visible preview rows disagree with ${first}–${last}:\n${session.screen}`);
+      visible.forEach((row, offset) => rows.set(first + offset, row));
+    };
+    const wideRows = new Map<number, string>();
+    collectRows(wideRows);
     assert.match(preview, /File:/u);
     assert.doesNotMatch(preview, /latest-selector-unchanged|Host teardown instruction/u);
     assert.ok(preview.split("\n").length <= 24, `wide preview exceeded the 24-row PTY:\n${preview}`);
     for (let move = 0; move < 80 && !approvalQuestion(); move += 1) {
       session.press("\u001b[6~");
       await new Promise(resolve => setTimeout(resolve, 20));
+      collectRows(wideRows);
     }
     assert.ok(approvalQuestion(), `wide preview never exposed its approval question:\n${session.screen}`);
     assert.ok(session.screen.replace(/\s/gu, "").includes(approvalRecipe.name), `wide preview truncated the approved recipe name:\n${session.screen}`);
@@ -486,16 +614,20 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     while (/Review (\d+) of (\d+)/u.test(session.screen) && Number(/Review (\d+) of (\d+)/u.exec(session.screen)?.[1]) > 1) {
       session.press("\u001b[5~");
       await new Promise(resolve => setTimeout(resolve, 20));
+      collectRows(wideRows);
     }
     session.resize(40, 17);
     await session.send("j", /Review 2 of \d+/u);
+    const narrowRows = new Map<number, string>();
+    collectRows(narrowRows);
     const count = Number(/Review 2 of (\d+)/u.exec(session.screen)?.[1]);
     assert.ok(count > 14, `test recipe should exceed the 40x17 viewport: ${count}`);
     for (let move = 0; move < 120 && !approvalQuestion(); move += 1) {
       const current = /Review (\d+) of (\d+)/u.exec(session.screen);
       assert.ok(current, `preview lost its physical-row position:\n${session.screen}`);
       if (current[1] === current[2]) break;
-      preview += await session.send("j", new RegExp(`Review (?!${current[1]} of)\\d+ of`));
+      await session.send("j", new RegExp(`Review (?!${current[1]} of)\\d+ of`));
+      collectRows(narrowRows);
     }
     const nearEnd = /Review (\d+) of (\d+)/u.exec(session.screen);
     assert.ok(nearEnd, `preview lost its position before consent:\n${session.screen}`);
@@ -503,6 +635,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     const beforeFinal = Number(nearEnd[1]) - 1;
     session.press("k");
     await new Promise(resolve => setTimeout(resolve, 20));
+    collectRows(narrowRows);
     assert.match(session.screen, /Scroll to end before y/u, `previous preview row did not close confirmation:\n${session.screen}`);
     assert.equal(Number(/Review (\d+) of (\d+)/u.exec(session.screen)?.[1]), beforeFinal, `preview cursor did not move back one physical row:\n${session.screen}`);
     session.press("y");
@@ -515,11 +648,12 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     for (let move = 0; move < 80 && !approvalQuestion(); move += 1) {
       session.press("\u001b[6~");
       await new Promise(resolve => setTimeout(resolve, 20));
+      collectRows(narrowRows);
     }
     assert.ok(approvalQuestion(), `complete preview did not restore the approval question:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= 17, `final preview exceeded the 17-row PTY:\n${session.screen}`);
-    preview += session.screen;
-    const reviewed = preview.split("\n").map(line => line.replace(/^.*?│/u, "").replace(/│.*$/u, "").trim()).join(" ");
+    collectRows(narrowRows);
+    const reviewed = [...wideRows, ...narrowRows].sort(([left], [right]) => left - right).map(([, line]) => line).join(" ");
     const continuous = reviewed.replace(/\s/gu, "");
     const argv = ["depot-e2e-app", "install", "separate", "argv", "--danger=host-setup-tail"];
     let position = continuous.indexOf("argv:[");
@@ -599,12 +733,6 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     assert.ok(session.screen.split("\n").length <= 17, `resized install preview exceeded the 17-row PTY:\n${session.screen}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "early y must not execute the install command");
     await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
-    const beforeFinalPage = /Review (\d+) of (\d+)/u.exec(session.screen);
-    assert.ok(beforeFinalPage, `resized preview lost its position before the final term:\n${session.screen}`);
-    const nextCursor = Math.min(Number(beforeFinalPage[1]) - 1 + 4, Number(beforeFinalPage[2]) - 1);
-    await session.send("\u001b[6~", new RegExp(`Review ${nextCursor + 1} of ${beforeFinalPage[2]}`));
-    const visibleManual = session.screen.replace(/[│╭╮╰╯]/gu, "").replace(/\s/gu, "");
-    assert.ok(visibleManual.includes("FINAL-INSTALL-MANUAL-TERM"), `complete manual term was not rendered while scrolling:\n${session.screen}`);
     installPreview += capturedOutput(session);
     installPreview += await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u);
     const continuousInstallPreview = installPreview.replace(/\s/gu, "");
@@ -613,6 +741,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     assert.ok(continuousInstallPreview.includes("depot-e2e-app"));
     assert.ok(!continuousInstallPreview.includes("Executable:…"), `install preview abbreviated the executable path:\n${installPreview}`);
     assert.ok(continuousInstallPreview.includes("Environment:linux"));
+    assert.ok(continuousInstallPreview.includes("FINAL-IN") && continuousInstallPreview.includes("STALL-MANUAL-TERM"), `manual execution terms were not displayed before consent:\n${installPreview}`);
     const finalInstallPreview = session.screen.replace(/[│╭╮╰╯]/gu, "").replace(/\s/gu, "");
     assert.ok(finalInstallPreview.includes(previewHome.replace(/\s/gu, "")), `install preview omitted the full working directory:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= 17, `confirmation exceeded the 17-row PTY:\n${session.screen}`);

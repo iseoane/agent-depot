@@ -93,7 +93,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
           resolve(done);
         };
         pendingAnswer.current = answer;
-        setMode({ kind: "manual", plan, reason, answer });
+        setMode({ kind: "manual", plan, reason, answer, cursor: 0 });
       }));
       result = { kind: outcome.failed === 0 ? "ok" : "error", lines: outcome.lines };
     } catch (error) {

@@ -27,6 +27,7 @@ function recipeApprovalChrome(entry: AppEntry): PreviewChrome {
   return {
     title: "Recipe approval · does not install",
     questions: [`Approve ${appName(entry)}? y/n · recipe approval does not install the App.`, "Scroll to end before y; n cancels."],
+    footerRows: 2,
   };
 }
 
@@ -34,6 +35,7 @@ function uninstallChrome(mode: Extract<RecipeMode, { kind: "uninstall-confirm" |
   return {
     title: mode.kind === "uninstall-manual" ? "App manual uninstall" : "App uninstall confirmation",
     questions: [mode.kind === "uninstall-manual" ? "Complete the manual uninstall, then check now? y/n" : `Uninstall ${appName(mode.removal.entry)}? y/n`, "Scroll to end before y; n cancels."],
+    footerRows: 2,
   };
 }
 

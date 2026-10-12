@@ -137,7 +137,7 @@ test("r previews, y confirms and refreshes the highlighted source", async () => 
   await highlights(lastFrame, /git:1234/);
   stdin.write("r");
   const preview = await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
-  assert.match(normalized(preview), /refresh Git Source git:1234567890abcdef12345678 from https:\/\/github\.com\/example\/skills\.git/u);
+  assert.ok(normalized(preview).replaceAll(" ", "").includes("refreshGitSourcegit:1234567890abcdef12345678fromhttps://github.com/example/skills.git"));
   assert.deepEqual(h.calls, []);
   stdin.write("y");
   await waitFor(() => h.calls.length > 0);
