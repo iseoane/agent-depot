@@ -54,6 +54,10 @@ class TuiSession {
   private cursorX = 0;
   private cursorY = 0;
   private cells: string[][];
+  private completedCells: string[][] = [];
+  private completedFrameCount = 0;
+  private synchronizedUpdateOpen = false;
+  private pendingOutput = "";
 
   constructor(environment: NodeJS.ProcessEnv = {}, cols = 110, rows = 40) {
     this.columns = cols;
@@ -92,9 +96,10 @@ class TuiSession {
     );
   }
 
-  /** Text rendered since the last `send` (or since spawn), ANSI stripped. */
+  /** The last complete synchronized terminal frame, ANSI stripped. */
   get screen(): string {
-    return this.cells.map(line => line.join("").replace(/\s+$/u, "")).join("\n");
+    const cells = this.completedFrameCount ? this.completedCells : this.cells;
+    return cells.map(line => line.join("").replace(/\s+$/u, "")).join("\n");
   }
 
   get terminalOutput(): string {
@@ -116,13 +121,17 @@ class TuiSession {
   resize(cols: number, rows: number): void {
     this.columns = cols;
     this.rows = rows;
-    this.cells = Array.from({ length: rows }, (_, index) => this.cells[index]?.slice(0, cols) ?? []);
+    const resizeCells = (cells: string[][]) => Array.from({ length: rows }, (_, index) => cells[index]?.slice(0, cols) ?? []);
+    this.cells = resizeCells(this.cells);
+    this.completedCells = resizeCells(this.completedCells);
     this.cursorX = Math.min(this.cursorX, cols - 1);
     this.cursorY = Math.min(this.cursorY, rows - 1);
     this.terminal.resize(cols, rows);
   }
 
   private updateScreen(chunk: string): void {
+    const input = this.pendingOutput + chunk;
+    this.pendingOutput = "";
     const clearLine = (mode: number) => {
       const start = mode === 0 ? this.cursorX : 0;
       const end = mode === 1 ? this.cursorX + 1 : this.columns;
@@ -136,14 +145,27 @@ class TuiSession {
         this.cursorY = this.rows - 1;
       }
     };
-    for (let index = 0; index < chunk.length;) {
-      if (chunk[index] === "\u001b") {
-        if (chunk[index + 1] === "[") {
+    for (let index = 0; index < input.length;) {
+      if (input[index] === "\u001b") {
+        if (index + 1 >= input.length) {
+          this.pendingOutput = input.slice(index);
+          break;
+        }
+        if (input[index + 1] === "[") {
           let end = index + 2;
-          while (end < chunk.length && (chunk.charCodeAt(end) < 0x40 || chunk.charCodeAt(end) > 0x7e)) end += 1;
-          if (end >= chunk.length) break;
-          const final = chunk[end]!;
-          const raw = chunk.slice(index + 2, end);
+          while (end < input.length && (input.charCodeAt(end) < 0x40 || input.charCodeAt(end) > 0x7e)) end += 1;
+          if (end >= input.length) {
+            this.pendingOutput = input.slice(index);
+            break;
+          }
+          const final = input[end]!;
+          const raw = input.slice(index + 2, end);
+          if (raw === "?2026" && final === "h") this.synchronizedUpdateOpen = true;
+          else if (raw === "?2026" && final === "l" && this.synchronizedUpdateOpen) {
+            this.completedCells = this.cells.map(line => line.slice());
+            this.completedFrameCount += 1;
+            this.synchronizedUpdateOpen = false;
+          }
           const params = raw.replace(/^\?/u, "").split(";").map(value => Number(value) || 0);
           const amount = params[0] || 1;
           if (final === "H" || final === "f") {
@@ -164,17 +186,21 @@ class TuiSession {
           index = end + 1;
           continue;
         }
-        if (chunk[index + 1] === "]") {
-          const bell = chunk.indexOf("\u0007", index + 2);
-          const terminator = chunk.indexOf("\u001b\\", index + 2);
+        if (input[index + 1] === "]") {
+          const bell = input.indexOf("\u0007", index + 2);
+          const terminator = input.indexOf("\u001b\\", index + 2);
           const end = bell < 0 ? terminator : terminator < 0 ? bell : Math.min(bell, terminator);
-          index = end < 0 ? chunk.length : end + (chunk[end] === "\u0007" ? 1 : 2);
+          if (end < 0) {
+            this.pendingOutput = input.slice(index);
+            break;
+          }
+          index = end + (input[end] === "\u0007" ? 1 : 2);
           continue;
         }
         index += 2;
         continue;
       }
-      const character = String.fromCodePoint(chunk.codePointAt(index)!);
+      const character = String.fromCodePoint(input.codePointAt(index)!);
       index += character.length;
       if (character === "\r") this.cursorX = 0;
       else if (character === "\n") lineFeed();
@@ -201,12 +227,12 @@ class TuiSession {
 
   async waitFor(expected: RegExp, ready: (screen: string) => boolean = () => true): Promise<string> {
     const deadline = Date.now() + TIMEOUT_MS;
-    const rawLengthBeforeWait = this.rawLength;
+    const completedFrameCountBeforeWait = this.completedFrameCount;
     for (;;) {
       const output = this.output.replace(ANSI, "");
       const currentScreen = this.screen;
       assert.doesNotMatch(output, /Error:|TypeError/u, `TUI reported an error:\n${output}`);
-      if (this.rawLength > rawLengthBeforeWait && expected.test(currentScreen) && ready(currentScreen)) return currentScreen;
+      if (this.completedFrameCount > completedFrameCountBeforeWait && expected.test(currentScreen) && ready(currentScreen)) return currentScreen;
       if (this.exit) {
         assert.fail(`TUI exited early while waiting for ${String(expected)}; ${this.diagnostics}; output:\n${output}; current screen:\n${currentScreen}`);
       }
@@ -465,6 +491,7 @@ test("Sources refresh requires reviewing every selected Source at narrow and wid
       await session.waitFor(/git:/u);
       await session.send("a", /\d+ selected/u);
       await session.send("r", /Refresh Git Sources/u);
+      assert.match(session.screen, /Review 1 of \d+/u, `refresh review frame is incomplete:\n${session.screen}`);
       const beforeY = session.screen;
       session.press("y");
       await new Promise(resolve => setTimeout(resolve, 25));
