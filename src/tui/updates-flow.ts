@@ -74,7 +74,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
     setMode({ kind: "busy", label: "Preparing preview..." });
     try {
       const prepared = await prepareUpdates(current, selected);
-      if (mounted.current) setMode({ kind: "preview", prepared });
+      if (mounted.current) setMode({ kind: "preview", prepared, cursor: 0 });
     } catch (error) {
       if (!mounted.current) return;
       setMessage({ kind: "error", lines: [errorText(error)] });

@@ -55,6 +55,11 @@ export function recordedVersionLabel(record: InstalledPackage): string {
   return "unknown";
 }
 
+export type PackageRowStatus =
+  | { readonly kind: "unknown"; readonly reason: "local changes" | "unknown" }
+  | { readonly kind: "current" }
+  | { readonly kind: "update available" };
+
 /** One recorded Package selection plus its inspection, as the Installations view shows it. */
 export interface PackageRow {
   readonly selection: PackageSelection;
@@ -62,7 +67,7 @@ export interface PackageRow {
   readonly name: string;
   readonly installed: string;
   readonly available: string;
-  readonly status: "unknown" | "current" | "update available";
+  readonly status: PackageRowStatus;
   readonly drift?: string;
 }
 
@@ -72,12 +77,7 @@ export function packageRow(record: InstalledPackage, inspection: PackageInspecti
     name: inspection.descriptor?.name ?? describeCoordinates(record.selection),
     installed: installedEvidenceLabel(inspection.installed),
     available: packageVersionLabel(inspection.available),
-    status: classifyUpdate(
-      inspection.installed,
-      inspection.available,
-      inspection.availableCommit,
-      inspection.installedCommitIsAncestor,
-    ),
+    status: packageRowStatus(inspection),
     ...(inspection.drift === undefined ? {} : { drift: inspection.drift }),
   };
 }
@@ -85,7 +85,28 @@ export function packageRow(record: InstalledPackage, inspection: PackageInspecti
 /** Host, evidence and status of one row, as the Installations line prints it. */
 export function describePackageRow(row: PackageRow): string {
   const drift = row.drift === undefined ? "" : `  drift: ${row.drift}`;
-  return `${row.selection.host}  ${row.installed}  available ${row.available}  ${packageStatusLabel(row.status)}${drift}`;
+  const status = row.status.kind === "unknown" && row.status.reason === "local changes"
+    ? "update not checked · local changes"
+    : row.status.kind === "unknown" ? "cannot assess" : packageStatusLabel(row.status.kind);
+  return `${row.selection.host}  ${row.installed}  available ${row.available}  ${status}${drift}`;
+}
+
+function packageRowStatus(inspection: PackageInspection): PackageRowStatus {
+  const status = classifyUpdate(
+    inspection.installed,
+    inspection.available,
+    inspection.availableCommit,
+    inspection.installedCommitIsAncestor,
+  );
+  if (status === "unknown") {
+    return {
+      kind: "unknown",
+      reason: inspection.installed.kind === "installed" && /local modifications|local changes/iu.test(inspection.installed.reason ?? "")
+        ? "local changes"
+        : "unknown",
+    };
+  }
+  return { kind: status };
 }
 
 /** One component of the inventory; the executable effect and a host-only owner are called out. */

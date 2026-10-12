@@ -6,7 +6,7 @@ export type UpdatesMode =
   | { readonly kind: "browse" }
   | { readonly kind: "manual"; readonly plan: AppLifecyclePlan; readonly reason: string | undefined; readonly answer: (done: boolean) => void }
   | { readonly kind: "busy"; readonly label: string }
-  | { readonly kind: "preview"; readonly prepared: PreparedUpdates }
+  | { readonly kind: "preview"; readonly prepared: PreparedUpdates; readonly cursor: number }
   | { readonly kind: "confirm-paths"; readonly prepared: PreparedUpdates };
 
 export const BROWSE: UpdatesMode = { kind: "browse" };

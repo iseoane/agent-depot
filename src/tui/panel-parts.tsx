@@ -8,10 +8,22 @@ import { previewViewport, type PreviewChrome } from "./preview-window.js";
 /** A titled, color-independent boundary for a focused interaction or result. */
 export function BorderPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {
   return (
-    <Box borderStyle="round" borderColor={theme.group} paddingX={1} flexDirection="column">
-      <Text bold>{title}</Text>
+    <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
+      <Text color={theme.title} bold>{title}</Text>
       {children}
     </Box>
+  );
+}
+
+export function FieldLine({ label, value }: { readonly label: string; readonly value: ReactNode }) {
+  return <Text><Text color={theme.field}>{label}</Text><Text color={theme.value}> {value}</Text></Text>;
+}
+
+export function DecisionPrompt({ children }: { readonly children: ReactNode }) {
+  return (
+    <Text>
+      {children} <Text color={theme.success}>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text>
+    </Text>
   );
 }
 
@@ -47,7 +59,7 @@ export function HostChecklist({ choices, cursor, selected }: {
 export function PreviewLines({ lines, warnFirst = false }: { readonly lines: readonly string[]; readonly warnFirst?: boolean }) {
   return (
     <>
-      {lines.map((line, position) => <Text key={position} color={warnFirst && position === 0 ? theme.warning : undefined}>{line}</Text>)}
+      {lines.map((line, position) => <Text key={position} color={warnFirst && position === 0 ? theme.warning : theme.value}>{line}</Text>)}
     </>
   );
 }

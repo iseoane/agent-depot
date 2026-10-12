@@ -1,9 +1,10 @@
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
 import type { TuiEnvironment } from "./environment.js";
 import { theme } from "./theme.js";
+import { previewViewport } from "./preview-window.js";
 import { computeWindow, useListHeight } from "./window.js";
 import { BROWSE, type UpdatesMode } from "./updates-mode.js";
 import { useMirrored } from "./view-state.js";
@@ -11,8 +12,9 @@ import { useUpdatesFlow } from "./updates-flow.js";
 import { handleUpdatesKey, type UpdatesKeyContext } from "./updates-keys.js";
 import { viewOf, type UpdatesMessage } from "./updates-model.js";
 import { CheckStatus, EntryLine, ModePanel, UpdatesFooter } from "./updates-panel.js";
-import type { UpdateScopeFilter, UpdatesData } from "./updates.js";
+import { previewLineText, type UpdateScopeFilter, type UpdatesData } from "./updates.js";
 import { useKeys } from "./keys.js";
+import { BorderPanel, FieldLine } from "./panel-parts.js";
 
 export interface UpdatesViewProps {
   readonly operations: SourceOperations;
@@ -31,6 +33,7 @@ const CLOCK_TICK_MS = 10_000;
 
 export function UpdatesView({ operations, environment, onCapturingChange, listHeight, now }: UpdatesViewProps) {
   const height = useListHeight(listHeight, 9);
+  const { rows: terminalRows, columns: terminalColumns } = useWindowSize();
   const env = environment ?? NO_ENVIRONMENT;
   const clock = now ?? Date.now;
   // Scope, cursor, fold and selection are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
@@ -98,8 +101,32 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const { shown, updatable, unknown, upToDate, entries } = viewOf(data, scope, showUnknown);
   const index = Math.min(cursor, Math.max(entries.length - 1, 0));
 
+  const previewLines = (prepared: NonNullable<Extract<UpdatesMode, { kind: "preview" }>["prepared"]>) => [
+    ...prepared.lines.map(previewLineText),
+    ...prepared.appFailures,
+    ...prepared.packageFailures,
+    ...prepared.failures.map(({ item, message: failure }) => `Preview failed for ${JSON.stringify(item.id)}: ${failure}`),
+  ];
+  const previewGeometry = (current: Extract<UpdatesMode, { kind: "preview" }>) => previewViewport(
+    previewLines(current.prepared),
+    current.cursor,
+    terminalRows || 24,
+    terminalColumns || 80,
+    { title: "Update batch preview", questions: ["Scroll to end before confirming; n cancels.", "Apply this update batch? y/n"], reservedRows: 1 },
+  );
+
   const keyContext: UpdatesKeyContext = {
     height,
+    previewMetrics: () => {
+      const current = modeRef.current;
+      if (current.kind !== "preview") return { length: 0, pageSize: 1 };
+      const geometry = previewGeometry(current);
+      return { length: geometry.total, pageSize: geometry.height };
+    },
+    previewAtEnd: () => {
+      const current = modeRef.current;
+      return current.kind === "preview" && previewGeometry(current).reachedEnd;
+    },
     latest,
     checked: () => checkedRef.current,
     setChecked,
@@ -123,14 +150,15 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const window = computeWindow(entries.length, index, height);
   const view = { shown, updatable, unknown, upToDate, entries };
   const hasErrors = data?.appError !== undefined || (data?.results ?? []).some((result) => result.error !== undefined);
+  const showingBrowse = mode.kind === "browse";
 
   return (
     <Box flexDirection="column">
-      <Text color={theme.accent} bold>Updates (scope: {scope})  t all · p project · g user-global</Text>
-      {state.status === "loading" ? <Text>{state.label}</Text> : null}
-      {data ? <CheckStatus data={data} now={clock()} /> : null}
-      {data && !hasErrors && shown.length === 0 ? <Text>No installations</Text> : null}
-      {entries.slice(window.start, window.end).map((entry, offset) => (
+      <Text color={theme.title} bold>Updates (scope: {scope})  t all · p project · g user-global · u update</Text>
+      {state.status === "loading" ? <BorderPanel title="Update check"><FieldLine label="Status" value={state.label} /></BorderPanel> : null}
+      {showingBrowse && data ? <CheckStatus data={data} now={clock()} /> : null}
+      {showingBrowse && data && !hasErrors && shown.length === 0 ? <Text>No installations</Text> : null}
+      {showingBrowse ? entries.slice(window.start, window.end).map((entry, offset) => (
         <EntryLine
           key={entry.kind === "summary" ? "summary" : entry.row.key}
           entry={entry}
@@ -139,8 +167,8 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
           view={view}
           showUnknown={showUnknown}
         />
-      ))}
-      <UpdatesFooter indicator={window.indicator} upToDate={upToDate} updatableCount={updatable.length} checkedCount={checked.length} message={message} />
+      )) : null}
+      {showingBrowse ? <UpdatesFooter indicator={window.indicator} upToDate={upToDate} updatableCount={updatable.length} checkedCount={checked.length} message={message} /> : null}
       <ModePanel mode={mode} />
     </Box>
   );

@@ -532,7 +532,7 @@ confirmar):
 | Sources | `j`/`k` recorren Sources de Git y recetas App. `Enter` abre el Catálogo de una Source de Git o previsualiza/aprueba una receta App. Aprobarla no instala la App. `n` añade una Source reutilizable o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Git. |
 | Catalog | `Enter`/flechas expandir y contraer, `space` alternar el Skill disponible resaltado, `a` alternar todos los Skills disponibles de la Source resaltada que coincidan con el filtro actual, `i` instalar Skills marcados o el Skill resaltado, previsualizar el Package resaltado o previsualizar la instalación de una App aprobada cuya ausencia se conoce. Confirma la instalación de la App por separado con `y`. `/` filtra y `s` alterna una Source o todas. Las marcas de otras Sources se conservan. |
 | Installations | `Enter`/flechas expandir y contraer, `u` desinstalar una App o Skill instalada (con el flujo admitido) o eliminar un Skill no gestionado, `h` o `i` añadir Hosts a una instalación de Skill, `A` o `Enter` adoptar un Skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo). En una fila de App, `u` previsualiza la desinstalación y `h` selecciona setup/teardown; las recetas modificadas requieren una nueva aprobación. En una fila de Package: `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala, `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
-| Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualizar las marcas, `r` comprobar de nuevo, las flechas pliegan el grupo "cannot be checked". Sus filas son informativas y no se pueden marcar para actualizar. Un Package marcado se une al lote y se aprueba antes de ejecutar su actualización. |
+| Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualiza las marcas, `u` previsualiza el lote seleccionado, `r` comprueba de nuevo, las flechas pliegan el grupo "cannot be checked". Sus filas son informativas y no se pueden marcar para actualizar. Un Package marcado se une al lote y se aprueba antes de ejecutar su actualización. |
 | Profile | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
 
 Las previsualizaciones de recetas App y las confirmaciones del ciclo de vida muestran todas las declaraciones y los términos de ejecución en un panel desplazable. Usa `j`, `k`, las flechas, `PageUp` o `PageDown`. Confirma solo después de llegar a la última página.
@@ -782,8 +782,10 @@ variable no está definida): la raíz del checkout, `origin`, el commit `HEAD` y
 paquete sigue instalado, pero su versión no está disponible. Si los cambios locales
 hacen que el checkout esté modificado, Agent Depot muestra la versión de `HEAD`, pero
 no usa el commit para evaluar actualizaciones. Installations y `package inspect`
-indican `(HEAD; local changes)` en la etiqueta. Tanto los cambios en archivos
-controlados como los archivos sin seguimiento cuentan; Agent Depot no ignora archivos
+indican `(HEAD; local changes)` en la etiqueta. La fila de Installations muestra
+`update not checked · local changes`; Updates sigue indicando `cannot assess` y no
+ofrece el Package para actualizar. Tanto los cambios en archivos controlados como
+los archivos sin seguimiento cuentan; Agent Depot no ignora archivos
 de bloqueo ni otros archivos locales. La versión del manifiesto sirve para mostrar
 información, pero no demuestra que el checkout coincida con la Source seleccionada.
 La evaluación de actualizaciones compara el commit de un checkout limpio con el

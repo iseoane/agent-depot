@@ -51,6 +51,7 @@ test("preview confirmation follows the rendered physical rows at the viewport en
   const middle = previewViewport(lines, 6, 15, 80);
   assert.deepEqual(middle, {
     rows: ["row 4", "row 5", "row 6", "row 7"],
+    sourceLines: [4, 5, 6, 7],
     start: 4,
     end: 8,
     total: 10,

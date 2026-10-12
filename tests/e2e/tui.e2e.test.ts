@@ -64,6 +64,7 @@ class TuiSession {
     };
     delete inherited.CI;
     delete inherited.CONTINUOUS_INTEGRATION;
+    if (environment.FORCE_COLOR === "3") delete inherited.NO_COLOR;
     this.terminal = pty.spawn(process.execPath, [CLI, "tui"], {
       name: "xterm-256color",
       cols,
@@ -242,12 +243,50 @@ async function scrollPreviewToEnd(session: TuiSession, ready: RegExp): Promise<s
   assert.fail(`preview did not reach confirmation:\n${session.screen}`);
 }
 
+test("the Xeo semantic palette reaches colored text in a real terminal", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const url = "https://example.test/xeo-palette/skills.git";
+  const paletteHome = path.join(sandbox, "palette-home");
+  await mkdir(paletteHome);
+  const environment = {
+    HOME: paletteHome,
+    USERPROFILE: paletteHome,
+    XDG_STATE_HOME: path.join(paletteHome, ".local", "state"),
+    XDG_CONFIG_HOME: path.join(paletteHome, ".config"),
+    XDG_CACHE_HOME: path.join(paletteHome, ".cache"),
+  };
+  execFileSync(process.execPath, [CLI, "source", "add", url], { cwd: projectRoot, env: { ...process.env, ...environment }, stdio: "pipe" });
+  const session = new TuiSession({ ...environment, FORCE_COLOR: "3" }, 80, 24);
+  try {
+    await session.waitFor(/xeo-palette/u);
+    await session.send("r", /Refresh these Sources\? y\/n/u);
+    assert.match(session.screen, /Refresh Git Sources/u);
+    assert.match(session.screen, /Source refresh Git Source/u);
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;255;46;154m", "u"), "titles use the Xeo accent magenta");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;68;157;171m", "u"), "field names use the Xeo cyan");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;192;202;245m", "u"), "field values use Xeo brightText");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;158;206;106m", "u"), "yes uses Xeo success green");
+    // eslint-disable-next-line no-control-regex
+    assert.match(session.terminalOutput, new RegExp("\\x1b\\[38;2;247;118;142m", "u"), "no uses Xeo error red");
+    await session.send("n", /LOCATION \/ STATUS/u);
+    assert.equal(execFileSync(process.execPath, [CLI, "source", "list"], { cwd: projectRoot, env: { ...process.env, ...environment }, encoding: "utf8" }).includes(url), true);
+    session.press("q");
+    assert.equal(await session.exitCode(), 0);
+  } finally {
+    session.kill();
+  }
+});
+
 test("the TUI walks every view in a real terminal and quits cleanly", { timeout: 120_000 }, async () => {
   const session = new TuiSession();
   try {
     await session.waitFor(/AGENT DEPOT[\s\S]*n add ·/u);
     assert.ok(session.terminalOutput.includes("\u001B[?1049h"), "the TUI starts in Ink's alternate screen");
-    const initialFrame = session.screen.slice(session.screen.lastIndexOf("╭"));
+    const header = session.screen.lastIndexOf("AGENT DEPOT");
+    const initialFrame = session.screen.slice(session.screen.lastIndexOf("╭", header));
     assert.ok(initialFrame.split("\n").length >= 40, `startup did not fill the 40-row PTY:\n${initialFrame}`);
 
     const catalog = await session.send("2", /▸ builtin:agent-depot \(3\)/u);
@@ -506,9 +545,11 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
 test("the narrow TUI keeps recipe approval separate from confirmed App installation and updates", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
   const fixture = await fakeAppFixture(sandbox);
   const previewHome = homeDirectory;
+  const updateExecutionTerm = `${"Review the exact delegated update arguments before approval. ".repeat(30)}FINAL-UPDATE-EXECUTION-TERM`;
   await writeFile(fixture.file, JSON.stringify({
     ...fixture.recipe,
     install: { ...fixture.recipe.install, manual: `${"Manual install terms remain reviewable. ".repeat(30)}FINAL-INSTALL-MANUAL-TERM` },
+    update: { argv: ["depot-e2e-app", "update", "--delay", updateExecutionTerm] },
   }));
   const apps = createAppOperations({
     homeDirectory: previewHome,
@@ -605,6 +646,35 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     const updates = await session.send("4", /App: fixture-app/u);
     assert.match(updates, /1\.0\.0/u);
     assert.match(updates, /2\.0\.0/u);
+    await session.send(" ", /1 selected/u);
+    const cancelledUpdate = await session.send("u", /Update batch preview/u);
+    assert.match(cancelledUpdate, /Scroll to end before confirming/u);
+    await session.send("n", /Update cancelled/u);
+    assert.doesNotMatch(await readFile(fixture.log, "utf8"), /"update"/u, "cancelling the update preview does not run the recipe");
+    assert.equal(await readFile(fixture.state, "utf8"), "1.0.0", "cancelling the update preview leaves the App version unchanged");
+    const updatePreview = await session.send("u", /Update batch preview/u);
+    assert.match(updatePreview, /Scroll to end before confirming/u);
+    session.resize(40, 17);
+    const narrowUpdatePreview = await session.send("j", /Review/u);
+    assert.match(narrowUpdatePreview, /Review/u);
+    assert.ok(session.screen.split("\n").length <= 17, `40x17 update preview exceeded its PTY:\n${session.screen}`);
+    await session.send("y", /Scroll to end before confirming/u);
+    assert.doesNotMatch(await readFile(fixture.log, "utf8"), /"update"/u, "y before the final page does not execute the recipe");
+    assert.equal(await readFile(fixture.state, "utf8"), "1.0.0", "y before the final page leaves the App version unchanged");
+    session.resize(80, 24);
+    await session.send("j", /Review/u);
+    const updateReview = await scrollPreviewToEnd(session, /Apply 1 update\? y\/n/u);
+    assert.ok(updateReview.includes("FINAL-UPDATE-EXECUTION-TERM"), `update preview omitted its final execution term:\n${updateReview}`);
+    assert.ok(session.screen.split("\n").length <= 24, `resized update preview exceeded its PTY:\n${session.screen}`);
+    assert.doesNotMatch(await readFile(fixture.log, "utf8"), /"update"/u, "reviewing the update preview does not execute the recipe");
+    const progress = await session.send("y", /Applying updates/u);
+    assert.match(progress, /Applying updates/u);
+    assert.ok(session.screen.split("\n").length <= 24, `update progress exceeded its PTY:\n${session.screen}`);
+    const updateResult = await session.waitFor(/Update summary: 1 updated, 0 failed/u);
+    assert.match(updateResult, /Update summary: 1 updated, 0 failed/u);
+    assert.ok(session.screen.split("\n").length <= 24, `update result exceeded its PTY:\n${session.screen}`);
+    assert.equal(await readFile(fixture.state, "utf8"), "2.0.0");
+    assert.match(await readFile(fixture.log, "utf8"), /"update"/u, "only the confirmed update runs the recipe");
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally { session.kill(); }

@@ -9,6 +9,7 @@ import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
 import { useSourcesRecipes, type RecipeRow } from "./sources-recipes.js";
+import { BorderPanel, DecisionPrompt, FieldLine } from "./panel-parts.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
@@ -312,8 +313,8 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   // Sources removed since they were marked no longer count.
   const selectedCount = sources.filter((source) => marked.has(source.id)).length;
 
-  if (state.status === "loading") return <Text>Loading sources...</Text>;
-  if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
+  if (state.status === "loading") return <BorderPanel title="Sources"><FieldLine label="Status" value="Loading sources..." /></BorderPanel>;
+  if (state.status === "error") return <BorderPanel title="Source error"><Text color={theme.error}>{state.message}</Text></BorderPanel>;
 
   const window = computeWindow(rows.length, selected, height);
   if (recipes.capturing) return <Box flexDirection="column">{recipes.panel}</Box>;
@@ -338,7 +339,11 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       {selectedCount > 0 ? <Text>{selectedCount} selected</Text> : null}
       {recipes.panel}
       <Prompt mode={mode} />
-      {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
+      {message ? (
+        <BorderPanel title={message.kind === "error" ? "Source action · failed" : "Source action · complete"}>
+          <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text>
+        </BorderPanel>
+      ) : null}
     </Box>
   );
 }
@@ -346,12 +351,19 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
 function Prompt({ mode }: { readonly mode: Mode }) {
   if (mode.kind === "add-kind") return <Text>Add: 1 Git Source (skills + Packages) · 2 App recipe (Esc cancel)</Text>;
   if (mode.kind === "input") return <Text>URL: {mode.value}</Text>;
-  if (mode.kind === "busy") return <Text>Working...</Text>;
+  if (mode.kind === "busy") return <BorderPanel title="Sources"><FieldLine label="Status" value="Working..." /></BorderPanel>;
   if (mode.kind === "confirm") {
-    const lines = mode.action === "refresh"
-      ? mode.sources.map((source) => `refresh Git Source ${source.id} from ${source.url}`)
-      : [`remove Git Source ${mode.source.id} from ${mode.source.url}`];
-    return <Text>{lines.join("\n")}{"\n"}[y/n]</Text>;
+    return mode.action === "refresh" ? (
+      <BorderPanel title="Refresh Git Sources">
+        {mode.sources.map((source) => <FieldLine key={source.id} label="Source" value={`refresh Git Source ${source.id} from ${source.url}`} />)}
+        <DecisionPrompt>Refresh these Sources?</DecisionPrompt>
+      </BorderPanel>
+    ) : (
+      <BorderPanel title="Remove Git Source">
+        <FieldLine label="Source" value={`remove Git Source ${mode.source.id} from ${mode.source.url}`} />
+        <DecisionPrompt>Remove this Source?</DecisionPrompt>
+      </BorderPanel>
+    );
   }
   return null;
 }

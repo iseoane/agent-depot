@@ -8,7 +8,7 @@ export const TABS: readonly (readonly [ViewName, string])[] = [
   ["profile", "[5] Profile"],
 ];
 
-function tabRowsFor(width: number): readonly (readonly (readonly [ViewName, string])[])[] {
+export function headerTabRows(width: number): readonly (readonly (readonly [ViewName, string])[])[] {
   const rows: (readonly [ViewName, string])[][] = [];
   let row: (readonly [ViewName, string])[] = [];
   let rowWidth = 0;
@@ -29,9 +29,9 @@ function tabRowsFor(width: number): readonly (readonly (readonly [ViewName, stri
 }
 
 export function headerTabRowCount(width: number): number {
-  return tabRowsFor(width).length;
+  return headerTabRows(width).length;
 }
 
 export function formatHeaderTabs(view: ViewName, width: number): string {
-  return tabRowsFor(width).map(row => row.map(([name, label]) => `${view === name ? "▶ " : ""}${label}`).join("  ")).join("\n");
+  return headerTabRows(width).map(row => row.map(([name, label]) => `${view === name ? "▶ " : ""}${label}`).join("  ")).join("\n");
 }

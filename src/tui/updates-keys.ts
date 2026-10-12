@@ -1,6 +1,6 @@
 import type { Key } from "ink";
 
-import { answerYesNo } from "./mode-keys.js";
+import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
 import type { UpdatesListView } from "./updates-model.js";
 import type { UpdatesMode } from "./updates-mode.js";
 import type { PreparedUpdates, ScopedPath, UpdateScopeFilter, UpdatesData } from "./updates.js";
@@ -15,6 +15,8 @@ export interface UpdatesSnapshot extends UpdatesListView {
 /** What the Updates keys need from the view; the view owns the state, mirrored in refs. */
 export interface UpdatesKeyContext {
   readonly height: number;
+  previewMetrics(): { readonly length: number; readonly pageSize: number };
+  previewAtEnd(): boolean;
   latest(): UpdatesSnapshot;
   checked(): readonly string[];
   setChecked(next: readonly string[]): void;
@@ -76,15 +78,23 @@ function handleBrowseKey(context: UpdatesKeyContext, input: string, key: Key): v
   const scope = SCOPE_KEYS.get(input);
   if (scope !== undefined) context.changeScope(scope);
   else if (input === "r") context.recheck();
+  else if (input === "u") context.startPreview();
   else foldKey(context, snapshot, key);
 }
 
 function handlePreviewKey(context: UpdatesKeyContext, mode: Extract<UpdatesMode, { kind: "preview" }>, input: string, key: Key): void {
+  const metrics = context.previewMetrics();
+  const cursor = movePreviewCursor(mode.cursor, metrics.length, input, key, metrics.pageSize);
+  if (cursor !== undefined) {
+    context.setMode({ ...mode, cursor });
+    return;
+  }
   if (mode.prepared.applicable.length === 0) {
     if (key.escape || key.return || input === "n") context.cancel();
     return;
   }
   answerYesNo(input, key, () => {
+    if (!context.previewAtEnd()) return;
     if (mode.prepared.nonCanonicalPaths.length > 0) context.setMode({ ...mode, kind: "confirm-paths" });
     else context.apply(mode.prepared, []);
   }, context.cancel);

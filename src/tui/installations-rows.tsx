@@ -12,7 +12,8 @@ export function TreeRowLine({ row, selected, marked }: {
   readonly marked: boolean;
 }) {
   const item = row.node.data;
-  const leaf = !row.expandable && item.kind !== "group";
+  const markable = item.kind !== "group" && item.kind !== "package";
+  const leaf = !row.expandable && markable;
   const prefix = `${selected ? "> " : "  "}${"  ".repeat(row.depth)}${leaf ? (marked ? "[x] " : "[ ] ") : ""}`;
   return (
     <Text {...rowStyle(selected)} color={item.kind === "group" ? theme.group : undefined}>

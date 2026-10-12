@@ -77,6 +77,7 @@ async function open(h: Harness) {
 /** Waits until the highlighted row (the one prefixed with "> ") matches. */
 const highlights = (lastFrame: () => string | undefined, id: RegExp) =>
   waitForFrame(lastFrame, (frame) => id.test(frame.split("\n").find((line) => line.startsWith("> ")) ?? ""));
+const normalized = (frame: string) => frame.replace(/[\s│]/gu, " ").replace(/\s+/gu, " ");
 
 test("n opens an input, Enter adds the Git Source, reloads the list and reports success", async () => {
   const h = harness();
@@ -135,11 +136,29 @@ test("r previews, y confirms and refreshes the highlighted source", async () => 
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
   stdin.write("r");
-  await waitForFrame(lastFrame, /refresh Git Source git:1234567890abcdef12345678 from https:\/\/github\.com\/example\/skills\.git/);
+  const preview = await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
+  assert.match(normalized(preview), /refresh Git Source git:1234567890abcdef12345678 from https:\/\/github\.com\/example\/skills\.git/u);
   assert.deepEqual(h.calls, []);
   stdin.write("y");
-  await waitForFrame(lastFrame, /Refreshed Git Source: git:1234/);
+  await waitFor(() => h.calls.length > 0);
+  await waitFor(() => (lastFrame() ?? "").includes("Refreshed Git Source"));
+  const result = lastFrame() ?? "";
+  assert.match(result, /Refreshed Git Source: git:1234/);
   assert.deepEqual(h.calls, ["refresh git:1234567890abcdef12345678"]);
+  unmount();
+});
+
+test("refresh failures use the titled error result panel", async () => {
+  const h = harness({ async refreshSource() { h.calls.push("refresh failed"); throw new Error("mirror locked"); } });
+  const { lastFrame, stdin, unmount } = await open(h);
+  stdin.write(DOWN);
+  await highlights(lastFrame, /git:1234/);
+  stdin.write("r");
+  await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
+  stdin.write("y");
+  const result = await waitForFrame(lastFrame, /Source action · failed/);
+  assert.match(result, /mirror locked/);
+  assert.deepEqual(h.calls, ["refresh failed"]);
   unmount();
 });
 
@@ -150,9 +169,9 @@ test("n and Esc cancel a refresh confirmation", async () => {
   await highlights(lastFrame, /git:1234/);
   for (const cancel of ["n", ESC]) {
     stdin.write("r");
-    await waitForFrame(lastFrame, /\[y\/n\]/);
+    await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
     stdin.write(cancel);
-    await waitForFrame(lastFrame, (frame) => !/\[y\/n\]/.test(frame));
+    await waitForFrame(lastFrame, (frame) => !/Refresh these Sources\? y\/n/.test(frame));
   }
   assert.deepEqual(h.calls, []);
   unmount();
@@ -175,7 +194,7 @@ test("d previews, y removes the source and reloads the list", async () => {
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
   stdin.write("d");
-  await waitForFrame(lastFrame, /remove Git Source git:1234567890abcdef12345678 from https:\/\/github\.com\/example\/skills\.git/);
+  await waitForFrame(lastFrame, (frame) => /remove Git Source git:1234567890abcdef12345678 from https:\/\/github\.com\/example\/skills\.git/u.test(normalized(frame)));
   stdin.write("y");
   const frame = await waitForFrame(lastFrame, /Removed Git Source: git:1234/);
   assert.deepEqual(h.calls, ["remove git:1234567890abcdef12345678"]);
@@ -215,7 +234,7 @@ test("a busy action ignores other keys", async () => {
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
   stdin.write("r");
-  await waitForFrame(lastFrame, /\[y\/n\]/);
+  await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   stdin.write("y");
   await waitForFrame(lastFrame, /Working/);
   // Keys are handled in order: once "j" (a no-op while busy) had its turn, "a" would already have opened the input.
@@ -242,10 +261,10 @@ test("App shows key hints and q does not quit while typing or confirming", async
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
   stdin.write("r");
-  await waitForFrame(lastFrame, /\[y\/n\]/);
+  await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   stdin.write("q");
   stdin.write("n");
-  await waitForFrame(lastFrame, (frame) => !/\[y\/n\]/.test(frame));
+  await waitForFrame(lastFrame, (frame) => !/Refresh these Sources\? y\/n/.test(frame));
   assert.equal(exits, 0);
   stdin.write("q");
   await waitFor(() => exits === 1);
@@ -277,7 +296,7 @@ test("App does not quit or switch views while an action is busy", async () => {
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
   stdin.write("r");
-  await waitForFrame(lastFrame, /\[y\/n\]/);
+  await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   stdin.write("y");
   stdin.write("q");
   stdin.write("2");
@@ -324,7 +343,7 @@ test("no reload is issued after the view unmounts mid-action", async () => {
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
   stdin.write("r");
-  await waitForFrame(lastFrame, /\[y\/n\]/);
+  await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   stdin.write("y");
   await waitForFrame(lastFrame, /Working/);
   unmount();

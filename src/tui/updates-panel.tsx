@@ -1,24 +1,27 @@
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 
 import { rowStyle, theme } from "./theme.js";
+import { BorderPanel, DecisionPrompt, FieldLine } from "./panel-parts.js";
+import { previewViewport } from "./preview-window.js";
 import { CHECKING, describeRefresh, describeUnknownReasons, REFRESHING, type Entry, type UpdatesListView, type UpdatesMessage } from "./updates-model.js";
 import type { UpdatesMode } from "./updates-mode.js";
-import { formatAgo, type UpdatesData } from "./updates.js";
-import { PreviewLines } from "./panel-parts.js";
+import { formatAgo, previewLineText, previewText, type UpdatePreviewLine, type UpdatesData } from "./updates.js";
 
 /** What the last check found out: its age, how the sources were refreshed, and what failed. */
 export function CheckStatus({ data, now }: { readonly data: UpdatesData; readonly now: number }) {
   const errors = data.results.filter((result) => result.error !== undefined);
   return (
-    <>
-      <Text color={theme.muted}>checked {formatAgo(now - data.checkedAt)} · {describeRefresh(data)}</Text>
+    <BorderPanel title="Update check">
+      <Text color={theme.field}>checked <Text color={theme.value}>{formatAgo(now - data.checkedAt)}</Text>
+        <Text color={theme.legend}> · </Text><Text color={theme.value}>{describeRefresh(data)}</Text>
+      </Text>
       {data.refresh.failed.map((failure) => (
-        <Text key={failure.source} color={theme.warning}>refresh failed for {failure.source}: {failure.reason}</Text>
+        <Text key={failure.source} color={theme.warning}>Refresh failed for {failure.source}: {failure.reason}</Text>
       ))}
       {data.appError ? <Text color={theme.error}>Error (Apps): {data.appError}</Text> : null}
       {data.packageError ? <Text color={theme.error}>Error (Packages): {data.packageError}</Text> : null}
       {errors.map((result) => <Text key={result.scope} color={theme.error}>Error ({result.scope}): {result.error}</Text>)}
-    </>
+    </BorderPanel>
   );
 }
 
@@ -80,43 +83,65 @@ export function UpdatesFooter({ indicator, upToDate, updatableCount, checkedCoun
 
 /** The prompt of the preview and confirmation modes; browsing and the check itself show nothing. */
 export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
+  const { rows, columns } = useWindowSize();
   switch (mode.kind) {
     case "manual":
       return (
-        <Box flexDirection="column">
-          <Text>App: {mode.plan.entry.recipe!.name}</Text>
-          <Text>Environment: {mode.plan.environment}</Text>
-          <Text>Working directory: {mode.plan.cwd}</Text>
-          <Text>Manual: {mode.plan.manual}</Text>
+        <BorderPanel title="Manual App update">
+          <FieldLine label="App" value={mode.plan.entry.recipe!.name} />
+          <FieldLine label="Environment" value={mode.plan.environment} />
+          <FieldLine label="Working directory" value={mode.plan.cwd} />
+          <FieldLine label="Manual step" value={mode.plan.manual} />
           {mode.reason ? <Text color={theme.warning}>{mode.reason}</Text> : null}
-          <Text>Manual step done, check now? y/n</Text>
-        </Box>
+          <DecisionPrompt>Manual step done, check now?</DecisionPrompt>
+        </BorderPanel>
       );
     case "browse":
       return null;
     case "busy":
-      return mode.label === REFRESHING || mode.label === CHECKING ? null : <Text>{mode.label}</Text>;
-    case "preview":
-      return (
-        <Box flexDirection="column">
-          <PreviewLines lines={mode.prepared.lines} />
-          <PreviewLines lines={mode.prepared.appFailures} />
-          <PreviewLines lines={mode.prepared.packageFailures} />
-          {mode.prepared.failures.map(({ item, message }) => (
-            <Text key={item.id} color={theme.error}>Preview failed for {JSON.stringify(item.id)}: {message}</Text>
-          ))}
-          {mode.prepared.applicable.length === 0
-            ? <Text>Nothing can be applied. Enter/Esc to go back</Text>
-            : <Text>Apply {mode.prepared.applicable.length} {mode.prepared.applicable.length === 1 ? "update" : "updates"}? y/n</Text>}
-        </Box>
+      return mode.label === REFRESHING || mode.label === CHECKING ? null : (
+        <BorderPanel title="Updates"><FieldLine label="Status" value={mode.label} /></BorderPanel>
       );
+    case "preview": {
+      const lines: UpdatePreviewLine[] = [
+        ...mode.prepared.lines,
+        ...mode.prepared.appFailures.map(previewText),
+        ...mode.prepared.packageFailures.map(previewText),
+        ...mode.prepared.failures.map(({ item, message }) => previewText(`Preview failed for ${JSON.stringify(item.id)}: ${message}`)),
+      ];
+      const displayLines = lines.map(previewLineText);
+      const question = mode.prepared.applicable.length === 0
+        ? "Nothing can be applied. Enter or Esc to go back."
+        : "Scroll to end before confirming; n cancels.";
+      const chrome = { title: "Update batch preview", questions: [question, "Apply this update batch? y/n"], reservedRows: 1 };
+      const viewport = previewViewport(displayLines, mode.cursor, rows || 24, columns || 80, chrome);
+      return (
+        <BorderPanel title={chrome.title}>
+          {viewport.rows.map((line, position) => {
+            const source = lines[viewport.sourceLines[position] ?? -1];
+            return source?.kind === "field" && line.startsWith(source.label)
+              ? <Text key={position}><Text color={theme.field}>{source.label}</Text><Text color={theme.value}>{line.slice(source.label.length)}</Text></Text>
+              : <Text key={position} color={theme.value}>{line}</Text>;
+          })}
+          {viewport.total > viewport.height ? <Text color={theme.legend}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
+          <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · j/k · PgUp/PgDn</Text>
+          {mode.prepared.applicable.length === 0
+            ? <Text color={theme.legend}>{question}</Text>
+            : viewport.reachedEnd
+              ? <DecisionPrompt>Apply {mode.prepared.applicable.length} {mode.prepared.applicable.length === 1 ? "update" : "updates"}?</DecisionPrompt>
+              : <Text color={theme.legend}>{question}</Text>}
+        </BorderPanel>
+      );
+    }
     case "confirm-paths":
       return (
-        <Box flexDirection="column">
-          <Text color={theme.warning}>Confirm replacing non-canonical locations (outside .agents/skills and .claude/skills):</Text>
-          {mode.prepared.nonCanonicalPaths.map((location, position) => <Text key={position} color={theme.warning}>  [{location.scope}] {JSON.stringify(location.path)}</Text>)}
-          <Text>Replace exactly these paths? y/n</Text>
-        </Box>
+        <BorderPanel title="Confirm replacing non-canonical locations">
+          <Text color={theme.warning}>Outside .agents/skills and .claude/skills:</Text>
+          {mode.prepared.nonCanonicalPaths.map((location, position) => (
+            <Text key={position}><Text color={theme.field}>[{location.scope}] </Text><Text color={theme.value}>{JSON.stringify(location.path)}</Text></Text>
+          ))}
+          <DecisionPrompt>Replace exactly these paths?</DecisionPrompt>
+        </BorderPanel>
       );
   }
 }

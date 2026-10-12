@@ -6,7 +6,7 @@ import type { SourceOperations } from "../sources.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
 import { InstallationsView } from "./installations-view.js";
-import { formatHeaderTabs, TABS, type ViewName } from "./header-layout.js";
+import { headerTabRows, TABS, type ViewName } from "./header-layout.js";
 import { useKeys } from "./keys.js";
 import { ProfileView } from "./profile-view.js";
 import { SourcesView, sourceRowHints } from "./sources-view.js";
@@ -32,19 +32,29 @@ function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boo
     case "profile":
       return "e export · i import · q quit";
     case "updates":
-      return "j/k move · space mark · a all · Enter preview · r check again · q quit";
+      return "j/k move · space mark · a all · Enter preview · u update · r check again · q quit";
   }
 }
 
 function Header({ view, columns }: { readonly view: ViewName; readonly columns: number }) {
   const innerWidth = Math.max(columns - 4, 1);
   return (
-    <Box borderStyle="round" borderColor={theme.group} paddingX={1} flexDirection="column" width={columns}>
+    <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column" width={columns}>
       <Box width={innerWidth} justifyContent="space-between">
-        <Text bold>AGENT DEPOT</Text>
-        {AGENT_DEPOT_PACKAGE_VERSION === undefined ? null : <Text>v{AGENT_DEPOT_PACKAGE_VERSION}</Text>}
+        <Text color={theme.title} bold>AGENT DEPOT</Text>
+        {AGENT_DEPOT_PACKAGE_VERSION === undefined ? null : <Text color={theme.value}>v{AGENT_DEPOT_PACKAGE_VERSION}</Text>}
       </Box>
-      <Text wrap="truncate-end">{formatHeaderTabs(view, innerWidth)}</Text>
+      <Box flexDirection="column">
+        {headerTabRows(innerWidth).map((row, rowIndex) => (
+          <Text key={rowIndex} wrap="truncate-end">
+            {row.map(([name, label], tabIndex) => (
+              <Text key={name} color={view === name ? theme.accent : theme.inactive}>
+                {tabIndex === 0 ? "" : "  "}{view === name ? "▶ " : ""}{label}
+              </Text>
+            ))}
+          </Text>
+        ))}
+      </Box>
     </Box>
   );
 }

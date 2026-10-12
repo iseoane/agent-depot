@@ -21,7 +21,10 @@ switch (action) {
   case '--version': if (!fs.existsSync(state)) process.exit(1); console.log(fs.readFileSync(state, 'utf8')); break;
   case 'latest': console.log('2.0.0'); break;
   case 'install': fs.writeFileSync(state, '1.0.0'); break;
-  case 'update': fs.writeFileSync(state, '2.0.0'); break;
+  case 'update':
+    if (process.argv.includes('--delay')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    fs.writeFileSync(state, '2.0.0');
+    break;
   case 'uninstall': fs.rmSync(state, { force: true }); break;
   case 'setup': case 'teardown': if (host === 'claude') { console.error('host deliberately failed'); process.exit(1); } break;
   case 'broken-install': break;
