@@ -467,7 +467,8 @@ five numbered views. Switch views with `1`-`5` or Tab/Shift+Tab, and quit with `
 (not while a prompt is open). Lists scroll when they are taller than the terminal.
 In Sources, Catalog,
 Installations, and Updates, `j`/`k` or the arrows move one row; `PageUp` and
-`PageDown` move by one visible page.
+`PageDown` move by one visible page. Use a terminal at least 40 columns wide to
+review Profile export notes; at 24 columns, the app header tab and note title clip.
 
 | View | Purpose |
 | --- | --- |

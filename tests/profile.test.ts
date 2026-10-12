@@ -186,6 +186,13 @@ test("approved App recipes are available choices, but only a tracked installatio
   assert.doesNotMatch(serializeProfile(installed.profile), /1\.2\.3|recipeFile|app-installations|approval/);
   assert.deepEqual(versionCalls, ["--version", "--version"]);
   assert.equal((await apps.trackedApps())[0]?.installedVersion, "9.9.9", "read-only export inspection must not reconcile tracking");
+
+  apps.inspectForExport = async () => { throw new Error("inspection port unavailable"); };
+  const inspectionFailure = await buildProfileExport(operations, apps, { homeDirectory: home });
+  assert.deepEqual(inspectionFailure.profile.apps.map(app => app.name), ["gentle-shell"]);
+  const appInspectionExclusions = inspectionFailure.exclusions.filter(item => item.label.startsWith("App "));
+  assert.deepEqual(appInspectionExclusions.map(item => item.block), ["replicas"]);
+  assert.match(appInspectionExclusions[0]!.reason, /installation state could not be read.*inspection port unavailable/);
 });
 
 test("a saved Package selection becomes replica intent only when host evidence says installed", async t => {
@@ -488,7 +495,7 @@ test("export reports named unmanaged Skills and only real exclusions", async t =
   const options = { homeDirectory: home, noSources: true };
   const empty = await buildProfileExport(operations, apps, options);
   assert.deepEqual(empty.preview, ["Preview: export portable user-global profile",
-    "Selected Skills keep their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel."]);
+    "Selected Skills are exported with their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel."]);
   const skill = path.join(home, ".agents", "skills", "unmanaged-tool");
   await mkdir(skill, { recursive: true });
   await writeFile(path.join(skill, "SKILL.md"), "---\nname: unmanaged-tool\ndescription: A tool\n---\nInstructions\n");
@@ -575,7 +582,7 @@ test("export exposes classified exclusions and warnings while preserving the CLI
   assert.deepEqual(result.warnings, [{ kind: "source", message: "WARNING: Skill demo references Source https://example.com/omitted.git not included in profile" }]);
   assert.deepEqual(result.preview, [
     "Preview: export portable user-global profile",
-    "Selected Skills keep their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel.",
+    "Selected Skills are exported with their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel.",
     "Skill demo [pi] (latest)",
     "Replica intent Installed Skill demo from https://example.com/omitted.git; no installed state or approval is transferred",
     "Not transferred because it is always present: built-in Source",

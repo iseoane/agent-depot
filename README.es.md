@@ -514,7 +514,9 @@ paquete en ejecución y las cinco vistas numeradas. Cambia de vista con `1`-`5` 
 y sal con `q` (no mientras haya un aviso abierto). Las listas se desplazan cuando
 superan la altura del terminal. En Sources, Catalog, Installations y Updates,
 `j`/`k` o las flechas mueven
-una fila; `PageUp` y `PageDown` avanzan una página visible.
+una fila; `PageUp` y `PageDown` avanzan una página visible. Usa un terminal de al
+menos 40 columnas para revisar las notas de exportación de Profile; con 24 columnas,
+se recortan la pestaña del encabezado y el título de la nota.
 
 | Vista | Propósito |
 | --- | --- |

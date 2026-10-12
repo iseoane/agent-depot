@@ -12,8 +12,9 @@ import {
   applyProfileImport, buildProfileImport, type ProfileImportEntry, type ProfileImportItem,
   type ProfileImportPackageItem, type ProfileImportPlan,
 } from "../profile-import.js";
-import { PROFILE_FORMAT } from "../profile.js";
+import { PROFILE_FORMAT, PROFILE_FORMAT_V2, parseProfile } from "../profile.js";
 import type { Profile } from "../profile.js";
+import { selectionKey } from "../package-model.js";
 import type { SourceOperations } from "../sources.js";
 import type { TuiEnvironment } from "./environment.js";
 import { packageOperationsOf } from "./environment.js";
@@ -191,6 +192,24 @@ function selectedPlanEntries(plan: ProfileImportPlan, selected: readonly Row[]):
   return planEntries(plan).filter((item, index) => item.status !== "add" || selected.some(row => row.index === index));
 }
 
+function selectedImportProfile(profile: Profile, entries: readonly ProfileImportEntry[]): Profile {
+  const sources = profile.sources.filter(value => entries.some(item => item.block === "sources" && item.value.url === value.url));
+  const skills = profile.skills.filter(value => entries.some(item => item.block === "skills" &&
+    item.value.path === value.path && JSON.stringify(item.value.source) === JSON.stringify(value.source)));
+  const apps = profile.apps.filter(value => entries.some(item => item.block === "apps" &&
+    item.value.name === value.name && item.value.platform === value.platform));
+  const packages = profile.packages.filter(value => entries.some(item => item.block === "packages" &&
+    selectionKey(item.value) === selectionKey(value)));
+  const replicas = profile.replicas.filter(replica => {
+    if (replica.kind === "skill") return skills.some(skill => skill.path === replica.path &&
+      JSON.stringify(skill.source) === JSON.stringify(replica.source));
+    if (replica.kind === "app") return apps.some(app => app.name === replica.name && app.platform === replica.platform);
+    return packages.some(selection => selectionKey(selection) === selectionKey(replica.selection));
+  });
+  return parseProfile({ ...profile, format: replicas.length ? PROFILE_FORMAT_V2 : PROFILE_FORMAT,
+    sources, skills, apps, packages, replicas });
+}
+
 /** A plan whose items are the chosen subset, split back into the block the writer consumes. */
 function chosenPlan(plan: ProfileImportPlan, selected: readonly Row[]): ProfileImportPlan {
   const entries = selectedPlanEntries(plan, selected);
@@ -251,7 +270,6 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const [plan, setPlan] = useState<ProfileImportPlan>();
   const diagnostics = useRef<readonly ProfileExportDiagnostic[]>([]);
   const action = useRef<"export" | "import">("export");
-  const profileVersion = useRef("");
   const { columns: terminalColumns } = useWindowSize();
   const panelWidth = Math.max((terminalColumns || 80) - 4, 1);
   const listingHint = mode === "export-list"
@@ -345,10 +363,10 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
         if (current === "export-path") {
           showLines(profileExportPreview(chosenProfile(), diagnostics.current), "confirm");
         } else void run(async () => {
-          const raw = JSON.parse(await readFile(typed.current, "utf8"));
-          const imported = await buildProfileImport(raw, operations, apps, {}, packages);
-          profileVersion.current = raw.agentDepotVersion;
+          const importedProfile = parseProfile(JSON.parse(await readFile(typed.current, "utf8")));
+          const imported = await buildProfileImport(importedProfile, operations, apps, {}, packages);
           if (!mounted.current) return;
+          setProfile(importedProfile);
           setPlan(imported);
           loadRows(rowsFromPlan(imported), "import-list");
         });
@@ -433,13 +451,8 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       } else void run(async () => {
         // Reuse the CLI's core preview for the exact selected subset, including argv and Source notes.
         const entries = selectedPlanEntries(plan!, selectedRef.current);
-        const preview = await buildProfileImport({
-          format: PROFILE_FORMAT, agentDepotVersion: profileVersion.current,
-          sources: entries.filter(item => item.block === "sources").map(item => item.value),
-          skills: entries.filter(item => item.block === "skills").map(item => item.value),
-          apps: entries.filter(item => item.block === "apps").map(item => item.value),
-          packages: entries.filter(item => item.block === "packages").map(item => item.value),
-        }, operations, apps, {}, packages);
+        const subset = selectedImportProfile(profile!, entries);
+        const preview = await buildProfileImport(subset, operations, apps, {}, packages);
         if (mounted.current) showLines(preview.preview, "confirm");
       });
     }

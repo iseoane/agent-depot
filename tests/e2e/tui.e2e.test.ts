@@ -391,6 +391,9 @@ test("Profile export groups keep identities and ordinals stable across PTY resiz
     version: { policy: "latest" }, hosts: ["pi"],
     installation: { path: `.agents/skills/skill-${index}`, adopted: false },
   });
+  const unmanaged = path.join(home, ".agents", "skills", `${"very-long-unmanaged-name-".repeat(3)}skill`);
+  await mkdir(unmanaged, { recursive: true });
+  await writeFile(path.join(unmanaged, "SKILL.md"), "---\nname: unmanaged\ndescription: fixture\n---\n");
   const environment = {
     HOME: home, USERPROFILE: home,
     XDG_STATE_HOME: path.join(home, ".local", "state"),
@@ -425,6 +428,29 @@ test("Profile export groups keep identities and ordinals stable across PTY resiz
     session.resize(80, 24);
     assert.ok(session.screen.split("\n").length <= 24, `Profile exceeded an 80x24 PTY:\n${session.screen}`);
     await session.send("\x1b", /e export · i import/u);
+    session.resize(40, 17);
+    await session.send("e", /▸ Sources/u);
+    await session.send("j".repeat(2), />.*▸ Export notes/u);
+    await session.send("\r", /▾ Export notes/u);
+    await session.send("j".repeat(2), /> Excluded unmanaged/u);
+    const selectedNote = session.screen;
+    assert.ok(selectedNote.split("\n").length <= 17, `40x17 export exceeded its PTY:\n${selectedNote}`);
+    const detail = await session.send("\r", /Excluded unmanag/u);
+    assert.ok(detail.split("\n").length <= 17, `40x17 exclusion detail exceeded its PTY:\n${detail}`);
+    assert.ok(detail.includes("[1] Sources"), `40x17 detail hid the first app tab:\n${detail}`);
+    assert.ok(detail.includes("Export note"), `40x17 detail hid its title:\n${detail}`);
+    const detailPages = await scrollPreviewToEnd(session, /not tracked/u);
+    assert.ok(session.screen.split("\n").length <= 17, `40x17 exclusion detail page exceeded its PTY:\n${session.screen}`);
+    const detailText = detail.replace(/[│\s]/g, "");
+    assert.ok(detailText.includes("ExcludedunmanagedSkill"), detail);
+    assert.ok(detailText.includes("very-long-unmanaged-name-very-long-unma"), detail);
+    const finalDetailText = session.screen.replace(/[│\s]/g, "");
+    assert.ok(finalDetailText.includes("naged-name-very-long-unmanaged-name-skill:nottracked"), detailPages);
+    const restored = await session.send("\x1b", /> Excluded unmanag/u);
+    assert.ok(restored.split("\n").length <= 17, `40x17 cursor restore exceeded its PTY:\n${restored}`);
+    session.resize(80, 24);
+    assert.match(session.screen, /> Excluded unmanag/u);
+    await session.send("\x1b", /Portable Profile/u);
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally {

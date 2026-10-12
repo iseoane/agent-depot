@@ -366,6 +366,57 @@ test("Packages appear in the export checklist and import previews the recorded s
   assert.deepEqual(evidence.executions, [{ action: "select", confirmed: true }]);
 });
 
+test("v2 replica intent is preview-only and follows the selected import resources", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "profile-tui-replica-import-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const recipesDirectory = path.join(home, "apps");
+  await mkdir(recipesDirectory);
+  const packageSelection = { ...piPackage, root: "plugins/pstack",
+    source: { kind: "external" as const, url: "https://github.com/michael-denyer/pstack-claude" } };
+  const recipeForImport = { ...recipe, name: "gentle-shell", platform: "linux" as const,
+    version: { argv: ["gentle-shell", "--version"], pattern: "(.*)" } };
+  const file = path.join(home, "replicas-v2.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v2", agentDepotVersion: "0.5.2",
+    sources: [], skills: [], apps: [recipeForImport], packages: [packageSelection], replicas: [
+      { kind: "app", name: recipeForImport.name, platform: recipeForImport.platform },
+      { kind: "package", selection: packageSelection },
+    ] }));
+  const { operations: packages, evidence } = fakePackageOperations({});
+  const view = render(<ProfileView operations={operations} environment={{ homeDirectory: home,
+    appEnvironment: { recipesDirectory, runner: async () => { throw new Error("recipe commands must not run"); } }, packages }} />);
+  t.after(() => view.unmount());
+
+  await importFile(view, file);
+  view.stdin.write("\r");
+  let preview = await waitForFrame(view.lastFrame, /Apply Profile/);
+  assert.match(preview, /Origin replica intent: Installed App gentle-shell \(linux\)/);
+  const normalizedPreview = preview.replace(/[│\s]/g, "");
+  assert.ok(normalizedPreview.includes(
+    "Originreplicaintent:InstalledPackagepiplugins/pstackfromhttps://github.com/michael-denyer/pstack-claude"));
+  assert.ok(normalizedPreview.includes("doesnotapproveorinstallit"));
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => frame.includes("Portable Profile") && !frame.includes("Apply Profile"));
+  assert.deepEqual(evidence.approvals, []);
+  assert.deepEqual(evidence.executions, []);
+  assert.deepEqual(await createAppOperations({ recipesDirectory }).load(), []);
+
+  await importFile(view, file);
+  view.stdin.write("j");
+  await waitForFrame(view.lastFrame, /add: Package pi plugins\/pstack/);
+  view.stdin.write(" ");
+  await waitForFrame(view.lastFrame, /\[ \].*add: Package pi plugins\/pstack/);
+  view.stdin.write("\r");
+  preview = await waitForFrame(view.lastFrame, /Apply Profile/);
+  assert.match(preview, /Origin replica intent: Installed App gentle-shell \(linux\)/);
+  assert.ok(!preview.replace(/[│\s]/g, "").includes("Originreplicaintent:InstalledPackagepiplugins/pstack"));
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => frame.includes("Portable Profile") && !frame.includes("Apply Profile"));
+  assert.deepEqual(evidence.approvals, []);
+  assert.deepEqual(evidence.executions, []);
+  assert.deepEqual(await createAppOperations({ recipesDirectory }).load(), []);
+});
+
 test("space and all toggle export choices; an empty selection stops before the file prompt", async t => {
   const f = await fixture(t);
   await f.operations.addGitSource("https://example.com/skills.git");
@@ -608,7 +659,7 @@ test("export keeps notes separate from resource selection", async t => {
   assert.doesNotMatch(appRow, /Not transferred/);
   await expandExportGroup(f.view, "Export notes");
   const note = await waitForFrame(f.view.lastFrame, /Export notes/);
-  assert.match(note, /Selected Skills keep their version policy/);
+  assert.match(note, /Selected Skills are exported with their version policy/);
   assert.match(note, /Not transferred because it is always present: built-in Source/);
   assert.match(note, /\[x\] 1 App recipe demo/);
 });

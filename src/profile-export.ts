@@ -45,7 +45,7 @@ export interface ProfileExportPlan {
   readonly preview: readonly string[];
 }
 
-export const SKILL_EXPORT_EXPLANATION = "Selected Skills keep their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel.";
+export const SKILL_EXPORT_EXPLANATION = "Selected Skills are exported with their version policy; destination install paths and Host links are recreated. Local paths and symlink targets do not travel.";
 
 export function selectProfileItems<T>(items: readonly T[], requested: readonly string[] | undefined, disabled: boolean | undefined,
   names: (item: T) => readonly string[], block: string): readonly T[] {
@@ -163,7 +163,14 @@ export async function buildProfileExport(operations: SourceOperations, apps: App
       recipes.push(validateOne("apps", entry.recipe));
       const tracked = entry.recipe && entry.canonicalFile && appInstallations.find(record =>
         record.name === entry.recipe!.name && path.resolve(record.recipeFile) === path.resolve(entry.canonicalFile!));
-      const inspection = await apps.inspectForExport(entry);
+      let inspection: Awaited<ReturnType<AppOperations["inspectForExport"]>>;
+      try {
+        inspection = await apps.inspectForExport(entry);
+      } catch (error) {
+        exclude("replicas", `App ${entry.recipe!.name} (${entry.recipe!.platform ?? "all platforms"})`,
+          `current installation state could not be read, so it is not marked for replication (${error instanceof Error ? error.message : String(error)})`);
+        continue;
+      }
       if (inspection.status === "installed" && entry.recipe) {
         replicas.push({ kind: "app", name: entry.recipe.name,
           ...(entry.recipe.platform === undefined ? {} : { platform: entry.recipe.platform }) });
