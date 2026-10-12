@@ -356,24 +356,33 @@ test("Profile export groups keep identities and ordinals stable across PTY resiz
   const statePath = path.join(home, ".local", "state", "agent-depot", "sources.json");
   await mkdir(path.dirname(statePath), { recursive: true });
   const operations = createSourceOperations({ homeDirectory: home, statePath });
-  const source = await operations.addGitSource("https://example.test/profile-groups.git");
+  const sourceUrl = `https://example.test/${"long-path-segment/".repeat(8)}profile-groups.git`;
+  const source = await operations.addGitSource(sourceUrl);
   for (let index = 1; index <= 8; index++) await operations.addUserGlobalInstallation!({
     source: { kind: "external", url: source.url }, path: `skill-${index}`,
     version: { policy: "latest" }, hosts: ["pi"],
     installation: { path: `.agents/skills/skill-${index}`, adopted: false },
   });
+  const unmanaged = path.join(home, ".agents", "skills", `${"very-long-unmanaged-name-".repeat(3)}skill`);
+  await mkdir(unmanaged, { recursive: true });
+  await writeFile(path.join(unmanaged, "SKILL.md"), "---\nname: unmanaged\ndescription: fixture\n---\n");
   const environment = {
     HOME: home, USERPROFILE: home,
     XDG_STATE_HOME: path.join(home, ".local", "state"),
     XDG_CONFIG_HOME: path.join(home, ".config"),
     XDG_CACHE_HOME: path.join(home, ".cache"),
     PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
+    FORCE_COLOR: "3",
   };
   const session = new TuiSession(environment, 80, 24);
   try {
     await session.waitFor(/builtin:agent-depot/u);
-    await session.send("5", /Portable user-global Profile/u);
+    await session.send("5", /Portable Profile/u);
     await session.send("e", /Skills \(8\)/u);
+    assert.ok(session.screen.replace(/[│\s]/g, "").includes(sourceUrl.replace(/[│\s]/g, "")),
+      `80x24 export did not show the complete Source URL:\n${session.screen}`);
+    assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "Export Profile")), "Export uses the fuchsia panel title");
+    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "  ▾ Sources (1)")), "Export groups use the blue group color");
     await session.send("j", /▾ Skills \(8\)/u);
     await session.send("j", /> \[x\] 1 skill-1/u);
     await session.send("j", /> \[x\] 2 skill-2/u);
@@ -401,6 +410,27 @@ test("Profile export groups keep identities and ordinals stable across PTY resiz
     await session.send("\r", /Apply Profile/u);
     await session.send("\x1b[6~", /PgUp\/PgDn page/u);
     await session.send("n", /e export · i import/u);
+    session.resize(40, 17);
+    const narrow = await session.send("e", /preview shows full text/u);
+    assert.match(narrow, /…/u);
+    assert.ok(session.screen.split("\n").length <= 17, `Export exceeded a 40x17 PTY:\n${session.screen}`);
+    await session.send("j", /> ▾ Skills/u);
+    for (let index = 0; index < 8; index++) await session.send("j", new RegExp(`\\[x\\] ${index + 1} skill-${index + 1}`, "u"));
+    await session.send("j", /> ▾ Export notes/u);
+    await session.send("j".repeat(10), /very-long-unmanaged-name/u);
+    const noteCursor = session.screen;
+    assert.ok(noteCursor.includes(">") && noteCursor.includes("very-long-unmanaged-name"), noteCursor);
+    const noteDetail = await session.send("\r", /Export note/u);
+    assert.ok(noteDetail.split("\n").length <= 17, `Export note exceeded a 40x17 PTY:\n${noteDetail}`);
+    await session.send("\x1b[6~", /not tracked/u);
+    assert.ok(session.screen.split("\n").length <= 17, `Export note review exceeded a 40x17 PTY:\n${session.screen}`);
+    await session.send("\x1b", /Export Profile/u);
+    await session.send("\x1b", /e export · i import/u);
+    await session.send("e", /preview shows full text/u);
+    const pathPrompt = await session.send("\r", /Profile path:/u);
+    assert.ok(pathPrompt.split("\n").length <= 17, `Profile path prompt exceeded a 40x17 PTY:\n${pathPrompt}`);
+    assert.match(pathPrompt, /Enter submit · Esc cancel/u);
+    await session.send("\x1b", /e export · i import/u);
     session.press("q");
     assert.equal(await session.exitCode(), 0);
   } finally {
@@ -523,7 +553,7 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
     assert.match(updates, /Updates \(scope: all\)/u);
 
     const profile = await session.send("5", /e export · i import/u);
-    assert.match(profile, /Portable user-global Profile/u);
+    assert.match(profile, /Portable Profile/u);
     assert.match(profile, /▶ \[5\] Profile/u);
 
     const sources = await session.send("1", /builtin:agent-depot/u);
@@ -934,7 +964,7 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     sessions.push(exporting);
     await exporting.waitFor(/n add ·/u);
     await exporting.send("5", /e export · i import/u);
-    const checklist = await exporting.send("e", /Enter preview/u);
+    const checklist = await exporting.send("e", /Enter group\/preview/u);
     assert.match(checklist, /\[x\] 1 https:\/\/example.test\/profile\/source.git/u);
     assert.match(checklist, /\[x\] 2 skills\/alpha/u);
     assert.match(checklist, /\[x\] 2 fixture-app \(windows\)/u);

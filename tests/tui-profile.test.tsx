@@ -74,7 +74,7 @@ test("import warns on newer producers, skips conflicts and adds recipes unapprov
   await waitForFrame(f.view.lastFrame, frame => frame.includes(file));
   f.view.stdin.write("\r");
   const checklist = await waitForFrame(f.view.lastFrame, /add: App recipe second/);
-  assert.match(checklist, /conflict: App recipe demo[\s\S]*not\s+selectable/);
+  assert.match(checklist.replaceAll("│", ""), /conflict: App recipe demo[\s\S]*not\s+selectable/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /newer than running/);
   f.view.stdin.write("y");
@@ -123,7 +123,8 @@ test("invalid import errors remain usable and long export lists are windowed", a
   const frame = await waitForFrame(view.lastFrame, /of 23/);
   assert.ok(frame.split("\n").length < 12);
   view.stdin.write("j".repeat(20));
-  await waitForFrame(view.lastFrame, /21–23 of 23/);
+  const scrolled = await waitForFrame(view.lastFrame, frame => frame.includes("of 23") && frame.includes("Export notes"));
+  assert.match(scrolled, /of 23/);
 });
 
 test("import previews recorded method argv and unregistered Sources; declining writes nothing", async t => {
@@ -169,39 +170,69 @@ test("export panel stays inside a resized terminal with wrapped choices and conf
   const f = await fixture(t);
   const url = `https://example.com/${"long-path-segment/".repeat(8)}skills.git`;
   await f.operations.addGitSource(url);
-  const unmanaged = path.join(f.home, ".agents", "skills", `${"very-long-unmanaged-name-".repeat(4)}skill`);
+  const unmanaged = path.join(f.home, ".agents", "skills", `${"very-long-unmanaged-name-".repeat(3)}skill`);
   await mkdir(unmanaged, { recursive: true });
-  const view = render(<ProfileView operations={f.operations} environment={f.environment} />);
-  t.after(() => view.unmount());
+  await writeFile(path.join(unmanaged, "SKILL.md"), "---\nname: unmanaged\ndescription: fixture\n---\n");
+  const view = f.view;
   Object.defineProperty(view.stdout, "rows", { configurable: true, value: 17 });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: 40 });
   view.stdout.emit("resize");
   view.stdin.write("e");
-  let frame = await waitForFrame(view.lastFrame, /Export notes/);
+  let frame = await waitForFrame(view.lastFrame, /Export Profile/);
   assert.ok(frame.split("\n").length <= 17, frame);
-  assert.match(frame, /Portable user-global Profile/);
-  assert.match(frame, /Not transferred because it is always present/);
-  for (let index = 0; index < 12 && !frame.includes("very-long-unmanaged-name-"); index++) {
+  assert.match(frame, /Export Profile/);
+  assert.match(frame, /…/);
+  assert.match(frame, /preview shows full text/);
+  for (let index = 0; index < 12 && !frame.replace(/[│\s]/g, "").includes("very-long-unmanaged-name-"); index++) {
+    const before = frame;
     view.stdin.write("j");
-    frame = await waitForFrame(view.lastFrame, next => next !== frame);
+    frame = await waitForFrame(view.lastFrame, next => next !== before);
   }
   assert.ok(frame.split("\n").length <= 17, frame);
-  assert.match(frame, /very-long-unmanaged-name-/);
-  for (let index = 0; index < 20 && !frame.includes("skills.git"); index++) {
-    view.stdin.write("j");
-    frame = await waitForFrame(view.lastFrame, next => next !== frame);
-  }
-  assert.match(frame, /skills.git/);
-  assert.ok(frame.split("\n").length <= 17, frame);
+  assert.ok(frame.replace(/[│\s]/g, "").includes("very-long-unmanaged-name-"), frame);
+  assert.match(frame, /preview shows full text/);
+  assert.ok(frame.split("\n").some(line => line.includes(">") && line.includes("very-long")), frame);
+  view.stdin.write("\r");
+  const detail = await waitForFrame(view.lastFrame, /Export note/);
+  assert.ok(detail.split("\n").length <= 17, detail);
+  assert.match(detail, /Excluded unmanaged Skill/);
+  view.stdin.write("j".repeat(12));
+  const detailTail = await waitForFrame(view.lastFrame, /not tracked/);
+  assert.ok(detailTail.split("\n").length <= 17, detailTail);
+  view.stdin.write("\u001b");
+  await waitForFrame(view.lastFrame, /Export Profile/);
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 24 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 80 });
+  view.stdout.emit("resize");
+  frame = await waitForFrame(view.lastFrame, frame => frame.includes("Export notes") &&
+    frame.split("\n").some(line => line.startsWith("╭") && line.length === 80));
+  assert.ok(frame.split("\n").length <= 24, frame);
+  assert.ok(frame.replace(/[│\s]/g, "").includes(`${"very-long-unmanaged-name-".repeat(3)}skill`), frame);
+  view.stdin.write("\u001b");
+  await waitForFrame(view.lastFrame, /e export · i import/);
+  view.stdin.write("e");
+  frame = await waitForFrame(view.lastFrame, frame => frame.replace(/[│\s]/g, "").includes(url.replace(/[│\s]/g, "")));
+  assert.ok(frame.split("\n").length <= 24, frame);
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 17 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 40 });
+  view.stdout.emit("resize");
+  await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("╭") && line.length === 40));
+  view.stdin.write("\u001b");
+  await waitForFrame(view.lastFrame, /e export · i import/);
+  view.stdin.write("e");
+  const narrowExport = await waitForFrame(view.lastFrame, /Export Profile/);
+  assert.match(narrowExport, /…/);
   view.stdin.write("\r");
   const prompt = await waitForFrame(view.lastFrame, /Profile path/);
   assert.ok(prompt.split("\n").length <= 17, prompt);
+  assert.match(prompt, /Enter submit · Esc cancel/);
   view.stdin.write(path.join(f.home, "review.json"));
   await waitForFrame(view.lastFrame, /review.json/);
   view.stdin.write("\r");
   const confirmation = await waitForFrame(view.lastFrame, /Apply Profile/);
   assert.ok(confirmation.split("\n").length <= 17, confirmation);
   assert.match(confirmation, /arrows\/PgUp\/PgDn page/);
+  assert.doesNotMatch(confirmation, /Export Profile|Portable Profile/);
 });
 
 test("export group selection and numbering survive scrolling, collapse, expansion and resize", async t => {
@@ -414,7 +445,7 @@ test("import shows same reasons, keeps them unselectable, and reports Sources an
     skills: [skill, { ...skill, path: "missing-skill" }], apps: [] }));
   await importFile(f.view, file);
   const same = await waitForFrame(f.view.lastFrame, /same: Source/);
-  assert.match(same, /included: existing true ->\s+incoming false/);
+  assert.match(same.replaceAll("│", "").replace(/\s+/g, " "), /included: existing true -> incoming false/);
   assert.match(same, /discovery inclusion is not imported/);
   assert.match(same, /not selectable/);
   f.view.stdin.write(" ");
