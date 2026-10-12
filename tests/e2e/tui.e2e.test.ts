@@ -355,8 +355,8 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     await mkdir(trackedDirectory, { recursive: true });
     const trackedFile = path.join(trackedDirectory, `${createHash("sha256").update("fixture-app").digest("hex")}.json`);
     await writeFile(trackedFile, JSON.stringify({ name: "fixture-app", recipeFile: fixture.file, installedVersion: "1.0.0" }));
-    await session.send("3", /Apps \(user-global\)/u);
-    await session.send("j", />\s+Managed \(project\)/u);
+    await session.send("3", /(?=.*▶ \[3\] Installations)(?=.*j\/k move · Enter expand · space mark · a all · u uninstall)(?=.*Apps \(user-global\))/su);
+    await session.send("j", /(?=.*▶ \[3\] Installations)(?=.*j\/k move · Enter expand · space mark · a all · u uninstall)(?=.*>\s+Managed \(project\))/su);
     await session.send("j", /Unmanaged \(user-global\)/u);
     await session.send("j", /Apps \(user-global\)/u);
     await session.send("k", /Unmanaged \(user-global\)/u);
