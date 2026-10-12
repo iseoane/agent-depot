@@ -76,7 +76,11 @@ class TuiSession {
     };
     delete inherited.CI;
     delete inherited.CONTINUOUS_INTEGRATION;
-    if (environment.FORCE_COLOR === "3") delete inherited.NO_COLOR;
+    if (environment.FORCE_COLOR === "3") {
+      delete inherited.NO_COLOR;
+      // FORCE_COLOR=3 still resolves to 256-color for TERM=xterm-256color without this hint.
+      inherited.COLORTERM = "truecolor";
+    }
     this.terminal = pty.spawn(process.execPath, [CLI, "tui"], {
       name: "xterm-256color",
       cols,
