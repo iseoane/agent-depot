@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
-import { previewViewport } from "./preview-window.js";
+import { previewViewport, type PreviewChrome } from "./preview-window.js";
 
 /** A titled, color-independent boundary for a focused interaction or result. */
 export function BorderPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {
@@ -72,15 +72,16 @@ export function ListFooter({ indicator, selectedCount, message }: {
 }
 
 /** A preview followed by a y/n question. */
-export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst, cursor }: {
+export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst, cursor, chrome }: {
   readonly title?: string;
   readonly lines: readonly string[];
   readonly question: string;
   readonly warnFirst?: boolean;
   readonly cursor?: number;
+  readonly chrome?: PreviewChrome;
 }) {
   const { rows, columns } = useWindowSize();
-  const viewport = cursor === undefined ? undefined : previewViewport(lines, cursor, rows || 24, columns || 80);
+  const viewport = cursor === undefined ? undefined : previewViewport(lines, cursor, rows || 24, columns || 80, chrome ?? { title, questions: [question] });
   const shown = viewport?.rows ?? lines;
   return (
     <BorderPanel title={title}>

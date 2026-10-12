@@ -223,7 +223,7 @@ test("Git Sources and recipes share one bounded list and cursor without Tab", as
   assert.match(frame, /35–40 of 40/);
   view.stdin.write("n");
   frame = await waitForFrame(view.lastFrame, /1 With the AI skill/);
-  assert.equal(listed(frame).length, 6);
+  assert.equal(listed(frame).length, 0, "captured recipe workflows replace the shared list at every terminal width");
 });
 
 test("invalid recipes cannot open approval and moving the cursor clears action errors", async t => {

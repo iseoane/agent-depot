@@ -316,7 +316,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
 
   const window = computeWindow(rows.length, selected, height);
-  if (columns < 64 && recipes.capturing) return <Box flexDirection="column">{recipes.panel}</Box>;
+  if (recipes.capturing) return <Box flexDirection="column">{recipes.panel}</Box>;
 
   return (
     <Box flexDirection="column">

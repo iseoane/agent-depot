@@ -14,13 +14,27 @@ import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
 import { BorderPanel, PreviewConfirm } from "./panel-parts.js";
 import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
-import { previewViewport } from "./preview-window.js";
+import { previewViewport, type PreviewChrome } from "./preview-window.js";
 import { theme } from "./theme.js";
 
 /** One recipe file with its command-free approval status. */
 export interface RecipeRow {
   readonly entry: AppEntry;
   readonly status: string;
+}
+
+function recipeApprovalChrome(entry: AppEntry): PreviewChrome {
+  return {
+    title: "Recipe approval · does not install",
+    questions: [`Approve ${appName(entry)}? y/n · recipe approval does not install the App.`, "Scroll to end before y; n cancels."],
+  };
+}
+
+function uninstallChrome(mode: Extract<RecipeMode, { kind: "uninstall-confirm" | "uninstall-manual" }>): PreviewChrome {
+  return {
+    title: mode.kind === "uninstall-manual" ? "App manual uninstall" : "App uninstall confirmation",
+    questions: [mode.kind === "uninstall-manual" ? "Complete the manual uninstall, then check now? y/n" : `Uninstall ${appName(mode.removal.entry)}? y/n`, "Scroll to end before y; n cancels."],
+  };
 }
 
 /** Captured approval, guide and delegated Catalog install interactions. */
@@ -194,7 +208,7 @@ export function useSourcesRecipes({
     }
     const cancel = () => setMode({ kind: "browse" });
     if (current.kind === "approve") {
-      const viewport = previewViewport(current.lines, current.cursor, terminalRows, terminalColumns);
+      const viewport = previewViewport(current.lines, current.cursor, terminalRows, terminalColumns, recipeApprovalChrome(current.entry));
       const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) setMode({ ...current, cursor });
       else if (input === "n" || key.escape) cancel();
@@ -222,7 +236,7 @@ export function useSourcesRecipes({
     }
     if (current.kind === "uninstall-confirm" || current.kind === "uninstall-manual") {
       const lines = appStepLines(current.plan);
-      const viewport = previewViewport(lines, current.cursor, terminalRows, terminalColumns);
+      const viewport = previewViewport(lines, current.cursor, terminalRows, terminalColumns, uninstallChrome(current));
       const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) setMode({ ...current, cursor });
       else if (input === "n" || key.escape) cancel();
@@ -296,30 +310,25 @@ export function useSourcesRecipes({
       ) : null}
       {mode.kind === "install" ? <ActionPanel mode={mode.action} /> : null}
       {mode.kind === "busy" ? <BorderPanel title="App recipe workflow"><Text>Working...</Text></BorderPanel> : null}
-      {mode.kind === "approve" ? (
-        <PreviewConfirm
-          title="Recipe approval · does not install"
-          lines={mode.lines}
-          cursor={mode.cursor}
-          question={previewViewport(mode.lines, mode.cursor, terminalRows, terminalColumns).reachedEnd
-            ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
-            : "Scroll to end before y; n cancels."}
-        />
-      ) : null}
+      {mode.kind === "approve" ? (() => {
+        const chrome = recipeApprovalChrome(mode.entry);
+        const viewport = previewViewport(mode.lines, mode.cursor, terminalRows, terminalColumns, chrome);
+        return <PreviewConfirm title={chrome.title} lines={mode.lines} cursor={mode.cursor}
+          question={viewport.reachedEnd ? chrome.questions[0]! : chrome.questions[1]!} chrome={chrome} />;
+      })() : null}
       {mode.kind === "uninstall-question" ? (
         <BorderPanel title="Uninstall before recipe removal">
           <Text>App {appName(mode.removal.entry)} is installed or tracked{mode.removal.installedVersion ? ` (${mode.removal.installedVersion})` : ""}.</Text>
           <Text>Uninstall it before removing the recipe? y/n (n cancels removal)</Text>
         </BorderPanel>
       ) : null}
-      {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (
-        <PreviewConfirm title={mode.kind === "uninstall-manual" ? "App manual uninstall" : "App uninstall confirmation"}
-          lines={appStepLines(mode.plan)} cursor={mode.cursor}
-          question={previewViewport(appStepLines(mode.plan), mode.cursor, terminalRows, terminalColumns).reachedEnd
-            ? mode.kind === "uninstall-manual" ? "Complete the manual uninstall, then check now? y/n"
-              : `Uninstall ${appName(mode.removal.entry)}? y/n`
-            : "Scroll to end before y; n cancels."} />
-      ) : null}
+      {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (() => {
+        const chrome = uninstallChrome(mode);
+        const lines = appStepLines(mode.plan);
+        const viewport = previewViewport(lines, mode.cursor, terminalRows, terminalColumns, chrome);
+        return <PreviewConfirm title={chrome.title} lines={lines} cursor={mode.cursor}
+          question={viewport.reachedEnd ? chrome.questions[0]! : chrome.questions[1]!} chrome={chrome} />;
+      })() : null}
       {mode.kind === "remove" ? (
         <PreviewConfirm title="Recipe removal" lines={[`Delete recipe: ${mode.removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."]}
           question={`Remove recipe for ${appName(mode.removal.entry)}? y/n`} />

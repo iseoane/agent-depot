@@ -70,10 +70,27 @@ test("preview viewport wraps complete long terms and responds to the latest term
   assert.equal(wide.total, 3);
   assert.equal(narrow.total, 5);
   const lastPage = previewViewport([line], 4, 17, 40);
-  assert.equal([...narrow.rows, lastPage.rows.at(-1)].join(""), line);
+  assert.equal(lastPage.rows.join(""), line);
   assert.equal(lastPage.reachedEnd, true);
   assert.equal(previewViewport(["界".repeat(19)], 0, 17, 40).total, 2);
   assert.ok(lastPage.height < wide.height);
+});
+
+test("preview chrome wraps long approval names into the shared viewport geometry", () => {
+  const name = `approved-${"long-recipe-name-".repeat(4)}`;
+  const chrome = {
+    title: "Recipe approval · does not install",
+    questions: [`Approve ${name}? y/n · recipe approval does not install the App.`, "Scroll to end before y; n cancels."],
+  };
+  const lines = Array.from({ length: 20 }, (_, index) => `danger term ${index}`);
+  const wide = previewViewport(lines, 19, 24, 80, chrome);
+  const narrow = previewViewport(lines, 19, 17, 40, chrome);
+  assert.equal(wide.height, 12);
+  assert.equal(narrow.height, 1);
+  assert.equal(wide.rows.at(-1), "danger term 19");
+  assert.equal(narrow.rows.at(-1), "danger term 19");
+  assert.equal(wide.reachedEnd, true);
+  assert.equal(narrow.reachedEnd, true);
 });
 
 test("pageStep is the window height, at least one row", () => {

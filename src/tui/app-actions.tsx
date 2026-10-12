@@ -6,7 +6,7 @@ import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
 import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
 import { BorderPanel, HostChecklist, PreviewConfirm } from "./panel-parts.js";
-import { previewViewport } from "./preview-window.js";
+import { previewViewport, type PreviewChrome } from "./preview-window.js";
 
 interface Request {
   readonly entry: AppEntry;
@@ -53,6 +53,15 @@ export interface AppContext {
 
 /** Recipe name, falling back to the file identity for invalid recipes. */
 export const appName = (entry: AppEntry) => entry.recipe?.name ?? entry.file;
+
+function appPreviewChrome(mode: Extract<AppMode, { kind: "app-approve" | "app-confirm" | "app-manual" }>): PreviewChrome {
+  const title = mode.kind === "app-approve" ? "Recipe approval · does not install"
+    : mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`;
+  const question = mode.kind === "app-approve" ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
+    : mode.kind === "app-manual" ? "Manual step done, check now? y/n"
+      : `${mode.plan.action} ${appName(mode.plan.entry)}? y/n`;
+  return { title, questions: [question, "Scroll to end before y; n cancels."] };
+}
 
 export function appStepLines(step: {
   readonly argv?: readonly string[];
@@ -208,7 +217,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
     }
   } else {
     const lines = appPreviewLines(mode);
-    const viewport = previewViewport(lines, mode.cursor, context.terminalRows, context.terminalColumns);
+    const viewport = previewViewport(lines, mode.cursor, context.terminalRows, context.terminalColumns, appPreviewChrome(mode));
     const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
     if (cursor !== undefined) {
       manage.setMode({ ...mode, cursor });
@@ -247,19 +256,15 @@ export function AppPanel({ mode }: { readonly mode: AppMode }) {
     );
   }
   const lines = appPreviewLines(mode);
-  const viewport = previewViewport(lines, mode.cursor, rows || 24, columns || 80);
-  const reviewed = viewport.reachedEnd;
+  const chrome = appPreviewChrome(mode);
+  const viewport = previewViewport(lines, mode.cursor, rows || 24, columns || 80, chrome);
   return (
     <PreviewConfirm
-      title={mode.kind === "app-approve" ? "Recipe approval · does not install"
-        : mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`}
+      title={chrome.title}
       lines={lines}
       cursor={mode.cursor}
-      question={reviewed
-        ? mode.kind === "app-approve" ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
-          : mode.kind === "app-manual" ? "Manual step done, check now? y/n"
-            : `${mode.plan.action} ${appName(mode.plan.entry)}? y/n`
-        : "Scroll to end before y; n cancels."}
+      question={viewport.reachedEnd ? chrome.questions[0]! : chrome.questions[1]!}
+      chrome={chrome}
     />
   );
 }

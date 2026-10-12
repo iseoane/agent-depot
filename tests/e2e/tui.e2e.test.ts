@@ -402,7 +402,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
   await mkdir(recipes, { recursive: true });
   const approvalRecipe = {
     ...fixture.recipe,
-    name: "review-all-terms",
+    name: `aaa-review-all-terms-${"long-approved-recipe-name-".repeat(2)}`,
     install: { argv: ["depot-e2e-app", "install", "separate", "argv", "--danger=host-setup-tail"], manual: "Install manually without dropping this full instruction" },
     update: { manual: "Manual update instruction must remain completely reviewable, including its final words" },
     latest: { argv: ["depot-e2e-app", "latest", "latest-selector-unchanged"], pattern: "(\\d+\\.\\d+\\.\\d+)" },
@@ -411,6 +411,10 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
   };
   const recipeFile = path.join(recipes, "review-all-terms.json");
   await writeFile(recipeFile, JSON.stringify(approvalRecipe));
+  await Promise.all(Array.from({ length: 30 }, (_, index) => writeFile(
+    path.join(recipes, `secondary-${String(index).padStart(2, "0")}.json`),
+    JSON.stringify({ ...fixture.recipe, name: `zzz-secondary-${String(index).padStart(2, "0")}` }),
+  )));
   const session = new TuiSession({
     PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
     HOME: home,
@@ -422,25 +426,46 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
   try {
     await session.waitFor(/n add ·/u);
     await session.send("j", /review-all-terms[\s\S]*needs approval/u);
+    const approvalQuestion = () => {
+      const visible = session.screen.replace(/\s/gu, "");
+      return visible.includes("Approve") && visible.includes("y/n");
+    };
     let preview = await session.send("\r", /Scroll to end before y/u);
     assert.match(preview, /File:/u);
     assert.doesNotMatch(preview, /latest-selector-unchanged|Host teardown instruction/u);
+    assert.ok(preview.split("\n").length <= 24, `wide preview exceeded the 24-row PTY:\n${preview}`);
+    for (let move = 0; move < 80 && !approvalQuestion(); move += 1) {
+      session.press("\u001b[6~");
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.ok(approvalQuestion(), `wide preview never exposed its approval question:\n${session.screen}`);
+    assert.ok(session.screen.replace(/\s/gu, "").includes(approvalRecipe.name), `wide preview truncated the approved recipe name:\n${session.screen}`);
+    assert.doesNotMatch(session.screen, /zzz-secondary/u, `wide preview left the Sources list visible below the panel:\n${session.screen}`);
+    assert.match(session.screen, /FINAL-DANGER-TERM-MUST-STAY-HIDDEN/u, `wide preview never exposed its final term:\n${session.screen}`);
+    assert.ok(session.screen.split("\n").length <= 24, `wide final preview exceeded the 24-row PTY:\n${session.screen}`);
+    preview += session.screen;
+    while (/Review (\d+) of (\d+)/u.test(session.screen) && Number(/Review (\d+) of (\d+)/u.exec(session.screen)?.[1]) > 1) {
+      session.press("\u001b[5~");
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
     session.resize(40, 17);
     await session.send("j", /Review 2 of \d+/u);
     const count = Number(/Review 2 of (\d+)/u.exec(session.screen)?.[1]);
     assert.ok(count > 14, `test recipe should exceed the 40x17 viewport: ${count}`);
-    for (let move = 0; move < 80; move += 1) {
+    for (let move = 0; move < 120 && !approvalQuestion(); move += 1) {
       const current = /Review (\d+) of (\d+)/u.exec(session.screen);
       assert.ok(current, `preview lost its physical-row position:\n${session.screen}`);
-      if (Number(current[1]) - 1 + 7 >= Number(current[2])) break;
-      preview += await session.send("\u001b[6~", /j\/k · PgUp\/PgDn/u);
+      if (current[1] === current[2]) break;
+      preview += await session.send("j", new RegExp(`Review (?!${current[1]} of)\\d+ of`));
     }
     const nearEnd = /Review (\d+) of (\d+)/u.exec(session.screen);
     assert.ok(nearEnd, `preview lost its position before consent:\n${session.screen}`);
-    assert.ok(Number(nearEnd[1]) - 1 + 7 >= Number(nearEnd[2]), `did not reach the previous premature-consent boundary:\n${session.screen}`);
-    await session.send("k", new RegExp(`Review ${Number(nearEnd[1]) - 1} of ${nearEnd[2]}`));
-    await session.send("j", new RegExp(`Review ${nearEnd[1]} of ${nearEnd[2]}`));
-    assert.doesNotMatch(session.screen, /Approve review-all-terms\? y\/n/u);
+    assert.ok(approvalQuestion(), `did not reach the final approval boundary:\n${session.screen}`);
+    const beforeFinal = Number(nearEnd[1]) - 1;
+    session.press("k");
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(session.screen, /Scroll to end before y/u, `previous preview row did not close confirmation:\n${session.screen}`);
+    assert.equal(Number(/Review (\d+) of (\d+)/u.exec(session.screen)?.[1]), beforeFinal, `preview cursor did not move back one physical row:\n${session.screen}`);
     session.press("y");
     await new Promise(resolve => setTimeout(resolve, 50));
     const prematureConfirm = session.screen;
@@ -448,10 +473,11 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     assert.doesNotMatch(prematureConfirm, /latest-selector-unchanged|FINAL-DANGER-TERM-MUST-STAY-HIDDEN/u);
     assert.ok(prematureConfirm.split("\n").length <= 17, `resized preview exceeded the 17-row PTY:\n${prematureConfirm}`);
     await assert.rejects(readdir(path.join(state, "agent-depot", "app-approvals")), { code: "ENOENT" });
-    for (let move = 0; move < 80 && !/Approve review-all-terms\? y\/n/u.test(session.screen); move += 1) {
-      preview += await session.send("\u001b[6~", /j\/k · PgUp\/PgDn/u);
+    for (let move = 0; move < 80 && !approvalQuestion(); move += 1) {
+      session.press("\u001b[6~");
+      await new Promise(resolve => setTimeout(resolve, 20));
     }
-    assert.match(session.screen, /Approve review-all-terms\? y\/n/u);
+    assert.ok(approvalQuestion(), `complete preview did not restore the approval question:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= 17, `final preview exceeded the 17-row PTY:\n${session.screen}`);
     preview += session.screen;
     const reviewed = preview.split("\n").map(line => line.replace(/^.*?│/u, "").replace(/│.*$/u, "").trim()).join(" ");
