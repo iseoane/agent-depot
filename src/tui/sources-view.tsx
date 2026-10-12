@@ -73,7 +73,7 @@ function errorText(error: unknown): string {
 }
 
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange }: SourcesViewProps) {
-  const { columns } = useWindowSize();
+  const { columns, rows: terminalRows } = useWindowSize();
   const height = useListHeight(listHeight, 9);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
@@ -144,12 +144,14 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   sourcesRef.current = sources;
   const rowsRef = useRef<readonly SourceRow[]>([]);
   const recipes = useSourcesRecipes({
-    operations, environment, onCapturingChange, previewPageSize: Math.max(height - 3, 1),
+    operations, environment, onCapturingChange,
     highlightedFile: () => {
       const rows = rowsRef.current;
       const row = rows[resolveIndex(rows, selectionRef.current)];
       return row?.kind === "app" ? row.recipe.entry.file : undefined;
     },
+    terminalRows: terminalRows || 24,
+    terminalColumns: columns || 80,
   });
   const rows: readonly SourceRow[] = [
     ...sources.map((source): SourceRow => ({ id: source.id, kind: "skills", source })),

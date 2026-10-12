@@ -6,6 +6,7 @@ import { render } from "ink-testing-library";
 import { BUILT_IN_SOURCE, type Source, type SourceOperations } from "../src/sources.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { formatHeaderTabs, headerTabRowCount } from "../src/tui/header-layout.js";
+import { previewViewport } from "../src/tui/preview-window.js";
 import { computeWindow, pageStep } from "../src/tui/window.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
@@ -43,6 +44,36 @@ test("computeWindow never renders less than one row and clamps an out-of-range s
   assert.deepEqual(computeWindow(10, 3, 0), { start: 3, end: 4, indicator: "4–4 of 10" });
   const clamped = computeWindow(10, 99, 4);
   assert.equal(clamped.end, 10);
+});
+
+test("preview confirmation follows the rendered physical rows at the viewport end", () => {
+  const lines = Array.from({ length: 10 }, (_, index) => `row ${index}`);
+  const middle = previewViewport(lines, 6, 15, 80);
+  assert.deepEqual(middle, {
+    rows: ["row 4", "row 5", "row 6", "row 7"],
+    start: 4,
+    end: 8,
+    total: 10,
+    cursor: 6,
+    height: 4,
+    reachedEnd: false,
+  });
+  const final = previewViewport(lines, 9, 15, 80);
+  assert.deepEqual(final.rows, ["row 6", "row 7", "row 8", "row 9"]);
+  assert.equal(final.reachedEnd, true);
+});
+
+test("preview viewport wraps complete long terms and responds to the latest terminal dimensions", () => {
+  const line = `Working directory: ${"/resolved/full/path/".repeat(8)}`;
+  const wide = previewViewport([line], 0, 24, 80);
+  const narrow = previewViewport([line], 0, 17, 40);
+  assert.equal(wide.total, 3);
+  assert.equal(narrow.total, 5);
+  const lastPage = previewViewport([line], 4, 17, 40);
+  assert.equal([...narrow.rows, lastPage.rows.at(-1)].join(""), line);
+  assert.equal(lastPage.reachedEnd, true);
+  assert.equal(previewViewport(["界".repeat(19)], 0, 17, 40).total, 2);
+  assert.ok(lastPage.height < wide.height);
 });
 
 test("pageStep is the window height, at least one row", () => {

@@ -1,4 +1,4 @@
-import { Text, type Key } from "ink";
+import { Text, useWindowSize, type Key } from "ink";
 
 import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
@@ -6,6 +6,7 @@ import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
 import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
 import { BorderPanel, HostChecklist, PreviewConfirm } from "./panel-parts.js";
+import { previewViewport } from "./preview-window.js";
 
 interface Request {
   readonly entry: AppEntry;
@@ -16,7 +17,7 @@ interface Request {
 /** App interaction modes capture keys inside the existing Installations view. */
 export type AppMode =
   | { readonly kind: "app-busy"; readonly label: string }
-  | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number; readonly pageSize: number }
+  | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number }
   | {
       readonly kind: "app-hosts";
       readonly entries: readonly AppEntry[];
@@ -31,7 +32,6 @@ export type AppMode =
       readonly results: readonly string[];
       readonly failures: number;
       readonly cursor: number;
-      readonly pageSize: number;
     };
 
 export const APP_KINDS: readonly AppMode["kind"][] = ["app-busy", "app-approve", "app-hosts", "app-confirm", "app-manual"];
@@ -47,7 +47,8 @@ export type AppActionHost = Pick<ManageContext, "browse" | "setMessage" | "isMou
 export interface AppContext {
   readonly apps: AppOperations;
   readonly manage: AppActionHost;
-  readonly previewPageSize: number;
+  readonly terminalRows: number;
+  readonly terminalColumns: number;
 }
 
 /** Recipe name, falling back to the file identity for invalid recipes. */
@@ -110,7 +111,6 @@ async function prepareNext(
   requests: readonly Request[],
   results: readonly string[] = [],
   failures = 0,
-  pageSize = context.previewPageSize,
 ): Promise<void> {
   const { manage, apps } = context;
   manage.setMode({ kind: "app-busy", label: "Preparing App step..." });
@@ -125,7 +125,7 @@ async function prepareNext(
     if (manage.isMounted()) {
       manage.setMode({
         kind: !plan.argv && plan.manual ? "app-manual" : "app-confirm",
-        plan, remaining, results, failures, cursor: 0, pageSize,
+        plan, remaining, results, failures, cursor: 0,
       });
     }
   } catch (error) {
@@ -146,7 +146,7 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
       manage.setMode({ kind: "app-busy", label: "Preparing recipe approval..." });
       const [steps, approval] = await Promise.all([apps.preview(entry), apps.approvalStatus(entry)]);
       if (manage.isMounted()) {
-        manage.setMode({ kind: "app-approve", entry, lines: appRecipePreviewLines(entry, approval.status, steps), cursor: 0, pageSize: context.previewPageSize });
+        manage.setMode({ kind: "app-approve", entry, lines: appRecipePreviewLines(entry, approval.status, steps), cursor: 0 });
       }
     } else if (input === "h") {
       const choices = PROJECT_HOSTS.filter(host => entries.some(entry => entry.recipe?.setup?.[host] || entry.recipe?.teardown?.[host]));
@@ -208,7 +208,8 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
     }
   } else {
     const lines = appPreviewLines(mode);
-    const cursor = movePreviewCursor(mode.cursor, lines.length, input, key, mode.pageSize);
+    const viewport = previewViewport(lines, mode.cursor, context.terminalRows, context.terminalColumns);
+    const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
     if (cursor !== undefined) {
       manage.setMode({ ...mode, cursor });
       return;
@@ -219,7 +220,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
       } else cancel();
       return;
     }
-    if (input !== "y" || mode.cursor + mode.pageSize < lines.length) return;
+    if (input !== "y" || !viewport.reachedEnd) return;
     if (mode.kind !== "app-approve") {
       void execute(context, mode);
       return;
@@ -234,6 +235,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
 
 /** Renders App prompts using the existing checklist and preview-confirm panels. */
 export function AppPanel({ mode }: { readonly mode: AppMode }) {
+  const { rows, columns } = useWindowSize();
   if (mode.kind === "app-busy") return <BorderPanel title="App lifecycle"><Text>{mode.label}</Text></BorderPanel>;
   if (mode.kind === "app-hosts") {
     return (
@@ -245,14 +247,14 @@ export function AppPanel({ mode }: { readonly mode: AppMode }) {
     );
   }
   const lines = appPreviewLines(mode);
-  const reviewed = mode.cursor + mode.pageSize >= lines.length;
+  const viewport = previewViewport(lines, mode.cursor, rows || 24, columns || 80);
+  const reviewed = viewport.reachedEnd;
   return (
     <PreviewConfirm
       title={mode.kind === "app-approve" ? "Recipe approval · does not install"
         : mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`}
       lines={lines}
       cursor={mode.cursor}
-      pageSize={mode.pageSize}
       question={reviewed
         ? mode.kind === "app-approve" ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
           : mode.kind === "app-manual" ? "Manual step done, check now? y/n"

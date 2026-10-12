@@ -56,7 +56,7 @@ export interface CatalogViewProps {
 }
 
 export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight }: CatalogViewProps) {
-  const { columns } = useWindowSize();
+  const { columns, rows: terminalRows } = useWindowSize();
   const env = environment ?? NO_ENVIRONMENT;
   const [all, setAll] = useState(sourceId === undefined);
   const mounted = useMounted();
@@ -165,14 +165,14 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     ready: state.status === "ready" && appCatalog.status === "ready",
     toggleAll: () => setAll((value) => !value),
     startPackage: (target) => void startPackageAction(packageContext, target, "i"),
-    startApp: (entry: AppEntry) => void startAppAction({ apps, manage: appManage, previewPageSize: Math.max(height - 3, 1) }, [entry], "i"),
+    startApp: (entry: AppEntry) => void startAppAction({ apps, manage: appManage, terminalRows: terminalRows || 24, terminalColumns: columns || 80 }, [entry], "i"),
     setMessage,
     setAction,
   };
 
   useKeys((input, key) => {
     const runningAppMode = appModeRef.current;
-    if (runningAppMode !== undefined) handleAppKey({ apps, manage: appManage, previewPageSize: Math.max(height - 3, 1) }, runningAppMode, input, key);
+    if (runningAppMode !== undefined) handleAppKey({ apps, manage: appManage, terminalRows: terminalRows || 24, terminalColumns: columns || 80 }, runningAppMode, input, key);
     else {
       const mode = actionRef.current;
         if (isPackageMode(mode)) handlePackageKey(packageContext, mode, input, key);

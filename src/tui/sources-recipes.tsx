@@ -14,6 +14,7 @@ import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
 import { BorderPanel, PreviewConfirm } from "./panel-parts.js";
 import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
+import { previewViewport } from "./preview-window.js";
 import { theme } from "./theme.js";
 
 /** One recipe file with its command-free approval status. */
@@ -28,16 +29,17 @@ type RecipeMode =
   | { readonly kind: "busy" }
   | { readonly kind: "guide" | "manual" | "prompt" }
   | { readonly kind: "install"; readonly action: ActionMode }
-  | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number; readonly pageSize: number; readonly removeAfterApproval?: boolean }
+  | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number; readonly removeAfterApproval?: boolean }
   | { readonly kind: "uninstall-question" | "remove"; readonly removal: AppRecipeRemovalPlan }
-  | { readonly kind: "uninstall-confirm" | "uninstall-manual"; readonly removal: AppRecipeRemovalPlan; readonly plan: AppLifecyclePlan; readonly cursor: number; readonly pageSize: number };
+  | { readonly kind: "uninstall-confirm" | "uninstall-manual"; readonly removal: AppRecipeRemovalPlan; readonly plan: AppLifecyclePlan; readonly cursor: number };
 
 interface RecipeSectionOptions {
   readonly operations: SourceOperations;
   readonly environment?: TuiEnvironment;
   readonly onCapturingChange?: (value: boolean) => void;
   readonly highlightedFile: () => string | undefined;
-  readonly previewPageSize: number;
+  readonly terminalRows: number;
+  readonly terminalColumns: number;
 }
 
 /**
@@ -48,7 +50,8 @@ export function useSourcesRecipes({
   environment,
   onCapturingChange,
   highlightedFile,
-  previewPageSize,
+  terminalRows,
+  terminalColumns,
 }: RecipeSectionOptions) {
   const homeDirectory = environment?.homeDirectory;
   const appEnvironment = environment?.appEnvironment;
@@ -80,7 +83,7 @@ export function useSourcesRecipes({
       if (mounted.current) {
         setMode({
           kind: "approve",
-          entry, removeAfterApproval, cursor: 0, pageSize: previewPageSize,
+          entry, removeAfterApproval, cursor: 0,
           lines: appRecipePreviewLines(entry, status, steps),
         });
       }
@@ -191,10 +194,11 @@ export function useSourcesRecipes({
     }
     const cancel = () => setMode({ kind: "browse" });
     if (current.kind === "approve") {
-      const cursor = movePreviewCursor(current.cursor, current.lines.length, input, key, current.pageSize);
+      const viewport = previewViewport(current.lines, current.cursor, terminalRows, terminalColumns);
+      const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) setMode({ ...current, cursor });
       else if (input === "n" || key.escape) cancel();
-      else if (input === "y" && current.cursor + current.pageSize >= current.lines.length) {
+      else if (input === "y" && viewport.reachedEnd) {
         setMode({ kind: "busy" });
         void apps.approve(current.entry).then(async () => {
           await reload();
@@ -211,17 +215,18 @@ export function useSourcesRecipes({
       answerYesNo(input, key, () => {
         setMode({ kind: "busy" });
         void apps.planLifecycle(current.removal.entry, "uninstall").then(plan => {
-          if (mounted.current) setMode({ kind: !plan.argv && plan.manual ? "uninstall-manual" : "uninstall-confirm", removal: current.removal, plan, cursor: 0, pageSize: previewPageSize });
+          if (mounted.current) setMode({ kind: !plan.argv && plan.manual ? "uninstall-manual" : "uninstall-confirm", removal: current.removal, plan, cursor: 0 });
         }, error => { if (mounted.current) { setError(errorText(error)); cancel(); } });
       }, cancel);
       return true;
     }
     if (current.kind === "uninstall-confirm" || current.kind === "uninstall-manual") {
       const lines = appStepLines(current.plan);
-      const cursor = movePreviewCursor(current.cursor, lines.length, input, key, current.pageSize);
+      const viewport = previewViewport(lines, current.cursor, terminalRows, terminalColumns);
+      const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) setMode({ ...current, cursor });
       else if (input === "n" || key.escape) cancel();
-      else if (input === "y" && current.cursor + current.pageSize >= lines.length) void uninstall(current);
+      else if (input === "y" && viewport.reachedEnd) void uninstall(current);
       return true;
     }
     if (current.kind === "remove") {
@@ -296,8 +301,7 @@ export function useSourcesRecipes({
           title="Recipe approval · does not install"
           lines={mode.lines}
           cursor={mode.cursor}
-          pageSize={mode.pageSize}
-          question={mode.cursor + mode.pageSize >= mode.lines.length
+          question={previewViewport(mode.lines, mode.cursor, terminalRows, terminalColumns).reachedEnd
             ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
             : "Scroll to end before y; n cancels."}
         />
@@ -310,8 +314,8 @@ export function useSourcesRecipes({
       ) : null}
       {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (
         <PreviewConfirm title={mode.kind === "uninstall-manual" ? "App manual uninstall" : "App uninstall confirmation"}
-          lines={appStepLines(mode.plan)} cursor={mode.cursor} pageSize={mode.pageSize}
-          question={mode.cursor + mode.pageSize >= appStepLines(mode.plan).length
+          lines={appStepLines(mode.plan)} cursor={mode.cursor}
+          question={previewViewport(appStepLines(mode.plan), mode.cursor, terminalRows, terminalColumns).reachedEnd
             ? mode.kind === "uninstall-manual" ? "Complete the manual uninstall, then check now? y/n"
               : `Uninstall ${appName(mode.removal.entry)}? y/n`
             : "Scroll to end before y; n cancels."} />

@@ -11,6 +11,7 @@ import { profileSandbox, seedProfileSandbox } from "../profile-e2e-fixture.js";
 import { fakeAppFixture } from "../fake-app-fixture.js";
 
 import pty from "@homebridge/node-pty-prebuilt-multiarch";
+import { createAppOperations } from "../../src/app-flow.js";
 import { sourceIdForUrl } from "../../src/git-source.js";
 
 // Compiled location: dist/tests/e2e -> the built CLI is dist/src/cli.js.
@@ -227,11 +228,16 @@ class TuiSession {
   }
 }
 
+function capturedOutput(session: TuiSession): string {
+  return session.terminalOutput.replace(ANSI, "").replaceAll("\r", "");
+}
+
 async function scrollPreviewToEnd(session: TuiSession, ready: RegExp): Promise<string> {
-  let visited = session.screen;
+  let visited = capturedOutput(session);
   for (let move = 0; move < 200; move += 1) {
-    if (ready.test(session.screen)) return visited + session.screen;
-    visited += await session.send("\u001b[6~", new RegExp(`${ready.source}|j\\/k · PgUp\\/PgDn`, ready.flags));
+    if (ready.test(session.screen)) return visited + capturedOutput(session);
+    await session.send("\u001b[6~", new RegExp(`${ready.source}|j\\/k · PgUp\\/PgDn`, ready.flags));
+    visited += capturedOutput(session);
   }
   assert.fail(`preview did not reach confirmation:\n${session.screen}`);
 }
@@ -401,7 +407,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     update: { manual: "Manual update instruction must remain completely reviewable, including its final words" },
     latest: { argv: ["depot-e2e-app", "latest", "latest-selector-unchanged"], pattern: "(\\d+\\.\\d+\\.\\d+)" },
     setup: { pi: { argv: ["depot-e2e-app", "setup", "pi", "host-setup-tail"] } },
-    teardown: { pi: { manual: "Host teardown instruction tail must remain visible" } },
+    teardown: { pi: { manual: `${"Host teardown instruction ".repeat(12)}FINAL-DANGER-TERM-MUST-STAY-HIDDEN` } },
   };
   const recipeFile = path.join(recipes, "review-all-terms.json");
   await writeFile(recipeFile, JSON.stringify(approvalRecipe));
@@ -412,20 +418,41 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     XDG_STATE_HOME: state,
     XDG_CONFIG_HOME: path.join(fixtureRoot, "approval-config"),
     XDG_CACHE_HOME: path.join(fixtureRoot, "approval-cache"),
-  }, 40, 17);
+  }, 80, 24);
   try {
     await session.waitFor(/n add ·/u);
     await session.send("j", /review-all-terms[\s\S]*needs approval/u);
     let preview = await session.send("\r", /Scroll to end before y/u);
     assert.match(preview, /File:/u);
     assert.doesNotMatch(preview, /latest-selector-unchanged|Host teardown instruction/u);
+    session.resize(40, 17);
+    await session.send("j", /Review 2 of \d+/u);
+    const count = Number(/Review 2 of (\d+)/u.exec(session.screen)?.[1]);
+    assert.ok(count > 14, `test recipe should exceed the 40x17 viewport: ${count}`);
+    for (let move = 0; move < 80; move += 1) {
+      const current = /Review (\d+) of (\d+)/u.exec(session.screen);
+      assert.ok(current, `preview lost its physical-row position:\n${session.screen}`);
+      if (Number(current[1]) - 1 + 7 >= Number(current[2])) break;
+      preview += await session.send("\u001b[6~", /j\/k · PgUp\/PgDn/u);
+    }
+    const nearEnd = /Review (\d+) of (\d+)/u.exec(session.screen);
+    assert.ok(nearEnd, `preview lost its position before consent:\n${session.screen}`);
+    assert.ok(Number(nearEnd[1]) - 1 + 7 >= Number(nearEnd[2]), `did not reach the previous premature-consent boundary:\n${session.screen}`);
+    await session.send("k", new RegExp(`Review ${Number(nearEnd[1]) - 1} of ${nearEnd[2]}`));
+    await session.send("j", new RegExp(`Review ${nearEnd[1]} of ${nearEnd[2]}`));
+    assert.doesNotMatch(session.screen, /Approve review-all-terms\? y\/n/u);
     session.press("y");
-    assert.match(session.screen, /Scroll to end before y/u);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const prematureConfirm = session.screen;
+    assert.match(prematureConfirm, /Scroll to end before y/u, `y approved while the final preview content was not displayed:\n${prematureConfirm}`);
+    assert.doesNotMatch(prematureConfirm, /latest-selector-unchanged|FINAL-DANGER-TERM-MUST-STAY-HIDDEN/u);
+    assert.ok(prematureConfirm.split("\n").length <= 17, `resized preview exceeded the 17-row PTY:\n${prematureConfirm}`);
     await assert.rejects(readdir(path.join(state, "agent-depot", "app-approvals")), { code: "ENOENT" });
     for (let move = 0; move < 80 && !/Approve review-all-terms\? y\/n/u.test(session.screen); move += 1) {
       preview += await session.send("\u001b[6~", /j\/k · PgUp\/PgDn/u);
     }
     assert.match(session.screen, /Approve review-all-terms\? y\/n/u);
+    assert.ok(session.screen.split("\n").length <= 17, `final preview exceeded the 17-row PTY:\n${session.screen}`);
     preview += session.screen;
     const reviewed = preview.split("\n").map(line => line.replace(/^.*?│/u, "").replace(/│.*$/u, "").trim()).join(" ");
     const continuous = reviewed.replace(/\s/gu, "");
@@ -437,10 +464,11 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     }
     assert.ok(continuous.includes("latest-selector-unchanged"));
     assert.ok(continuous.includes("setup"));
-    assert.ok(continuous.includes("Hostteardowninstructiontailmustremainvisible"));
+    assert.ok(continuous.includes("FINAL-DANGER-TERM-MUST-STAY-HIDDEN"));
     assert.ok(continuous.includes("Installmanually"));
     assert.ok(continuous.includes("fullinstruction"));
     assert.ok(continuous.includes(home.replace(/\s/gu, "")), `full approval cwd was not reachable:\n${reviewed}`);
+    assert.ok(continuous.includes(fixture.bin.replace(/\s/gu, "")), `full executable path was not reachable:\n${reviewed}`);
     assert.ok(continuous.includes("Environment:linux".replace(/\s/gu, "")));
     await assert.rejects(readFile(fixture.log), { code: "ENOENT" });
     await session.send("y", /review-all-terms[\s\S]*approved/u);
@@ -451,38 +479,76 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
 
 test("the narrow TUI keeps recipe approval separate from confirmed App installation and updates", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
   const fixture = await fakeAppFixture(sandbox);
+  const previewHome = homeDirectory;
+  await writeFile(fixture.file, JSON.stringify({
+    ...fixture.recipe,
+    install: { ...fixture.recipe.install, manual: `${"Manual install terms remain reviewable. ".repeat(30)}FINAL-INSTALL-MANUAL-TERM` },
+  }));
+  const apps = createAppOperations({
+    homeDirectory: previewHome,
+    recipesDirectory: path.join(sandbox, "state", "agent-depot", "apps"),
+  });
+  const [entry] = await apps.load();
+  assert.ok(entry, "fixture recipe exists before approval");
+  await apps.approve(entry);
   const session = new TuiSession({
     PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
+    HOME: previewHome,
+    USERPROFILE: previewHome,
     XDG_STATE_HOME: path.join(sandbox, "state"),
     XDG_CONFIG_HOME: path.join(sandbox, "config"),
     XDG_CACHE_HOME: path.join(sandbox, "cache"),
-  }, 40, 17);
+  }, 80, 24);
   try {
     await session.waitFor(/n add ·/u);
-    await session.send("j", /fixture-app[\s\S]*needs approval/u);
-    await session.send("\r", /Scroll to end before y/u);
-    const approval = await scrollPreviewToEnd(session, /Approve fixture-app\? y\/n/u);
-    assert.match(approval, /Recipe approval · does not install/u);
-    assert.match(approval, /Approve fixture-app\? y\/n/u);
-    assert.ok(session.screen.split("\n").length <= 17, `approval panel exceeded the 17-row PTY:\n${session.screen}`);
-    await session.send("y", /fixture-app[\s\S]*approved/u);
-    await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
-
     await session.send("\t", /▶ \[2\] Catalog/u);
     await session.send("/", /Enter submit · Esc cancel/u);
     await session.send("fixture-app", /Filter: fixture-app/u);
     await session.send("\r", /j\/k move/u);
     await session.send("j", />\s+App fixture-app\s+not installed/u);
+    await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
     await session.send("i", /Scroll to end before y/u);
-    const installPreview = await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u);
+    let installPreview = capturedOutput(session);
+    session.resize(40, 17);
+    await session.send("j", /Review 2 of \d+/u);
+    installPreview += capturedOutput(session);
+    const installRows = Number(/Review 2 of (\d+)/u.exec(session.screen)?.[1]);
+    assert.ok(installRows > 11, `long install preview should exceed the resized 40x17 viewport: ${installRows}\n${session.screen}`);
+    for (let move = 0; move < 80; move += 1) {
+      const progress = /Review (\d+) of (\d+)/u.exec(session.screen);
+      assert.ok(progress, `resized install preview lost its row position:\n${session.screen}`);
+      if (Number(progress[1]) - 1 + 10 >= Number(progress[2])) break;
+      await session.send("\u001b[6~", /j\/k · PgUp\/PgDn/u);
+      installPreview += capturedOutput(session);
+    }
+    const beforeInstall = session.screen;
+    const nearEnd = /Review (\d+) of (\d+)/u.exec(beforeInstall);
+    assert.ok(nearEnd && Number(nearEnd[1]) - 1 + 10 >= Number(nearEnd[2]), `did not reach the old wide-viewport consent boundary:\n${beforeInstall}`);
+    await session.send("k", new RegExp(`Review ${Number(nearEnd[1]) - 1} of ${nearEnd[2]}`));
+    await session.send("j", new RegExp(`Review ${nearEnd[1]} of ${nearEnd[2]}`));
+    session.press("y");
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.match(session.screen, /Scroll to end before y/u, `y executed before the complete install preview was displayed:\n${session.screen}`);
+    assert.ok(session.screen.split("\n").length <= 17, `resized install preview exceeded the 17-row PTY:\n${session.screen}`);
+    assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "early y must not execute the install command");
+    await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
+    const beforeFinalPage = /Review (\d+) of (\d+)/u.exec(session.screen);
+    assert.ok(beforeFinalPage, `resized preview lost its position before the final term:\n${session.screen}`);
+    const nextCursor = Math.min(Number(beforeFinalPage[1]) - 1 + 4, Number(beforeFinalPage[2]) - 1);
+    await session.send("\u001b[6~", new RegExp(`Review ${nextCursor + 1} of ${beforeFinalPage[2]}`));
+    const visibleManual = session.screen.replace(/[│╭╮╰╯]/gu, "").replace(/\s/gu, "");
+    assert.ok(visibleManual.includes("FINAL-INSTALL-MANUAL-TERM"), `complete manual term was not rendered while scrolling:\n${session.screen}`);
+    installPreview += capturedOutput(session);
+    installPreview += await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u);
     const continuousInstallPreview = installPreview.replace(/\s/gu, "");
-    assert.ok(continuousInstallPreview.includes("argv:["));
+    assert.ok(continuousInstallPreview.includes("argv:["), `install preview omitted JSON argv:\n${installPreview}`);
     assert.ok(continuousInstallPreview.includes("Executable:"));
     assert.ok(continuousInstallPreview.includes("depot-e2e-app"));
     assert.ok(!continuousInstallPreview.includes("Executable:…"), `install preview abbreviated the executable path:\n${installPreview}`);
     assert.ok(continuousInstallPreview.includes("Environment:linux"));
-    assert.ok(continuousInstallPreview.includes(homeDirectory.replace(/\s/gu, "")), `install preview omitted the full working directory:\n${installPreview}`);
-    assert.ok(session.screen.split("\n").length === 17, `confirmation exceeded the 17-row PTY:\n${session.screen}`);
+    const finalInstallPreview = session.screen.replace(/[│╭╮╰╯]/gu, "").replace(/\s/gu, "");
+    assert.ok(finalInstallPreview.includes(previewHome.replace(/\s/gu, "")), `install preview omitted the full working directory:\n${session.screen}`);
+    assert.ok(session.screen.split("\n").length <= 17, `confirmation exceeded the 17-row PTY:\n${session.screen}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "preview must not execute the recipe");
     const installed = await session.send("y", /fixture-app: installed/u);
     assert.ok(installed.split("\n").length <= 17, `result exceeded the 17-row PTY:\n${installed}`);

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
-import { computeWindow } from "./window.js";
+import { previewViewport } from "./preview-window.js";
 
 /** A titled, color-independent boundary for a focused interaction or result. */
 export function BorderPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {
@@ -72,24 +72,21 @@ export function ListFooter({ indicator, selectedCount, message }: {
 }
 
 /** A preview followed by a y/n question. */
-export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst, cursor, pageSize }: {
+export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst, cursor }: {
   readonly title?: string;
   readonly lines: readonly string[];
   readonly question: string;
   readonly warnFirst?: boolean;
   readonly cursor?: number;
-  readonly pageSize?: number;
 }) {
-  const { rows } = useWindowSize();
-  const visibleLines = pageSize ?? Math.max((rows || 24) - 12, 1);
-  const window = cursor === undefined ? { start: 0, end: lines.length, indicator: undefined }
-    : computeWindow(lines.length, cursor, visibleLines);
-  const shown = lines.slice(window.start, window.end);
+  const { rows, columns } = useWindowSize();
+  const viewport = cursor === undefined ? undefined : previewViewport(lines, cursor, rows || 24, columns || 80);
+  const shown = viewport?.rows ?? lines;
   return (
     <BorderPanel title={title}>
-      <PreviewLines lines={shown} warnFirst={warnFirst && window.start === 0} />
-      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
-      {cursor === undefined ? null : <Text color={theme.muted}>Review {cursor + 1} of {lines.length} · j/k · PgUp/PgDn</Text>}
+      <PreviewLines lines={shown} warnFirst={warnFirst && (viewport?.start ?? 0) === 0} />
+      {viewport && viewport.total > viewport.height ? <Text color={theme.muted}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
+      {viewport ? <Text color={theme.muted}>Review {viewport.cursor + 1} of {viewport.total} · j/k · PgUp/PgDn</Text> : null}
       <Text>{question}</Text>
     </BorderPanel>
   );

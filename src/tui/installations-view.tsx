@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createAppOperations } from "../app-flow.js";
@@ -43,6 +43,7 @@ type LoadState =
   | { readonly status: "ready"; readonly data: InstallationsData };
 
 export function InstallationsView({ operations, environment, onCapturingChange, listHeight }: InstallationsViewProps) {
+  const { rows: terminalRows, columns: terminalColumns } = useWindowSize();
   const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
   const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
@@ -157,14 +158,14 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     packages,
     startAdoption: (group) => void startAdoption(adoption, group),
     setMessage,
-    startApps: (entries, input) => void startAppAction({ apps, manage, previewPageSize: Math.max(height - 3, 1) }, entries, input),
+    startApps: (entries, input) => void startAppAction({ apps, manage, terminalRows: terminalRows || 24, terminalColumns: terminalColumns || 80 }, entries, input),
   };
 
   useKeys((input, key) => {
     const current = modeRef.current;
     if (current.kind === "browse") handleBrowseKey(browse, input, key);
     else if (isPackageMode(current)) handlePackageKey({ packages, manage }, current, input, key);
-    else if (isAppMode(current)) handleAppKey({ apps, manage, previewPageSize: Math.max(height - 3, 1) }, current, input, key);
+    else if (isAppMode(current)) handleAppKey({ apps, manage, terminalRows: terminalRows || 24, terminalColumns: terminalColumns || 80 }, current, input, key);
     else if (!handleManageKey(manage, current, input, key)) handleAdoptionKey(adoption, current, input, key);
   });
 

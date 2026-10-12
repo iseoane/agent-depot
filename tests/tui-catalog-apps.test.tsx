@@ -98,7 +98,10 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
       throw new Error(`Unexpected recipe command: ${command} ${args.join(" ")}`);
     },
   };
-  await writeFile(path.join(recipesDirectory, "gentle-shell.json"), JSON.stringify(RECIPE));
+  await writeFile(path.join(recipesDirectory, "gentle-shell.json"), JSON.stringify({
+    ...RECIPE,
+    install: { ...RECIPE.install, manual: `${"Manual installation details remain reviewable. ".repeat(24)}FINAL-MANUAL-TERM` },
+  }));
   await writeFile(path.join(recipesDirectory, "missing-app.json"), JSON.stringify({
     ...RECIPE,
     name: "missing-app",
@@ -144,6 +147,7 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     assert.match(frame, /argv: \[/);
     assert.match(frame, /"npm"/);
     assert.match(frame, /"gentle-shell"/);
+    assert.match(frame, /Manual installation details remain reviewable/);
     assert.match(frame, /Scroll to end before y/);
     assert.ok(!commands.some(command => command.startsWith("npm install")), "the preview is separate from execution");
 
@@ -154,7 +158,10 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     frame = await waitForFrame(view.lastFrame, /App install confirmation/);
     assert.match(frame, /Scroll to end before y/);
     view.stdin.write("y");
-    frame = await waitForFrame(view.lastFrame, /Scroll to end before y/);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    frame = view.lastFrame() ?? "";
+    assert.match(frame, /Scroll to end before y/);
+    assert.doesNotMatch(frame, /FINAL-MANUAL-TERM/);
     assert.ok(!commands.some(command => command.startsWith("npm install")), "consent is blocked until the full preview is reviewed");
     await reviewPreviewToEnd(view.lastFrame, view.stdin);
     frame = await waitForFrame(view.lastFrame, /install gentle-shell\? y\/n/);
