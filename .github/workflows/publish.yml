@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Exact stable version already set in package.json, such as 0.5.2
+        description: Exact stable version already set in package.json, such as 0.6.0
         required: true
         type: string
 

@@ -462,10 +462,10 @@ The TUI is an [Ink](https://github.com/vadimdemedes/ink) (React for terminals)
 front end over the same operations as the CLI. It needs Node.js >= 24 and an
 interactive terminal; otherwise `tui` fails with an error. It uses the terminal's
 alternate screen and returns to the previous screen when you quit. It adjusts to
-terminal resizing. The bordered header shows the running package version and all
-five numbered views. Switch views with `1`-`5` or Tab/Shift+Tab, and quit with `q`
-(not while a prompt is open). Lists scroll when they are taller than the terminal.
-In Sources, Catalog,
+terminal resizing. The bordered header shows the running package version and all five numbered views.
+Switch views with `1`-`5` or Tab/Shift+Tab, and quit with `q` (not while a prompt
+is open). The Xeo palette distinguishes resource roles and status; `y` confirmations
+are bold green. Lists scroll when they are taller than the terminal. In Sources, Catalog,
 Installations, and Updates, `j`/`k` or the arrows move one row; `PageUp` and
 `PageDown` move by one visible page. Use a terminal at least 40 columns wide to
 review Profile export notes; at 24 columns, the app header tab and note title clip.
@@ -473,22 +473,22 @@ review Profile export notes; at 24 columns, the app header tab and note title cl
 | View | Purpose |
 | --- | --- |
 | 1 Sources | Git Sources (their skills and Packages) and user-owned App recipes in one list, with `skills`/`app` kinds and contextual actions. |
-| 2 Catalog | Available Skills and Packages, plus applicable approved App recipes verified as not installed. App installation has a separate preview and confirmation. Invalid or unapproved recipes remain in Sources; unknown App state is never treated as absence. Host-confirmed installed Packages are hidden; selected-only Packages remain visible. Package-owned Skills keep their existing behavior. |
-| 3 Installations | Confirmed installed Apps, managed Skill installations (user-global and project), Package selections and unmanaged user-global Skills. App installation records remain visible if recipe approval later expires, but recipe actions still require current approval. |
-| 4 Updates | Managed Skills, installed Apps and Packages with a newer version available, for user-global and project scope. Unknown or unverified Apps are not treated as installed. |
-| 5 Profile | Export or import portable user-global Source choices, Skill selections, App recipes and Package selections. |
+| 2 Catalog | Available Skills and Packages, plus applicable approved App recipes verified as not installed. App installation has a separate preview and confirmation. Invalid or unapproved recipes remain in Sources; unknown App state is never treated as absence. Host-confirmed installed Packages are hidden; selected-only or unknown-state Packages remain visible. Package-owned Skills keep their existing behavior. |
+| 3 Installations | Confirmed installed Apps, managed Skill installations (user-global and project), Package selections with Host membership and version evidence shown separately, and unmanaged user-global Skills. App installation records remain visible if recipe approval later expires, but recipe actions still require current approval. |
+| 4 Updates | Managed Skills in project and user-global scope, plus user-global installed Apps and Packages with a newer version available. Unknown or unverified Apps are not treated as installed. |
+| 5 Profile | Export or import portable user-global Source choices, individual Skill selections, App recipes and Package selections. Replica entries report confirmed origin-machine identities only. |
 
 Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 
 | View | Keys |
 | --- | --- |
-| Sources | `j`/`k` move through Git Sources and App recipes. `Enter` opens the Catalog for a Git Source or previews/approves an App recipe. Approval does not install the App. `n` adds a Git Source or guides recipe authoring; `r` refreshes Sources or reloads recipe status; `d` removes. `space`/`a` mark Git Sources only. Refresh previews show every selected Source; use `j`/`k` or PgUp/PgDn to review them all before `y`; `n` cancels. |
-| Catalog | `Enter`/arrows expand and collapse, `space` toggle the highlighted loose Skill, `a` toggle all loose Skills in the highlighted Source that match the current filter, `i` install marked Skills or the highlighted loose Skill, preview the highlighted Package, or preview installation of a known-absent approved App. Confirm the App install separately with `y`. `/` filters and `s` toggles one Source or all. Marks in other Sources remain unchanged. |
-| Installations | `Enter`/arrows expand and collapse, `u` uninstalls an installed App or Skill (with the supported flow), or removes an unmanaged Skill; `h` or `i` add Hosts to a Skill installation, `A` or `Enter` adopt an unmanaged Skill, `space` marks a leaf and `a` marks all visible leaves. On an App row, `u` previews uninstall and `h` selects setup/teardown; changed recipes must be approved again before commands run. On a Package row: `i` previews the frozen install plan and runs it, approving the receipt first when it is missing, `Enter` approves the install declaration only, `U` updates, `u` uninstalls, and `f` forgets the selection record. Package rows are not markable for bulk actions. |
-| Updates | `space` mark, `a` mark all, `t`/`p`/`g` show all, project or user-global, `Enter` previews the marks, `u` previews the selected update batch, `r` checks again, arrows fold the "cannot be checked" group. Use `j`/`k` or PgUp/PgDn to review every preview row before `y`; `n` cancels. Rows in that group are informational and cannot be marked for an update. A marked Package joins the batch and is approved before its update runs. |
+| Sources | `j`/`k` move through Git Sources and App recipes. `Enter` opens the Catalog for a Git Source or previews/approves an App recipe. Approval does not install the App. `n` adds a Git Source or guides recipe authoring; `r` refreshes Sources or reloads recipe status; `d` removes. `space`/`a` mark Git Sources only. Refresh previews show every selected Source; review every physical row before `y`. `n` cancels. |
+| Catalog | `Enter`/arrows expand and collapse, `space` marks the highlighted loose Skill, `a` marks or clears the visible loose Skills in its Source, and `i` starts installation for marked Skills or the highlighted Skill, Package, or verified-absent approved App. Confirm an App install separately with `y`. `/` filters and `s` widens a Source view to all Sources. Marks in other Sources remain unchanged; Skills hidden by the filter are not installed. |
+| Installations | `Enter`/arrows expand and collapse. On user-global rows, `u` starts an App or managed Skill uninstall, or removes an unmanaged Skill; project Skills cannot be removed. `h` or `i` adds Hosts to a user-global Skill installation, and `A` or `Enter` adopts an unmanaged Skill. `space` marks a leaf and `a` marks all visible leaves; bulk actions skip project installations with a reason. On an App row, `u` previews uninstall and `h` selects setup/teardown; changed recipes must be approved again before commands run. On a Package row, `i` previews the frozen install plan and runs it, approving the receipt first when it is missing; `Enter` approves the install declaration only, `U` updates, `u` uninstalls, and `f` forgets the selection record. Package rows are not markable for bulk actions. |
+| Updates | `space` marks an update, `a` marks all available updates, and `t`/`p`/`g` selects all, project, or user-global scope. `Enter` previews the marked rows; `u` previews the selected batch; neither applies updates. `r` checks again, and left/right arrows fold or unfold the "cannot be checked" group. In a preview, arrows or PageUp/PageDown move by a visible page and `j`/`k` move one row. Review every row before `y`; `n` cancels. Unknown rows are informational. Packages and Apps are user-global only; Packages need action approval before update execution. |
 | Profile | `e` export, `i` import; enter a file path, `space` toggle choices, `a` toggle all, `Enter` preview, `y` apply; `j`/`k` scroll previews and results |
 
-App recipe previews and App lifecycle confirmations show every declaration and execution term in a scrollable panel. Use `j`, `k`, the arrow keys, `PageUp`, or `PageDown`. Confirm only after the panel reaches its final page.
+Scrollable previews show every declaration and execution term. Use `j`/`k` to move one row, or the arrows and `PageUp`/`PageDown` to move by a visible page. Confirm only after every physical row has been displayed. Resizing a preview requires reviewing any rows that have not yet been displayed.
 
 Removing an App recipe checks its approved version command and tracked state.
 If the App is installed or tracked, the TUI offers the existing uninstall flow;
@@ -864,12 +864,13 @@ independently. Unknown selections and combining a block's inclusion filter with 
 
 Stdout contains JSON only; stderr shows the preview and exclusion reasons.
 `--out` requires a new file (existing files and symlinks are not replaced).
-Profiles contain canonical Git URLs with discovery inclusion, recorded Skill
-version policies/Hosts/user methods, complete App recipes, including recipes for
-other platforms, and Package selections as declarations only: their full Source
-origin, host coordinates and version policy. A v2 Profile may also contain identity-only
-replica intent for Skills, Apps, and Packages confirmed installed on the exporting
-machine. It does not carry installed state, receipts, approvals, or local paths.
+Profiles contain canonical Git URLs with discovery inclusion, individual Skill
+selections with recorded version policies, Hosts and user methods, complete App
+recipes (including recipes for other platforms), and Package selections as
+declarations only, with their full Source origin, Host coordinates and version
+policy. A v2 Profile may also contain identity-only replica intent for Skills, Apps
+and Packages confirmed installed on the exporting machine. These entries do not
+carry installed state, receipts, approvals or local paths.
 The current parser reads legacy v1 files; v1-only older readers reject v2 files.
 CLI export always writes `included: true`; discovery choices are transient, while
 the TUI may pass explicit inclusion choices to the shared export core.
@@ -933,8 +934,9 @@ rows explain when discovery inclusion differs but is not imported.
 The **5 Import/Export** TUI tab starts with a collapsed **Sources** parent. It
 contains nested Source choices, Skills, Apps, and Packages groups; resource rows show
 their Source identities. **Installed replicas** and export notes are separate groups.
-It uses the same shared-core previews as the CLI. Replica intent is
-informational only; import never approves or installs Apps or Packages from it.
+Replica entries identify resources confirmed installed on the exporting machine.
+They do not contain installed state, approvals, or full machine contents. Import is
+add-only; it never transfers approval or automatically installs Apps or Packages.
 Exclusions and conflicts cannot be selected. Export creates
 a new file only; empty exports write nothing (CLI reports an error). Import adds missing choices without replacing existing ones.
 Imported recipes remain unapproved and Apps are never installed by import.

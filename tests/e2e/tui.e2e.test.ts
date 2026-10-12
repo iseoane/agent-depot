@@ -13,6 +13,7 @@ import { fakeAppFixture } from "../fake-app-fixture.js";
 
 import pty from "@homebridge/node-pty-prebuilt-multiarch";
 import { createAppOperations } from "../../src/app-flow.js";
+import { AGENT_DEPOT_PACKAGE_VERSION } from "../../src/project-manifest.js";
 import { sourceIdForUrl } from "../../src/git-source.js";
 import { createSourceOperations } from "../../src/sources.js";
 
@@ -314,7 +315,7 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     assert.match(session.screen, /Source: refresh Git Source/u);
     assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "╭")), "header border uses the fuchsia accent");
     assert.ok(session.terminalOutput.includes(`\u001b[1m${ansiColor(255, 46, 154, "AGENT DEPOT")}`), "header name is bold fuchsia");
-    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, "v0.5.2")), "header version stays light");
+    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, `v${AGENT_DEPOT_PACKAGE_VERSION}`)), "header shows the package version in light text");
     assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "Refresh Git Sources")), "panel titles use the fuchsia accent");
     assert.ok(session.terminalOutput.includes(ansiColor(255, 46, 154, "▶ [1] Sources")), "the active header tab retains Xeo accent pink");
     assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " refresh Git Source")), "field values use Xeo brightText");
@@ -660,7 +661,7 @@ test("the Catalog keeps numbered destinations and Packages readable in a narrow 
   try {
     const narrowHeader = await session.waitFor(/n add ·/u);
     assert.match(narrowHeader, /AGENT DEPOT/u, `40-column header lost its title:\n${narrowHeader}`);
-    assert.match(narrowHeader, /v0\.5\.2/u, `40-column header lost the package version:\n${narrowHeader}`);
+    assert.ok(narrowHeader.includes(`v${AGENT_DEPOT_PACKAGE_VERSION}`), `40-column header lost the package version:\n${narrowHeader}`);
     for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
       assert.ok(narrowHeader.includes(destination), `40-column header lost ${destination}:\n${narrowHeader}`);
     }
@@ -677,7 +678,7 @@ test("the Catalog keeps numbered destinations and Packages readable in a narrow 
         currentScreen.split("\n").some(line => destinations.every(destination => line.includes(destination)));
     });
     assert.match(resized, /AGENT DEPOT/u);
-    assert.match(resized, /v0\.5\.2/u);
+    assert.ok(resized.includes(`v${AGENT_DEPOT_PACKAGE_VERSION}`), `resized header lost the package version:\n${resized}`);
     for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
       assert.ok(resized.includes(destination), `resized header lost ${destination}:\n${resized}`);
     }
