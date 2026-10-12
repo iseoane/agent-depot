@@ -20,8 +20,9 @@ Qué hace:
 - **Instalaciones existentes**: informa de los Skills no gestionados que ya hay en
   disco, adopta los que coinciden exactamente con una Source o los elimina mediante
   una ruta explícita.
-- **Apps**: instala, actualiza y desinstala aplicaciones globales de usuario mediante
-  App recipes escritas por el usuario que deben aprobarse antes de ejecutarse.
+- **Apps**: gestiona aplicaciones globales de usuario mediante App recipes escritas
+  por el usuario. Aprobar una receta autoriza sus comandos, pero no instala la App;
+  la instalación tiene su propia previsualización y confirmación.
 - **Packages**: instala, actualiza y desinstala bundles nativos del Host (paquetes de
   Pi y plugins de Claude Code) delegando el ciclo de vida en la CLI de cada Host y
   leyendo evidencia de instalación y versión propiedad del Host. Un bundle
@@ -508,29 +509,36 @@ La TUI es un front end de [Ink](https://github.com/vadimdemedes/ink) (React para
 terminales) sobre las mismas operaciones que la CLI. Necesita Node.js >= 24 y un
 terminal interactivo; en caso contrario, `tui` falla con un error. Usa la pantalla
 alternativa del terminal y vuelve a la pantalla anterior al salir. Se adapta al
-redimensionado del terminal. Cambia de vista con `1`-`5` y sal con `q` (no mientras
-haya un aviso abierto). Las listas se desplazan cuando superan la altura del
-terminal. En Sources, Catalog, Installations y Updates, `j`/`k` o las flechas mueven
-una fila; `PageUp` y `PageDown` avanzan una página visible.
+redimensionado del terminal. El encabezado con bordes muestra la versión activa del
+paquete en ejecución y las cinco vistas numeradas. Cambia de vista con `1`-`5` o Tab/Shift+Tab,
+y sal con `q` (no mientras haya un aviso abierto). La paleta Xeo distingue roles y
+estados; las confirmaciones con `y` se muestran en negrita y verde. Las listas se
+desplazan cuando superan la altura del terminal. En Sources, Catalog, Installations y Updates,
+`j`/`k` o las flechas mueven
+una fila; `PageUp` y `PageDown` avanzan una página visible. Usa un terminal de al
+menos 40 columnas para revisar las notas de exportación de Profile; con 24 columnas,
+se recortan la pestaña del encabezado y el título de la nota.
 
 | Vista | Propósito |
 | --- | --- |
 | 1 Sources | Sources de Git (sus skills y Packages) y recetas App del usuario en una sola lista, con tipos `skills`/`app` y acciones contextuales. |
-| 2 Catalog | Skills y Packages disponibles, agrupados por Source. Los Packages que el Host confirma como instalados se ocultan; los que solo están seleccionados siguen visibles. Un Skill propiedad de un Package activo conserva el contraste normal y muestra una insignia breve; no se puede marcar ni instalar por separado. Sitúa el cursor encima para ver el motivo. |
-| 3 Installations | Lo que hay en disco: instalaciones gestionadas (globales de usuario y de proyecto), selecciones de Packages y skills globales de usuario no gestionados. |
-| 4 Updates | Skills y Packages gestionados con una versión más reciente disponible, para el ámbito global de usuario y de proyecto. |
-| 5 Import/Export | Transferir las elecciones portables de Sources globales de usuario, las selecciones de Skills, las App recipes y las selecciones de Packages. |
+| 2 Catalog | Skills y Packages disponibles, además de App recipes aplicables y aprobadas cuya ausencia se ha verificado. La instalación de una App tiene una previsualización y confirmación separadas. Las recetas inválidas o sin aprobar permanecen en Sources; un estado desconocido nunca se trata como ausencia. Los Packages que el Host confirma como instalados se ocultan; los seleccionados o con estado desconocido siguen visibles. Los Skills propiedad de Packages conservan su comportamiento actual. |
+| 3 Installations | Apps cuya instalación está confirmada, instalaciones de Skills gestionadas (globales de usuario y de proyecto), selecciones de Packages con pertenencia al Host y evidencia de versión mostradas por separado, y Skills globales de usuario no gestionados. Un registro de instalación de App permanece visible aunque caduque la aprobación de la receta, pero sus acciones siguen exigiendo aprobación vigente. |
+| 4 Updates | Skills gestionados en el ámbito global de usuario y de proyecto, además de Apps y Packages instalados globales de usuario con una versión más reciente disponible. Las Apps desconocidas o no verificadas no se tratan como instaladas. |
+| 5 Profile | Exportar o importar elecciones portables de Sources globales de usuario, selecciones individuales de Skills, App recipes y selecciones de Packages. Las réplicas solo identifican recursos cuya instalación se confirmó en el origen. |
 
 Teclas por vista (los avisos también aceptan `Esc` para cancelar y `y`/`n` para
 confirmar):
 
 | Vista | Teclas |
 | --- | --- |
-| Sources | `j`/`k` recorren Sources de Git y recetas App, sin cambiar de sección con Tab. `Enter` abre el Catálogo de una Source de Git (sus skills y Packages) o previsualiza/aprueba una receta. `n` añade una Source de Git reutilizable o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Git. |
-| Catalog | `Enter`/flechas expandir y contraer, `space` alternar el Skill disponible resaltado, `a` alternar todos los Skills disponibles de la Source resaltada que coincidan con el filtro actual, `i` instalar los Skills marcados que coincidan con el filtro o el Skill disponible resaltado, o previsualizar el Package resaltado, `/` filtrar, `s` alternar una Source o todas (si se abrió desde una Source). Las marcas de otras Sources se conservan. |
-| Installations | `Enter`/flechas expandir y contraer, `u` desinstalar (todos los Hosts o los Hosts elegidos) o eliminar un skill no gestionado, `h` o `i` añadir Hosts a una instalación, `A` o `Enter` adoptar un skill no gestionado, `space` marca una hoja y `a` marca todas las hojas visibles: con marcas, `u` y `h` actúan sobre todas ellas con una única previsualización combinada y una única confirmación (las instalaciones de proyecto se omiten con un motivo). En una fila de Package: `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala, `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
-| Updates | `space` marcar, `a` marcar todo, `t`/`p`/`g` mostrar todo, proyecto o global de usuario, `Enter` previsualizar las marcas, `r` comprobar de nuevo, las flechas pliegan el grupo "cannot be checked". Sus filas son informativas y no se pueden marcar para actualizar. Un Package marcado se une al lote y se aprueba antes de ejecutar su actualización. |
-| Import/Export | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
+| Sources | `j`/`k` recorren Sources de Git y recetas App. `Enter` abre el Catálogo de una Source de Git o previsualiza/aprueba una receta App. Aprobarla no instala la App. `n` añade una Source reutilizable o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Git. La previsualización de refresco muestra todas las Sources seleccionadas; usa `j`/`k` o PgUp/PgDn para revisarlas antes de `y`; `n` cancela. |
+| Catalog | `Enter`/flechas expanden y contraen; `space` marca el Skill disponible resaltado; `a` marca o desmarca los Skills disponibles visibles de su Source; `i` inicia la instalación de los Skills marcados o del Skill, Package o App aprobada cuya ausencia se verificó y que está resaltada. Confirma la instalación de una App por separado con `y`. `/` filtra y `s` amplía la vista de una Source a todas. Las marcas de otras Sources se conservan y no se instalan Skills ocultos por el filtro. |
+| Installations | `Enter`/flechas expanden y contraen. En filas globales de usuario, `u` inicia la desinstalación de una App o Skill gestionada, o elimina un Skill no gestionado; los Skills de proyecto no se pueden eliminar. `h` o `i` añade Hosts a una instalación global de usuario, y `A` o `Enter` adopta un Skill no gestionado. `space` marca una hoja y `a` marca todas las hojas visibles; las acciones por lotes omiten instalaciones de proyecto con un motivo. En una fila de App, `u` previsualiza la desinstalación y `h` selecciona setup/teardown; las recetas modificadas requieren una nueva aprobación. En una fila de Package, `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala y `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
+| Updates | `space` marca una actualización, `a` marca todas las actualizaciones disponibles y `t`/`p`/`g` selecciona todo, el ámbito de proyecto o el global de usuario. `Enter` previsualiza las filas marcadas; `u` previsualiza el lote seleccionado; ninguna aplica actualizaciones. `r` vuelve a comprobar y las flechas izquierda/derecha pliegan o despliegan el grupo "cannot be checked". En una previsualización, las flechas o PageUp/PageDown avanzan una página visible y `j`/`k` una fila. Revisa todas las filas antes de `y`; `n` cancela. Las filas desconocidas son informativas. Packages y Apps solo se gestionan en el ámbito global de usuario; Packages requieren aprobación de acción antes de ejecutar una actualización. |
+| Profile | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
+
+Las previsualizaciones desplazables muestran todas las declaraciones y los términos de ejecución. Usa `j`/`k` para avanzar una fila, o las flechas y `PageUp`/`PageDown` para avanzar una página visible. Confirma solo después de mostrar cada fila física. Si cambias el tamaño del terminal, revisa las filas que aún no se han mostrado.
 
 Al eliminar una receta App se comprueban su comando de versión aprobado y su
 seguimiento. Si la App está instalada o sigue registrada, la TUI ofrece el flujo
@@ -777,8 +785,10 @@ variable no está definida): la raíz del checkout, `origin`, el commit `HEAD` y
 paquete sigue instalado, pero su versión no está disponible. Si los cambios locales
 hacen que el checkout esté modificado, Agent Depot muestra la versión de `HEAD`, pero
 no usa el commit para evaluar actualizaciones. Installations y `package inspect`
-indican `(HEAD; local changes)` en la etiqueta. Tanto los cambios en archivos
-controlados como los archivos sin seguimiento cuentan; Agent Depot no ignora archivos
+indican `(HEAD; local changes)` en la etiqueta. La fila de Installations muestra
+`update not checked · local changes`; Updates sigue indicando `cannot assess` y no
+ofrece el Package para actualizar. Tanto los cambios en archivos controlados como
+los archivos sin seguimiento cuentan; Agent Depot no ignora archivos
 de bloqueo ni otros archivos locales. La versión del manifiesto sirve para mostrar
 información, pero no demuestra que el checkout coincida con la Source seleccionada.
 La evaluación de actualizaciones compara el commit de un checkout limpio con el
@@ -931,16 +941,22 @@ combinar el filtro de inclusión de un bloque con su indicador `--no-*` son erro
 
 La salida estándar contiene solo JSON; stderr muestra la previsualización y los
 motivos de exclusión. `--out` requiere un archivo nuevo (los archivos existentes y
-los enlaces simbólicos no se reemplazan). Los Profiles contienen URL de Git
-canónicas con su inclusión en el descubrimiento, las políticas de versión/Hosts/
-métodos de usuario registrados de los Skills, recipes de App completas, incluidas
-las recipes de otras plataformas, y selecciones de Package solo como declaraciones:
-su Source, coordenadas de Host y política de versión. La exportación por CLI siempre
-escribe
-`included: true`; las elecciones de descubrimiento son transitorias, mientras que la
+los enlaces simbólicos no se reemplazan). Los Profiles contienen URL de Git canónicas con su inclusión en el descubrimiento,
+selecciones individuales de Skills con sus políticas de versión, Hosts y métodos de
+usuario registrados, recipes de App completas (incluidas las de otras plataformas) y
+selecciones de Package como declaraciones, con su origen Source completo,
+coordenadas de Host y política de versión. Un Profile v2 también puede incluir
+intención de réplica, solo con la identidad de Skills, Apps y Packages cuya
+instalación se confirmó en la máquina de origen. No incluye estado de instalación,
+recibos, aprobaciones ni rutas locales. El parser actual lee los
+Profiles v1 anteriores; los lectores antiguos que solo admiten v1 rechazan los v2.
+La exportación por CLI siempre escribe `included: true`; las elecciones de descubrimiento son transitorias, mientras que la
 TUI puede pasar elecciones de inclusión explícitas al núcleo de exportación
-compartido. La exportación no refresca Sources ni ejecuta comandos de Apps, y un
-recibo de Package nunca viaja en un Profile.
+compartido. La exportación no refresca Sources ni ejecuta comandos del ciclo de vida.
+Puede ejecutar la sonda existente de versión de App aprobada e inspeccionar Packages
+sin escritura para determinar la intención de réplica actual; un estado desconocido no
+se considera instalado y la inspección no reconcilia registros. Los recibos de Package
+nunca viajan en un Profile.
 
 Las rutas locales y las credenciales evidentes no son portables. Los elementos no
 portables o inválidos se excluyen con sus motivos, al igual que los Skills no
@@ -1004,9 +1020,15 @@ registro; la previsualización nombra las Sources no registradas que se obtendr�
 registrarse. Las filas de Sources existentes explican cuándo la inclusión en el
 descubrimiento difiere pero no se importa.
 
-La pestaña **5 Import/Export** de la TUI ofrece listas de verificación agrupadas y
-las mismas previsualizaciones del núcleo compartido que la CLI. Las exclusiones y los
-conflictos no pueden seleccionarse. La exportación solo crea un archivo nuevo; las
+La pestaña **5 Import/Export** de la TUI empieza con el grupo padre **Sources**
+contraído. Dentro contiene grupos anidados para elecciones de Source, Skills, Apps y
+Packages; cada recurso muestra la identidad de su Source. **Installed replicas** y las
+notas de exportación son grupos separados. Usa las mismas previsualizaciones del núcleo
+compartido que la CLI. Las réplicas identifican recursos cuya instalación se confirmó
+en la máquina de origen; no incluyen el estado de instalación, las aprobaciones ni el
+contenido completo de la máquina. La importación solo añade; nunca transfiere
+aprobaciones ni instala automáticamente Apps o Packages. Las exclusiones y los conflictos
+no pueden seleccionarse. La exportación solo crea un archivo nuevo; las
 exportaciones vacías no escriben nada (la CLI informa de un error). La importación
 añade las elecciones que faltan sin reemplazar las existentes. Las recipes importadas
 permanecen sin aprobar y la importación nunca instala Apps. Las selecciones de Package

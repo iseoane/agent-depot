@@ -3,10 +3,17 @@ import { test } from "node:test";
 
 import { separatorLine, theme } from "../src/tui/theme.js";
 
-test("theme carries the xeo palette", () => {
+test("theme carries Xeo colors through explicit semantic roles", () => {
+  assert.equal(theme.title, "#ff2e9a");
   assert.equal(theme.accent, "#ff2e9a");
+  assert.equal(theme.border, "#7aa2f7");
   assert.equal(theme.group, "#7aa2f7");
-  assert.equal(theme.marker, "#449dab");
+  assert.equal(theme.field, "#7aa2f7");
+  assert.equal(theme.marker, "#7aa2f7");
+  assert.equal(theme.text, "#a9b1d6");
+  assert.equal(theme.value, "#c0caf5");
+  assert.equal(theme.version, "#ff9e64");
+  assert.equal(theme.legend, "#565f89");
   assert.equal(theme.success, "#9ece6a");
   assert.equal(theme.warning, "#e0af68");
   assert.equal(theme.error, "#f7768e");

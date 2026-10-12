@@ -61,6 +61,26 @@ test("text that only looks like a remnant is split into keys again", async () =>
   }
 });
 
+test("Ink decodes Tab and Shift+Tab as navigation keys without leaking sequence bytes", async () => {
+  const seen: { input: string; tab: boolean; shift: boolean }[] = [];
+  const view = render(<TextProbe seen={seen} />);
+  await waitForFrame(view.lastFrame, /probe/);
+  view.stdin.write("\t");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  view.stdin.write("\u001B[Z");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  view.unmount();
+  assert.deepEqual(seen.map(({ tab, shift }) => ({ tab, shift })), [
+    { tab: true, shift: false },
+    { tab: true, shift: true },
+  ]);
+});
+
+function TextProbe({ seen }: { readonly seen: { input: string; tab: boolean; shift: boolean }[] }) {
+  useKeys((input, key) => seen.push({ input, tab: key.tab, shift: key.shift }));
+  return <Text>probe</Text>;
+}
+
 test("real terminal remnants are kept whole", async () => {
   for (const sequence of ["[A", "[D", "[H", "[F", "[Z", "[I", "[O", "[200~", "[201~", "[1;5A", "[<0;10;5M", "[<0;10;5m", "OA", "OD", "OH", "OF", "OP", "OS"]) {
     const seen = await received([sequence]);

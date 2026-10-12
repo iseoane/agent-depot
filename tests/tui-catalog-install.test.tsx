@@ -172,9 +172,9 @@ test("i installs user-global step by step with a multi-host preview and confirma
   await waitForFrame(lastFrame, /\[x\] 1 pi.*\[ \] 2 claude.*\[x\] 3 codex/s);
   await key(stdin, " ");
   await key(stdin, ENTER);
-  await waitForFrame(lastFrame, /Scope:.*1 project.*2 user-global/s);
+  await waitForFrame(lastFrame, /Skill installation scope[\s\S]*1 project.*2 user-global/s);
   await key(stdin, "2");
-  await waitForFrame(lastFrame, /Version:.*1 latest.*2 fixed/s);
+  await waitForFrame(lastFrame, /Skill version policy[\s\S]*1 latest.*2 fixed/s);
   await key(stdin, "1");
   const preview = await waitForFrame(lastFrame, /y\/n/);
   assert.match(preview, /scope: user-global; hosts: pi,claude,codex; version policy: latest/);
@@ -236,7 +236,7 @@ test("fixed version policy asks for the version text", async (t) => {
   const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["1"], "2", "2");
-  await waitForFrame(lastFrame, /Fixed version:/);
+  await waitForFrame(lastFrame, /Fixed Skill version/);
   for (const character of AGENT_DEPOT_PACKAGE_VERSION!) await key(stdin, character);
   await key(stdin, ENTER);
   const preview = await waitForFrame(lastFrame, /y\/n/);
@@ -259,17 +259,17 @@ test("adopting an identical Skill with a missing Host location needs a separate 
   const preview = await waitForFrame(lastFrame, /y\/n/);
   assert.match(preview, /ADDITIONAL HOST EXPOSURE/);
   await key(stdin, "y");
-  const second = await waitForFrame(lastFrame, /--confirm-additional-host/);
+  const second = await waitForFrame(lastFrame, /Skill Host exposure/);
   assert.match(second, /Confirm\? y\/n/);
   assert.deepEqual(await new ProjectManifestStore(defaultProjectManifestPath(f.project)).load().then((m) => m.skills), []);
   await key(stdin, "n");
-  await waitForFrame(lastFrame, /Install cancelled/);
+  await waitForFrame(lastFrame, frame => frame.replaceAll("│", "").includes("Install cancelled"));
   assert.deepEqual(await new ProjectManifestStore(defaultProjectManifestPath(f.project)).load().then((m) => m.skills), []);
 
   await chooseInstall(stdin, ["1", "2"], "1", "1");
   await waitForFrame(lastFrame, /y\/n/);
   await key(stdin, "y");
-  await waitForFrame(lastFrame, /--confirm-additional-host/);
+  await waitForFrame(lastFrame, /Skill Host exposure/);
   await key(stdin, "y");
   const done = await waitForFrame(lastFrame, (frame) => /Adopted Skill "demo"/.test(frame) && /All skills are installed/.test(frame));
   assert.ok(!done.includes("Demo skill"), "an adopted Skill leaves the Catalog");

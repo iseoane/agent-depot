@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-12
+
+### Added
+
+- The TUI fills the terminal and shows five numbered views. Switch with `1` through `5` or Tab/Shift+Tab. Resizing updates the layout. Xeo colors distinguish resource roles and status; `y` confirmations use bold green.
+- Sources lists Git Sources and App recipes together. Approve recipes there; Catalog offers installation only for approved recipes verified absent. Installations retains installed Apps when approval expires and separates installation status from version evidence.
+- Profile v2 can include identity-only replica intent for installed Skills, Apps and Packages. Export carries individual Skill selections and complete Package origin declarations, not installed state or approvals. The parser accepts Profile v1; v1-only readers reject v2. Import does not transfer approval or automatically install Apps or Packages.
+
+### Changed
+
+- App recipe, refresh and update previews require review of every physical row before confirmation. After a resize, review any rows not yet displayed. Arrow keys and PageUp/PageDown move by visible pages.
+- `u` in Updates opens the selected batch preview. It does not apply updates until the user reviews the preview and confirms.
+- The Import/Export view groups Source choices, Skills, Apps and Packages under a collapsed Sources parent. Installed replicas and export notes have separate groups. Replica entries carry identity only and do not claim that the destination has installed those resources.
+
+### Fixed
+
+- The TUI fills the terminal from startup and recalculates its layout on resize. Unmanaged Skill symlinks are marked distinctly in Installations.
+- The real-terminal test harness waits for fully rendered frames and isolates test state from inherited user paths. Cleanup waits for views to unmount before removing temporary state.
+
 ## [0.5.2] - 2026-10-11
 
 ### Added

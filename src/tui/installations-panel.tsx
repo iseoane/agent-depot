@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { HOST_CHOICES } from "./catalog-actions.js";
 import type { InstallationsMode } from "./installations-mode.js";
 import { ManagePanel } from "./manage-panel.js";
-import { HostChecklist, PreviewLines } from "./panel-parts.js";
+import { DecisionPrompt, HostChecklist, PreviewLines } from "./panel-parts.js";
 import { theme } from "./theme.js";
 
 /** The prompt of the adoption and manage modes; browsing shows nothing. */
@@ -36,7 +36,7 @@ export function ModePanel({ mode }: { readonly mode: InstallationsMode }) {
         <Box flexDirection="column">
           <PreviewLines lines={mode.adoption.prepared.preview} />
           {mode.adoption.prepared.runsExternalCommand ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
-          <Text>Adopt {mode.entry.name}? y/n</Text>
+          <DecisionPrompt>Adopt {mode.entry.name}?</DecisionPrompt>
         </Box>
       ) : (
         <Box flexDirection="column">
@@ -47,7 +47,7 @@ export function ModePanel({ mode }: { readonly mode: InstallationsMode }) {
     case "confirm-exposure":
       return (
         <Text color={theme.warning}>
-          Adopting {mode.entry.name} adds the missing Host location and exposes it to more hosts; this needs separate confirmation (CLI: --confirm-additional-host). Confirm? y/n
+          Adopting {mode.entry.name} adds the missing Host location and exposes it to more hosts; this needs separate confirmation (CLI: --confirm-additional-host). <DecisionPrompt>Confirm?</DecisionPrompt>
         </Text>
       );
     default:

@@ -2,21 +2,35 @@
 
 Status: Accepted
 
-A Profile transfers user-global choices rather than machine state. Use strict JSON
-`agent-depot-profile/v1` with `agentDepotVersion`, Git Sources (`url`, `included`),
+A Profile transfers user-global choices rather than machine state. Strict JSON
+`agent-depot-profile/v1` contains `agentDepotVersion`, Git Sources (`url`, `included`),
 portable Skill selections (the project-manifest shape without `installation`),
-and full App recipe contents. Reuse manifest and recipe validators in shared core
-operations, following ADR 0006. Exclude local Sources, unmanaged and App-owned
-Skills, project selections, installation locations/evidence, caches, approvals,
-installed-App records and pending updates. Reject unknown fields and versions,
-local paths and obvious credentials; recipe free text gets conservative portability
-checks as well as normal recipe validation. Do not claim arbitrary secret detection.
+full App recipe contents, and optional Package selections. `agent-depot-profile/v2`
+adds a `replicas` array of identity-only intent for Skills, Apps, and Packages
+confirmed installed on the exporting machine. It carries no installed version,
+receipt, local path, Host approval, or installation evidence. Every replica must
+reference a corresponding Skill, App recipe, or Package declaration in the same
+Profile. The new parser reads v1 with no replica intent; serialization uses v1
+when replicas are empty and v2 otherwise. This is legacy-input compatibility, not
+forward compatibility: older v1-only readers reject v2. Unknown fields and versions
+remain errors.
+
+Reuse manifest, recipe, and Package validators in shared core operations, following
+ADR 0006. Existing App inspection and Package host-state inspection may establish
+current installation evidence through their read-only ports; stale App records do
+not establish installation. Unknown inspection remains unknown, not absent or
+installed. Export excludes local Sources, unmanaged and App-owned Skills, project
+selections, installation locations/evidence, caches, approvals, and pending updates.
+Recipe free text gets conservative portability checks as well as normal recipe
+validation. Do not claim arbitrary secret detection.
 
 Import is add-only: add missing items, skip identical items, and show and skip
 conflicts. Apply Sources, then Skills through the existing confirmed install flow,
-then recipes. Independent failures do not stop the batch. Recipes arrive unapproved;
-Apps are not installed by import. Approval is machine-local and never travels.
-A newer producing Agent Depot version warrants a warning, not rejection.
+then recipes. Independent failures do not stop the batch. Recipes arrive unapproved; Apps are not installed by import. Replica intent is a
+record of origin-machine installation identity only. Import previews it for context
+but does not approve, install, or otherwise act on it. Package selection remains a
+selection, not an installation. Approval is machine-local and never travels. A
+newer producing Agent Depot version warrants a warning, not rejection.
 
 Approve a fifth TUI tab, **5 Import/Export**, after Updates: an explicit exception
 to the no-new-tabs direction. Existing keys 1–4 and App lifecycle views retain their
@@ -31,9 +45,12 @@ recipes with the same name but different platforms travel independently.
 
 CLI export sends JSON only to stdout and its preview/exclusion diagnostics to
 stderr. `--out` creates a new file exclusively; it never overwrites an existing
-file or follows an existing symlink. No Source refresh, recipe approval or command
-execution occurs during export. Invalid/nonportable export candidates are excluded
-with reasons; strict parsing rejects such items in incoming profiles.
+file or follows an existing symlink. Export does not refresh Sources, approve
+recipes, or run lifecycle commands. It may use the existing approved App version
+probe and read-only Package host inspection to classify origin-machine replica
+intent; these inspections do not reconcile records or run install/update commands.
+Invalid/nonportable export candidates are excluded with reasons; strict parsing
+rejects such items in incoming profiles.
 
 ### Ticket 01 review corrections
 

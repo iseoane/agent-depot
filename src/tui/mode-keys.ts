@@ -10,6 +10,14 @@ export function moveCursor(cursor: number, length: number, input: string, key: K
   return undefined;
 }
 
+/** Read-only preview navigation: arrows and page keys move a viewport; j/k move one line. */
+export function movePreviewCursor(cursor: number, length: number, input: string, key: Key, pageSize: number): number | undefined {
+  const step = key.pageDown || key.downArrow ? pageSize : key.pageUp || key.upArrow ? -pageSize : 0;
+  if (step !== 0) return Math.min(Math.max(cursor + step, 0), Math.max(length - 1, 0));
+  if (input === "j" || input === "k") return moveCursor(cursor, length, input, key);
+  return undefined;
+}
+
 /** `selected` with `choice` flipped, always in the order of `choices`. */
 export function toggleChoice<T>(choices: readonly T[], selected: readonly T[], choice: T): T[] {
   return choices.filter((candidate) => candidate === choice ? !selected.includes(candidate) : selected.includes(candidate));

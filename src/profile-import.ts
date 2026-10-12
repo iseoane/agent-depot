@@ -6,7 +6,7 @@ import type { AppOperations } from "./app-flow.js";
 import { compareAppVersions } from "./app-version.js";
 import { canonicalizeGitSourceUrl, sourceIdForUrl } from "./git-source.js";
 import { selectionKey, type InstalledPackage, type PackageSelection } from "./package-model.js";
-import { describeProfilePackage, packageFilterNames, selectProfileItems, type ProfileFilters } from "./profile-export.js";
+import { describeProfilePackage, describeProfileReplica, packageFilterNames, selectProfileItems, type ProfileFilters } from "./profile-export.js";
 import { parseProfile, PROFILE_FORMAT, type Profile, type ProfilePackageOperations } from "./profile.js";
 import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection, type ProjectSource } from "./project-manifest.js";
 import { defaultProjectSkillTreeAccess, executeSingleInstall, formatVersionPolicy, outputSingleInstallPreview, planSingleInstall,
@@ -203,7 +203,10 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   if (AGENT_DEPOT_PACKAGE_VERSION && (compareAppVersions(profile.agentDepotVersion, AGENT_DEPOT_PACKAGE_VERSION) ?? 0) > 0) {
     preview.push(`WARNING: profile Agent Depot ${profile.agentDepotVersion} is newer than running ${AGENT_DEPOT_PACKAGE_VERSION}`);
   }
+  preview.push(...profile.replicas.map(replica =>
+    `Origin replica intent: ${describeProfileReplica(replica)}; importing this intent does not approve or install it`));
   preview.push("Existing choices are never replaced. Source inclusion is a transient discovery choice.",
+    "Replica intent never triggers approval or installation. Apps remain unapproved; Package selection does not install.",
     "Same-name App recipes conflict only when platforms overlap; disjoint platform recipes can both be added.");
   return { items, packages, preview };
 }

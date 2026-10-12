@@ -71,14 +71,17 @@ test("Enter previews every step; only y approves and changed content needs appro
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
   view.stdin.write("\r");
-  let frame = await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
-  for (const step of ["install", "remove", "version", "latest", "setup"]) assert.ok(frame.includes(`["demo","${step}"]`), frame);
+  let frame = await waitForFrame(view.lastFrame, /Scroll to end before y/);
   assert.ok(frame.includes(f.file));
   assert.match(frame, /Platform: all/);
+  assert.match(frame, /argv: \[/);
+  assert.match(frame, /"demo",/);
   view.stdin.write("n");
   await waitForFrame(view.lastFrame, frame => !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "needs approval");
   view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /approved/);
@@ -106,9 +109,9 @@ test("recipe add guide offers exactly AI and manual routes, and AI reuses confir
   await waitForFrame(view.lastFrame, /Install agent-depot-apprecipe. Host/);
   view.stdin.write("1");
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Scope/);
+  await waitForFrame(view.lastFrame, /Skill installation scope/);
   view.stdin.write("2");
-  await waitForFrame(view.lastFrame, /Version/);
+  await waitForFrame(view.lastFrame, /Skill version policy/);
   view.stdin.write("1");
   frame = await waitForFrame(view.lastFrame, /Install.*y\/n/);
   assert.match(frame, /agent-depot-apprecipe/);
@@ -148,6 +151,8 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs approval/);
   view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   await writeFile(f.file, JSON.stringify({ ...recipe, platform: "windows" }));
   view.stdin.write("y");
@@ -156,6 +161,8 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   await waitForFrame(view.lastFrame, /not applicable here/);
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /Platform: windows/);
+  view.stdin.write("j".repeat(100));
+  await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, frame => frame.includes("Recipe changed, invalid or not applicable") && !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "not applicable here");
@@ -172,12 +179,12 @@ test("recipe guide captures global number and quit keys in the shell", async t =
   assert.doesNotMatch(startup, /Tab section/);
   view.stdin.write("n2q");
   const frame = await waitForFrame(view.lastFrame, /agent-depot app schema/);
-  assert.match(frame, /\[1 Sources\]/);
+  assert.match(frame, /▶ \[1\] Sources/);
   assert.equal(exited, false);
   view.stdin.write("\u001b");
   await waitForFrame(view.lastFrame, frame => !frame.includes("agent-depot app schema"));
   view.stdin.write("2");
-  await waitForFrame(view.lastFrame, /\[2 Catalog\]/);
+  await waitForFrame(view.lastFrame, /▶ \[2\] Catalog/);
 });
 
 test("core approval status is explicit and reads no executables, commands or latest", async t => {
@@ -216,7 +223,7 @@ test("Git Sources and recipes share one bounded list and cursor without Tab", as
   assert.match(frame, /35–40 of 40/);
   view.stdin.write("n");
   frame = await waitForFrame(view.lastFrame, /1 With the AI skill/);
-  assert.equal(listed(frame).length, 6);
+  assert.equal(listed(frame).length, 0, "captured recipe workflows replace the shared list at every terminal width");
 });
 
 test("invalid recipes cannot open approval and moving the cursor clears action errors", async t => {
@@ -260,6 +267,8 @@ test("one cursor dispatches contextual actions for Skill Sources and App recipes
   assert.doesNotMatch(frame, /> \[.\] git:/);
   view.stdin.write(" a");
   view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  view.stdin.write("j".repeat(100));
   frame = await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   assert.doesNotMatch(frame, /selected|remove Git Source/);
   assert.deepEqual(opened, []);
@@ -293,11 +302,11 @@ for (const stage of ["host", "scope", "version", "confirm"] as const) {
       if (stage !== "host") {
         view.stdin.write("1");
         view.stdin.write("\r");
-        await waitForFrame(view.lastFrame, /Scope:/);
+        await waitForFrame(view.lastFrame, /Skill installation scope/);
       }
       if (stage === "version" || stage === "confirm") {
         view.stdin.write("2");
-        await waitForFrame(view.lastFrame, /Version:/);
+        await waitForFrame(view.lastFrame, /Skill version policy/);
       }
       if (stage === "confirm") {
         view.stdin.write("1");

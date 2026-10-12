@@ -91,6 +91,7 @@ export function groupUnmanaged(inventory: UserGlobalSkillInventory): readonly Un
 export interface AppRow {
   readonly entry: AppEntry;
   readonly inspection: AppInspection;
+  readonly name?: string;
 }
 
 export interface InstallationsData {
@@ -162,13 +163,15 @@ export async function loadInstallations(
   let appsError: string | undefined;
   try {
     const tracked = await appOperations.trackedApps();
-    apps = await Promise.all((await appOperations.load()).filter(entry => entry.applicable).map(async entry => ({
-      entry,
-      inspection: await appOperations.inspect(entry, {
-        installedVersion: tracked.find(record => record.name === entry.recipe?.name
-          && record.recipeFile === entry.canonicalFile)?.installedVersion,
-      }),
-    })));
+    apps = (await Promise.all((await appOperations.load()).filter(entry => entry.applicable).map(async entry => {
+      const record = tracked.find(item => item.recipeFile === entry.canonicalFile
+        && (item.name === entry.recipe?.name || entry.recipe === undefined));
+      const inspection = record && (entry.error || !entry.recipe)
+        ? { status: "invalid" as const, installedVersion: record.installedVersion, evidence: "recorded" as const, reason: entry.error }
+        : await appOperations.inspect(entry, record === undefined ? undefined : { installedVersion: record.installedVersion });
+      return { entry, inspection, ...(record === undefined ? {} : { name: record.name }) };
+    }))).filter(row => row.inspection.status === "installed"
+      || (row.inspection.status === "invalid" && row.inspection.evidence === "recorded"));
   } catch (error) {
     appsError = errorText(error);
   }

@@ -166,6 +166,22 @@ async function seedProject(f: Fixture, specs: readonly SkillSpec[]) {
 type Stdin = { write(data: string): void };
 const press = (stdin: Stdin, data: string) => stdin.write(data);
 
+async function reviewToEnd(lastFrame: () => string | undefined, stdin: Stdin, question: RegExp): Promise<string> {
+  await waitForFrame(lastFrame, /Update batch preview/);
+  const visited: string[] = [];
+  for (let page = 0; page < 100; page += 1) {
+    const frame = lastFrame() ?? "";
+    visited.push(frame);
+    if (question.test(frame)) return visited.join("\n");
+    const review = /Review (\d+) of (\d+)/u.exec(frame);
+    assert.ok(review, `preview lost its review position:\n${frame}`);
+    const before = Number(review[1]);
+    press(stdin, "\u001B[6~");
+    await waitForFrame(lastFrame, (next) => question.test(next) || Number(/Review (\d+) of (\d+)/u.exec(next)?.[1] ?? before) > before);
+  }
+  assert.fail(`preview did not expose its final confirmation:\n${lastFrame()}`);
+}
+
 function mount(f: Fixture, extra: { onCapturingChange?: (capturing: boolean) => void; now?: () => number } = {}) {
   return render(<UpdatesView operations={f.operations} environment={f.environment} {...extra} />);
 }
@@ -340,6 +356,23 @@ test("refreshes each distinct Git source once even when installed in both scopes
   unmount();
 });
 
+test("u previews the selected batch and n cancels without running an update", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "outdated", state: "outdated", method: ["update-fixture"] }]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /portable\/outdated/);
+  press(stdin, " ");
+  await waitForFrame(lastFrame, /1 selected/);
+  press(stdin, "u");
+  const preview = await waitForFrame(lastFrame, /Apply 1 update\?/);
+  assert.match(preview, /Update batch preview/);
+  assert.deepEqual(f.methodCalls, [], "preview does not execute the installation method");
+  press(stdin, "n");
+  await waitForFrame(lastFrame, /Update cancelled/);
+  assert.deepEqual(f.methodCalls, [], "cancelling keeps the installation method unexecuted");
+  unmount();
+});
+
 test("r refreshes the sources again and rechecks", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "ext", state: "outdated", url: GIT_URL }]);
@@ -432,7 +465,7 @@ test("previews the update, writes nothing before y, then reports and reloads wit
   const checkReads = f.readCalls.length;
   press(stdin, "a");
   press(stdin, ENTER);
-  const preview = await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   assert.equal(f.readCalls.length, checkReads, "the preview reuses the assessed snapshot instead of rereading or refreshing the Source");
   assert.match(preview, /Preview: update Skill "portable\/one"/);
   assert.match(preview, /proposed changes: replace 1 managed files/);
@@ -497,7 +530,7 @@ test("a non-canonical location needs a second confirmation naming the exact path
   await waitForFrame(lastFrame, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
-  const preview = await waitForFrame(lastFrame, /non-canonical location "tools\/skills\/one"/);
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   assert.ok(!preview.includes("--confirm-path"), "TUI wording does not mention CLI flags");
   press(stdin, "y");
   const second = await waitForFrame(lastFrame, /Confirm replacing non-canonical/);
@@ -509,7 +542,7 @@ test("a non-canonical location needs a second confirmation naming the exact path
 
   press(stdin, "a");
   press(stdin, ENTER);
-  await waitForFrame(lastFrame, /y\/n/);
+  await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   press(stdin, "y");
   await waitForFrame(lastFrame, /Confirm replacing non-canonical/);
   press(stdin, "y");
@@ -547,7 +580,7 @@ test("one preview and confirmation applies project and user-global updates toget
   await waitForFrame(lastFrame, (frame) => frame.includes("portable/proj") && frame.includes("portable/glob"));
   press(stdin, "a");
   press(stdin, ENTER);
-  const preview = await waitForFrame(lastFrame, /Apply 2 updates\? y\/n/);
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
   assert.match(preview, /Preview: update Skill "portable\/proj" from builtin:agent-depot \(scope: project\)/);
   assert.match(preview, /Preview: update Skill "portable\/glob" from builtin:agent-depot \(scope: user-global\)/);
   press(stdin, "y");
@@ -593,9 +626,9 @@ test("key 4 opens the Updates view; q and number keys are ignored while confirmi
   await seedProject(f, [{ name: "one", state: "outdated" }]);
   let exited = false;
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} onExit={() => { exited = true; }} />);
-  await waitForFrame(lastFrame, /4 Updates/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   press(stdin, "4");
-  await waitForFrame(lastFrame, /\[4 Updates\]/);
+  await waitForFrame(lastFrame, /▶ \[4\] Updates/);
   await waitForFrame(lastFrame, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
@@ -603,19 +636,19 @@ test("key 4 opens the Updates view; q and number keys are ignored while confirmi
   press(stdin, "q");
   press(stdin, "1");
   const frame = await waitForFrame(lastFrame, /Apply 1 update/);
-  assert.match(frame, /\[4 Updates\]/);
+  assert.match(frame, /▶ \[4\] Updates/);
   assert.equal(exited, false);
   press(stdin, "n");
   await waitForFrame(lastFrame, /Update cancelled/);
   press(stdin, "1");
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   unmount();
 });
 
 test("the footer names the scope keys and the check", async (t) => {
   const f = await fixture(t);
   const { lastFrame, stdin, unmount } = render(<App operations={f.operations} environment={f.environment} />);
-  await waitForFrame(lastFrame, /4 Updates/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   press(stdin, "4");
   // While the sources refresh the view captures keys, so the footer shows the check key once it is done.
   const frame = await waitForFrame(lastFrame, /r check again/);
@@ -704,12 +737,13 @@ test("a Skill that became locally modified after the preview is not overwritten"
   await waitForFrame(lastFrame, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
-  const preview = await waitForFrame(lastFrame, /Apply 2 updates\? y\/n/);
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
   assert.ok(!preview.includes("local modifications"), "the preview showed no overwrite");
   await writeFile(path.join(f.project, ".agents/skills/one/SKILL.md"), "edited after the preview", "utf8");
   press(stdin, "y");
   const done = await waitForFrame(lastFrame, /1 updated, 1 failed/);
-  assert.match(done, /Failed portable\/one:[\s\S]*modified after the\s+preview/);
+  const unwrapped = done.replace(/[│╭╮╰╯]/gu, " ").replace(/\s+/gu, " ");
+  assert.match(unwrapped, /Failed portable\/one:.*modified after the preview/);
   assert.equal(await f.read(f.project, ".agents/skills/one"), "edited after the preview", "the new local edit survives");
   assert.equal(await f.read(f.project, ".agents/skills/two"), newText("two"));
   unmount();
@@ -729,8 +763,9 @@ test("an item whose preview failed is excluded from the apply and its files stay
   await waitForFrame(lastFrame, /portable\/bad/);
   press(stdin, "a");
   press(stdin, ENTER);
-  const preview = await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
-  assert.match(preview, /Preview failed for[\s\S]*bad[\s\S]*cannot read install metadata/);
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
+  assert.match(preview, /Preview failed for[\s\S]*bad/);
+  assert.match(preview.replace(/[\s│]/gu, ""), /cannotreadinstallmetadata/);
   press(stdin, "y");
   const done = await waitForFrame(lastFrame, /1 updated, 1 failed/);
   assert.match(done, /Failed portable\/bad: preview failed: cannot read install metadata/);
@@ -749,7 +784,7 @@ test("with a scope filter active, y applies only the visible items and leaves th
   await waitForFrame(lastFrame, (frame) => /scope: user-global/.test(frame) && !frame.includes("portable/proj"));
   press(stdin, "a");
   press(stdin, ENTER);
-  await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
+  await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   press(stdin, "y");
   await waitForFrame(lastFrame, /1 updated, 0 failed/);
   assert.equal(await f.read(f.home, ".agents/skills/glob"), newText("glob"));
@@ -767,7 +802,7 @@ test("after a failed refresh the apply works on the current data and the view sa
   assert.match(listed, /network unreachable/);
   press(stdin, "a");
   press(stdin, ENTER);
-  await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
+  await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   press(stdin, "y");
   await waitForFrame(lastFrame, /1 updated, 0 failed/);
   assert.equal(await f.read(f.project, ".agents/skills/ext"), newText("ext"));
@@ -802,7 +837,7 @@ test("j, j, space, Enter in one burst previews the item the highlight reached", 
   const { lastFrame, stdin, unmount } = mount(f);
   await waitForFrame(lastFrame, /portable\/three/);
   for (const data of ["j", "j", " ", ENTER]) press(stdin, data);
-  const frame = await waitForFrame(lastFrame, /Apply 1 update\? y\/n/);
+  const frame = await waitForFrame(lastFrame, /Update batch preview/);
   assert.match(frame, /three/);
   unmount();
 });
@@ -884,7 +919,7 @@ test("mixed Skills and Apps continue after App failure with a combined summary",
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Apply 3 updates/);
+  await reviewToEnd(view.lastFrame, view.stdin, /Apply 3 updates/);
   assert.equal(lookups, 2);
   view.stdin.write("y");
   const frame = await waitForFrame(view.lastFrame, /Update summary: 2 updated, 1 failed/);
@@ -905,7 +940,7 @@ test("App inventory failure leaves user-global Skill updates available", async t
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /1 selected/);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Apply 1 update/);
+  await reviewToEnd(view.lastFrame, view.stdin, /Apply 1 update/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Update summary: 1 updated, 0 failed/);
 });
@@ -988,7 +1023,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   press(view.stdin, "a");
   await waitForFrame(view.lastFrame, /1 selected/);
   press(view.stdin, ENTER);
-  const preview = await waitForFrame(view.lastFrame, /Apply 1 update\? y\/n/);
+  const preview = await reviewToEnd(view.lastFrame, view.stdin, /Apply 1 update\?/);
   assert.match(preview, /Step 1 \(apply\): \["pi","update","github\.com\/iseoane\/pstack"\]/);
   assert.match(preview, /Approval: needs approval/);
   assert.match(preview, /runs a host process/);
@@ -1006,7 +1041,7 @@ test("an unknown Package is folded with its reason and is never offered as an up
     checkUpdates: async () => [{
       installed: packageRecord,
       status: "unknown",
-      reason: "the host reports no usable version evidence",
+      reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
     }],
     planLifecycle: async () => {
       calls.push("plan");
@@ -1016,9 +1051,10 @@ test("an unknown Package is folded with its reason and is never offered as an up
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   t.after(() => { view.unmount(); view.cleanup(); });
   const folded = await waitForFrame(view.lastFrame, /1 cannot be checked/);
+  assert.match(folded, /Package update comparison unavailable because the checkout has local\s+changes/);
   assert.ok(!folded.includes("Package: pi plugins/pstack"), "an unknown Package is never offered as an update");
   press(view.stdin, ENTER);
-  const open = await waitForFrame(view.lastFrame, /the host reports no usable version evidence/);
+  const open = await waitForFrame(view.lastFrame, /Update comparison unavailable: Pi reports this Package installed/);
   assert.match(open, /Package: pi plugins\/pstack/);
   assert.ok(!open.includes("1 selected"));
   assert.deepEqual(calls, []);

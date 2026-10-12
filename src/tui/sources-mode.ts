@@ -5,7 +5,7 @@ export type Mode =
   | { readonly kind: "browse" }
   | { readonly kind: "add-kind" }
   | { readonly kind: "input"; readonly value: string }
-  | { readonly kind: "confirm"; readonly action: "refresh"; readonly sources: readonly GitSource[] }
+  | { readonly kind: "confirm"; readonly action: "refresh"; readonly sources: readonly GitSource[]; readonly cursor: number }
   | { readonly kind: "confirm"; readonly action: "remove"; readonly source: GitSource }
   | { readonly kind: "busy" };
 
@@ -14,6 +14,7 @@ export type ModeEvent =
   | { readonly type: "input" }
   | { readonly type: "edit"; readonly value: string }
   | { readonly type: "confirm"; readonly action: "refresh"; readonly sources: readonly GitSource[] }
+  | { readonly type: "preview-cursor"; readonly cursor: number }
   | { readonly type: "confirm"; readonly action: "remove"; readonly source: GitSource }
   | { readonly type: "busy" }
   | { readonly type: "done" };
@@ -30,8 +31,10 @@ export function modeReducer(mode: Mode, event: ModeEvent): Mode {
       return mode.kind === "input" ? { kind: "input", value: event.value } : mode;
     case "confirm":
       return event.action === "refresh"
-        ? { kind: "confirm", action: "refresh", sources: event.sources }
+        ? { kind: "confirm", action: "refresh", sources: event.sources, cursor: 0 }
         : { kind: "confirm", action: "remove", source: event.source };
+    case "preview-cursor":
+      return mode.kind === "confirm" && mode.action === "refresh" ? { ...mode, cursor: event.cursor } : mode;
     case "busy":
       return { kind: "busy" };
     case "done":

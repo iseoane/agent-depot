@@ -9,11 +9,12 @@ import type { ActionMode } from "./catalog-actions.js";
 import { ActionPanel } from "./catalog-panel.js";
 import { hasUnmanagedCopy, isInstalled, loadInstalledSkills } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
-import { appName, appStepLines } from "./app-actions.js";
+import { appName, appRecipePreviewLines, appStepLines } from "./app-actions.js";
 import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
-import { PreviewConfirm } from "./panel-parts.js";
-import { answerYesNo } from "./mode-keys.js";
+import { BorderPanel, DecisionPrompt, PreviewConfirm } from "./panel-parts.js";
+import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
+import { previewViewport, type PreviewChrome } from "./preview-window.js";
 import { theme } from "./theme.js";
 
 /** One recipe file with its command-free approval status. */
@@ -22,21 +23,39 @@ export interface RecipeRow {
   readonly status: string;
 }
 
+function recipeApprovalChrome(entry: AppEntry): PreviewChrome {
+  return {
+    title: "Recipe approval · does not install",
+    questions: [`Approve ${appName(entry)}? y/n · recipe approval does not install the App.`, "Scroll to end before y; n cancels."],
+    footerRows: 2,
+  };
+}
+
+function uninstallChrome(mode: Extract<RecipeMode, { kind: "uninstall-confirm" | "uninstall-manual" }>): PreviewChrome {
+  return {
+    title: mode.kind === "uninstall-manual" ? "App manual uninstall" : "App uninstall confirmation",
+    questions: [mode.kind === "uninstall-manual" ? "Complete the manual uninstall, then check now? y/n" : `Uninstall ${appName(mode.removal.entry)}? y/n`, "Scroll to end before y; n cancels."],
+    footerRows: 2,
+  };
+}
+
 /** Captured approval, guide and delegated Catalog install interactions. */
 type RecipeMode =
   | { readonly kind: "browse" }
   | { readonly kind: "busy" }
   | { readonly kind: "guide" | "manual" | "prompt" }
   | { readonly kind: "install"; readonly action: ActionMode }
-  | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly removeAfterApproval?: boolean }
+  | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number; readonly removeAfterApproval?: boolean }
   | { readonly kind: "uninstall-question" | "remove"; readonly removal: AppRecipeRemovalPlan }
-  | { readonly kind: "uninstall-confirm" | "uninstall-manual"; readonly removal: AppRecipeRemovalPlan; readonly plan: AppLifecyclePlan };
+  | { readonly kind: "uninstall-confirm" | "uninstall-manual"; readonly removal: AppRecipeRemovalPlan; readonly plan: AppLifecyclePlan; readonly cursor: number };
 
 interface RecipeSectionOptions {
   readonly operations: SourceOperations;
   readonly environment?: TuiEnvironment;
   readonly onCapturingChange?: (value: boolean) => void;
   readonly highlightedFile: () => string | undefined;
+  readonly terminalRows: number;
+  readonly terminalColumns: number;
 }
 
 /**
@@ -47,6 +66,8 @@ export function useSourcesRecipes({
   environment,
   onCapturingChange,
   highlightedFile,
+  terminalRows,
+  terminalColumns,
 }: RecipeSectionOptions) {
   const homeDirectory = environment?.homeDirectory;
   const appEnvironment = environment?.appEnvironment;
@@ -78,13 +99,8 @@ export function useSourcesRecipes({
       if (mounted.current) {
         setMode({
           kind: "approve",
-          entry, removeAfterApproval,
-          lines: [
-            `File: ${entry.file}`,
-            `Platform: ${entry.recipe?.platform ?? "all"}`,
-            `Status: ${status}`,
-            ...steps.flatMap(step => [step.step, ...appStepLines(step)]),
-          ],
+          entry, removeAfterApproval, cursor: 0,
+          lines: appRecipePreviewLines(entry, status, steps),
         });
       }
     } catch (error) {
@@ -194,7 +210,11 @@ export function useSourcesRecipes({
     }
     const cancel = () => setMode({ kind: "browse" });
     if (current.kind === "approve") {
-      answerYesNo(input, key, () => {
+      const viewport = previewViewport(current.lines, current.cursor, terminalRows, terminalColumns, recipeApprovalChrome(current.entry));
+      const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
+      if (cursor !== undefined) setMode({ ...current, cursor });
+      else if (input === "n" || key.escape) cancel();
+      else if (input === "y" && viewport.reachedEnd) {
         setMode({ kind: "busy" });
         void apps.approve(current.entry).then(async () => {
           await reload();
@@ -204,20 +224,25 @@ export function useSourcesRecipes({
         }, error => {
           if (mounted.current) { setError(errorText(error)); cancel(); }
         });
-      }, cancel);
+      }
       return true;
     }
     if (current.kind === "uninstall-question") {
       answerYesNo(input, key, () => {
         setMode({ kind: "busy" });
         void apps.planLifecycle(current.removal.entry, "uninstall").then(plan => {
-          if (mounted.current) setMode({ kind: !plan.argv && plan.manual ? "uninstall-manual" : "uninstall-confirm", removal: current.removal, plan });
+          if (mounted.current) setMode({ kind: !plan.argv && plan.manual ? "uninstall-manual" : "uninstall-confirm", removal: current.removal, plan, cursor: 0 });
         }, error => { if (mounted.current) { setError(errorText(error)); cancel(); } });
       }, cancel);
       return true;
     }
     if (current.kind === "uninstall-confirm" || current.kind === "uninstall-manual") {
-      answerYesNo(input, key, () => { void uninstall(current); }, cancel);
+      const lines = appStepLines(current.plan);
+      const viewport = previewViewport(lines, current.cursor, terminalRows, terminalColumns, uninstallChrome(current));
+      const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
+      if (cursor !== undefined) setMode({ ...current, cursor });
+      else if (input === "n" || key.escape) cancel();
+      else if (input === "y" && viewport.reachedEnd) void uninstall(current);
       return true;
     }
     if (current.kind === "remove") {
@@ -267,41 +292,50 @@ export function useSourcesRecipes({
       {error ? <Text color={theme.error}>{error}</Text> : null}
       {notice ? <Text color={theme.success}>{notice}</Text> : null}
       {mode.kind === "guide" ? (
-        <Text>
-          {"1 With the AI skill · install if missing, then copy the prompt\n"}
-          {"2 Manual · write a recipe using the schema\nn or Esc closes"}
-        </Text>
+        <BorderPanel title="Add an App recipe">
+          <Text>1 With the AI skill · install if missing, then copy the prompt</Text>
+          <Text>2 Manual · write a recipe using the schema</Text>
+          <Text>n or Esc closes</Text>
+        </BorderPanel>
       ) : null}
       {mode.kind === "manual" ? (
-        <Text>
-          Write a JSON recipe in {apps.directory}{"\n"}
-          Schema: agent-depot app schema · n or Esc closes
-        </Text>
+        <BorderPanel title="Write an App recipe">
+          <Text>Write a JSON recipe in {apps.directory}</Text>
+          <Text>Schema: agent-depot app schema · n or Esc closes</Text>
+        </BorderPanel>
       ) : null}
       {mode.kind === "prompt" ? (
-        <Text>
-          Use the agent-depot-apprecipe skill to create the recipe for &lt;app&gt;{"\n"}
-          Recipes: {apps.directory} · n or Esc closes
-        </Text>
+        <BorderPanel title="App recipe authoring prompt">
+          <Text>Use the agent-depot-apprecipe skill to create the recipe for &lt;app&gt;</Text>
+          <Text>Recipes: {apps.directory} · n or Esc closes</Text>
+        </BorderPanel>
       ) : null}
       {mode.kind === "install" ? <ActionPanel mode={mode.action} /> : null}
-      {mode.kind === "busy" ? <Text>Working...</Text> : null}
-      {mode.kind === "approve" ? (
-        <PreviewConfirm lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n`} />
-      ) : null}
+      {mode.kind === "busy" ? <BorderPanel title="App recipe workflow"><Text>Working...</Text></BorderPanel> : null}
+      {mode.kind === "approve" ? (() => {
+        const chrome = recipeApprovalChrome(mode.entry);
+        const viewport = previewViewport(mode.lines, mode.cursor, terminalRows, terminalColumns, chrome);
+        return <PreviewConfirm title={chrome.title} lines={mode.lines} cursor={mode.cursor}
+          question={viewport.reachedEnd ? chrome.questions[0]! : chrome.questions[1]!} chrome={chrome} />;
+      })() : null}
       {mode.kind === "uninstall-question" ? (
-        <Text>App {appName(mode.removal.entry)} is installed or tracked{mode.removal.installedVersion ? ` (${mode.removal.installedVersion})` : ""}. Uninstall it before removing the recipe? y/n (n cancels removal)</Text>
+        <BorderPanel title="Uninstall before recipe removal">
+          <Text>App {appName(mode.removal.entry)} is installed or tracked{mode.removal.installedVersion ? ` (${mode.removal.installedVersion})` : ""}.</Text>
+          <Text><DecisionPrompt>Uninstall it before removing the recipe?</DecisionPrompt><Text color={theme.legend}>(n cancels removal)</Text></Text>
+        </BorderPanel>
       ) : null}
-      {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (
-        <PreviewConfirm lines={appStepLines(mode.plan)} question={mode.kind === "uninstall-manual"
-          ? "Complete the manual uninstall, then check now? y/n"
-          : `Uninstall ${appName(mode.removal.entry)}? y/n`} />
-      ) : null}
+      {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (() => {
+        const chrome = uninstallChrome(mode);
+        const lines = appStepLines(mode.plan);
+        const viewport = previewViewport(lines, mode.cursor, terminalRows, terminalColumns, chrome);
+        return <PreviewConfirm title={chrome.title} lines={lines} cursor={mode.cursor}
+          question={viewport.reachedEnd ? chrome.questions[0]! : chrome.questions[1]!} chrome={chrome} />;
+      })() : null}
       {mode.kind === "remove" ? (
-        <PreviewConfirm lines={[`Delete recipe: ${mode.removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."]}
+        <PreviewConfirm title="Recipe removal" lines={[`Delete recipe: ${mode.removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."]}
           question={`Remove recipe for ${appName(mode.removal.entry)}? y/n`} />
       ) : null}
     </Box>
   );
-  return { rows, handleKey, startAdd, reload, clearMessage: () => { setError(undefined); setNotice(undefined); }, panel, directory: apps.directory };
+  return { rows, handleKey, startAdd, reload, clearMessage: () => { setError(undefined); setNotice(undefined); }, panel, directory: apps.directory, capturing: mode.kind !== "browse" };
 }

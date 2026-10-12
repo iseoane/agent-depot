@@ -1,6 +1,6 @@
 import type { Key } from "ink";
 
-import { answerYesNo } from "./mode-keys.js";
+import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
 import type { UpdatesListView } from "./updates-model.js";
 import type { UpdatesMode } from "./updates-mode.js";
 import type { PreparedUpdates, ScopedPath, UpdateScopeFilter, UpdatesData } from "./updates.js";
@@ -15,6 +15,8 @@ export interface UpdatesSnapshot extends UpdatesListView {
 /** What the Updates keys need from the view; the view owns the state, mirrored in refs. */
 export interface UpdatesKeyContext {
   readonly height: number;
+  previewMetrics(mode: UpdatesMode): { readonly length: number; readonly pageSize: number };
+  previewAtEnd(mode: UpdatesMode): boolean;
   latest(): UpdatesSnapshot;
   checked(): readonly string[];
   setChecked(next: readonly string[]): void;
@@ -76,16 +78,24 @@ function handleBrowseKey(context: UpdatesKeyContext, input: string, key: Key): v
   const scope = SCOPE_KEYS.get(input);
   if (scope !== undefined) context.changeScope(scope);
   else if (input === "r") context.recheck();
+  else if (input === "u") context.startPreview();
   else foldKey(context, snapshot, key);
 }
 
 function handlePreviewKey(context: UpdatesKeyContext, mode: Extract<UpdatesMode, { kind: "preview" }>, input: string, key: Key): void {
+  const metrics = context.previewMetrics(mode);
+  const cursor = movePreviewCursor(mode.cursor, metrics.length, input, key, metrics.pageSize);
+  if (cursor !== undefined) {
+    context.setMode({ ...mode, cursor });
+    return;
+  }
   if (mode.prepared.applicable.length === 0) {
     if (key.escape || key.return || input === "n") context.cancel();
     return;
   }
   answerYesNo(input, key, () => {
-    if (mode.prepared.nonCanonicalPaths.length > 0) context.setMode({ ...mode, kind: "confirm-paths" });
+    if (!context.previewAtEnd(mode)) return;
+    if (mode.prepared.nonCanonicalPaths.length > 0) context.setMode({ ...mode, kind: "confirm-paths", cursor: 0 });
     else context.apply(mode.prepared, []);
   }, context.cancel);
 }
@@ -93,8 +103,12 @@ function handlePreviewKey(context: UpdatesKeyContext, mode: Extract<UpdatesMode,
 /** Handles a key in the current Updates mode; `busy` ignores keys. */
 export function handleUpdatesKey(context: UpdatesKeyContext, mode: UpdatesMode, input: string, key: Key): void {
   switch (mode.kind) {
-    case "manual":
+    case "manual": {
+      const metrics = context.previewMetrics(mode);
+      const cursor = movePreviewCursor(mode.cursor, metrics.length, input, key, metrics.pageSize);
+      if (cursor !== undefined) { context.setMode({ ...mode, cursor }); return; }
       answerYesNo(input, key, () => {
+        if (!context.previewAtEnd(mode)) return;
         context.setMode({ kind: "busy", label: "Checking App version..." });
         mode.answer(true);
       }, () => {
@@ -102,15 +116,22 @@ export function handleUpdatesKey(context: UpdatesKeyContext, mode: UpdatesMode, 
         mode.answer(false);
       });
       return;
+    }
     case "browse":
       handleBrowseKey(context, input, key);
       return;
     case "preview":
       handlePreviewKey(context, mode, input, key);
       return;
-    case "confirm-paths":
-      answerYesNo(input, key, () => context.apply(mode.prepared, mode.prepared.nonCanonicalPaths), context.cancel);
+    case "confirm-paths": {
+      const metrics = context.previewMetrics(mode);
+      const cursor = movePreviewCursor(mode.cursor, metrics.length, input, key, metrics.pageSize);
+      if (cursor !== undefined) { context.setMode({ ...mode, cursor }); return; }
+      answerYesNo(input, key, () => {
+        if (context.previewAtEnd(mode)) context.apply(mode.prepared, mode.prepared.nonCanonicalPaths);
+      }, context.cancel);
       return;
+    }
     default:
       return;
   }

@@ -240,7 +240,7 @@ export async function loadUpdateRows(
   } catch (error) {
     appError = errorText(error);
   }
-  for (const check of appChecks) {
+  for (const check of appChecks.filter(candidate => candidate.inspection.status === "installed")) {
     rows.push({
       kind: "app",
       key: `app:${check.entry.file}`,
@@ -300,6 +300,18 @@ export interface PreparedUpdateGroup {
   readonly overwriteShown: ReadonlySet<string>;
 }
 
+export type UpdatePreviewLine =
+  | { readonly kind: "field"; readonly label: string; readonly value: string }
+  | { readonly kind: "text"; readonly text: string };
+
+export function previewText(text: string): UpdatePreviewLine {
+  return { kind: "text", text };
+}
+
+export function previewLineText(line: UpdatePreviewLine): string {
+  return line.kind === "field" ? `${line.label} ${line.value}` : line.text;
+}
+
 /** An update plan for one recorded Package, with the receipt state the preview must show. */
 export interface PreparedPackagePlan {
   readonly plan: PackageLifecyclePlan;
@@ -320,7 +332,7 @@ export interface PreparedUpdates {
   readonly packagePlans?: readonly PreparedPackagePlan[];
   readonly packageFailures: readonly string[];
   /** The exact `update apply` preview of every candidate whose preview succeeded. */
-  readonly lines: readonly string[];
+  readonly lines: readonly UpdatePreviewLine[];
   /** Items whose preview succeeded, across scopes; only these are applied. */
   readonly applicable: readonly (UpdateBatchAssessmentItem | AppLifecyclePlan | PackageLifecyclePlan)[];
   readonly failures: readonly UpdatePreviewFailure[];
@@ -338,14 +350,14 @@ export async function prepareUpdates(
   const appFailures: string[] = [];
   const packagePlans: PreparedPackagePlan[] = [];
   const packageFailures: string[] = [];
-  const lines: string[] = [];
+  const lines: UpdatePreviewLine[] = [];
   const failures: UpdatePreviewFailure[] = [];
   for (const { scope, loaded } of data.results) {
     const items = selected.filter((row): row is SkillUpdateRow => row.kind !== "app" && row.kind !== "package" && row.scope === scope).map((row) => row.item);
     if (!loaded || items.length === 0) continue;
     const { context } = loaded;
     const outcome = await previewUpdateCandidates(items, context);
-    lines.push(...outcome.plans.flatMap((plan) => describeUpdatePreview(plan, scope, context.projectRoot, "prompt")));
+    lines.push(...outcome.plans.flatMap((plan) => describeUpdatePreview(plan, scope, context.projectRoot, "prompt").map(previewText)));
     failures.push(...outcome.failures);
     groups.push({
       scope,
@@ -361,13 +373,16 @@ export async function prepareUpdates(
       const plan = await data.apps.planLifecycle(row.check.entry, "update", undefined, row.check);
       appPlans.push(plan);
       lines.push(
-        `Environment: ${plan.environment}`,
-        row.path,
-        `Version: ${plan.previousVersion} -> ${plan.latestVersion ?? "unknown"}`,
-        ...(plan.argv ? [`argv: ${JSON.stringify(plan.argv)}`, `Executable: ${plan.executable ?? `${JSON.stringify(plan.argv[0])} not found in PATH`}`] : []),
-        ...(plan.manual ? [`Manual: ${plan.manual}`] : []),
-        `Working directory: ${plan.cwd}`,
-        ...(plan.warning ? [plan.warning] : []),
+        { kind: "field", label: "Environment:", value: plan.environment },
+        previewText(row.path),
+        { kind: "field", label: "Version:", value: `${plan.previousVersion} -> ${plan.latestVersion ?? "unknown"}` },
+        ...(plan.argv ? [
+          { kind: "field" as const, label: "argv:", value: JSON.stringify(plan.argv) },
+          { kind: "field" as const, label: "Executable:", value: plan.executable ?? `${JSON.stringify(plan.argv[0])} not found in PATH` },
+        ] : []),
+        ...(plan.manual ? [{ kind: "field" as const, label: "Manual:", value: plan.manual }] : []),
+        { kind: "field", label: "Working directory:", value: plan.cwd },
+        ...(plan.warning ? [previewText(plan.warning)] : []),
       );
     } catch (error) {
       appFailures.push(`Failed ${row.path}: preview failed: ${errorText(error)}`);
@@ -379,8 +394,8 @@ export async function prepareUpdates(
       const plan = await data.packages.planLifecycle(row.check.installed.selection, "update");
       const approval = await data.packages.approvalStatus(row.check.installed.selection, "update");
       packagePlans.push({ plan, approval });
-      lines.push(...packagePlanLines(plan, approval));
-      if (approval === "needs approval") lines.push("This apply approves the declaration above.");
+      lines.push(...packagePlanLines(plan, approval).map(previewText));
+      if (approval === "needs approval") lines.push(previewText("This apply approves the declaration above."));
     } catch (error) {
       packageFailures.push(`Failed ${row.path}: preview failed: ${errorText(error)}`);
     }

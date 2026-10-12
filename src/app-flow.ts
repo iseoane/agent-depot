@@ -27,7 +27,7 @@ export interface AppApprovalStatus {
 }
 
 export interface AppInspection {
-  readonly status: "invalid" | "not applicable here" | "needs approval" | "installed" | "not installed";
+  readonly status: "invalid" | "not applicable here" | "needs approval" | "installed" | "not installed" | "unknown";
   readonly installedVersion?: string;
   readonly executable?: string;
   readonly reason?: string;
@@ -112,17 +112,21 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   );
 
   async function read(file: string): Promise<AppEntry> {
+    let canonicalFile: string;
+    let content: Buffer;
     try {
-      const canonicalFile = await realpath(file);
-      const content = await readFile(canonicalFile);
-      const recipe = parseAppRecipe(JSON.parse(content.toString("utf8")));
-      const currentPlatform = platform === "win32" ? "windows" : platform;
-      return {
-        file, canonicalFile, recipe, hash: createHash("sha256").update(content).digest("hex"),
-        applicable: recipe.platform === undefined || recipe.platform === currentPlatform,
-      };
+      canonicalFile = await realpath(file);
+      content = await readFile(canonicalFile);
     } catch (error) {
       return { file, applicable: true, error: error instanceof Error ? error.message : String(error) };
+    }
+    const hash = createHash("sha256").update(content).digest("hex");
+    try {
+      const recipe = parseAppRecipe(JSON.parse(content.toString("utf8")));
+      const currentPlatform = platform === "win32" ? "windows" : platform;
+      return { file, canonicalFile, recipe, hash, applicable: recipe.platform === undefined || recipe.platform === currentPlatform };
+    } catch (error) {
+      return { file, canonicalFile, hash, applicable: true, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -168,14 +172,21 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       ...Object.entries({
         install: recipe.install, update: recipe.update, uninstall: recipe.uninstall, version: recipe.version,
       }),
-      ...(recipe.latest && "argv" in recipe.latest ? [["latest", recipe.latest] as const] : []),
+      ...(recipe.latest ? [["latest", recipe.latest] as const] : []),
       ...Object.entries(recipe.setup ?? {}).map(([host, step]) => [`setup.${host}`, step] as const),
       ...Object.entries(recipe.teardown ?? {}).map(([host, step]) => [`teardown.${host}`, step] as const),
     ];
     return Promise.all(steps.map(async ([step, value]) => {
-      const resolution = value.argv ? await resolve(value.argv[0]) : undefined;
+      const resolution = "argv" in value && value.argv ? await resolve(value.argv[0]) : undefined;
       return {
-        step, ...value, executable: resolution?.executable, cwd: home,
+        step,
+        ...("argv" in value && value.argv ? { argv: value.argv } : {}),
+        ...("manual" in value && value.manual ? { manual: value.manual } : {}),
+        ...("npm" in value ? { declaration: `Latest npm package: ${value.npm}` } : {}),
+        ...("github" in value ? { declaration: `Latest GitHub repository: ${value.github}` } : {}),
+        ...("pattern" in value ? { pattern: value.pattern } : {}),
+        executable: resolution?.executable, cwd: home,
+        environment: isWsl ? "linux (WSL)" : platform,
         warning: resolution?.blocked ? WINDOWS_EXECUTABLE_WARNING : undefined,
       };
     }));
@@ -223,32 +234,48 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   }
 
   /** A supplied cache checks recipe approval without running version; omit it for a live check. */
-  async function inspect(entry: AppEntry, cached?: { installedVersion?: string }): Promise<AppInspection> {
+  async function inspectEntry(entry: AppEntry, cached: { installedVersion?: string } | undefined, reconcileTracking: boolean): Promise<AppInspection> {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
+    if (cached?.installedVersion) {
+      return { status: "installed", installedVersion: cached.installedVersion, evidence: "recorded" };
+    }
     const approval = await approvalProblem(entry);
     if (approval) return approval;
-    if (cached) return cached.installedVersion
-      ? { status: "installed", installedVersion: cached.installedVersion, evidence: "recorded" }
-      : { status: "not installed" };
-    const { executable, blocked } = await resolve(entry.recipe.version.argv[0]);
-    if (!executable || blocked) {
-      return { status: "not installed", executable, reason: blocked ? WINDOWS_EXECUTABLE_WARNING : undefined };
-    }
-    let installedVersion: string | undefined;
+    let resolution: Awaited<ReturnType<typeof resolve>>;
     try {
-      const result = await runner(executable, entry.recipe.version.argv.slice(1), {
+      resolution = await resolve(entry.recipe.version.argv[0]);
+    } catch (error) {
+      return { status: "unknown", reason: error instanceof Error ? error.message : String(error) };
+    }
+    const { executable, blocked } = resolution;
+    if (blocked) return { status: "unknown", executable, reason: WINDOWS_EXECUTABLE_WARNING };
+    if (!executable) return { status: "not installed", reason: "Version executable is unavailable" };
+    let installedVersion: string | undefined;
+    let result: Awaited<ReturnType<typeof runner>>;
+    try {
+      result = await runner(executable, entry.recipe.version.argv.slice(1), {
         cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
       });
       installedVersion = result.code === 0 && !result.signal && !result.outputTooLarge
         ? new RegExp(entry.recipe.version.pattern).exec(result.stdout.toString("utf8"))?.[1]
         : undefined;
-    } catch {
-      return { status: "not installed", executable };
+    } catch (error) {
+      return { status: "unknown", executable, reason: error instanceof Error ? error.message : String(error) };
     }
-    if (!installedVersion) return { status: "not installed", executable };
-    await reconcileTracked(entry, installedVersion);
+    if (result.signal) return { status: "unknown", executable, reason: `Version command terminated by signal ${result.signal}` };
+    if (result.code !== 0) return { status: "not installed", executable };
+    if (!installedVersion || result.outputTooLarge) {
+      return { status: "unknown", executable, reason: result.outputTooLarge ? "Version output exceeded the limit" : "Version output did not match the recipe" };
+    }
+    if (reconcileTracking) await reconcileTracked(entry, installedVersion);
     return { status: "installed", executable, installedVersion, evidence: "verified" };
+  }
+  async function inspect(entry: AppEntry, cached?: { installedVersion?: string }): Promise<AppInspection> {
+    return await inspectEntry(entry, cached, true);
+  }
+  async function inspectForExport(entry: AppEntry): Promise<AppInspection> {
+    return await inspectEntry(entry, undefined, false);
   }
   async function checkUpdate(entry: AppEntry): Promise<AppUpdateCheck> {
     const inspection = await inspect(entry);
@@ -516,7 +543,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     });
   }
 
-  return { directory, approvalStatus, checkUpdate, load, preview, approve, inspect, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
+  return { directory, approvalStatus, checkUpdate, load, preview, approve, inspect, inspectForExport, planLifecycle, executeLifecycle, completeManual, cancelManual, trackedApps, previewForget, forgetApp };
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;

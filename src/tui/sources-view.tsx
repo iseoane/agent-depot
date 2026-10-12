@@ -1,4 +1,4 @@
-import { Box, Text } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { GitSource } from "../git-source.js";
@@ -9,6 +9,9 @@ import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
 import { useSourcesRecipes, type RecipeRow } from "./sources-recipes.js";
+import { BorderPanel, DecisionPrompt, FieldLine, PreviewLines } from "./panel-parts.js";
+import { previewViewport } from "./preview-window.js";
+import { movePreviewCursor } from "./mode-keys.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
@@ -72,7 +75,20 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function refreshPreviewLines(sources: readonly GitSource[]): string[] {
+  return sources.map(source => `Source: refresh Git Source ${source.id} from ${source.url}`);
+}
+
+function refreshViewport(mode: Extract<Mode, { readonly kind: "confirm"; readonly action: "refresh" }>, rows: number, columns: number) {
+  return previewViewport(refreshPreviewLines(mode.sources), mode.cursor, rows, columns, {
+    title: "Refresh Git Sources",
+    questions: ["Scroll to end; n cancels.", "Refresh these Sources? y/n"],
+    footerRows: 2,
+  });
+}
+
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange }: SourcesViewProps) {
+  const { columns, rows: terminalRows } = useWindowSize();
   const height = useListHeight(listHeight, 9);
   const [state, setState] = useState<LoadState>({ status: "loading" });
   // The highlight follows the source id; the index is only the fallback once that source is gone.
@@ -149,6 +165,8 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       const row = rows[resolveIndex(rows, selectionRef.current)];
       return row?.kind === "app" ? row.recipe.entry.file : undefined;
     },
+    terminalRows: terminalRows || 24,
+    terminalColumns: columns || 80,
   });
   const rows: readonly SourceRow[] = [
     ...sources.map((source): SourceRow => ({ id: source.id, kind: "skills", source })),
@@ -157,7 +175,9 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   rowsRef.current = rows;
   const selected = resolveIndex(rows, selection);
   const selectedRow = rows[selected];
-  const hints = sourceRowHints(selectedRow);
+  const hints = mode.kind === "confirm" && mode.action === "refresh"
+    ? "↑↓/Pg page · y refresh · n cancel"
+    : sourceRowHints(selectedRow);
   useEffect(() => { onHintsChange?.(hints); }, [hints, onHintsChange]);
   const select = (index: number) => {
     setMessage(undefined);
@@ -245,6 +265,12 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       return;
     }
     if (mode.kind === "confirm") {
+      if (mode.action === "refresh") {
+        const viewport = refreshViewport(mode, terminalRows || 24, columns || 80);
+        const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
+        if (cursor !== undefined) { dispatch({ type: "preview-cursor", cursor }); return; }
+        if (input === "y" && !viewport.reachedEnd) return;
+      }
       if (input === "y") {
         if (mode.action === "refresh") {
           const { sources: targets } = mode;
@@ -309,15 +335,17 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   // Sources removed since they were marked no longer count.
   const selectedCount = sources.filter((source) => marked.has(source.id)).length;
 
-  if (state.status === "loading") return <Text>Loading sources...</Text>;
-  if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
+  if (state.status === "loading") return <BorderPanel title="Sources"><FieldLine label="Status" value="Loading sources..." /></BorderPanel>;
+  if (state.status === "error") return <BorderPanel title="Source error"><Text color={theme.error}>{state.message}</Text></BorderPanel>;
 
   const window = computeWindow(rows.length, selected, height);
+  if (mode.kind === "confirm") return <Prompt mode={mode} terminalRows={terminalRows || 24} terminalColumns={columns || 80} />;
+  if (recipes.capturing) return <Box flexDirection="column">{recipes.panel}</Box>;
 
   return (
     <Box flexDirection="column">
       <Text color={theme.muted}>{"      "}ID  KIND  LOCATION / STATUS</Text>
-      {builtin ? <Text color={theme.muted}>{"    "}{builtin.id}  skills  included</Text> : null}
+      {builtin ? <Text>{"    "}<Text color={theme.value}>{builtin.id}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>skills</Text><Text color={theme.legend}>  </Text><Text color={theme.warning}>included</Text></Text> : null}
       {rows.length === 0 ? <Text>No sources or App recipes · n to add</Text> : null}
       {rows.slice(window.start, window.end).map((row, offset) => {
         const index = window.start + offset;
@@ -326,7 +354,12 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
           <Text key={row.id} {...rowStyle(index === selected)}>
             {index === selected ? "> " : "  "}
             {row.kind === "skills" ? (marked.has(row.id) ? "[x] " : "[ ] ") : "    "}
-            {id}  {row.kind}  {row.kind === "skills" ? row.source.url : `${row.recipe.entry.file} · ${row.recipe.status}`}
+            <Text color={theme.value}>{id}</Text><Text color={theme.legend}>  </Text>
+            <Text color={theme.field}>{row.kind}</Text><Text color={theme.legend}>  </Text>
+            {row.kind === "skills"
+              ? <Text color={theme.value}>{row.source.url}</Text>
+              : <><Text color={theme.value}>{row.recipe.entry.file}</Text><Text color={theme.legend}> · </Text>
+                  <Text color={row.recipe.status === "approved" ? theme.success : theme.warning}>{row.recipe.status}</Text></>}
           </Text>
         );
       })}
@@ -334,20 +367,38 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       {selectedCount > 0 ? <Text>{selectedCount} selected</Text> : null}
       {recipes.panel}
       <Prompt mode={mode} />
-      {message ? <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text> : null}
+      {message ? (
+        <BorderPanel title={message.kind === "error" ? "Source action · failed" : "Source action · complete"}>
+          <Text color={message.kind === "error" ? theme.error : theme.success}>{message.text}</Text>
+        </BorderPanel>
+      ) : null}
     </Box>
   );
 }
 
-function Prompt({ mode }: { readonly mode: Mode }) {
+function Prompt({ mode, terminalRows = 24, terminalColumns = 80 }: { readonly mode: Mode; readonly terminalRows?: number; readonly terminalColumns?: number }) {
   if (mode.kind === "add-kind") return <Text>Add: 1 Git Source (skills + Packages) · 2 App recipe (Esc cancel)</Text>;
   if (mode.kind === "input") return <Text>URL: {mode.value}</Text>;
-  if (mode.kind === "busy") return <Text>Working...</Text>;
+  if (mode.kind === "busy") return <BorderPanel title="Sources"><FieldLine label="Status" value="Working..." /></BorderPanel>;
   if (mode.kind === "confirm") {
-    const lines = mode.action === "refresh"
-      ? mode.sources.map((source) => `refresh Git Source ${source.id} from ${source.url}`)
-      : [`remove Git Source ${mode.source.id} from ${mode.source.url}`];
-    return <Text>{lines.join("\n")}{"\n"}[y/n]</Text>;
+    return mode.action === "refresh" ? (() => {
+      const viewport = refreshViewport(mode, terminalRows, terminalColumns);
+      return (
+        <BorderPanel title="Refresh Git Sources">
+          <PreviewLines lines={viewport.rows} />
+          {viewport.total > viewport.height ? <Text color={theme.legend}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
+          <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · arrows/Pg page</Text>
+          {viewport.reachedEnd
+            ? <DecisionPrompt>Refresh these Sources?</DecisionPrompt>
+            : <Text color={theme.legend}>Scroll to end; n cancels.</Text>}
+        </BorderPanel>
+      );
+    })() : (
+      <BorderPanel title="Remove Git Source">
+        <FieldLine label="Source" value={`remove Git Source ${mode.source.id} from ${mode.source.url}`} />
+        <DecisionPrompt>Remove this Source?</DecisionPrompt>
+      </BorderPanel>
+    );
   }
   return null;
 }

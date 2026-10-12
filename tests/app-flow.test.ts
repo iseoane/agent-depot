@@ -59,6 +59,41 @@ test("approval permits version checks, but changed content never runs", async ()
   }
 });
 
+test("a recorded App remains installed after recipe approval expires, but actions still require approval", async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "app-stale-approval-"));
+  const root = path.join(fixture, "workspace");
+  await mkdir(root);
+  try {
+    const file = path.join(root, "example.json");
+    await writeFile(file, JSON.stringify(recipe));
+    let commands = 0;
+    const apps = createAppOperations({
+      recipesDirectory: root,
+      homeDirectory: root,
+      resolveExecutable: async () => "/usr/bin/example",
+      runner: async () => {
+        commands += 1;
+        return { code: 0, signal: null, stdout: Buffer.from("1.2.3"), stderr: "", outputTooLarge: false };
+      },
+    });
+    const [original] = await apps.load();
+    await apps.approve(original!);
+    const installations = path.join(fixture, "app-installations");
+    await mkdir(installations);
+    await writeFile(path.join(installations, `${createHash("sha256").update("example").digest("hex")}.json`), JSON.stringify({
+      name: "example", recipeFile: original!.canonicalFile, installedVersion: "1.2.3",
+    }));
+    await writeFile(file, JSON.stringify({ ...recipe, homepage: "https://changed.example" }));
+    const [changed] = await apps.load();
+    assert.equal((await apps.inspect(changed!, { installedVersion: "1.2.3" })).status, "installed");
+    assert.equal(commands, 0);
+    await assert.rejects(apps.planLifecycle(changed!, "uninstall"), /needs approval|not approved/u);
+    assert.equal(commands, 0);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("a live version probe reconciles only the tracked record for the same recipe file", async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), "app-reconcile-"));
   const root = path.join(fixture, "workspace");
@@ -158,7 +193,7 @@ test("platform selection rejects applicable duplicates and isolates WSL executab
     let entries = await apps.load();
     assert.equal(entries.filter(entry => entry.applicable).length, 1);
     await apps.approve(entries[0]!);
-    assert.equal((await apps.inspect(entries[0]!)).status, "not installed");
+    assert.equal((await apps.inspect(entries[0]!)).status, "unknown");
     assert.equal(calls, 0);
     await writeFile(path.join(root, "two.json"), JSON.stringify({
       ...recipe,
@@ -202,22 +237,25 @@ test("a duplicate added after approval blocks even a previously loaded entry", a
   }
 });
 
-test("version spawn failure, non-zero exit, oversized output and unmatched output mean not installed", async () => {
+test("a missing version executable proves absence; failed checks remain unknown", async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), "app-test-"));
   const root = path.join(fixture, "workspace");
   await mkdir(root);
   try {
     await writeFile(path.join(root, "one.json"), JSON.stringify(recipe));
-    for (const outcome of ["spawn", "exit", "size", "pattern", "missing"] as const) {
+    for (const outcome of ["spawn", "exit", "size", "pattern", "missing", "resolve", "signal"] as const) {
       const apps = createAppOperations({
         recipesDirectory: root,
-        resolveExecutable: async () => outcome === "missing" ? undefined : "/usr/bin/example",
+        resolveExecutable: async () => {
+          if (outcome === "missing") return undefined;
+          if (outcome === "resolve") throw new Error("resolver unavailable");
+          return "/usr/bin/example";
+        },
         runner: async () => {
-          if (outcome === "spawn")
-            throw new Error("ENOENT");
+          if (outcome === "spawn") throw new Error("ENOENT");
           return {
             code: outcome === "exit" ? 1 : 0,
-            signal: null,
+            signal: outcome === "signal" ? "SIGTERM" : null,
             stdout: Buffer.from(outcome === "pattern" ? "unknown" : "1.2.3"),
             stderr: "",
             outputTooLarge: outcome === "size"
@@ -226,7 +264,7 @@ test("version spawn failure, non-zero exit, oversized output and unmatched outpu
       });
       const [entry] = await apps.load();
       await apps.approve(entry!);
-      assert.equal((await apps.inspect(entry!)).status, "not installed", outcome);
+      assert.equal((await apps.inspect(entry!)).status, outcome === "exit" || outcome === "missing" ? "not installed" : "unknown", outcome);
     }
   } finally {
     await rm(fixture, {
@@ -281,7 +319,7 @@ test("WSL skips Windows PATH hits and spawns the Linux shim rather than its real
     assert.equal((await apps.inspect(entry!)).executable, path.join(linux, "example"));
     assert.equal(calls, 2);
     await rm(path.join(linux, "example"));
-    assert.equal((await apps.inspect(entry!)).status, "not installed");
+    assert.equal((await apps.inspect(entry!)).status, "unknown");
     assert.equal(calls, 2);
   } finally {
     if (previousPath === undefined)
@@ -393,7 +431,7 @@ test("WSL mount boundaries and previews distinguish Windows drive mounts", async
       const versionPreview = (await apps.preview(entry!)).find(step => step.step === "version")!;
       assert.equal(versionPreview.warning, executable === "/mnt/c/x" ? "will not run (Windows executable on WSL)" : undefined);
       await apps.approve(entry!);
-      assert.equal((await apps.inspect(entry!)).status, executable === "/mnt/c/x" ? "not installed" : "installed");
+      assert.equal((await apps.inspect(entry!)).status, executable === "/mnt/c/x" ? "unknown" : "installed");
       assert.equal(calls, executable === "/mnt/c/x" ? 0 : 1);
     }
   } finally {
@@ -540,7 +578,11 @@ test("approval preview includes exactly all argv and only the version reaches th
         ["teardown.claude", ["example", "teardown", "claude"]],
       ];
       assert.deepEqual(preview.filter(step => step.argv).map(step => [step.step, step.argv]), expected);
-      assert.ok(preview.every(step => step.cwd === home && step.executable === "/usr/bin/example"));
+      const latestDeclaration = "npm" in latest ? `Latest npm package: ${latest.npm}`
+        : "github" in latest ? `Latest GitHub repository: ${latest.github}` : undefined;
+      assert.equal(preview.find(step => step.step === "latest")?.declaration, latestDeclaration);
+      assert.ok(preview.every(step => step.cwd === home && step.environment !== undefined));
+      assert.ok(preview.filter(step => step.argv).every(step => step.executable === "/usr/bin/example"));
       assert.equal(executed.length, 0);
     }
     await writeFile(file, JSON.stringify(recipe));

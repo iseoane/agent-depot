@@ -42,15 +42,15 @@ test("import classifies Package additions, identical records and version conflic
   const { operations: packageOperations, evidence } = fakePackageOperations({ recorded });
   const plan = await buildProfileImport(input, operations, apps, {}, packageOperations);
   assert.deepEqual(Object.fromEntries(plan.packages.map(item => [item.label, item.status])), {
-    "Package claude other@plugins/other (fixed:0.3.0)": "same",
-    "Package pi plugins/demo (latest)": "conflict",
-    "Package pi plugins/other-bundle (latest)": "add",
+    "Package claude other@plugins/other from Agent Depot (built-in Source) (fixed:0.3.0; saved selection)": "same",
+    "Package pi plugins/demo from https://example.test/demo.git (latest; saved selection)": "conflict",
+    "Package pi plugins/other-bundle from https://example.test/demo.git (latest; saved selection)": "add",
   });
   const difference = plan.packages.find(item => item.status === "conflict")!.difference!;
   assert.match(difference, /version: existing .*0\.4\.0.* -> incoming .*latest/);
   assert.doesNotMatch(difference, /installId|verified|source:|root:/);
   const preview = plan.preview.join("\n");
-  assert.match(preview, /add: Package pi plugins\/other-bundle \(latest\)/);
+  assert.match(preview, /add: Package pi plugins\/other-bundle from https:\/\/example\.test\/demo\.git \(latest; saved selection\)/);
   assert.match(preview, /host pi: select records the choice; it runs no host command and installs nothing/);
   assert.match(preview, /Source https:\/\/example\.test\/demo\.git will be fetched but not registered/);
   const unconfirmed = await applyProfileImport(plan, operations, apps, false, () => {}, { homeDirectory: home, packageOperations });
@@ -71,6 +71,28 @@ test("confirmed import selects an added Package and never approves install or up
   assert.deepEqual(evidence.plans, ["select"]);
   assert.deepEqual(evidence.executions, [{ action: "select", confirmed: true }]);
   assert.match(output.join("\n"), /no host command ran/);
+});
+
+test("replica intent is preview-only on import and does not approve or install Apps or Packages", async t => {
+  const { home, operations, apps } = await fixture(t);
+  const packageSelection = { ...piPackage, source: { kind: "external" as const, url: "https://example.test/demo.git" } };
+  const incoming = parseProfile({ format: "agent-depot-profile/v2", agentDepotVersion: "1.2.3",
+    sources: [], skills: [], apps: [recipe], packages: [packageSelection], replicas: [
+      { kind: "app", name: recipe.name, platform: recipe.platform },
+      { kind: "package", selection: packageSelection },
+    ] });
+  const { operations: packageOperations, evidence } = fakePackageOperations({});
+  const plan = await buildProfileImport(incoming, operations, apps, {}, packageOperations);
+  const preview = plan.preview.join("\n");
+  assert.match(preview, /Origin replica intent: Installed App tool.*does not approve or install it/);
+  assert.ok(preview.includes("Origin replica intent: Installed Package pi plugins/demo"));
+  assert.match(preview, /Replica intent never triggers approval or installation/);
+  const results = await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home, packageOperations });
+  assert.deepEqual(results.map(result => [result.item.block, result.status]), [["apps", "added"], ["packages", "added"]]);
+  assert.deepEqual(evidence.approvals, ["select"]);
+  assert.deepEqual(evidence.executions, [{ action: "select", confirmed: true }]);
+  assert.deepEqual(evidence.approvals, ["select"]);
+  assert.deepEqual((await apps.load()).map(entry => entry.recipe?.name), ["tool"]);
 });
 
 test("import refuses a select plan that carries host steps instead of running them", async t => {

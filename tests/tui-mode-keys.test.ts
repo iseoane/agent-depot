@@ -5,7 +5,7 @@ import type { Key } from "ink";
 
 import type { ProjectHost } from "../src/project-manifest.js";
 
-import { answerYesNo, hostChecklistKey, moveCursor, toggleChoice } from "../src/tui/mode-keys.js";
+import { answerYesNo, hostChecklistKey, moveCursor, movePreviewCursor, toggleChoice } from "../src/tui/mode-keys.js";
 
 const plain = {} as Key;
 const pressed = (name: keyof Key): Key => ({ [name]: true }) as unknown as Key;
@@ -17,6 +17,19 @@ test("moveCursor moves with arrows and j/k and stays within the list", () => {
   assert.equal(moveCursor(1, 3, "k", plain), 0);
   assert.equal(moveCursor(0, 3, "", pressed("upArrow")), 0);
   assert.equal(moveCursor(1, 3, "x", plain), undefined);
+});
+
+test("read-only preview arrows and page keys move by a page while j/k move one line", () => {
+  assert.equal(movePreviewCursor(0, 20, "", pressed("downArrow"), 6), 6);
+  assert.equal(movePreviewCursor(12, 20, "", pressed("upArrow"), 6), 6);
+  assert.equal(movePreviewCursor(6, 20, "", pressed("pageDown"), 6), 12);
+  assert.equal(movePreviewCursor(6, 20, "", pressed("pageUp"), 6), 0);
+  assert.equal(movePreviewCursor(6, 20, "j", plain, 6), 7);
+  assert.equal(movePreviewCursor(6, 20, "k", plain, 6), 5);
+  assert.equal(movePreviewCursor(0, 20, "", pressed("upArrow"), 6), 0);
+  assert.equal(movePreviewCursor(18, 20, "", pressed("downArrow"), 6), 19);
+  assert.equal(movePreviewCursor(0, 0, "", pressed("downArrow"), 6), 0);
+  assert.equal(movePreviewCursor(6, 20, "x", plain, 6), undefined);
 });
 
 test("toggleChoice flips one choice and keeps the order of the choices", () => {

@@ -76,7 +76,7 @@ for (const version of ["v1.0.0+build", "1.5.0"]) {
   });
 }
 
-test("r rechecks Apps and folds unknown latest alongside unchecked recipes", async t => {
+test("r rechecks installed Apps; an invalid recipe is excluded from Updates", async t => {
   const f = await fixture(t);
   await waitForFrame(f.view.lastFrame, frame => frame.includes("1.0.0 -> 2.0.0"));
   f.setVersion("2.0.0");
@@ -92,9 +92,8 @@ test("r rechecks Apps and folds unknown latest alongside unchecked recipes", asy
   await writeFile(entry!.file, "{}");
   const before = f.commands.length;
   f.view.stdin.write("r");
-  await waitForFrame(f.view.lastFrame, frame => frame.includes("1 cannot be checked"));
-  f.view.stdin.write("\r");
-  await waitForFrame(f.view.lastFrame, frame => frame.includes("name: expected non-empty text"));
+  const absent = await waitForFrame(f.view.lastFrame, frame => frame.includes("No installations"));
+  assert.doesNotMatch(absent, /App: demo/);
   assert.equal(f.commands.length, before);
 });
 

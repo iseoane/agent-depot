@@ -132,6 +132,21 @@ async function moveDownTo(lastFrame: Frame, stdin: { write(data: string): void }
   assert.fail("selection never reached the expected line");
 }
 
+async function reviewToEnd(lastFrame: Frame, stdin: { write(data: string): void }, question: RegExp): Promise<string> {
+  await waitForFrame(lastFrame, /Update batch preview/u);
+  const visited: string[] = [];
+  for (let page = 0; page < 100; page += 1) {
+    const frame = lastFrame() ?? "";
+    visited.push(frame);
+    if (question.test(frame)) return visited.join("\n");
+    const current = Number(/Review (\d+) of (\d+)/u.exec(frame)?.[1]);
+    assert.ok(Number.isFinite(current), `update preview lost its review position:\n${frame}`);
+    stdin.write("\u001B[6~");
+    await waitForFrame(lastFrame, (next) => question.test(next) || Number(/Review (\d+) of (\d+)/u.exec(next)?.[1] ?? current) > current);
+  }
+  assert.fail(`update preview did not reach its final confirmation:\n${lastFrame()}`);
+}
+
 async function addSourceAndOpenCatalog(j: Journey): Promise<void> {
   await waitForFrame(j.view.lastFrame, /builtin:agent-depot/);
   j.view.stdin.write("n");
@@ -195,7 +210,7 @@ test("a Claude install disappears from Catalog and shows a verified available up
   assert.doesNotMatch(updates, /cannot be checked/u);
   j.view.stdin.write(" ");
   j.view.stdin.write(ENTER);
-  const updatePreview = await waitForFrame(j.view.lastFrame, /Package: pstack \(claude\) update/u);
+  const updatePreview = await reviewToEnd(j.view.lastFrame, j.view.stdin, /Apply 1 update\?/u);
   assert.match(updatePreview, /\["claude","plugin","update","pstack@pstack-claude"\]/u);
   assert.match(updatePreview, /Apply 1 update\?/u);
 });
@@ -241,7 +256,10 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   await waitForFrame(j.view.lastFrame, /Packages \(user-global\)/u);
   j.view.stdin.write(ENTER);
   const installations = await waitForFrame(j.view.lastFrame, /pstack {2}pi {2}installed 0\.9\.68 \(HEAD; local changes\)/u);
-  assert.match(installations, /cannot assess/u);
+  assert.match(installations.replace(/[\s│]/gu, ""), /updatenotchecked·localchanges/u);
+  assert.doesNotMatch(installations, /cannot assess/u);
+  const packageRow = installations.split("\n").find((line) => line.includes("pstack  pi")) ?? "";
+  assert.doesNotMatch(packageRow, />\s+\[ \]/u, "an unmarkable Package row has no empty selection checkbox");
   assert.equal(
     await readFile(path.join(j.home, ".pi", "agent", "git", "example.test", "packages", "pstack", "package-lock.json"), "utf8"),
     "pre-existing local file\n",

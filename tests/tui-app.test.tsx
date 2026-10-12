@@ -44,7 +44,7 @@ async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void
 test("App renders the header and the Sources view", async () => {
   const { lastFrame, unmount } = render(<App operations={operations} onExit={() => undefined} />);
   const frame = await waitForFrame(lastFrame, /builtin:agent-depot/);
-  assert.match(frame, /Agent Depot/);
+  assert.match(frame, /AGENT DEPOT/);
   assert.match(frame, /Sources/);
   unmount();
 });
@@ -59,14 +59,17 @@ test("App fills its startup screen and tracks terminal resize while Sources is l
   try {
     const initial = await waitForFrame(lastFrame, /Loading sources/);
     assert.equal(initial.split("\n").length, 24, "the loading screen occupies Ink's default 24-row viewport");
-    Object.defineProperty(stdout, "rows", { configurable: true, value: 12 });
+    Object.defineProperty(stdout, "rows", { configurable: true, value: 17 });
     Object.defineProperty(stdout, "columns", { configurable: true, value: 40 });
     stdout.emit("resize");
-    const resized = await waitForFrame(lastFrame, (frame) => frame.split("\n").length === 12);
-    assert.equal(resized.split("\n").find((line) => line.includes("═"))?.trim().length, 40);
+    const resized = await waitForFrame(lastFrame, (frame) => frame.split("\n").length === 17);
+    assert.equal(resized.split("\n").find((line) => line.includes("╭"))?.trim().length, 40);
+    for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
+      assert.ok(resized.includes(destination), `narrow header lost ${destination}:\n${resized}`);
+    }
     finishLoading?.([BUILT_IN_SOURCE]);
     const ready = await waitForFrame(lastFrame, /builtin:agent-depot/);
-    assert.equal(ready.split("\n").length, 12, "the loaded view keeps filling the resized viewport");
+    assert.equal(ready.split("\n").length, 17, "the loaded view keeps filling the resized viewport");
   } finally {
     unmount();
   }
@@ -75,7 +78,7 @@ test("App fills its startup screen and tracks terminal resize while Sources is l
 test("App shows the package version in the header", async () => {
   const { lastFrame, unmount } = render(<App operations={operations} onExit={() => undefined} />);
   const frame = await waitForFrame(lastFrame, /builtin:agent-depot/);
-  assert.ok(frame.includes(`Agent Depot v${AGENT_DEPOT_PACKAGE_VERSION}`), frame);
+  assert.ok(frame.includes(`AGENT DEPOT`) && frame.includes(`v${AGENT_DEPOT_PACKAGE_VERSION}`), frame);
   unmount();
 });
 
@@ -102,13 +105,13 @@ const catalogOperations: SourceOperations = {
 
 test("App switches views with 1 and 2 and shows the active view", async () => {
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   stdin.write("2");
-  await waitForFrame(lastFrame, (frame) => /\[2 Catalog\]/.test(frame) && /▸ builtin:agent-depot/.test(frame));
+  await waitForFrame(lastFrame, (frame) => /▶ \[2\] Catalog/.test(frame) && /▸ builtin:agent-depot/.test(frame));
   stdin.write("\r");
   await waitForFrame(lastFrame, /skill-of-builtin/);
   stdin.write("1");
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   unmount();
 });
 
@@ -121,7 +124,7 @@ test("App opens the catalog of the highlighted source with Enter", async () => {
   await waitForFrame(lastFrame, /▸ example\/skills/);
   stdin.write("\r");
   const frame = await waitForFrame(lastFrame, /skill-of-git:1234567890abcdef12345678/);
-  assert.match(frame, /\[2 Catalog\]/);
+  assert.match(frame, /▶ \[2\] Catalog/);
   assert.ok(!frame.includes("skill-of-builtin"));
   unmount();
 });
@@ -129,31 +132,31 @@ test("App opens the catalog of the highlighted source with Enter", async () => {
 test("App does not switch views or quit while the catalog filter captures keys", async () => {
   let exits = 0;
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} onExit={() => { exits += 1; }} />);
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   stdin.write("2");
-  await waitForFrame(lastFrame, /\[2 Catalog\]/);
+  await waitForFrame(lastFrame, /▶ \[2\] Catalog/);
   stdin.write("/");
   await waitForFrame(lastFrame, /Filter: _/);
   stdin.write("q1");
   // Typing is processed in order, so once the filter shows the text the keys were captured, not treated as q / view 1.
   const frame = await waitForFrame(lastFrame, /Filter: q1/);
   assert.equal(exits, 0);
-  assert.match(frame, /\[2 Catalog\]/);
+  assert.match(frame, /▶ \[2\] Catalog/);
   unmount();
 });
 
 test("App ignores q and view keys sent in the same burst as the catalog filter key", async () => {
   let exits = 0;
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} onExit={() => { exits += 1; }} />);
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   stdin.write("2");
-  await waitForFrame(lastFrame, /\[2 Catalog\]/);
+  await waitForFrame(lastFrame, /▶ \[2\] Catalog/);
   stdin.write("/");
   stdin.write("q");
   stdin.write("1");
   const frame = await waitForFrame(lastFrame, /Filter: q1/);
   assert.equal(exits, 0);
-  assert.match(frame, /\[2 Catalog\]/);
+  assert.match(frame, /▶ \[2\] Catalog/);
   unmount();
 });
 
@@ -168,11 +171,11 @@ test("App views render with the real source operations on a temporary home", asy
     const { lastFrame, stdin, unmount } = render(<App operations={real} environment={environment} />);
     await waitForFrame(lastFrame, /builtin:agent-depot/);
     const views: [string, RegExp][] = [
-      ["2", /\[2 Catalog\]/],
-      ["3", /\[3 Installations\]/],
-      ["4", /\[4 Updates\]/],
-      ["5", /\[5 Import\/Export\]/],
-      ["1", /\[1 Sources\]/],
+      ["2", /▶ \[2\] Catalog/],
+      ["3", /▶ \[3\] Installations/],
+      ["4", /▶ \[4\] Updates/],
+      ["5", /▶ \[5\] Profile/],
+      ["1", /▶ \[1\] Sources/],
     ];
     for (const [key, header] of views) {
       stdin.write(key);
@@ -186,22 +189,30 @@ test("App views render with the real source operations on a temporary home", asy
   }
 });
 
-test("App separates the header and tab bar from the page with a double line", async () => {
+test("the bordered header contains the tabs before the page and keeps the viewport full", async () => {
   const { lastFrame, unmount } = render(<App operations={operations} onExit={() => undefined} />);
   const frame = await waitForFrame(lastFrame, /builtin:agent-depot/);
   const lines = frame.split("\n");
-  const tabs = lines.findIndex((line) => line.includes("1 Sources"));
-  const separator = lines.findIndex((line) => /^═{20,}$/.test(line.trim()));
+  const topBorder = lines.findIndex((line) => line.includes("╭"));
+  const tabs = lines.findIndex((line) => line.includes("[1] Sources"));
+  const bottomBorder = lines.findIndex((line) => line.includes("╰"));
   const page = lines.findIndex((line) => line.includes("builtin:agent-depot"));
-  assert.ok(tabs >= 0 && separator > tabs && page > separator, `unexpected layout:\n${frame}`);
+  for (const destination of ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"]) {
+    assert.ok(frame.includes(destination), `missing numbered destination ${destination}:\n${frame}`);
+  }
+  assert.ok(frame.includes("▶ [1] Sources"), `active view lacks its separate marker:\n${frame}`);
+  assert.ok(lines.some(line => ["[1] Sources", "[2] Catalog", "[3] Installations", "[4] Updates", "[5] Profile"].every(tab => line.includes(tab))),
+    `80-column header truncated a destination instead of wrapping it:\n${frame}`);
+  assert.ok(topBorder >= 0 && tabs > topBorder && bottomBorder > tabs && page > bottomBorder, `unexpected layout:\n${frame}`);
+  assert.equal(lines.length, 24, "the header keeps the app inside Ink's full-screen viewport");
   unmount();
 });
 
 test("App footer for the Catalog offers install only", async () => {
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   stdin.write("2");
-  const frame = await waitForFrame(lastFrame, /\[2 Catalog\]/);
+  const frame = await waitForFrame(lastFrame, /▶ \[2\] Catalog/);
   assert.match(frame, /i install/);
   assert.match(frame, /Enter expand/);
   assert.doesNotMatch(frame, /uninstall|add hosts/);
@@ -216,10 +227,10 @@ function footerOf(frame: string): string {
 test("no footer repeats the view-switch hints the tab bar already shows, and each names its own keys", async () => {
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
   const expected: [string | undefined, RegExp, RegExp][] = [
-    [undefined, /\[1 Sources\]/, /space mark.*a all.*Enter catalog.*n add.*r refresh.*d remove/],
-    ["2", /\[2 Catalog\]/, /space mark.*a repo.*i install.*\/ filter/],
-    ["3", /\[3 Installations\]/, /space mark.*a all.*u uninstall.*h add hosts.*A adopt/],
-    ["4", /\[4 Updates\]/, /space mark.*a all.*Enter preview.*r check again/],
+    [undefined, /▶ \[1\] Sources/, /space mark.*a all.*Enter catalog.*n add.*r refresh.*d remove/],
+    ["2", /▶ \[2\] Catalog/, /space mark.*a repo.*i install.*\/ filter/],
+    ["3", /▶ \[3\] Installations/, /space mark.*a all.*u uninstall.*h add hosts.*A adopt/],
+    ["4", /▶ \[4\] Updates/, /space mark.*a all.*Enter preview.*r check again/],
   ];
   for (const [key, tab, keys] of expected) {
     if (key !== undefined) stdin.write(key);
@@ -232,10 +243,57 @@ test("no footer repeats the view-switch hints the tab bar already shows, and eac
   unmount();
 });
 
+test("Tab advances and Shift+Tab reverses with wrapping across every main view", async () => {
+  const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
+  stdin.write("\t");
+  await waitForFrame(lastFrame, /▶ \[2\] Catalog/);
+  stdin.write("\u001B[Z");
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
+  stdin.write("\u001B[Z");
+  await waitForFrame(lastFrame, /▶ \[5\] Profile/);
+  stdin.write("\t");
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
+  unmount();
+});
+
+test("Tab is captured by a Catalog filter instead of leaking navigation", async () => {
+  const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
+  stdin.write("2");
+  await waitForFrame(lastFrame, /▶ \[2\] Catalog/);
+  stdin.write("/");
+  await waitForFrame(lastFrame, /Filter: _/);
+  stdin.write("\t");
+  const frame = await waitForFrame(lastFrame, /Filter: _/);
+  assert.match(frame, /▶ \[2\] Catalog/);
+  unmount();
+});
+
+test("Tab directions stay inside an active Skills checklist", async () => {
+  const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
+  stdin.write("2");
+  await waitForFrame(lastFrame, /▶ \[2\] Catalog/);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot/);
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /skill-of-builtin/);
+  stdin.write("j");
+  await waitForFrame(lastFrame, /> .*skill-of-builtin/);
+  stdin.write("i");
+  const prompt = await waitForFrame(lastFrame, /Skill selection · 1 selected/);
+  assert.match(prompt, /▶ \[2\] Catalog/);
+  stdin.write("\t");
+  stdin.write("\u001B[Z");
+  const captured = await waitForFrame(lastFrame, /Skill selection · 1 selected/);
+  assert.match(captured, /▶ \[2\] Catalog/);
+  unmount();
+});
+
 test("the number keys still switch views", async () => {
   const { lastFrame, stdin, unmount } = render(<App operations={catalogOperations} />);
-  await waitForFrame(lastFrame, /\[1 Sources\]/);
-  for (const [key, tab] of [["2", /\[2 Catalog\]/], ["3", /\[3 Installations\]/], ["1", /\[1 Sources\]/], ["4", /\[4 Updates\]/]] as const) {
+  await waitForFrame(lastFrame, /▶ \[1\] Sources/);
+  for (const [key, tab] of [["2", /▶ \[2\] Catalog/], ["3", /▶ \[3\] Installations/], ["1", /▶ \[1\] Sources/], ["4", /▶ \[4\] Updates/]] as const) {
     stdin.write(key);
     await waitForFrame(lastFrame, tab);
   }

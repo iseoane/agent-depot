@@ -1,11 +1,12 @@
-import { Box, Text, type Key } from "ink";
+import { Text, useWindowSize, type Key } from "ink";
 
 import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
-import { answerYesNo, hostChecklistKey } from "./mode-keys.js";
-import { HostChecklist, PreviewConfirm } from "./panel-parts.js";
+import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
+import { BorderPanel, HostChecklist, PreviewConfirm } from "./panel-parts.js";
+import { previewViewport, type PreviewChrome } from "./preview-window.js";
 
 interface Request {
   readonly entry: AppEntry;
@@ -15,7 +16,8 @@ interface Request {
 
 /** App interaction modes capture keys inside the existing Installations view. */
 export type AppMode =
-  | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[] }
+  | { readonly kind: "app-busy"; readonly label: string }
+  | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number }
   | {
       readonly kind: "app-hosts";
       readonly entries: readonly AppEntry[];
@@ -29,22 +31,37 @@ export type AppMode =
       readonly remaining: readonly Request[];
       readonly results: readonly string[];
       readonly failures: number;
+      readonly cursor: number;
     };
 
-export const APP_KINDS: readonly AppMode["kind"][] = ["app-approve", "app-hosts", "app-confirm", "app-manual"];
+export const APP_KINDS: readonly AppMode["kind"][] = ["app-busy", "app-approve", "app-hosts", "app-confirm", "app-manual"];
 
 /** Narrows the view's mode without asserting a partial mode is an App mode. */
 export function isAppMode(mode: { readonly kind: string }): mode is AppMode {
   return APP_KINDS.some(kind => kind === mode.kind);
 }
 
+export type AppActionHost = Pick<ManageContext, "browse" | "setMessage" | "isMounted" | "finish" | "unmark">
+  & { setMode(mode: AppMode): void };
+
 export interface AppContext {
   readonly apps: AppOperations;
-  readonly manage: ManageContext;
+  readonly manage: AppActionHost;
+  readonly terminalRows: number;
+  readonly terminalColumns: number;
 }
 
 /** Recipe name, falling back to the file identity for invalid recipes. */
 export const appName = (entry: AppEntry) => entry.recipe?.name ?? entry.file;
+
+function appPreviewChrome(mode: Extract<AppMode, { kind: "app-approve" | "app-confirm" | "app-manual" }>): PreviewChrome {
+  const title = mode.kind === "app-approve" ? "Recipe approval · does not install"
+    : mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`;
+  const question = mode.kind === "app-approve" ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
+    : mode.kind === "app-manual" ? "Manual step done, check now? y/n"
+      : `${mode.plan.action} ${appName(mode.plan.entry)}? y/n`;
+  return { title, questions: [question, "Scroll to end before y; n cancels."], footerRows: 2 };
+}
 
 export function appStepLines(step: {
   readonly argv?: readonly string[];
@@ -52,12 +69,49 @@ export function appStepLines(step: {
   readonly executable?: string;
   readonly cwd: string;
   readonly warning?: string;
+  readonly environment?: string;
+  readonly declaration?: string;
+  readonly pattern?: string;
 }): string[] {
+  const argv = step.argv;
   return [
-    ...(step.argv ? [`argv: ${JSON.stringify(step.argv)}`, `Executable: ${step.executable ?? `${JSON.stringify(step.argv[0])} not found in PATH`}`] : []),
+    ...(argv ? [
+      "argv: [",
+      ...argv.map((argument, index) => `  ${JSON.stringify(argument)}${index < argv.length - 1 ? "," : ""}`),
+      "]",
+      `Executable: ${step.executable ?? `${JSON.stringify(argv[0])} not found in PATH`}`,
+    ] : []),
     ...(step.manual ? [`Manual: ${step.manual}`] : []),
+    ...(step.declaration ? [step.declaration] : []),
+    ...(step.pattern ? [`Version pattern: ${step.pattern}`] : []),
+    ...(step.environment ? [`Environment: ${step.environment}`] : []),
     `Working directory: ${step.cwd}`,
     ...(step.warning ? [step.warning] : []),
+  ];
+}
+
+type AppPreviewStep = Parameters<typeof appStepLines>[0] & { readonly step: string };
+
+export function appRecipePreviewLines(entry: AppEntry, status: string, steps: readonly AppPreviewStep[]): string[] {
+  const recipe = entry.recipe;
+  return [
+    `File: ${entry.file}`,
+    `Name: ${recipe?.name ?? entry.file}`,
+    `Platform: ${recipe?.platform ?? "all"}`,
+    `Status: ${status}`,
+    ...(recipe?.homepage ? [`Homepage: ${recipe.homepage}`] : []),
+    ...(recipe?.skills ? [`Owned Skills: ${JSON.stringify(recipe.skills)}`] : []),
+    ...steps.flatMap(step => [step.step, ...appStepLines(step)]),
+  ];
+}
+
+function appPreviewLines(mode: Extract<AppMode, { kind: "app-approve" | "app-confirm" | "app-manual" }>): readonly string[] {
+  if (mode.kind === "app-approve") return mode.lines;
+  return [
+    `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,
+    ...(mode.plan.previousVersion ? [`Previous version: ${mode.plan.previousVersion}`] : []),
+    ...(mode.plan.latestVersion ? [`Latest version: ${mode.plan.latestVersion}`] : []),
+    ...appStepLines(mode.plan),
   ];
 }
 
@@ -68,7 +122,7 @@ async function prepareNext(
   failures = 0,
 ): Promise<void> {
   const { manage, apps } = context;
-  manage.setMode({ kind: "busy", label: "Preparing App step..." });
+  manage.setMode({ kind: "app-busy", label: "Preparing App step..." });
   // Independent planning failures never stop the remaining marked Apps.
   const [request, ...remaining] = requests;
   if (!request) {
@@ -80,7 +134,7 @@ async function prepareNext(
     if (manage.isMounted()) {
       manage.setMode({
         kind: !plan.argv && plan.manual ? "app-manual" : "app-confirm",
-        plan, remaining, results, failures,
+        plan, remaining, results, failures, cursor: 0,
       });
     }
   } catch (error) {
@@ -98,10 +152,10 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
     if (input === "approve") {
       const entry = entries[0];
       if (!entry) throw new Error("No App selected");
-      manage.setMode({ kind: "busy", label: "Preparing recipe approval..." });
-      const steps = await apps.preview(entry);
+      manage.setMode({ kind: "app-busy", label: "Preparing recipe approval..." });
+      const [steps, approval] = await Promise.all([apps.preview(entry), apps.approvalStatus(entry)]);
       if (manage.isMounted()) {
-        manage.setMode({ kind: "app-approve", entry, lines: steps.flatMap(step => [step.step, ...appStepLines(step)]) });
+        manage.setMode({ kind: "app-approve", entry, lines: appRecipePreviewLines(entry, approval.status, steps), cursor: 0 });
       }
     } else if (input === "h") {
       const choices = PROJECT_HOSTS.filter(host => entries.some(entry => entry.recipe?.setup?.[host] || entry.recipe?.teardown?.[host]));
@@ -121,7 +175,7 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
 
 async function execute(context: AppContext, mode: Extract<AppMode, { kind: "app-confirm" | "app-manual" }>): Promise<void> {
   const { manage, apps } = context;
-  manage.setMode({ kind: "busy", label: "Running App step..." });
+  manage.setMode({ kind: "app-busy", label: "Running App step..." });
   let manualRequired = false;
   const [outcome] = await runBatch([mode.plan], async plan => {
     const result = mode.kind === "app-manual"
@@ -144,6 +198,7 @@ async function execute(context: AppContext, mode: Extract<AppMode, { kind: "app-
 /** Applies checklist and y/n keys, continuing independent batch steps after cancellation or failure. */
 export function handleAppKey(context: AppContext, mode: AppMode, input: string, key: Key): void {
   const { manage, apps } = context;
+  if (mode.kind === "app-busy") return;
   const cancel = () => {
     manage.browse();
     manage.setMessage({ kind: "ok", text: "App action cancelled" });
@@ -160,49 +215,56 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
       if (!requests.length) manage.setMessage({ kind: "error", text: "No declared steps for this selection" });
       else void prepareNext(context, requests);
     }
-  } else answerYesNo(input, key, () => {
+  } else {
+    const lines = appPreviewLines(mode);
+    const viewport = previewViewport(lines, mode.cursor, context.terminalRows, context.terminalColumns, appPreviewChrome(mode));
+    const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
+    if (cursor !== undefined) {
+      manage.setMode({ ...mode, cursor });
+      return;
+    }
+    if (input === "n" || key.escape) {
+      if (mode.kind === "app-confirm" || mode.kind === "app-manual") {
+        void prepareNext(context, mode.remaining, [...mode.results, `${appName(mode.plan.entry)}: cancelled`], mode.failures);
+      } else cancel();
+      return;
+    }
+    if (input !== "y" || !viewport.reachedEnd) return;
     if (mode.kind !== "app-approve") {
       void execute(context, mode);
       return;
     }
-    manage.setMode({ kind: "busy", label: "Approving recipe..." });
+    manage.setMode({ kind: "app-busy", label: "Approving recipe..." });
     void apps.approve(mode.entry).then(
       () => manage.finish({ kind: "ok", text: `Approved ${appName(mode.entry)}` }),
       error => manage.finish({ kind: "error", text: errorText(error) }),
     );
-  }, () => {
-    if (mode.kind === "app-confirm" || mode.kind === "app-manual") {
-      void prepareNext(context, mode.remaining, [...mode.results, `${appName(mode.plan.entry)}: cancelled`], mode.failures);
-    } else cancel();
-  });
+  }
 }
 
 /** Renders App prompts using the existing checklist and preview-confirm panels. */
 export function AppPanel({ mode }: { readonly mode: AppMode }) {
+  const { rows, columns } = useWindowSize();
+  if (mode.kind === "app-busy") return <BorderPanel title="App lifecycle"><Text>{mode.label}</Text></BorderPanel>;
   if (mode.kind === "app-hosts") {
     return (
-      <Box flexDirection="column">
-        <Text>
-          App Host steps: checked = setup, unchecked = teardown. Wiring is not tracked.
-          Space/1-{mode.choices.length} toggle, j/k move, Enter continue, Esc cancel.
-        </Text>
+      <BorderPanel title="App Host steps">
+        <Text>Checked = setup. Unchecked = teardown. Wiring is not tracked.</Text>
+        <Text>Space/1-{mode.choices.length} toggle · j/k move · Enter continue · Esc cancel</Text>
         <HostChecklist choices={mode.choices} cursor={mode.cursor} selected={mode.selected} />
-      </Box>
+      </BorderPanel>
     );
   }
-  if (mode.kind === "app-approve") {
-    return <PreviewConfirm lines={mode.lines} question={`Approve ${appName(mode.entry)}? y/n`} />;
-  }
+  const lines = appPreviewLines(mode);
+  const chrome = appPreviewChrome(mode);
+  const viewport = previewViewport(lines, mode.cursor, rows || 24, columns || 80, chrome);
   return (
     <PreviewConfirm
-      lines={[
-        `Environment: ${mode.plan.environment}`,
-        `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,
-        ...appStepLines(mode.plan),
-      ]}
-      question={mode.kind === "app-manual"
-        ? "Manual step done, check now? y/n"
-        : `${mode.plan.action} ${appName(mode.plan.entry)}? y/n`}
+      title={chrome.title}
+      lines={lines}
+      cursor={mode.cursor}
+      question={viewport.reachedEnd ? chrome.questions[0]! : chrome.questions[1]!}
+      chrome={chrome}
     />
   );
 }

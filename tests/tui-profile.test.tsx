@@ -15,6 +15,28 @@ import { waitForFrame } from "./wait-for-frame.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
+async function expandExportGroup(view: ReturnType<typeof render>, label: string): Promise<string> {
+  const target = label === "Sources" ? "Source choices" : label === "App recipes" ? "Apps" : label;
+  let frame = view.lastFrame() ?? "";
+  const selectGroup = async (name: string) => {
+    for (let attempt = 0; attempt < 80; attempt++) {
+      const line = frame.split("\n").find(candidate => candidate.includes(">") && candidate.includes(name) && /[▸▾]/u.test(candidate));
+      if (line) {
+        if (line.includes("▸")) {
+          view.stdin.write("\r");
+          frame = await waitForFrame(view.lastFrame, next => next !== frame);
+        }
+        return;
+      }
+      view.stdin.write("j");
+      frame = await waitForFrame(view.lastFrame, next => next !== frame);
+    }
+    assert.fail(`Group ${name} was not reachable:\n${frame}`);
+  };
+  if (target !== "Export notes" && target !== "Installed replicas" && !frame.includes("▾ Sources")) await selectGroup("Sources");
+  await selectGroup(target);
+  return frame;
+}
 async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = {}) {
   const home = await mkdtemp(path.join(tmpdir(), "profile-tui-"));
   const directory = path.join(home, "apps");
@@ -35,9 +57,12 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
   const f = await fixture(t);
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
-  const checklist = await waitForFrame(f.view.lastFrame, /Apps: demo/);
-  assert.match(checklist, /\[x\].*Apps: demo/);
-  assert.match(checklist, /Excluded built-in Source[\s\S]*not\s+selectable/);
+  await waitForFrame(f.view.lastFrame, /▸ Sources/);
+  const checklist = await expandExportGroup(f.view, "App recipes");
+  assert.match(checklist, /\[x\] 1 App recipe demo \(all platforms\)/);
+  assert.match(checklist, /App recipe demo/);
+  f.view.stdin.write("j");
+  await waitForFrame(f.view.lastFrame, /App recipe demo/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Profile path:/);
   const file = path.join(f.home, "out.json");
@@ -50,7 +75,9 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
   assert.equal(parseProfile(JSON.parse(await readFile(file, "utf8"))).apps[0]?.name, "demo");
   const original = await readFile(file, "utf8");
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /Apps: demo/);
+  await waitForFrame(f.view.lastFrame, /▸ Sources/);
+  await expandExportGroup(f.view, "App recipes");
+  f.view.stdin.write("j");
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Profile path:/);
   f.view.stdin.write(file);
@@ -74,7 +101,7 @@ test("import warns on newer producers, skips conflicts and adds recipes unapprov
   await waitForFrame(f.view.lastFrame, frame => frame.includes(file));
   f.view.stdin.write("\r");
   const checklist = await waitForFrame(f.view.lastFrame, /add: App recipe second/);
-  assert.match(checklist, /conflict: App recipe demo[\s\S]*not\s+selectable/);
+  assert.match(checklist.replaceAll("│", ""), /conflict: App recipe demo[\s\S]*not\s+selectable/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /newer than running/);
   f.view.stdin.write("y");
@@ -105,7 +132,7 @@ for (const [label, content, reason] of [
     assert.deepEqual(await createAppOperations(f.environment.appEnvironment).load(), []);
     assert.equal((await f.operations.listSources()).length, 1);
     f.view.stdin.write("1");
-    await waitForFrame(f.view.lastFrame, /\[1 Sources\]/);
+    await waitForFrame(f.view.lastFrame, /▶ \[1\] Sources/);
   });
 }
 
@@ -120,10 +147,19 @@ test("invalid import errors remain usable and long export lists are windowed", a
   const view = render(<ProfileView operations={f.operations} environment={f.environment} listHeight={3} />);
   t.after(() => view.unmount());
   view.stdin.write("e");
-  const frame = await waitForFrame(view.lastFrame, /of 21/);
+  await waitForFrame(view.lastFrame, /▸ Sources/);
+  await expandExportGroup(view, "Apps");
+  let frame = view.lastFrame() ?? "";
+  for (let attempt = 0; attempt < 40 && !frame.split("\n").some(line => line.includes("> ▸ Export notes")); attempt++) {
+    view.stdin.write("j");
+    frame = await waitForFrame(view.lastFrame, next => next !== frame);
+  }
+  view.stdin.write("\r");
+  frame = await waitForFrame(view.lastFrame, /▾ Export notes/);
   assert.ok(frame.split("\n").length < 12);
   view.stdin.write("j".repeat(20));
-  await waitForFrame(view.lastFrame, /19–21 of 21/);
+  const scrolled = await waitForFrame(view.lastFrame, frame => frame.includes("of 25") && frame.includes("Export notes"));
+  assert.match(scrolled, /of 25/);
 });
 
 test("import previews recorded method argv and unregistered Sources; declining writes nothing", async t => {
@@ -157,11 +193,131 @@ test("export renders real group headers and plain exclusions rather than synthet
   });
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
-  const frame = await waitForFrame(f.view.lastFrame, /Skills: demo/);
-  for (const group of ["Sources", "Skills", "Apps", "Excluded"]) assert.match(frame, new RegExp(`^${group}$`, "m"));
-  assert.match(frame, /\[x\].*Sources: https:\/\/example.com\/skills.git/);
-  assert.match(frame, /\[x\].*Skills: demo/);
-  assert.doesNotMatch(frame, /\[ \].*Excluded built-in/);
+  await waitForFrame(f.view.lastFrame, /▸ Sources/);
+  let frame = await expandExportGroup(f.view, "Sources");
+  assert.match(frame, /\[x\] 1 https:\/\/example.com\/skills.git/);
+  frame = await expandExportGroup(f.view, "Skills");
+  assert.match(frame, /\[x\] 1 Skill demo from https:\/\/example.com\/skills.git/);
+  frame = await expandExportGroup(f.view, "Apps");
+  assert.match(frame, /\[x\] 1 App recipe demo/);
+  frame = await expandExportGroup(f.view, "Export notes");
+  assert.match(frame, /Not transferred because it is always present: built-in Source/);
+  assert.doesNotMatch(frame, /\[ \].*Not transferred/);
+});
+
+test("export panel stays inside a resized terminal with wrapped choices and confirmation chrome", async t => {
+  const f = await fixture(t);
+  const url = `https://example.com/${"long-path-segment/".repeat(8)}skills.git`;
+  await f.operations.addGitSource(url);
+  const unmanaged = path.join(f.home, ".agents", "skills", `${"very-long-unmanaged-name-".repeat(3)}skill`);
+  await mkdir(unmanaged, { recursive: true });
+  await writeFile(path.join(unmanaged, "SKILL.md"), "---\nname: unmanaged\ndescription: fixture\n---\n");
+  const view = f.view;
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 17 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 40 });
+  view.stdout.emit("resize");
+  view.stdin.write("e");
+  let frame = await waitForFrame(view.lastFrame, /Export Profile/);
+  assert.ok(frame.split("\n").length <= 17, frame);
+  assert.match(frame, /Export Profile/);
+  assert.match(frame, /preview shows full text/);
+  frame = await expandExportGroup(view, "Export notes");
+  view.stdin.write("j".repeat(2));
+  frame = await waitForFrame(view.lastFrame, candidate => candidate.split("\n").some(line =>
+    line.includes(">") && line.includes("very-long")));
+  assert.ok(frame.split("\n").length <= 17, frame);
+  assert.ok(frame.replace(/[│\s]/g, "").includes("very-long-unmanaged-name-"), frame);
+  assert.match(frame, /preview shows full text/);
+  assert.ok(frame.split("\n").some(line => line.includes(">") && line.includes("very-long")), frame);
+  view.stdin.write("\r");
+  const detail = await waitForFrame(view.lastFrame, /Export note/);
+  assert.ok(detail.split("\n").length <= 17, detail);
+  assert.match(detail, /Excluded unmanaged Skill/);
+  view.stdin.write("j".repeat(30));
+  const detailTail = await waitForFrame(view.lastFrame, /not tracked/);
+  assert.ok(detailTail.split("\n").length <= 17, detailTail);
+  view.stdin.write("\u001b");
+  frame = await waitForFrame(view.lastFrame, frame => frame.includes("Export Profile") &&
+    frame.split("\n").some(line => line.includes("> ") && line.includes("Excluded unmanaged Skill very-long")));
+  assert.match(frame, />\s+Excluded unmanaged Skill very-long/);
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 24 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 24 });
+  view.stdout.emit("resize");
+  frame = await waitForFrame(view.lastFrame, frame => frame.includes("Export Profile") && frame.includes(" of "));
+  assert.ok(frame.split("\n").length <= 24, frame);
+  assert.match(frame, /preview shows full text/);
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 24 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 80 });
+  view.stdout.emit("resize");
+  frame = await waitForFrame(view.lastFrame, frame => frame.includes("Export notes") &&
+    frame.split("\n").some(line => line.startsWith("╭") && line.length === 80));
+  assert.ok(frame.split("\n").length <= 24, frame);
+  assert.ok(frame.replace(/[│\s]/g, "").includes(`${"very-long-unmanaged-name-".repeat(3)}skill`), frame);
+  view.stdin.write("\u001b");
+  await waitForFrame(view.lastFrame, /e export · i import/);
+  view.stdin.write("e");
+  await waitForFrame(view.lastFrame, /▸ Sources/);
+  await expandExportGroup(view, "Sources");
+  frame = await waitForFrame(view.lastFrame, candidate => candidate.replace(/[│\s]/g, "").includes(url.replace(/[│\s]/g, "")));
+  assert.ok(frame.split("\n").length <= 24, frame);
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 17 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 40 });
+  view.stdout.emit("resize");
+  await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("╭") && line.length === 40));
+  view.stdin.write("\u001b");
+  await waitForFrame(view.lastFrame, /e export · i import/);
+  view.stdin.write("e");
+  await waitForFrame(view.lastFrame, /Export Profile/);
+  await expandExportGroup(view, "Sources");
+  view.stdin.write("j");
+  view.stdin.write("\r");
+  const prompt = await waitForFrame(view.lastFrame, /Profile path/);
+  assert.ok(prompt.split("\n").length <= 17, prompt);
+  assert.match(prompt, /Enter submit · Esc cancel/);
+  view.stdin.write(path.join(f.home, "review.json"));
+  await waitForFrame(view.lastFrame, /review.json/);
+  view.stdin.write("\r");
+  const confirmation = await waitForFrame(view.lastFrame, /Apply Profile/);
+  assert.ok(confirmation.split("\n").length <= 17, confirmation);
+  assert.match(confirmation, /arrows\/PgUp\/PgDn page/);
+  assert.doesNotMatch(confirmation, /Export Profile|Portable Profile/);
+});
+
+test("export group selection and numbering survive scrolling, collapse, expansion and resize", async t => {
+  const f = await fixture(t);
+  const source = await f.operations.addGitSource("https://example.com/stable.git");
+  for (let index = 1; index <= 6; index++) await f.operations.addUserGlobalInstallation!({
+    source: { kind: "external", url: source.url }, path: `skill-${index}`,
+    version: { policy: "latest" }, hosts: ["pi"],
+    installation: { path: `.agents/skills/skill-${index}`, adopted: false },
+  });
+  const view = render(<ProfileView operations={f.operations} environment={f.environment} listHeight={4} />);
+  t.after(() => view.unmount());
+  view.stdin.write("e");
+  await waitForFrame(view.lastFrame, /▸ Sources/);
+  await expandExportGroup(view, "Skills");
+  const step = async (key: string) => {
+    const before = view.lastFrame();
+    view.stdin.write(key);
+    return waitForFrame(view.lastFrame, frame => frame !== before);
+  };
+  let frame = view.lastFrame() ?? "";
+  for (let index = 0; index < 12 && !/> \[x\] 4 Skill skill-4/.test(frame); index++) frame = await step("j");
+  assert.match(frame, /> \[x\] 4 Skill skill-4/);
+  assert.equal([...frame.matchAll(/▾ Skills \(6\)/g)].length, 1, frame);
+  frame = await step(" ");
+  assert.match(frame, /> \[ \] 4 Skill skill-4/);
+  for (let index = 0; index < 12 && !/>.*▾ Skills/.test(frame); index++) frame = await step("k");
+  assert.match(frame, />.*▾ Skills/);
+  const collapsed = await step("\r");
+  assert.match(collapsed, /▸ Skills \(6\)/);
+  assert.doesNotMatch(collapsed, /skill-4/);
+  view.stdin.write("\r");
+  let expanded = await waitForFrame(view.lastFrame, /▾ Skills \(6\)/);
+  for (let index = 0; index < 8 && !/\[ \] 4 Skill skill-4/.test(expanded); index++) expanded = await step("j");
+  assert.match(expanded, /\[ \] 4 Skill skill-4/);
+  for (let index = 0; index < 8 && !/\[x\] 6 Skill skill-6/.test(expanded); index++) expanded = await step("j");
+  assert.match(expanded, /\[x\] 6 Skill skill-6/);
 });
 
 test("Packages appear in the export checklist and import previews the recorded selection", async t => {
@@ -172,8 +328,11 @@ test("Packages appear in the export checklist and import previews the recorded s
   const view = render(<ProfileView operations={operations} environment={{ homeDirectory: home, packages: exporter }} />);
   t.after(() => view.unmount());
   view.stdin.write("e");
-  const checklist = await waitForFrame(view.lastFrame, /Packages: Package pi plugins\/demo/);
-  assert.match(checklist, /\[x\].*Packages: Package pi plugins\/demo \(latest\)/);
+  await waitForFrame(view.lastFrame, /▸ Sources/);
+  await expandExportGroup(view, "Packages");
+  view.stdin.write("j");
+  const checklist = await waitForFrame(view.lastFrame, /Package pi plugins\/demo from https:\/\/example\.test\/demo\.git/);
+  assert.match(checklist, /\[x\] 1 Package pi plugins\/demo from https:\/\/example\.test\/demo\.git \(latest; saved selection\)/);
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /Profile path:/);
   const file = path.join(home, "out.json");
@@ -207,22 +366,81 @@ test("Packages appear in the export checklist and import previews the recorded s
   assert.deepEqual(evidence.executions, [{ action: "select", confirmed: true }]);
 });
 
+test("v2 replica intent is preview-only and follows the selected import resources", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "profile-tui-replica-import-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const recipesDirectory = path.join(home, "apps");
+  await mkdir(recipesDirectory);
+  const packageSelection = { ...piPackage, root: "plugins/pstack",
+    source: { kind: "external" as const, url: "https://github.com/michael-denyer/pstack-claude" } };
+  const recipeForImport = { ...recipe, name: "gentle-shell", platform: "linux" as const,
+    version: { argv: ["gentle-shell", "--version"], pattern: "(.*)" } };
+  const file = path.join(home, "replicas-v2.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v2", agentDepotVersion: "0.5.2",
+    sources: [], skills: [], apps: [recipeForImport], packages: [packageSelection], replicas: [
+      { kind: "app", name: recipeForImport.name, platform: recipeForImport.platform },
+      { kind: "package", selection: packageSelection },
+    ] }));
+  const { operations: packages, evidence } = fakePackageOperations({});
+  const view = render(<ProfileView operations={operations} environment={{ homeDirectory: home,
+    appEnvironment: { recipesDirectory, runner: async () => { throw new Error("recipe commands must not run"); } }, packages }} />);
+  t.after(() => view.unmount());
+
+  await importFile(view, file);
+  view.stdin.write("\r");
+  let preview = await waitForFrame(view.lastFrame, /Apply Profile/);
+  assert.match(preview, /Origin replica intent: Installed App gentle-shell \(linux\)/);
+  const normalizedPreview = preview.replace(/[│\s]/g, "");
+  assert.ok(normalizedPreview.includes(
+    "Originreplicaintent:InstalledPackagepiplugins/pstackfromhttps://github.com/michael-denyer/pstack-claude"));
+  assert.ok(normalizedPreview.includes("doesnotapproveorinstallit"));
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => frame.includes("Portable Profile") && !frame.includes("Apply Profile"));
+  assert.deepEqual(evidence.approvals, []);
+  assert.deepEqual(evidence.executions, []);
+  assert.deepEqual(await createAppOperations({ recipesDirectory }).load(), []);
+
+  await importFile(view, file);
+  view.stdin.write("j");
+  await waitForFrame(view.lastFrame, /add: Package pi plugins\/pstack/);
+  view.stdin.write(" ");
+  await waitForFrame(view.lastFrame, /\[ \].*add: Package pi plugins\/pstack/);
+  view.stdin.write("\r");
+  preview = await waitForFrame(view.lastFrame, /Apply Profile/);
+  assert.match(preview, /Origin replica intent: Installed App gentle-shell \(linux\)/);
+  assert.ok(!preview.replace(/[│\s]/g, "").includes("Originreplicaintent:InstalledPackagepiplugins/pstack"));
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => frame.includes("Portable Profile") && !frame.includes("Apply Profile"));
+  assert.deepEqual(evidence.approvals, []);
+  assert.deepEqual(evidence.executions, []);
+  assert.deepEqual(await createAppOperations({ recipesDirectory }).load(), []);
+});
+
 test("space and all toggle export choices; an empty selection stops before the file prompt", async t => {
   const f = await fixture(t);
   await f.operations.addGitSource("https://example.com/skills.git");
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /\[x\].*Sources:/);
+  await waitForFrame(f.view.lastFrame, /▸ Sources/);
+  await expandExportGroup(f.view, "Sources");
+  f.view.stdin.write("j");
+  await waitForFrame(f.view.lastFrame, /\[x\] 1 https:\/\/example.com\/skills.git/);
   f.view.stdin.write(" ");
-  const partial = await waitForFrame(f.view.lastFrame, /\[ \].*Sources:/);
-  assert.match(partial, /\[x\].*Apps: demo/);
+  const unselected = await waitForFrame(f.view.lastFrame, /\[ \] 1 https:\/\/example.com\/skills.git/);
+  assert.match(unselected, /Sources/);
   f.view.stdin.write("a");
-  await waitForFrame(f.view.lastFrame, /\[ \].*Apps: demo/);
+  const cleared = await waitForFrame(f.view.lastFrame, /\[ \] 1 https:\/\/example.com\/skills.git/);
+  assert.ok(cleared);
   f.view.stdin.write("a");
-  const all = await waitForFrame(f.view.lastFrame, /\[x\].*Sources:/);
-  assert.match(all, /\[x\].*Apps: demo/);
+  const all = await waitForFrame(f.view.lastFrame, /\[x\] 1 https:\/\/example.com\/skills.git/);
+  assert.ok(all);
+  await expandExportGroup(f.view, "Apps");
+  f.view.stdin.write("j");
+  const appSelected = await waitForFrame(f.view.lastFrame, /\[x\] 1 App recipe demo/);
+  assert.ok(appSelected);
   f.view.stdin.write("a");
-  await waitForFrame(f.view.lastFrame, /\[ \].*Apps: demo/);
+  await waitForFrame(f.view.lastFrame, /\[ \] 1 App recipe demo/);
   f.view.stdin.write("\r");
   const empty = await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
   assert.doesNotMatch(empty, /Profile path:|Apply Profile/);
@@ -233,7 +451,7 @@ test("browse hints do not advertise scrolling; result summaries do", async t => 
   const browse = f.view.lastFrame()!;
   assert.doesNotMatch(browse, /j\/k scroll/);
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /Excluded built-in/);
+  await waitForFrame(f.view.lastFrame, /▸ Export notes/);
   f.view.stdin.write("\r");
   const result = await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
   assert.match(result, /j\/k scroll/);
@@ -252,7 +470,7 @@ async function importFile(view: ReturnType<typeof render>, file: string): Promis
 
 async function browse(view: ReturnType<typeof render>): Promise<string> {
   return waitForFrame(view.lastFrame, frame => frame.includes("e export · i import · q quit") &&
-    !frame.includes("Enter submit") && !frame.includes("j/k move"));
+    !frame.includes("Enter submit") && !frame.includes("j/k move · Enter/right expand"));
 }
 
 for (const action of ["export", "import"] as const) {
@@ -261,14 +479,17 @@ for (const action of ["export", "import"] as const) {
     await f.operations.addGitSource("https://example.com/skills.git");
     if (action === "export") {
       f.view.stdin.write("e");
-      await waitForFrame(f.view.lastFrame, /Sources: https:/);
+      await waitForFrame(f.view.lastFrame, /▸ Sources/);
+      await expandExportGroup(f.view, "Sources");
+      f.view.stdin.write("j");
+      await waitForFrame(f.view.lastFrame, /https:\/\//);
       f.view.stdin.write("\r");
     } else f.view.stdin.write("i");
     await waitForFrame(f.view.lastFrame, /Profile path: _/);
     f.view.stdin.write("\r");
     f.view.stdin.write("q12345");
     const captured = await waitForFrame(f.view.lastFrame, /Profile path: q12345_/);
-    assert.match(captured, /\[5 Import\/Export\]/);
+    assert.match(captured, /▶ \[5\] Profile/);
     assert.equal(f.exits(), 0);
     f.view.stdin.write("\u007f");
     await waitForFrame(f.view.lastFrame, /Profile path: q1234_/);
@@ -286,9 +507,9 @@ test("Esc cancels both checklists and a fresh path prompt starts empty", async t
   const f = await fixture(t);
   await f.operations.addGitSource("https://example.com/skills.git");
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /Sources: https:/);
+  await waitForFrame(f.view.lastFrame, /▸ Sources/);
   f.view.stdin.write("\u001b");
-  assert.doesNotMatch(await browse(f.view), /\[x\]|Excluded built-in/);
+  assert.doesNotMatch(await browse(f.view), /\[x\]|Not transferred because it is always present/);
   const file = path.join(f.home, "cancel.json");
   await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
     sources: [], skills: [], apps: [recipe] }));
@@ -310,9 +531,12 @@ test("unchecking an exported Source recomputes the subset's omitted-Source warni
     installation: { path: ".agents/skills/demo", adopted: false },
   });
   f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /\[x\].*Skills: demo/);
+  await waitForFrame(f.view.lastFrame, /▸ Sources/);
+  await expandExportGroup(f.view, "Sources");
+  f.view.stdin.write("j");
+  await waitForFrame(f.view.lastFrame, /\[x\] 1 https:\/\/example.com\/skills.git/);
   f.view.stdin.write(" ");
-  await waitForFrame(f.view.lastFrame, /\[ \].*Sources:/);
+  await waitForFrame(f.view.lastFrame, /\[ \] 1 https:\/\/example.com\/skills.git/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Profile path: _/);
   const file = path.join(f.home, "subset.json");
@@ -339,7 +563,7 @@ test("import shows same reasons, keeps them unselectable, and reports Sources an
     skills: [skill, { ...skill, path: "missing-skill" }], apps: [] }));
   await importFile(f.view, file);
   const same = await waitForFrame(f.view.lastFrame, /same: Source/);
-  assert.match(same, /included: existing true ->\s+incoming false/);
+  assert.match(same.replaceAll("│", "").replace(/\s+/g, " "), /included: existing true -> incoming false/);
   assert.match(same, /discovery inclusion is not imported/);
   assert.match(same, /not selectable/);
   f.view.stdin.write(" ");
@@ -414,7 +638,7 @@ test("busy import ignores view, quit, cancel, toggle and action keys until the r
   await new Promise(resolve => setTimeout(resolve, 50));
   const busy = f.view.lastFrame()!;
   assert.match(busy, /Loading Profile/);
-  assert.match(busy, /\[5 Import\/Export\]/);
+  assert.match(busy, /▶ \[5\] Profile/);
   assert.doesNotMatch(busy, /Profile path:/);
   assert.equal(f.exits(), 0);
   release();
@@ -425,27 +649,17 @@ test("busy import ignores view, quit, cancel, toggle and action keys until the r
   assert.equal(f.exits(), 0);
 });
 
-test("export navigation stays on visible choices instead of entering excluded rows", async t => {
+test("export keeps notes separate from resource selection", async t => {
   const f = await fixture(t);
-  for (const name of ["first", "second"]) {
-    await writeFile(path.join(f.directory, `${name}.json`), JSON.stringify({ ...recipe, name }));
-  }
+  await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
-  const initial = await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
-  assert.match(initial, /Excluded built-in Source/);
-  f.view.stdin.write("j");
-  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: second/);
-  // At the last choice, repeated down keys must leave space toggling that choice.
-  f.view.stdin.write("jjj ");
-  const last = await waitForFrame(f.view.lastFrame, /> \[ \].*Apps: second/);
-  assert.match(last, /\[x\].*Apps: first/);
-  f.view.stdin.write("k");
-  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
-  f.view.stdin.write("\u001b[B");
-  await waitForFrame(f.view.lastFrame, /> \[ \].*Apps: second/);
-  f.view.stdin.write("\u001b[B");
-  f.view.stdin.write(" ");
-  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: second/);
-  f.view.stdin.write("\u001b[A");
-  await waitForFrame(f.view.lastFrame, /> \[x\].*Apps: first/);
+  await waitForFrame(f.view.lastFrame, /▸ Sources/);
+  await expandExportGroup(f.view, "App recipes");
+  const appRow = await waitForFrame(f.view.lastFrame, /\[x\] 1 App recipe demo/);
+  assert.doesNotMatch(appRow, /Not transferred/);
+  await expandExportGroup(f.view, "Export notes");
+  const note = await waitForFrame(f.view.lastFrame, /Export notes/);
+  assert.match(note, /Selected Skills are exported with their version policy/);
+  assert.match(note, /Not transferred because it is always present: built-in Source/);
+  assert.match(note, /\[x\] 1 App recipe demo/);
 });

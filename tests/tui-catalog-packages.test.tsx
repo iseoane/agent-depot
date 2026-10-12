@@ -164,7 +164,7 @@ test("i on a Catalog bundle previews the frozen plan, approves the missing recei
   assert.match(preview, /Step 1 \(apply\): \["pi","install","github\.com\/iseoane\/pstack"\]/);
   assert.match(preview, /Executable: \/usr\/bin\/pi/);
   assert.match(preview, /runs a host process/);
-  assert.match(preview, /host-only: Agent Depot never manages it/);
+  assert.match(preview.replaceAll("│", ""), /host-only: Agent Depot never manages\s+it/);
   assert.match(preview, /Blast radius: pi plugins\/pstack/);
   assert.match(preview, /Approval: needs approval/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install"]);

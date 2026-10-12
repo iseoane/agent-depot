@@ -2,17 +2,19 @@ import { Box, Text, useWindowSize } from "ink";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
+import { createAppOperations, type AppEntry } from "../app-flow.js";
 import { BROWSE, type ActionMode } from "./catalog-actions.js";
 import { handleCatalogBrowseKey, type CatalogBrowseContext } from "./catalog-browse.js";
 import { filterSkills } from "./catalog-filter.js";
 import { handleCatalogActionKey, type CatalogFlowContext } from "./catalog-flow.js";
 import { isInstalled } from "./catalog-installs.js";
+import { AppPanel, handleAppKey, startAppAction, type AppActionHost, type AppMode } from "./app-actions.js";
 import { ActionPanel, CatalogHeader, CatalogRowLine, CatalogSelectionHelp } from "./catalog-panel.js";
 import { packageOwnedSkillNotice } from "./catalog-ownership.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 import { handlePackageKey, isPackageMode, startPackageAction, type PackageActionHost, type PackageContext } from "./package-actions.js";
 import { ListFooter } from "./panel-parts.js";
-import { useCatalogFilter, useCatalogSkills, useInstalledSkills } from "./catalog-state.js";
+import { useCatalogApps, useCatalogFilter, useCatalogSkills, useInstalledSkills } from "./catalog-state.js";
 import { buildTree, leavesOf, openByDefault, skillKey, type NodeData } from "./catalog-tree.js";
 import { theme } from "./theme.js";
 import { useTreeNavigation } from "./tree-navigation.js";
@@ -54,7 +56,7 @@ export interface CatalogViewProps {
 }
 
 export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight }: CatalogViewProps) {
-  const { columns } = useWindowSize();
+  const { columns, rows: terminalRows } = useWindowSize();
   const env = environment ?? NO_ENVIRONMENT;
   const [all, setAll] = useState(sourceId === undefined);
   const mounted = useMounted();
@@ -68,7 +70,17 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const filter = useCatalogFilter(actionRef, onCapturingChange);
   const state = useCatalogSkills(operations, sourceId, all, env, reloadKey);
   const packages = useMemo(() => packageOperationsOf(env), [env]);
+  const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
+  const appCatalogState = useCatalogApps(apps);
+  const appCatalog = appCatalogState.state;
   const { installed, installedReady, reloadInstalled } = useInstalledSkills(operations, env, mounted);
+  const [appMode, setAppMode] = useState<AppMode>();
+  const appModeRef = useRef<AppMode | undefined>(undefined);
+  const setAppAction = (mode: AppMode | undefined) => {
+    appModeRef.current = mode;
+    onCapturingChange?.(mode !== undefined || filter.filterRef.current.editing || actionRef.current.kind !== "browse");
+    setAppMode(mode);
+  };
 
   const setAction = (next: ActionMode) => {
     actionRef.current = next;
@@ -79,12 +91,18 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const skills = state.status === "ready" ? state.skills : [];
   const installable = useMemo(() => skills.filter((skill) => !isInstalled(skill, installed)), [state, installed]);
   const visible = useMemo(() => filterSkills(installable, filter.filter.query), [installable, filter.filter.query]);
+  const visibleApps = useMemo(() => {
+    if (appCatalog.status !== "ready") return [];
+    const query = filter.filter.query.trim().toLowerCase();
+    return query === "" ? appCatalog.rows : appCatalog.rows.filter(row => (row.entry.recipe?.name ?? row.entry.file).toLowerCase().includes(query));
+  }, [appCatalog, filter.filter.query]);
   const roots = useMemo(() => buildTree(
     visible,
     state.status === "ready" ? state.sources : [],
     state.status === "ready" ? state.bundles : [],
     state.status === "ready" ? state.activeBundles : [],
-  ), [visible, state]);
+    visibleApps,
+  ), [visible, state, visibleApps]);
   const navigation = useTreeNavigation<NodeData>(roots, (nodes) => openByDefault(nodes, filter.queryRef.current));
   // Discovering again starts the list over.
   const { restart } = navigation;
@@ -109,6 +127,21 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       setAction(BROWSE);
     },
   };
+  const appManage: AppActionHost = {
+    setMode: setAppAction,
+    browse: () => setAppAction(undefined),
+    setMessage,
+    isMounted: () => mounted.current,
+    unmark: ids => marks.setMarked(new Set([...marks.markedRef.current].filter(id => !ids.includes(id)))),
+    finish: async result => {
+      await reloadInstalled();
+      if (!mounted.current) return;
+      await appCatalogState.reload();
+      if (!mounted.current) return;
+      setMessage(result);
+      setAppAction(undefined);
+    },
+  };
   const packageHost: PackageActionHost = {
     setMode: setAction,
     browse: () => setAction(BROWSE),
@@ -129,37 +162,45 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     marks,
     filter,
     canWiden: sourceId !== undefined,
-    ready: state.status === "ready",
+    ready: state.status === "ready" && appCatalog.status === "ready",
     toggleAll: () => setAll((value) => !value),
     startPackage: (target) => void startPackageAction(packageContext, target, "i"),
+    startApp: (entry: AppEntry) => void startAppAction({ apps, manage: appManage, terminalRows: terminalRows || 24, terminalColumns: columns || 80 }, [entry], "i"),
     setMessage,
     setAction,
   };
 
   useKeys((input, key) => {
-    const mode = actionRef.current;
-    if (isPackageMode(mode)) handlePackageKey(packageContext, mode, input, key);
-    else if (mode.kind !== "browse") handleCatalogActionKey(flow, mode, input, key);
-    else if (filter.filterRef.current.editing) filter.handleEditKey(input, key, navigation.restart);
-    else handleCatalogBrowseKey(browse, input, key);
+    const runningAppMode = appModeRef.current;
+    if (runningAppMode !== undefined) handleAppKey({ apps, manage: appManage, terminalRows: terminalRows || 24, terminalColumns: columns || 80 }, runningAppMode, input, key);
+    else {
+      const mode = actionRef.current;
+        if (isPackageMode(mode)) handlePackageKey(packageContext, mode, input, key);
+      else if (mode.kind !== "browse") handleCatalogActionKey(flow, mode, input, key);
+      else if (filter.filterRef.current.editing) filter.handleEditKey(input, key, navigation.restart);
+      else handleCatalogBrowseKey(browse, input, key);
+    }
   });
 
   const scope = all || sourceId === undefined ? "all sources" : sourceId;
-  if (state.status === "loading" || (state.status === "ready" && !installedReady)) return <Text>Loading skills...</Text>;
+  if (state.status === "loading" || appCatalog.status === "loading" || (state.status === "ready" && !installedReady)) return <Text>Loading catalog...</Text>;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
   const window = computeWindow(rows.length, index, height);
   const selectedCount = leavesOf(roots).filter((skill) => marks.marked.has(skillKey(skill))).length;
 
+  if (appMode !== undefined) return <AppPanel mode={appMode} />;
+
   return (
     <Box flexDirection="column">
       {state.warnings.map((warning) => <Text key={warning} color={theme.warning}>{warning}</Text>)}
-      <CatalogHeader scope={scope} listed={visible.length} installable={installable.length} total={skills.length} filter={filter.filter} />
+      {appCatalog.status === "ready" && appCatalog.error ? <Text color={theme.error}>Apps unavailable: {appCatalog.error}</Text> : null}
+      <CatalogHeader scope={scope} listed={visible.length} installable={installable.length} total={skills.length} appCount={visibleApps.length} filter={filter.filter} />
       {rows.slice(window.start, window.end).map((row, offset) => (
         <CatalogRowLine key={row.node.id} row={row} selected={window.start + offset === index} marked={marks.marked.has(row.node.id)} installed={installed} />
       ))}
       <CatalogSelectionHelp row={rows[index]} height={helpLines} />
       <ListFooter indicator={window.indicator} selectedCount={selectedCount} message={message} />
-      <ActionPanel mode={action} />
+      {appMode ? <AppPanel mode={appMode} /> : <ActionPanel mode={action} />}
     </Box>
   );
 }

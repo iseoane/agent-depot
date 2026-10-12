@@ -95,11 +95,12 @@ test("r refreshes the selected sources with one combined preview and one confirm
   stdin.write(" ");
   await waitForFrame(lastFrame, /2 selected/);
   stdin.write("r");
-  const preview = await waitForFrame(lastFrame, /\[y\/n\]/);
-  assert.match(preview, new RegExp(`${first.id}.*${first.url.replaceAll(".", "\\.")}`));
-  assert.match(preview, new RegExp(`${third.id}.*${third.url.replaceAll(".", "\\.")}`));
-  assert.doesNotMatch(preview.slice(preview.indexOf("selected")), new RegExp(second.id));
-  assert.equal(preview.match(/\[y\/n\]/g)?.length, 1);
+  const preview = await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
+  const compactPreview = preview.replace(/[\s│]/gu, "");
+  assert.ok(compactPreview.includes(`${first.id} from ${first.url}`.replace(/\s/gu, "")));
+  assert.ok(compactPreview.includes(`${third.id} from ${third.url}`.replace(/\s/gu, "")));
+  assert.doesNotMatch(preview, new RegExp(second.id));
+  assert.equal(preview.match(/Refresh these Sources\?/g)?.length, 1);
   assert.deepEqual(calls, []);
   stdin.write("y");
   const frame = await waitForFrame(lastFrame, (candidate) => candidate.includes(`Refreshed Git Source: ${first.id}`) && candidate.includes(`Refreshed Git Source: ${third.id}`));
@@ -114,7 +115,7 @@ test("one failing refresh does not stop the others and is reported with its reas
   stdin.write("a");
   await waitForFrame(lastFrame, /3 selected/);
   stdin.write("r");
-  await waitForFrame(lastFrame, /\[y\/n\]/);
+  await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   stdin.write("y");
   const frame = await waitForFrame(lastFrame, (candidate) => candidate.includes(`Refreshed Git Source: ${third.id}`));
   assert.deepEqual(calls, [`refresh ${first.id}`, `refresh ${second.id}`, `refresh ${third.id}`]);
@@ -128,7 +129,7 @@ test("r without a selection refreshes the highlighted source", async () => {
   const { lastFrame, stdin, unmount } = await open(operationsFor(calls));
   await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
   stdin.write("r");
-  await waitForFrame(lastFrame, /\[y\/n\]/);
+  await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   stdin.write("y");
   await waitForFrame(lastFrame, new RegExp(`Refreshed Git Source: ${first.id}`));
   assert.deepEqual(calls, [`refresh ${first.id}`]);
@@ -151,7 +152,7 @@ test("d stays single-source even with a selection", async () => {
   await waitForFrame(lastFrame, /3 selected/);
   await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
   stdin.write("d");
-  const preview = await waitForFrame(lastFrame, /\[y\/n\]/);
+  const preview = await waitForFrame(lastFrame, /Remove this Source\? y\/n/);
   assert.match(preview, new RegExp(`remove Git Source ${first.id}`));
   assert.doesNotMatch(preview.slice(preview.indexOf("selected")), new RegExp(second.id));
   stdin.write("y");
@@ -186,7 +187,7 @@ test("a then r in one burst previews every marked source", async () => {
   await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
   stdin.write("a");
   stdin.write("r");
-  const frame = await waitForFrame(lastFrame, /\[y\/n\]/);
+  const frame = await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   for (const source of [first, second, third]) assert.match(frame, new RegExp(`refresh Git Source ${source.id}`));
   unmount();
 });
@@ -195,7 +196,7 @@ test("j, j, r in one burst previews the source the highlight reached", async () 
   const { lastFrame, stdin, unmount } = await open(operationsFor([]));
   await waitForFrame(lastFrame, (frame) => highlighted(frame).includes(first.id));
   for (const data of ["j", "j", "r"]) stdin.write(data);
-  const frame = await waitForFrame(lastFrame, /\[y\/n\]/);
+  const frame = await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   assert.match(frame, new RegExp(`refresh Git Source ${third.id}`));
   assert.doesNotMatch(frame, new RegExp(`refresh Git Source ${first.id}`));
   unmount();
