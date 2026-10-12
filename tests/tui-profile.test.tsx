@@ -165,6 +165,45 @@ test("export renders real group headers and plain exclusions rather than synthet
   assert.doesNotMatch(frame, /\[ \].*Not transferred/);
 });
 
+test("export panel stays inside a resized terminal with wrapped choices and confirmation chrome", async t => {
+  const f = await fixture(t);
+  const url = `https://example.com/${"long-path-segment/".repeat(8)}skills.git`;
+  await f.operations.addGitSource(url);
+  const unmanaged = path.join(f.home, ".agents", "skills", `${"very-long-unmanaged-name-".repeat(4)}skill`);
+  await mkdir(unmanaged, { recursive: true });
+  const view = render(<ProfileView operations={f.operations} environment={f.environment} />);
+  t.after(() => view.unmount());
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 17 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 40 });
+  view.stdout.emit("resize");
+  view.stdin.write("e");
+  let frame = await waitForFrame(view.lastFrame, /Export notes/);
+  assert.ok(frame.split("\n").length <= 17, frame);
+  assert.match(frame, /Portable user-global Profile/);
+  assert.match(frame, /Not transferred because it is always present/);
+  for (let index = 0; index < 12 && !frame.includes("very-long-unmanaged-name-"); index++) {
+    view.stdin.write("j");
+    frame = await waitForFrame(view.lastFrame, next => next !== frame);
+  }
+  assert.ok(frame.split("\n").length <= 17, frame);
+  assert.match(frame, /very-long-unmanaged-name-/);
+  for (let index = 0; index < 20 && !frame.includes("skills.git"); index++) {
+    view.stdin.write("j");
+    frame = await waitForFrame(view.lastFrame, next => next !== frame);
+  }
+  assert.match(frame, /skills.git/);
+  assert.ok(frame.split("\n").length <= 17, frame);
+  view.stdin.write("\r");
+  const prompt = await waitForFrame(view.lastFrame, /Profile path/);
+  assert.ok(prompt.split("\n").length <= 17, prompt);
+  view.stdin.write(path.join(f.home, "review.json"));
+  await waitForFrame(view.lastFrame, /review.json/);
+  view.stdin.write("\r");
+  const confirmation = await waitForFrame(view.lastFrame, /Apply Profile/);
+  assert.ok(confirmation.split("\n").length <= 17, confirmation);
+  assert.match(confirmation, /arrows\/PgUp\/PgDn page/);
+});
+
 test("export group selection and numbering survive scrolling, collapse, expansion and resize", async t => {
   const f = await fixture(t);
   const source = await f.operations.addGitSource("https://example.com/stable.git");
