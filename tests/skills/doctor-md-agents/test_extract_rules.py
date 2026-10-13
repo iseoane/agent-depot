@@ -354,7 +354,7 @@ class ConditionalBlockTests(unittest.TestCase):
 
 
 def _load_old_extract_rules_module():
-    """Load scripts/testdata/old_extract_rules_pre_t1.py.txt -- a frozen
+    """Load testdata/old_extract_rules_pre_t1.py.txt -- a frozen
     copy of extract_rules.py exactly as it was before T1 (commit
     acae673^), captured with `git show acae673^:scripts/extract_rules.py`.
     Used as the ground truth for the golden test below: comparing against
@@ -442,13 +442,13 @@ class GoldenNoBlocksRegressionTests(unittest.TestCase):
         # The files this skill actually grades (or documents itself with),
         # none of which had -- or, for the two written in T2, still don't
         # use as real blocks -- an <important if> container of their own.
-        repo_root = Path(__file__).parent.parent
+        skill_root = Path(__file__).resolve().parents[3] / "skills" / "doctor-md-agents"
         candidates = [
-            repo_root / "SKILL.md",
-            repo_root / "references" / "rule-model.md",
-            repo_root / "references" / "structure.md",
-            repo_root / "scorers" / "adherence.md",
-            repo_root / "scorers" / "rule-value.md",
+            skill_root / "SKILL.md",
+            skill_root / "references" / "rule-model.md",
+            skill_root / "references" / "structure.md",
+            skill_root / "scorers" / "adherence.md",
+            skill_root / "scorers" / "rule-value.md",
         ]
         checked = 0
         for path in candidates:

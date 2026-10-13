@@ -40,12 +40,7 @@ jobs:
       - run: pnpm test:e2e
       - run: pnpm audit:dead-code
       - run: node --test scripts/release-artifact.test.mjs
-      - name: Test both Python doctor tools
-        env:
-          PYTHONDONTWRITEBYTECODE: "1"
-        run: |
-          python3 -m unittest discover -s skills/doctor-md-agents/scripts -p 'test_*.py'
-          python3 -m unittest discover -s skills/doctor-md-skill/scripts -p 'test_*.py'
+      - run: pnpm test:skills
       - run: pnpm test:pack
       - name: Pack and validate the release artifact
         env:

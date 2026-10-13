@@ -44,8 +44,10 @@ Cada cita del juez se verifica mecánicamente contra la transcripción por subca
 
 ## Tests
 
+From the Agent Depot repository root, run:
+
 ```bash
-python3 -m unittest discover -s scripts -p 'test_*.py'
+pnpm test:skills
 ```
 
 Sin dependencias: stdlib de Python 3.9+.

@@ -4,7 +4,7 @@
 // Requires a prior `pnpm build`. Never publishes anything.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,10 @@ const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const sandbox = mkdtempSync(path.join(tmpdir(), "agent-depot-pack-"));
 const run = (command, args, options = {}) =>
   execFileSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32", ...options });
+const filesUnder = (directory) => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  const entryPath = path.join(directory, entry.name);
+  return entry.isDirectory() ? filesUnder(entryPath).map((file) => path.join(entry.name, file)) : [entry.name];
+}).sort();
 
 try {
   const packDirectory = path.join(sandbox, "pack");
@@ -32,11 +36,25 @@ try {
   assert.deepEqual(unexpected, [], `unexpected files in tarball: ${unexpected.join(", ")}`);
   const forbidden = files.filter((file) => /(^|\/)(tests?|coverage|odd|\.scratch)\/|\.test\.(js|d\.ts|js\.map)$/u.test(file));
   assert.deepEqual(forbidden, [], `forbidden files in tarball: ${forbidden.join(", ")}`);
-  // Source maps point at ../../src (not shipped); skill tests and fixtures are dev-only.
-  const devOnly = files.filter((file) => /\.map$/u.test(file) || /(^|\/)test_[^/]*\.py$/u.test(file) || /(^|\/)testdata\//u.test(file));
+  // Source maps point at ../../src (not shipped); tests and bytecode belong outside runtime skills.
+  const devOnly = files.filter((file) => /\.map$/u.test(file) || /(^|\/)test_[^/]*\.py$/u.test(file) || /(^|\/)testdata\//u.test(file) || /(^|\/)__pycache__(\/|$)/u.test(file) || /\.pyc$/u.test(file));
   assert.deepEqual(devOnly, [], `dev-only files in tarball: ${devOnly.join(", ")}`);
   for (const required of ["dist/src/cli.js", "package.json", "README.md", "LICENSE", "CHANGELOG.md", "resources/pi/agents-panel/index.ts", "resources/pi/agents-panel/contract.ts", "skills/doctor-md-agents/SKILL.md", "skills/doctor-md-agents/scripts/scan_corrections.py", "skills/doctor-md-skill/SKILL.md", "skills/doctor-md-skill/references/supported-harnesses.md", "skills/doctor-md-skill/scripts/collect_sessions.py", "skills/doctor-md-skill/scripts/detect_machine_sessions.py", "skills/agent-depot-apprecipe/SKILL.md", "skills/agent-depot-apprecipe/assets/example.md"]) {
     assert.ok(files.includes(required), `missing from tarball: ${required}`);
+  }
+
+  const extractedDirectory = path.join(sandbox, "extracted");
+  mkdirSync(extractedDirectory);
+  run("tar", ["-xzf", path.join(packDirectory, packed.filename), "-C", extractedDirectory]);
+  for (const skill of ["doctor-md-agents", "doctor-md-skill"]) {
+    const source = path.join(root, "skills", skill);
+    const packedSkill = path.join(extractedDirectory, "package", "skills", skill);
+    const sourceFiles = filesUnder(source);
+    assert.deepEqual(filesUnder(packedSkill), sourceFiles, `${skill} packed file set differs from source`);
+    for (const file of sourceFiles) {
+      assert.deepEqual(readFileSync(path.join(packedSkill, file)), readFileSync(path.join(source, file)),
+        `${skill}/${file} differs between source and tarball`);
+    }
   }
 
   const installDirectory = path.join(sandbox, "install");

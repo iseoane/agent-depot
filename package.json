@@ -28,8 +28,6 @@
     "!dist/src/**/*.map",
     "resources/pi",
     "skills",
-    "!skills/**/test_*.py",
-    "!skills/**/testdata",
     "README.md",
     "README.es.md",
     "LICENSE",
@@ -84,7 +82,8 @@
     "audit:all": "pnpm audit:dead-code && pnpm audit:dupes && pnpm audit:health",
     "test:e2e": "pnpm build && node --import ./dist/tests/isolated-env.js --test --test-timeout=120000 \"dist/tests/e2e/*.e2e.test.js\"",
     "prepublishOnly": "pnpm build && pnpm test",
-    "test:pack": "pnpm build && node scripts/pack-smoke.mjs"
+    "test:pack": "pnpm build && node scripts/pack-smoke.mjs",
+    "test:skills": "node scripts/test-skills.mjs"
   },
   "dependencies": {
     "ink": "^7.1.1",

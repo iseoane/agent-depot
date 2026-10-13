@@ -20,8 +20,8 @@ ln -s /path/to/doctor-md-skill ~/.agents/skills/doctor-md-skill
 
 ## Run the tests
 
-Stdlib `unittest` only, Python 3.9+, no network access required:
+The tests use Python 3.9+ and the standard library. They need no network access. From the Agent Depot repository root, run:
 
 ```bash
-python3 -m unittest discover -s scripts -p 'test_*.py'
+pnpm test:skills
 ```

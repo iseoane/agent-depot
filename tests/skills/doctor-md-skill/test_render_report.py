@@ -16,7 +16,7 @@ from render_report import (
 
 class ReportRendererTests(unittest.TestCase):
     def test_skill_startup_contract_is_centralized(self):
-        skill_root = Path(__file__).resolve().parent.parent
+        skill_root = Path(__file__).resolve().parents[3] / "skills" / "doctor-md-skill"
         skill_text = (skill_root / "SKILL.md").read_text()
         harness_text = (
             skill_root / "references" / "supported-harnesses.md"
@@ -181,7 +181,7 @@ class ReportRendererTests(unittest.TestCase):
         self.assertIn(".bar-fill { animation: none; }", page)
 
     def test_skill_output_uses_report_path_only(self):
-        skill_path = Path(__file__).resolve().parent.parent / "SKILL.md"
+        skill_path = Path(__file__).resolve().parents[3] / "skills" / "doctor-md-skill" / "SKILL.md"
         skill_text = skill_path.read_text()
 
         self.assertIn(
@@ -196,7 +196,7 @@ class ReportRendererTests(unittest.TestCase):
         self.assertNotIn("[View in browser]", skill_text)
 
     def test_skill_edits_only_use_failed_conversations(self):
-        skill_path = Path(__file__).resolve().parent.parent / "SKILL.md"
+        skill_path = Path(__file__).resolve().parents[3] / "skills" / "doctor-md-skill" / "SKILL.md"
         skill_text = skill_path.read_text()
 
         self.assertIn(
