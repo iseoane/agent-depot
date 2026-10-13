@@ -406,7 +406,9 @@ async function readPiCheckoutEvidence(checkoutPath: string, sourceIdentity: stri
     const version = isRecord(packageJson) && typeof packageJson.version === "string" && packageJson.version.trim() !== ""
       ? packageJson.version
       : undefined;
-    if (status !== "") {
+    const generatedRootLock = status === "?? package-lock.json"
+      && await isMatchingRootOnlyNpmLock(checkoutPath, packageJson);
+    if (status !== "" && !generatedRootLock) {
       return {
         ...(version === undefined ? {} : { version }),
         issue: `Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.`,
@@ -421,6 +423,41 @@ async function readPiCheckoutEvidence(checkoutPath: string, sourceIdentity: stri
         ? "the configured checkout path contains a symbolic link"
         : "the Pi Git checkout could not be read safely";
     return unavailable(reason);
+  }
+}
+
+/** Recognize only npm's dependency-free generated root lock, never tracked edits. */
+async function isMatchingRootOnlyNpmLock(checkoutPath: string, manifest: unknown): Promise<boolean> {
+  try {
+    if (!isRecord(manifest)) return false;
+    const lockPath = path.join(checkoutPath, "package-lock.json");
+    await assertNoSymlinkPath(lockPath, "Pi generated lockfile");
+    const stat = await lstat(lockPath);
+    if (!stat.isFile() || stat.size > 64 * 1024) return false;
+    const lock: unknown = JSON.parse(await readFile(lockPath, "utf8"));
+    if (!isRecord(lock) || lock.lockfileVersion !== 3 || lock.requires !== true
+      || typeof manifest.name !== "string" || typeof manifest.version !== "string"
+      || lock.name !== manifest.name || lock.version !== manifest.version
+      || Object.keys(lock).some((key) => !["name", "version", "lockfileVersion", "requires", "packages"].includes(key))
+      || !isRecord(lock.packages) || Object.keys(lock.packages).length !== 1) return false;
+    const root = lock.packages[""];
+    if (!isRecord(root) || root.name !== manifest.name || root.version !== manifest.version) return false;
+    // Ordinary dependencies mean this is more than the harmless root-only artifact.
+    for (const key of ["dependencies", "devDependencies", "optionalDependencies"]) {
+      if (manifest[key] !== undefined && (!isRecord(manifest[key]) || Object.keys(manifest[key]).length !== 0)) return false;
+    }
+    const allowed = ["name", "version", "license", "peerDependencies", "peerDependenciesMeta"];
+    const equalJson = (left: unknown, right: unknown): boolean => {
+      if (left === right) return true;
+      if (!isRecord(left) || !isRecord(right)) return false;
+      const keys = Object.keys(left);
+      return keys.length === Object.keys(right).length
+        && keys.every((key) => Object.hasOwn(right, key) && equalJson(left[key], right[key]));
+    };
+    return Object.keys(root).every((key) => allowed.includes(key) && equalJson(root[key], manifest[key]))
+      && ["peerDependencies", "peerDependenciesMeta"].every((key) => equalJson(root[key], manifest[key]));
+  } catch {
+    return false;
   }
 }
 
