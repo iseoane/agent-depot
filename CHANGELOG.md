@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-13
+
+### Fixed
+
+- `agent-depot self update` tells npm to revalidate cached registry metadata, so
+  a version published moments earlier is no longer reported as unavailable.
+- The release workflow waits up to eight minutes for npm to expose a published
+  version. Its two-minute window timed out the verification step while the
+  publish itself had already succeeded.
+
 ## [0.6.2] - 2026-10-13
 
 ### Fixed
