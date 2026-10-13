@@ -6,7 +6,7 @@ import { headerTabRowCount } from "./header-layout.js";
 export const FALLBACK_TERMINAL_ROWS = 24;
 /** Header borders, title, one tab row and footer; extra tab rows are added per terminal width. */
 export const APP_CHROME_ROWS = 5;
-const MINIMUM_ROWS = 1;
+const DEFAULT_MINIMUM_ROWS = 3;
 
 export interface ListWindow {
   /** Index of the first rendered row. */
@@ -36,9 +36,9 @@ export function pageStep(height: number): number {
  * Rows available to a list: the terminal height minus the shell chrome and the
  * view's own `reserved` lines. `override` fixes the height for tests.
  */
-export function useListHeight(override: number | undefined, reserved: number): number {
+export function useListHeight(override: number | undefined, reserved: number, minimumRows = DEFAULT_MINIMUM_ROWS): number {
   const { rows, columns } = useWindowSize();
   if (override !== undefined) return Math.max(override, 1);
   const chromeRows = APP_CHROME_ROWS + headerTabRowCount(Math.max(columns - 4, 1)) - 1;
-  return Math.max((rows || FALLBACK_TERMINAL_ROWS) - chromeRows - reserved, MINIMUM_ROWS);
+  return Math.max((rows || FALLBACK_TERMINAL_ROWS) - chromeRows - reserved, minimumRows);
 }

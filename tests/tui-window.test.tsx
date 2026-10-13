@@ -11,13 +11,19 @@ import { previewViewport } from "../src/tui/preview-window.js";
 import { computeWindow, pageStep, useListHeight } from "../src/tui/window.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
-function ListHeightProbe({ override }: { readonly override?: number }) {
-  return <Text>{useListHeight(override, 100)}</Text>;
+function ListHeightProbe({ override, minimumRows }: { readonly override?: number; readonly minimumRows?: number }) {
+  return <Text>{useListHeight(override, 100, minimumRows)}</Text>;
 }
 
-test("list height keeps the default minimum", () => {
+test("list height keeps the default minimum, allows a lower picker minimum, and preserves overrides", () => {
   const view = render(<ListHeightProbe />);
   assert.equal(view.lastFrame(), "3");
+  view.rerender(<ListHeightProbe minimumRows={1} />);
+  assert.equal(view.lastFrame(), "1");
+  view.rerender(<ListHeightProbe override={5} minimumRows={1} />);
+  assert.equal(view.lastFrame(), "5");
+  view.rerender(<ListHeightProbe override={0} minimumRows={3} />);
+  assert.equal(view.lastFrame(), "1");
   view.unmount();
 });
 

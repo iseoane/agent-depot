@@ -133,7 +133,7 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
   const footerLines = showFullPath ? wrapText("p hide path · Esc back", panelWidth) : ordinaryFooterLines;
   const reservesWindowIndicator = !showFullPath && rows.length > 0 && listHeight === undefined ? 1 : 0;
   const reserved = 3 + directoryLines.length + statusLineCount + filterNoteLines.length + visibleNoticeLines.length + footerLines.length + reservesWindowIndicator;
-  const available = useListHeight(listHeight, reserved);
+  const available = useListHeight(listHeight, reserved, 1);
   const height = rows.length > available && listHeight !== undefined ? Math.max(available - 1, 1) : available;
   const window = computeWindow(rows.length, cursor, height);
   const listedRows = showFullPath ? [] : rows.slice(window.start, window.end);
