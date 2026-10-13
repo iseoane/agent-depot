@@ -989,7 +989,7 @@ test("wrapped Profile preview retains semantic colors while scrolling in a narro
   const file = path.join(projectRoot, "wrapped-profile-colors.json");
   const sourceUrl = `https://example.test/${"source-segment/".repeat(14)}skills.git`;
   await writeFile(file, JSON.stringify({
-    format: "agent-depot-profile/v1", agentDepotVersion: "0.6.0",
+    format: "agent-depot-profile/v1", agentDepotVersion: AGENT_DEPOT_PACKAGE_VERSION,
     sources: [{ url: sourceUrl, included: true }],
     skills: [{ source: { kind: "external", url: sourceUrl }, path: `skills/${"long-directory/".repeat(14)}demo`,
       hosts: ["claude", "codex", "pi"], version: { policy: "latest" } }],

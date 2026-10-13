@@ -126,25 +126,49 @@ function profilePreviewSpans(line: string): readonly PreviewSpan[] | undefined {
   return undefined;
 }
 
+function visiblePreviewSpans(spans: readonly PreviewSpan[], offset: number, length: number): readonly PreviewSpan[] {
+  const end = offset + length;
+  let spanStart = 0;
+  const visible: PreviewSpan[] = [];
+  for (const span of spans) {
+    const spanEnd = spanStart + span.text.length;
+    const start = Math.max(offset, spanStart);
+    const stop = Math.min(end, spanEnd);
+    if (start < stop) visible.push({ ...span, text: span.text.slice(start - spanStart, stop - spanStart) });
+    spanStart = spanEnd;
+  }
+  return visible;
+}
+
+function PreviewLine({ line, position, warnFirst, logicalLine, offset = 0 }: {
+  readonly line: string;
+  readonly position: number;
+  readonly warnFirst: boolean;
+  readonly logicalLine?: string;
+  readonly offset?: number;
+}) {
+  const profileSpans = logicalLine === undefined ? profilePreviewSpans(line) : profilePreviewSpans(logicalLine);
+  if (profileSpans) {
+    const spans = logicalLine === undefined ? profileSpans : visiblePreviewSpans(profileSpans, offset, line.length);
+    return <Text key={position}>{spans.map((span, index) =>
+      <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>;
+  }
+  const field = previewField(logicalLine ?? line);
+  if (field) {
+    const fieldSpans = [previewSpan(field.label, theme.field), previewSpan(field.value, theme.value)];
+    const spans = logicalLine === undefined ? fieldSpans : visiblePreviewSpans(fieldSpans, offset, line.length);
+    return <Text key={position}>{spans.map((span, index) =>
+      <Text key={index} color={span.color}>{span.text}</Text>)}</Text>;
+  }
+  return <Text key={position} color={warnFirst && position === 0 ? theme.warning : theme.value}>{line}</Text>;
+}
+
 export function PreviewLines({ lines, warnFirst = false }: {
   readonly lines: readonly string[];
   readonly warnFirst?: boolean;
 }) {
-  return (
-    <>
-      {lines.map((line, position) => {
-        const profileSpans = profilePreviewSpans(line);
-        if (profileSpans) return <Text key={position}>{profileSpans.map((span, index) =>
-          <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>;
-        const field = previewField(line);
-        return field ? (
-          <Text key={position}>
-            <Text color={theme.field}>{field.label}</Text><Text color={theme.value}>{field.value}</Text>
-          </Text>
-        ) : <Text key={position} color={warnFirst && position === 0 ? theme.warning : theme.value}>{line}</Text>;
-      })}
-    </>
-  );
+  return <>{lines.map((line, position) =>
+    <PreviewLine key={position} line={line} position={position} warnFirst={warnFirst} />)}</>;
 }
 
 /** Under a list: the window indicator, how many items are marked, and the last result. */
@@ -180,7 +204,12 @@ export function PreviewConfirm({ title = "Confirmation", lines, question, warnFi
   const shown = viewport?.rows ?? lines;
   return (
     <BorderPanel title={title}>
-      <PreviewLines lines={shown} warnFirst={warnFirst && (viewport?.start ?? 0) === 0} />
+      {viewport ? shown.map((line, position) => {
+        const sourceLine = viewport.sourceLines[position]!;
+        return <PreviewLine key={position} line={line} position={position}
+          warnFirst={Boolean(warnFirst && viewport.start === 0)} logicalLine={lines[sourceLine]!}
+          offset={viewport.sourceOffsets[position]!} />;
+      }) : <PreviewLines lines={shown} warnFirst={warnFirst} />}
       {viewport && viewport.total > viewport.height ? <Text color={theme.muted}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
       {viewport ? <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · arrows/Pg page</Text> : null}
       {question.includes("y/n") ? (() => {

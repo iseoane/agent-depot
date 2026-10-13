@@ -52,6 +52,7 @@ test("preview confirmation follows the rendered physical rows at the viewport en
   assert.deepEqual(middle, {
     rows: ["row 4", "row 5", "row 6", "row 7"],
     sourceLines: [4, 5, 6, 7],
+    sourceOffsets: [0, 0, 0, 0],
     start: 4,
     end: 8,
     total: 10,
@@ -78,6 +79,22 @@ test("preview viewport wraps complete long terms and responds to the latest term
   assert.equal(lastPage.reachedEnd, true);
   assert.equal(previewViewport(["界".repeat(19)], 0, 17, 40).total, 2);
   assert.ok(lastPage.height < wide.height);
+});
+
+test("preview viewport offsets preserve grapheme text through CJK, combining marks and emoji wraps", () => {
+  const line = `Source git:界e\u0301👩‍💻-${"repeat/".repeat(20)}`;
+  const first = previewViewport([line], 0, 17, 40);
+  const continuation = previewViewport([line], first.total - 1, 17, 40);
+  const rows = new Map<number, string>();
+  for (const page of [first, continuation]) {
+    page.rows.forEach((row, index) => {
+      const offset = page.sourceOffsets[index]!;
+      assert.equal(line.slice(offset, offset + row.length), row);
+      rows.set(offset, row);
+    });
+  }
+  assert.equal([...rows.entries()].sort(([left], [right]) => left - right).map(([, row]) => row).join(""), line);
+  assert.ok(continuation.sourceOffsets[0]! > 0);
 });
 
 test("preview chrome wraps long approval names into the shared viewport geometry", () => {

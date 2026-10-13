@@ -54,7 +54,7 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
     const longProfileLines = [
       "Source git:" + "0123456789abcdef".repeat(8) + " https://example.test/" + "source-segment/".repeat(12) + "skills.git (included: true)",
       "Skill skills/" + "long-skill-directory/".repeat(12) + "skill [pi, codex, claude] (latest)",
-      "Package " + "package/".repeat(12) + "demo from https://example.test/" + "package-source/".repeat(10) + "repo.git (latest; saved selection)",
+      "Package " + "package/".repeat(12) + "demo from https://example.test/" + "package-source/".repeat(10) + "repo.git (fixed 1.2.3; saved selection)",
     ];
     const longProfile = Array.from({ length: 60 }, (_, cursor) => frame(React.createElement(PreviewConfirm, {
       lines: longProfileLines, cursor, question: "Apply Profile? (y/n)",
@@ -120,6 +120,7 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
   assert.ok(longProfile?.includes(ansi(255, 158, 100, "latest")), "wrapped Skill policy keeps its version color");
   assert.ok(longProfile?.includes(`\u001b[1m${"package/package/"}`), "wrapped Package path stays bold");
   assert.ok(longProfile?.includes(ansi(192, 202, 245, "age-source/package-source/pack")), "wrapped Package Source retains its value color");
+  assert.ok(longProfile?.includes(ansi(255, 158, 100, "fixed 1.2.3")), "wrapped Package version policy retains its version color");
 
   assert.ok(preview?.includes(ansi(255, 46, 154, "Confirmation")), "panel title remains fuchsia");
   assert.ok(preview?.includes(ansi(122, 162, 247, "  target:")), "CLI target field label is blue");

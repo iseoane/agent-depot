@@ -15,6 +15,8 @@ export interface PreviewViewport {
   readonly rows: readonly string[];
   /** Source line index for each physically wrapped row. */
   readonly sourceLines: readonly number[];
+  /** UTF-16 offset of each physical row within its logical source line. */
+  readonly sourceOffsets: readonly number[];
   readonly start: number;
   readonly end: number;
   readonly total: number;
@@ -25,23 +27,25 @@ export interface PreviewViewport {
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-function wrapLine(line: string, width: number): string[] {
+function wrapLine(line: string, width: number): { readonly row: string; readonly offset: number }[] {
   const segments = [...graphemes.segment(line)];
-  if (segments.length === 0) return [""];
-  const wrapped: string[] = [];
+  if (segments.length === 0) return [{ row: "", offset: 0 }];
+  const wrapped: { row: string; offset: number }[] = [];
   let row = "";
   let rowWidth = 0;
-  for (const { segment } of segments) {
+  let rowOffset = 0;
+  for (const { segment, index } of segments) {
     const segmentWidth = stringWidth(segment);
     if (row !== "" && rowWidth + segmentWidth > width) {
-      wrapped.push(row);
+      wrapped.push({ row, offset: rowOffset });
       row = "";
       rowWidth = 0;
+      rowOffset = index;
     }
     row += segment;
     rowWidth += segmentWidth;
   }
-  wrapped.push(row);
+  wrapped.push({ row, offset: rowOffset });
   return wrapped;
 }
 
@@ -53,7 +57,7 @@ export function previewViewport(
   chrome: PreviewChrome = { title: "Confirmation", questions: ["Scroll to end before y; n cancels.", "Confirm? y/n"] },
 ): PreviewViewport {
   const contentWidth = Math.max(terminalColumns - 8, 1);
-  const wrapped = lines.flatMap((line, sourceLine) => wrapLine(line, contentWidth).map((row) => ({ row, sourceLine })));
+  const wrapped = lines.flatMap((line, sourceLine) => wrapLine(line, contentWidth).map(({ row, offset }) => ({ row, sourceLine, offset })));
   const previewRows = wrapped.map(({ row }) => row);
   const headerRows = headerTabRowCount(contentWidth) + 3;
   const titleRows = wrapLine(chrome.title, contentWidth).length;
@@ -68,6 +72,7 @@ export function previewViewport(
   return {
     rows: previewRows.slice(start, end),
     sourceLines: wrapped.slice(start, end).map(({ sourceLine }) => sourceLine),
+    sourceOffsets: wrapped.slice(start, end).map(({ offset }) => offset),
     start,
     end,
     total: previewRows.length,
