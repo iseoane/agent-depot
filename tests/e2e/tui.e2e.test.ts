@@ -991,12 +991,13 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     const a = await profileSandbox(path.join(root, "a"), repo);
     const b = await profileSandbox(path.join(root, "b"), repo);
     await seedProfileSandbox(a, repo);
-    const file = path.join(root, "profile.json");
+    // Both sessions run with the shared project cwd as the picker's starting directory.
+    const file = path.join(projectRoot, "profile.json");
     const exporting = new TuiSession(a.env);
     sessions.push(exporting);
     await exporting.waitFor(/n add ·/u);
     await exporting.send("5", /e export · i import/u);
-    const checklist = await exporting.send("e", /Enter group\/preview/u);
+    const checklist = await exporting.send("e", /Export Profile/u);
     assert.match(checklist, /▸ Sources/u);
     assert.match(checklist, /▸ Installed replicas \(2\)/u);
     assert.match(checklist, /▸ Export notes/u);
@@ -1010,9 +1011,11 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await exporting.send("j".repeat(3), /▸ Apps \(2\)/u);
     await exporting.send("\r", /▾ Apps \(2\)/u);
     assert.match(exporting.screen, /App recipe fixture-app \(windows\)/u);
-    await exporting.send("j", /App recipe fixture-app \(windows\)/u);
-    await exporting.send("\r", /Profile path:/u);
-    await exporting.send(file, /profile.json/u);
+    // `e` from any row exports the aggregate selection into a chosen folder and file name.
+    await exporting.send("e", /Use this folder/u);
+    await exporting.send("\r", /Export file name/u);
+    await exporting.send("\u0015", /Name: _/u);
+    await exporting.send("profile.json", /Name: profile\.json_/u);
     await exporting.send("\r", /Apply Profile\? \(y\/n\)/u);
     await assert.rejects(readFile(file), { code: "ENOENT" });
     await exporting.send("y", /Exported profile to/u);
@@ -1025,8 +1028,8 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     sessions.push(importing);
     await importing.waitFor(/n add ·/u);
     await importing.send("5", /e export · i import/u);
-    await importing.send("i", /Profile path:/u);
-    await importing.send(file, /profile.json/u);
+    await importing.send("i", /profile\.json/u);
+    await importing.send("j", />\s+profile\.json/u);
     const plan = await importing.send("\r", /Enter preview/u);
     assert.match(plan, /add: Source/u);
     assert.match(plan, /add: Skill skills\/alpha/u);
@@ -1038,6 +1041,7 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     assert.equal(await importing.exitCode(), 0);
     assert.deepEqual(JSON.parse(b.cli("export").stdout), profile);
     assert.match(b.ok("app", "list"), /needs approval/u);
+    await rm(file, { force: true });
   } finally {
     for (const session of sessions) session.kill();
     await rm(root, { recursive: true, force: true });

@@ -486,7 +486,7 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | Catalog | `Enter`/arrows expand and collapse, `space` marks the highlighted loose Skill, `a` marks or clears the visible loose Skills in its Source, and `i` starts installation for marked Skills or the highlighted Skill, Package, or verified-absent approved App. Confirm an App install separately with `y`. `/` filters and `s` widens a Source view to all Sources. Marks in other Sources remain unchanged; Skills hidden by the filter are not installed. |
 | Installations | `Enter`/arrows expand and collapse. On user-global rows, `u` starts an App or managed Skill uninstall, or removes an unmanaged Skill; project Skills cannot be removed. `h` or `i` adds Hosts to a user-global Skill installation, and `A` or `Enter` adopts an unmanaged Skill. `space` marks a leaf and `a` marks all visible leaves; bulk actions skip project installations with a reason. On an App row, `u` previews uninstall and `h` selects setup/teardown; changed recipes must be approved again before commands run. On a Package row, `i` previews the frozen install plan and runs it, approving the receipt first when it is missing; `Enter` approves the install declaration only, `U` updates, `u` uninstalls, and `f` forgets the selection record. Package rows are not markable for bulk actions. |
 | Updates | `space` marks an update, `a` marks all available updates, and `t`/`p`/`g` selects all, project, or user-global scope. `Enter` previews the marked rows; `u` previews the selected batch; neither applies updates. `r` checks again, and left/right arrows fold or unfold the "cannot be checked" group. In a preview, arrows or PageUp/PageDown move by a visible page and `j`/`k` move one row. Review every row before `y`; `n` cancels. Unknown rows are informational. Packages and Apps are user-global only; Packages need action approval before update execution. |
-| Profile | `e` export, `i` import; enter a file path, `space` toggle choices, `a` toggle all, `Enter` preview, `y` apply; `j`/`k` scroll previews and results |
+| Profile | `e` opens the export checklist; inside it, `e` exports the whole marked selection and `Enter` only expands a group or previews a note. `space` toggles a row, `a` toggles all, `Esc` goes back. Export then opens a folder browser (`j`/`k` move, `Enter` opens a folder or picks "Use this folder", Left/Backspace goes to the parent, `Esc` back), a file name editor (default `agent-depot-profile.json`, `Ctrl+U` clears, a missing extension gains `.json`, `Enter` shows the full path), and the preview. Import opens the same browser filtered to `.json` files; `f` shows all files. `j`/`k` scroll previews and results |
 
 Scrollable previews show every declaration and execution term. Use `j`/`k` to move one row, or the arrows and `PageUp`/`PageDown` to move by a visible page. Confirm only after every physical row has been displayed. Resizing a preview requires reviewing any rows that have not yet been displayed.
 
@@ -934,11 +934,20 @@ rows explain when discovery inclusion differs but is not imported.
 The **5 Import/Export** TUI tab starts with a collapsed **Sources** parent. It
 contains nested Source choices, Skills, Apps, and Packages groups; resource rows show
 their Source identities. **Installed replicas** and export notes are separate groups.
-Replica entries identify resources confirmed installed on the exporting machine.
-They do not contain installed state, approvals, or full machine contents. Import is
-add-only; it never transfers approval or automatically installs Apps or Packages.
-Exclusions and conflicts cannot be selected. Export creates
-a new file only; empty exports write nothing (CLI reports an error). Import adds missing choices without replacing existing ones.
-Imported recipes remain unapproved and Apps are never installed by import.
-Imported Package selections are recorded without installing a bundle and without
-running a Host command.
+`e` exports the whole marked selection from any row; `Enter` only expands a group or
+previews a note, so browsing never starts a write. Replica entries identify resources
+confirmed installed on the exporting machine. They do not contain installed state,
+approvals, or full machine contents. Import is add-only; it never transfers approval or
+automatically installs Apps or Packages. Exclusions and conflicts cannot be selected.
+
+Export and import share one directory browser that starts at the project root, lists
+folders (and, for import, `.json` files), and moves with `j`/`k` or the arrows. Export
+picks a folder, then pre-fills `agent-depot-profile.json` in an editable name field that
+shows the complete destination; `Ctrl+U` clears it, a name without an extension gains
+`.json`, and an existing file or symlink is refused at that step so you can retype.
+Import browses to an existing file; `f` switches between `.json` files and every file,
+and a malformed file reports inline while the browser stays open. Export creates a new
+file only; empty exports write nothing (CLI reports an error). Import adds missing
+choices without replacing existing ones. Imported recipes remain unapproved and Apps
+are never installed by import. Imported Package selections are recorded without
+installing a bundle and without running a Host command.

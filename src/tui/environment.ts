@@ -18,6 +18,8 @@ export interface TuiEnvironment extends TuiPackagesEnvironment {
   readonly appEnvironment?: AppEnvironment;
   readonly homeDirectory?: string;
   readonly projectRoot?: string;
+  /** Directory the Profile import/export browser opens in; defaults to `projectRoot`, then cwd. */
+  readonly startDirectory?: string;
   readonly sourceAccess?: ProjectSkillTreeAccess;
   readonly installationOptions?: Omit<ProjectInstallationOptions, "projectRoot" | "sourceAccess">;
   readonly projectManifestStore?: ProjectManifestStore;

@@ -536,7 +536,7 @@ confirmar):
 | Catalog | `Enter`/flechas expanden y contraen; `space` marca el Skill disponible resaltado; `a` marca o desmarca los Skills disponibles visibles de su Source; `i` inicia la instalación de los Skills marcados o del Skill, Package o App aprobada cuya ausencia se verificó y que está resaltada. Confirma la instalación de una App por separado con `y`. `/` filtra y `s` amplía la vista de una Source a todas. Las marcas de otras Sources se conservan y no se instalan Skills ocultos por el filtro. |
 | Installations | `Enter`/flechas expanden y contraen. En filas globales de usuario, `u` inicia la desinstalación de una App o Skill gestionada, o elimina un Skill no gestionado; los Skills de proyecto no se pueden eliminar. `h` o `i` añade Hosts a una instalación global de usuario, y `A` o `Enter` adopta un Skill no gestionado. `space` marca una hoja y `a` marca todas las hojas visibles; las acciones por lotes omiten instalaciones de proyecto con un motivo. En una fila de App, `u` previsualiza la desinstalación y `h` selecciona setup/teardown; las recetas modificadas requieren una nueva aprobación. En una fila de Package, `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala y `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
 | Updates | `space` marca una actualización, `a` marca todas las actualizaciones disponibles y `t`/`p`/`g` selecciona todo, el ámbito de proyecto o el global de usuario. `Enter` previsualiza las filas marcadas; `u` previsualiza el lote seleccionado; ninguna aplica actualizaciones. `r` vuelve a comprobar y las flechas izquierda/derecha pliegan o despliegan el grupo "cannot be checked". En una previsualización, las flechas o PageUp/PageDown avanzan una página visible y `j`/`k` una fila. Revisa todas las filas antes de `y`; `n` cancela. Las filas desconocidas son informativas. Packages y Apps solo se gestionan en el ámbito global de usuario; Packages requieren aprobación de acción antes de ejecutar una actualización. |
-| Profile | `e` exportar, `i` importar; introduce una ruta de archivo, `space` alterna opciones, `a` alterna todas, `Enter` previsualiza, `y` aplica; `j`/`k` desplazan las previsualizaciones y los resultados |
+| Profile | `e` abre la lista de exportación; dentro, `e` exporta toda la selección marcada y `Enter` solo expande un grupo o previsualiza una nota. `space` alterna una fila, `a` alterna todas, `Esc` vuelve atrás. La exportación abre después un navegador de carpetas (`j`/`k` mueven, `Enter` abre una carpeta o elige "Use this folder", Izquierda/Retroceso sube al directorio padre, `Esc` vuelve), un editor de nombre de archivo (por defecto `agent-depot-profile.json`, `Ctrl+U` lo borra, un nombre sin extensión recibe `.json`, `Enter` muestra la ruta completa) y la previsualización. La importación abre el mismo navegador filtrado a archivos `.json`; `f` muestra todos los archivos. `j`/`k` desplazan las previsualizaciones y los resultados |
 
 Las previsualizaciones desplazables muestran todas las declaraciones y los términos de ejecución. Usa `j`/`k` para avanzar una fila, o las flechas y `PageUp`/`PageDown` para avanzar una página visible. Confirma solo después de mostrar cada fila física. Si cambias el tamaño del terminal, revisa las filas que aún no se han mostrado.
 
@@ -1024,13 +1024,24 @@ La pestaña **5 Import/Export** de la TUI empieza con el grupo padre **Sources**
 contraído. Dentro contiene grupos anidados para elecciones de Source, Skills, Apps y
 Packages; cada recurso muestra la identidad de su Source. **Installed replicas** y las
 notas de exportación son grupos separados. Usa las mismas previsualizaciones del núcleo
-compartido que la CLI. Las réplicas identifican recursos cuya instalación se confirmó
-en la máquina de origen; no incluyen el estado de instalación, las aprobaciones ni el
-contenido completo de la máquina. La importación solo añade; nunca transfiere
-aprobaciones ni instala automáticamente Apps o Packages. Las exclusiones y los conflictos
-no pueden seleccionarse. La exportación solo crea un archivo nuevo; las
-exportaciones vacías no escriben nada (la CLI informa de un error). La importación
-añade las elecciones que faltan sin reemplazar las existentes. Las recipes importadas
-permanecen sin aprobar y la importación nunca instala Apps. Las selecciones de Package
-importadas se registran sin instalar ningún bundle y sin ejecutar ningún comando del
-Host.
+compartido que la CLI.
+`e` exporta toda la selección marcada desde cualquier fila; `Enter` solo expande un grupo
+o previsualiza una nota, así que navegar nunca inicia una escritura. Las réplicas
+identifican recursos cuya instalación se confirmó en la máquina de origen; no incluyen el
+estado de instalación, las aprobaciones ni el contenido completo de la máquina. La
+importación solo añade; nunca transfiere aprobaciones ni instala automáticamente Apps o
+Packages. Las exclusiones y los conflictos no pueden seleccionarse.
+
+La exportación y la importación comparten un navegador de directorios que empieza en la
+raíz del proyecto, lista carpetas (y, al importar, archivos `.json`) y se mueve con
+`j`/`k` o las flechas. La exportación elige una carpeta y luego rellena
+`agent-depot-profile.json` en un campo editable que muestra el destino completo;
+`Ctrl+U` lo borra, un nombre sin extensión recibe `.json`, y un archivo o enlace
+simbólico existente se rechaza en ese paso para volver a escribirlo. La importación
+navega hasta un archivo existente; `f` alterna entre archivos `.json` y todos los
+archivos, y un archivo mal formado informa en línea mientras el navegador sigue abierto.
+La exportación solo crea un archivo nuevo; las exportaciones vacías no escriben nada (la
+CLI informa de un error). La importación añade las elecciones que faltan sin reemplazar
+las existentes. Las recipes importadas permanecen sin aprobar y la importación nunca
+instala Apps. Las selecciones de Package importadas se registran sin instalar ningún
+bundle y sin ejecutar ningún comando del Host.
