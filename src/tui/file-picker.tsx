@@ -1,7 +1,7 @@
 import path from "node:path";
 import { Text, useWindowSize } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { pickerEntries, readDirectoryListing, type DirectoryListing, type DirectoryEntry, type PickerPurpose, type PickerSelection } from "./file-picker-model.js";
+import { pickerEntries, readDirectoryListing, PROFILE_EXTENSION, type DirectoryListing, type DirectoryEntry, type PickerPurpose, type PickerSelection } from "./file-picker-model.js";
 import { useKeys } from "./keys.js";
 import { moveCursor } from "./mode-keys.js";
 import { BorderPanel } from "./panel-parts.js";
@@ -24,12 +24,10 @@ type PickerRow =
 export interface FilePickerProps {
   readonly purpose: PickerPurpose;
   readonly startDirectory: string;
-  /** An inline, recoverable message kept while the browser stays open. */
   readonly notice?: string;
   readonly onCancel: () => void;
   readonly onChoose: (selection: PickerSelection) => void;
   readonly listHeight?: number;
-  /** The directory read, injectable so tests can control read order and latency. */
   readonly readDirectory?: (directory: string) => Promise<DirectoryListing>;
 }
 
@@ -50,11 +48,11 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
   const [state, setState] = useState<PickerState>({ status: "loading", directory: startDirectory });
   const [cursor, cursorRef, cursorTo] = useMirrored(0);
   const [showAllFiles, showAllFilesRef, setShowAllFiles] = useMirrored(false);
+  const [showFullPath, setShowFullPath] = useState(false);
   const requestId = useRef(0);
   const mounted = useMounted();
   const { columns } = useWindowSize();
   const panelWidth = Math.max((columns || 80) - 4, 1);
-  const height = useListHeight(listHeight, 5);
 
   const navigate = useCallback((directory: string) => {
     const id = ++requestId.current;
@@ -93,7 +91,15 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
 
   useKeys((input, key) => {
     if (key.escape) { settle(onCancel); return; }
-    if (state.status !== "ready") return;
+    if (showFullPath) {
+      if (input === "p") setShowFullPath(false);
+      return;
+    }
+    if (state.status !== "ready") {
+      const fallbackParent = path.dirname(state.directory);
+      if ((key.backspace || key.leftArrow) && fallbackParent !== state.directory) navigate(fallbackParent);
+      return;
+    }
     if (key.backspace || key.leftArrow) {
       if (state.parent !== undefined) navigate(state.parent);
       return;
@@ -103,26 +109,43 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
       cursorTo(0);
       return;
     }
+    if (input === "p") { setShowFullPath(true); return; }
     const next = moveCursor(cursorRef.current, rows.length, input, key);
     if (next !== undefined) { cursorTo(Math.max(next, 0)); return; }
     if (key.return) choose(rows[Math.min(cursorRef.current, rows.length - 1)]);
   });
 
   const directory = state.directory;
-  const directoryLines = wrapText(`Directory: ${directory}`, panelWidth);
+  const wrappedDirectory = wrapText(`Directory: ${directory}`, panelWidth);
+  const directoryLines = showFullPath || wrappedDirectory.length <= 3
+    ? wrappedDirectory
+    : [wrappedDirectory[0]!, ...wrapText(`… ${wrappedDirectory.length - 2} lines · press p for full path`, panelWidth), wrappedDirectory.at(-1)!];
+  const ordinaryFooterLines = (purpose === "directory"
+    ? ["j/k move · Enter open/use · ←", "parent · p full path · Esc back"]
+    : ["j/k move · Enter open · ← parent", `f ${showAllFiles ? "json only" : "all files"} · p full path · Esc back`])
+    .flatMap(line => wrapText(line, panelWidth));
+  const noticeLines = notice === undefined ? [] : wrapText(notice, panelWidth);
+  const filterNoteLines = !showFullPath && purpose === "file" && state.status === "ready" && !showAllFiles
+    ? wrapText(`Showing ${PROFILE_EXTENSION} only · f shows all files`, panelWidth)
+    : [];
+  const statusLineCount = !showFullPath && (state.status === "loading" || state.status === "error" || (state.status === "ready" && rows.length === 0)) ? 1 : 0;
+  const visibleNoticeLines = showFullPath ? [] : noticeLines;
+  const footerLines = showFullPath ? wrapText("p hide path · Esc back", panelWidth) : ordinaryFooterLines;
+  const reservesWindowIndicator = !showFullPath && rows.length > 0 && listHeight === undefined ? 1 : 0;
+  const reserved = 3 + directoryLines.length + statusLineCount + filterNoteLines.length + visibleNoticeLines.length + footerLines.length + reservesWindowIndicator;
+  const available = useListHeight(listHeight, reserved);
+  const height = rows.length > available && listHeight !== undefined ? Math.max(available - 1, 1) : available;
   const window = computeWindow(rows.length, cursor, height);
-  const visibleRows = rows.slice(window.start, window.end);
-  const footer = purpose === "directory"
-    ? "j/k move · Enter open/use this folder · ←/Backspace parent · Esc back"
-    : `j/k move · Enter open/choose file · ←/Backspace parent · f ${showAllFiles ? "json only" : "all files"} · Esc back`;
+  const listedRows = showFullPath ? [] : rows.slice(window.start, window.end);
 
   return (
     <BorderPanel title={purpose === "directory" ? "Choose export folder" : "Choose import file"}>
       {directoryLines.map((line, index) => <Text key={index} color={theme.value}>{line}</Text>)}
-      {state.status === "loading" ? <Text color={theme.muted}>Loading…</Text> : null}
-      {state.status === "error" ? <Text color={theme.error}>Error: {clipText(state.message, panelWidth)}</Text> : null}
-      {state.status === "ready" && rows.length === 0 ? <Text color={theme.muted}>Empty folder</Text> : null}
-      {visibleRows.map((row, position) => {
+      {!showFullPath && state.status === "loading" ? <Text color={theme.muted}>Loading…</Text> : null}
+      {!showFullPath && state.status === "error" ? <Text color={theme.error}>Error: {clipText(state.message, panelWidth)}</Text> : null}
+      {!showFullPath && state.status === "ready" && rows.length === 0 ? <Text color={theme.muted}>Empty folder</Text> : null}
+      {filterNoteLines.map((line, index) => <Text key={`filter-${index}`} color={theme.muted}>{line}</Text>)}
+      {listedRows.map((row, position) => {
         const index = window.start + position;
         const marker = index === cursor ? "> " : "  ";
         const label = row.kind === "use-folder" ? `Use this folder: ${directory}`
@@ -130,9 +153,9 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
             : row.entry.kind === "directory" ? `${row.entry.name}/` : row.entry.name;
         return <Text key={index}><Text color={theme.field}>{marker}</Text><Text color={theme.value}>{clipText(label, Math.max(panelWidth - 2, 1))}</Text></Text>;
       })}
-      {notice === undefined ? null : <Text color={theme.warning}>{wrapText(notice, panelWidth).join("\n")}</Text>}
-      <Text color={theme.legend}>{footer}</Text>
-      {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {visibleNoticeLines.map((line, index) => <Text key={`notice-${index}`} color={theme.warning}>{line}</Text>)}
+      {footerLines.map((line, index) => <Text key={`footer-${index}`} color={theme.legend}>{line}</Text>)}
+      {!showFullPath && window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
     </BorderPanel>
   );
 }

@@ -9,8 +9,7 @@ import {
   type ProfileExportDiagnostic, type ProfileExportPlan,
 } from "../profile-export.js";
 import {
-  applyProfileImport, buildProfileImport, type ProfileImportEntry, type ProfileImportItem,
-  type ProfileImportPackageItem, type ProfileImportPlan,
+  applyProfileImport, buildProfileImport, type ProfileImportEntry, type ProfileImportPlan,
 } from "../profile-import.js";
 import { PROFILE_FORMAT, PROFILE_FORMAT_V2, parseProfile } from "../profile.js";
 import type { Profile } from "../profile.js";
@@ -33,6 +32,10 @@ import { computeWindow, useListHeight } from "./window.js";
 
 /** Input ownership and the stages of the two Profile workflows. */
 type Mode = "browse" | "busy" | "export-list" | "export-folder" | "export-name" | "import-browse" | "import-list" | "confirm" | "detail" | "results";
+
+type ConfirmRequest =
+  | { readonly kind: "export"; readonly file: string }
+  | { readonly kind: "import"; readonly plan: ProfileImportPlan };
 
 /** A choice keeps its source identity and ordinal even when its group is collapsed or offscreen. */
 interface Row {
@@ -182,22 +185,13 @@ function selectedImportProfile(profile: Profile, entries: readonly ProfileImport
     sources, skills, apps, packages, replicas });
 }
 
-/** A plan whose items are the chosen subset, split back into the block the writer consumes. */
-function chosenPlan(plan: ProfileImportPlan, selected: readonly Row[]): ProfileImportPlan {
-  const entries = selectedPlanEntries(plan, selected);
-  return {
-    ...plan,
-    items: entries.filter((item): item is ProfileImportItem => item.block !== "packages"),
-    packages: entries.filter((item): item is ProfileImportPackageItem => item.block === "packages"),
-  };
-}
-
 /** Collect choices, display shared-core previews and confirm portable Profile transfers. */
-export function ProfileView({ operations, environment = {}, onCapturingChange, listHeight }: {
+export function ProfileView({ operations, environment = {}, onCapturingChange, listHeight, existsCheck = pathExists }: {
   readonly operations: SourceOperations;
   readonly environment?: TuiEnvironment;
   readonly onCapturingChange?: (value: boolean) => void;
   readonly listHeight?: number;
+  readonly existsCheck?: (target: string) => Promise<boolean>;
 }) {
   const apps = useMemo(() => createAppOperations({
     homeDirectory: environment.homeDirectory, ...environment.appEnvironment,
@@ -221,18 +215,22 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const [importDirectory, setImportDirectory] = useState<string | undefined>(undefined);
   const [lines, setLines] = useState<readonly string[]>([]);
   const detailReturnId = useRef<string | undefined>(undefined);
-  const destination = useRef<string | undefined>(undefined);
+  const confirmRequest = useRef<ConfirmRequest | undefined>(undefined);
   const nameRequest = useRef(0);
   const importRequest = useRef(0);
   const [profile, setProfile] = useState<Profile>();
   const [plan, setPlan] = useState<ProfileImportPlan>();
   const diagnostics = useRef<readonly ProfileExportDiagnostic[]>([]);
-  const action = useRef<"export" | "import">("export");
   const { columns: terminalColumns } = useWindowSize();
   const panelWidth = Math.max((terminalColumns || 80) - 4, 1);
+  const hintCursorRow = (mode === "export-list" ? exportDisplayRows(rows, expandedGroupsRef.current) : rows)[cursorRef.current];
+  const enterHint = hintCursorRow === undefined ? undefined
+    : "kind" in hintCursorRow ? "Enter open"
+      : hintCursorRow.block === "excluded" ? "Enter note" : undefined;
+  const groupHint = hintCursorRow !== undefined && "kind" in hintCursorRow ? " · ←/→ group" : "";
   const listingHint = mode === "export-list"
-    ? "j/k move · Enter group/note · ←/→ group · space toggle · a all · e export · Esc back"
-    : "j/k move · space toggle · a all · Enter preview · Esc back";
+    ? `j/k move${groupHint}${enterHint === undefined ? "" : ` · ${enterHint}`} · space toggle · a all · e export · Esc back to menu`
+    : "j/k move · space toggle · a all · Enter preview · Esc back to menu";
   const hintText = `${selected.length} selected · ${listingHint}`;
   const titleRows = Math.max(Math.ceil(stringWidth("Export Profile") / panelWidth), 1);
   const hintRows = Math.max(Math.ceil(stringWidth(hintText) / panelWidth), 1);
@@ -291,7 +289,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     setNameError(undefined);
     setMode("export-folder");
   };
+  const abandonNameCheck = () => { nameRequest.current += 1; };
   const chooseExportDirectory = (directory: string) => {
+    abandonNameCheck();
     setExportDirectory(directory);
     setNameError(undefined);
     if (typed.current === "") setText(DEFAULT_PROFILE_FILE_NAME);
@@ -300,27 +300,37 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const submitExportName = () => {
     const outcome = resolveExportFileName(typed.current);
     if (outcome.kind === "invalid") { setNameError(outcome.message); return; }
-    const finalPath = exportDestination(exportDirectory ?? startDirectory, outcome.fileName);
+    const directory = exportDirectory ?? startDirectory;
+    const fileName = outcome.fileName;
+    const finalPath = exportDestination(directory, fileName);
     const id = ++nameRequest.current;
     void (async () => {
-      const exists = await pathExists(finalPath);
+      let exists: boolean;
+      try { exists = await existsCheck(finalPath); }
+      catch (error) {
+        if (!mounted.current || nameRequest.current !== id || modeRef.current !== "export-name") return;
+        setNameError(`Error: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      const current = resolveExportFileName(typed.current);
       if (!mounted.current || nameRequest.current !== id || modeRef.current !== "export-name") return;
+      if (current.kind !== "ok" || current.fileName !== fileName) return;
       if (exists) { setNameError(`${finalPath} already exists; choose another name`); return; }
-      destination.current = finalPath;
+      confirmRequest.current = { kind: "export", file: finalPath };
       setNameError(undefined);
       showLines([`Destination: ${finalPath}`, ...profileExportPreview(chosenProfile(), diagnostics.current)], "confirm");
     })();
   };
   const confirmApply = () => {
+    const request = confirmRequest.current;
+    if (request === undefined) return;
     void run(async () => {
       let result: readonly string[];
-      if (action.current === "export") {
-        const file = destination.current!;
-        await writeProfileExport(file, chosenProfile());
-        result = [`Exported profile to ${file}`];
+      if (request.kind === "export") {
+        await writeProfileExport(request.file, chosenProfile());
+        result = [`Exported profile to ${request.file}`];
       } else {
-        const confirmed = chosenPlan(plan!, selectedRef.current);
-        const outcomes = await applyProfileImport(confirmed, operations, apps, true, () => undefined,
+        const outcomes = await applyProfileImport(request.plan, operations, apps, true, () => undefined,
           { homeDirectory: environment.homeDirectory, packageOperations: packages, ...environment.installationOptions });
         result = outcomes.map(outcome =>
           `${outcome.status}: ${outcome.item.label}${outcome.detail ? `; ${outcome.detail}` : ""}`);
@@ -335,8 +345,10 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       // Reuse the CLI's core preview for the exact selected subset, including argv and Source notes.
       const entries = selectedPlanEntries(plan!, selectedRef.current);
       const subset = selectedImportProfile(profile!, entries);
-      const preview = await buildProfileImport(subset, operations, apps, {}, packages);
-      if (mounted.current) showLines(preview.preview, "confirm");
+      const imported = await buildProfileImport(subset, operations, apps, {}, packages);
+      if (!mounted.current) return;
+      confirmRequest.current = { kind: "import", plan: imported };
+      showLines(imported.preview, "confirm");
     });
   };
   const chooseImportFile = (selection: PickerSelection) => {
@@ -366,7 +378,6 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     if (current === "export-folder" || current === "import-browse" || current === "busy") return;
     if (current === "browse" || current === "results") {
       if (input === "e") {
-        action.current = "export";
         void run(async () => {
           const exported = await buildProfileExport(operations, apps, {
             homeDirectory: environment.homeDirectory, packageOperations: packages,
@@ -377,7 +388,6 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
           loadRows(rowsFromExport(exported), "export-list");
         });
       } else if (input === "i") {
-        action.current = "import";
         setImportNotice(undefined);
         setMode("import-browse");
       } else if (current === "results") {
@@ -387,11 +397,11 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       return;
     }
     if (current === "export-name") {
-      if (key.escape) { setMode("export-folder"); return; }
-      if (key.ctrl && input === "u") { setText(""); setNameError(undefined); return; }
+      if (key.escape) { abandonNameCheck(); setMode("export-folder"); return; }
+      if (key.ctrl && input === "u") { abandonNameCheck(); setText(""); setNameError(undefined); return; }
       if (key.return) { submitExportName(); return; }
-      if (key.backspace || key.delete) { setText(typed.current.slice(0, -1)); setNameError(undefined); return; }
-      if (input && !key.ctrl && !key.meta) { setText(typed.current + input); setNameError(undefined); }
+      if (key.backspace || key.delete) { abandonNameCheck(); setText(typed.current.slice(0, -1)); setNameError(undefined); return; }
+      if (input && !key.ctrl && !key.meta) { abandonNameCheck(); setText(typed.current + input); setNameError(undefined); }
       return;
     }
     if (current === "detail") {
@@ -408,7 +418,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       return;
     }
     if (current === "confirm") {
-      answerYesNo(input, key, confirmApply, () => setMode(action.current === "export" ? "export-name" : "import-list"));
+      answerYesNo(input, key, confirmApply, () => setMode(confirmRequest.current?.kind === "import" ? "import-list" : "export-name"));
       if (input === "y" || input === "n" || key.escape) return;
       const next = movePreviewCursor(cursorRef.current, lines.length, input, key, height);
       if (next !== undefined) cursorTo(Math.max(0, next));
@@ -515,10 +525,15 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       <Text><Text color={theme.field}>Name: </Text><Text color={theme.value}>{text}_</Text></Text>
       {liveDestination === undefined ? null : <Text><Text color={theme.field}>Destination: </Text><Text color={theme.value}>{liveDestination}</Text></Text>}
       {nameNote === undefined ? null : <Text color={theme.warning}>{nameNote}</Text>}
+      {nameOutcome.kind === "ok" && nameOutcome.appendedExtension
+        ? <Text color={theme.muted}>A name without an extension is saved as {nameOutcome.fileName}.</Text> : null}
       {nameError === undefined ? null : <Text color={theme.error}>{nameError}</Text>}
-      <Text color={theme.legend}>Type to edit · Ctrl+U clear · Enter continue · Esc back</Text>
+      <Text color={theme.legend}>Type to edit · Ctrl+U clear · Enter continue · Esc back to folder</Text>
     </BorderPanel> : null}
-    {mode === "confirm" ? <PreviewConfirm lines={lines} cursor={cursor} question="Apply Profile? (y/n) · arrows/PgUp/PgDn page · j/k line" /> : null}
+    {mode === "confirm" ? <PreviewConfirm lines={lines} cursor={cursor}
+      question={confirmRequest.current?.kind === "export"
+        ? "Save/Export Profile? (y/n) · arrows/PgUp/PgDn page · j/k line"
+        : "Apply Profile? (y/n) · arrows/PgUp/PgDn page · j/k line"} /> : null}
     {mode === "detail" ? <PreviewConfirm title="Export note" lines={lines} cursor={cursor}
       question="Esc close · arrows/PgUp/PgDn page · j/k line" /> : null}
     {mode === "results" ? <>

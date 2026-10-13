@@ -59,7 +59,7 @@ async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = 
 
 async function browse(view: ReturnType<typeof render>): Promise<string> {
   return waitForFrame(view.lastFrame, frame => frame.includes("Portable Profile") &&
-    !frame.includes("Enter submit") && !frame.includes("Apply Profile"));
+    !frame.includes("Enter submit") && !frame.includes("Apply Profile") && !frame.includes("Save/Export Profile"));
 }
 
 /** Move the picker cursor onto the row that shows `name`; assumes the row appears below the cursor. */
@@ -88,7 +88,7 @@ async function enterExportName(view: ReturnType<typeof render>, fileName: string
 /** Export the current aggregate selection to `fileName` inside the picker's starting directory. */
 async function exportNamedFile(view: ReturnType<typeof render>, fileName: string): Promise<string> {
   await enterExportName(view, fileName);
-  return waitForFrame(view.lastFrame, /Apply Profile/);
+  return waitForFrame(view.lastFrame, /Save\/Export Profile\? \(y\/n\)/);
 }
 
 async function importFile(view: ReturnType<typeof render>, file: string): Promise<string> {
@@ -118,8 +118,33 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
   await enterExportName(f.view, "out.json");
   const refusedFrame = await waitForFrame(f.view.lastFrame, /already exists; choose another name/);
   assert.match(refusedFrame, /out\.json/);
-  assert.doesNotMatch(refusedFrame, /Apply Profile/);
+  assert.doesNotMatch(refusedFrame, /Apply Profile|Save\/Export Profile/);
   assert.equal(await readFile(file, "utf8"), original);
+});
+
+test("confirming an import subset preserves the selected item after reindexing", async t => {
+  const f = await fixture(t);
+  const file = path.join(f.picker, "selected.json");
+  const laterRecipe = { ...recipe, name: "later" };
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [], skills: [], apps: [recipe, laterRecipe] }));
+  const checklist = await importFile(f.view, file);
+  assert.match(checklist, /\[x\].*App recipe demo/);
+  assert.match(checklist, /\[x\].*App recipe later/);
+  f.view.stdin.write(" ");
+  const firstDeselected = await waitForFrame(f.view.lastFrame, /\[ \].*App recipe demo/);
+  assert.match(firstDeselected, /\[x\].*App recipe later/);
+  f.view.stdin.write("j");
+  await waitForFrame(f.view.lastFrame, /> \[x\].*App recipe later/);
+  f.view.stdin.write("\r");
+  const preview = await waitForFrame(f.view.lastFrame, /Apply Profile/);
+  assert.doesNotMatch(preview, /add: App recipe demo/);
+  assert.match(preview, /add: App recipe later/);
+  f.view.stdin.write("y");
+  const results = await waitForFrame(f.view.lastFrame, /added: App recipe later/);
+  assert.doesNotMatch(results, /added: App recipe demo/);
+  const apps = await createAppOperations({ homeDirectory: f.home, ...f.environment.appEnvironment }).load();
+  assert.deepEqual(apps.map(entry => entry.recipe?.name), ["later"]);
 });
 
 test("import warns on newer producers, skips conflicts and adds recipes unapproved without commands", async t => {
@@ -288,10 +313,10 @@ test("export panel stays inside a resized terminal with wrapped choices and the 
   view.stdin.write("review.json");
   await waitForFrame(view.lastFrame, /review\.json_/);
   view.stdin.write("\r");
-  const confirmation = await waitForFrame(view.lastFrame, /Apply Profile/);
+  const confirmation = await waitForFrame(view.lastFrame, /Save\/Export Profile\? \(y\/n\)/);
   assert.ok(confirmation.split("\n").length <= 17, confirmation);
   assert.match(confirmation, /arrows\/PgUp\/PgDn page/);
-  assert.doesNotMatch(confirmation, /Export Profile|Portable Profile/);
+  assert.doesNotMatch(confirmation, /Portable Profile|▸ Sources/);
 });
 
 test("export group selection and numbering survive scrolling, collapse, expansion and resize", async t => {
@@ -450,17 +475,23 @@ test("space and all toggle export choices; e with an empty selection stops befor
   await waitForFrame(f.view.lastFrame, /\[ \] 1 App recipe demo/);
   f.view.stdin.write("e");
   const empty = await waitForFrame(f.view.lastFrame, /Nothing selected; nothing written/);
-  assert.doesNotMatch(empty, /Choose export folder|Export file name|Apply Profile/);
+  assert.doesNotMatch(empty, /Choose export folder|Export file name|Apply Profile|Save\/Export Profile/);
 });
 
-test("the export footer labels keys and shows the selection count without a preview hint", async t => {
+test("the export footer labels keys, names the Esc target, and drops Enter where it does nothing", async t => {
   const f = await fixture(t);
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
   const frame = await waitForFrame(f.view.lastFrame, /Export Profile/);
-  assert.match(frame, /e export · Esc/);
+  assert.match(frame.replace(/[│\n]/g, ""), /e export · Esc back to\s*menu/);
   assert.match(frame, /1 selected/);
+  assert.match(frame, /Enter open/);
   assert.doesNotMatch(frame, /preview shows full text/);
+  await expandExportGroup(f.view, "App recipes");
+  f.view.stdin.write("j");
+  const resource = await waitForFrame(f.view.lastFrame, /> \[x\] 1 App recipe demo/);
+  assert.doesNotMatch(resource, /Enter open|Enter note|Enter group/);
+  assert.match(resource, /space toggle · a all · e export/);
 });
 
 test("Enter on a resource row never starts export; e on any row exports the aggregate", async t => {
@@ -473,7 +504,7 @@ test("Enter on a resource row never starts export; e on any row exports the aggr
   await waitForFrame(f.view.lastFrame, /App recipe demo/);
   f.view.stdin.write("\r");
   const unchanged = await waitForFrame(f.view.lastFrame, /Export Profile/);
-  assert.doesNotMatch(unchanged, /Choose export folder|Export file name|Apply Profile/);
+  assert.doesNotMatch(unchanged, /Choose export folder|Export file name|Apply Profile|Save\/Export Profile/);
   f.view.stdin.write("e");
   await waitForFrame(f.view.lastFrame, /Choose export folder/);
 });
@@ -702,4 +733,83 @@ test("export keeps notes separate from resource selection", async t => {
   assert.match(note, /Selected Skills are exported with their version policy/);
   assert.match(note, /Not transferred because it is always present: built-in Source/);
   assert.match(note, /\[x\] 1 App recipe demo/);
+});
+
+async function nameStageFixture(t: TestContext, existsCheck: (target: string) => Promise<boolean>) {
+  const home = await mkdtemp(path.join(tmpdir(), "profile-name-stage-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const picker = path.join(home, "picker");
+  const directory = path.join(home, "apps");
+  await mkdir(picker);
+  await mkdir(directory);
+  await writeFile(path.join(directory, "demo.json"), JSON.stringify(recipe));
+  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
+  const view = render(<ProfileView operations={operations} existsCheck={existsCheck}
+    environment={{ homeDirectory: home, startDirectory: picker,
+      appEnvironment: { recipesDirectory: directory, runner: async () => { throw new Error("Recipes must not execute"); } } }} />);
+  t.after(() => view.unmount());
+  view.stdin.write("e");
+  await waitForFrame(view.lastFrame, /▸ Sources/);
+  view.stdin.write("e");
+  await waitForFrame(view.lastFrame, /Use this folder/);
+  view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, /Export file name/);
+  view.stdin.write("\u0015");
+  return { view, picker };
+}
+
+test("a slow existence check for an older name never confirms after the name is edited", async t => {
+  let release = () => {};
+  const firstCheck = new Promise<boolean>(resolve => { release = () => resolve(false); });
+  let calls = 0;
+  const { view } = await nameStageFixture(t, async () => {
+    calls += 1;
+    return calls === 1 ? firstCheck : Promise.resolve(false);
+  });
+  view.stdin.write("first.json");
+  await waitForFrame(view.lastFrame, /first\.json_/);
+  view.stdin.write("\r");
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.ok(view.lastFrame()!.includes("Export file name"));
+  assert.doesNotMatch(view.lastFrame()!, /Save\/Export Profile/);
+  view.stdin.write("2");
+  await waitForFrame(view.lastFrame, /first\.json2_/);
+  release();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.match(view.lastFrame()!, /Export file name/);
+  assert.doesNotMatch(view.lastFrame()!, /Save\/Export Profile|already exists/);
+  view.stdin.write("\r");
+  const confirmation = await waitForFrame(view.lastFrame, /Save\/Export Profile\? \(y\/n\)/);
+  assert.match(confirmation, /Destination: /);
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => frame.includes("Export file name") && !frame.includes("Save/Export Profile"));
+});
+
+test("a failing destination check is reported inline in the name stage", async t => {
+  const { view } = await nameStageFixture(t, async () => {
+    throw Object.assign(new Error("permission denied, open '/root/out.json'"), { code: "EACCES" });
+  });
+  view.stdin.write("out.json");
+  await waitForFrame(view.lastFrame, /out\.json_/);
+  view.stdin.write("\r");
+  const failure = await waitForFrame(view.lastFrame, /Error: permission denied/);
+  assert.match(failure, /Export file name/);
+  assert.doesNotMatch(failure, /Save\/Export Profile/);
+  view.stdin.write("x");
+  await waitForFrame(view.lastFrame, frame => frame.includes("out.jsonx_") && !frame.includes("Error:"));
+});
+
+test("the Enter that chooses the export folder is not also submitted to the name stage", async t => {
+  const { view, picker } = await nameStageFixture(t, async () => Promise.resolve(false));
+  assert.match(view.lastFrame()!, /Name: _/);
+  view.stdin.write("\u0015");
+  await waitForFrame(view.lastFrame, /Name: _/);
+  view.stdin.write("profile");
+  const appended = await waitForFrame(view.lastFrame, /Name: profile_/);
+  assert.match(appended, /A name without an extension is saved as profile\.json\./);
+  assert.match(appended, new RegExp(`Destination: ${path.join(picker, "profile.json").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  const settled = view.lastFrame()!;
+  assert.match(settled, /Export file name/);
+  assert.doesNotMatch(settled, /Save\/Export Profile|Apply Profile/);
 });

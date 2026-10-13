@@ -6,7 +6,7 @@ import { headerTabRowCount } from "./header-layout.js";
 export const FALLBACK_TERMINAL_ROWS = 24;
 /** Header borders, title, one tab row and footer; extra tab rows are added per terminal width. */
 export const APP_CHROME_ROWS = 5;
-const MINIMUM_ROWS = 3;
+const MINIMUM_ROWS = 1;
 
 export interface ListWindow {
   /** Index of the first rendered row. */

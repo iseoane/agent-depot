@@ -1,4 +1,4 @@
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 /** The portable Profile artifact extension; import shows only these files until `f`. */
@@ -27,7 +27,7 @@ export type PickerSelection =
 
 /** The directory an export or import browser opens in. Tests inject `startDirectory`. */
 export function pickerStartDirectory(environment: { readonly startDirectory?: string; readonly projectRoot?: string }): string {
-  return environment.startDirectory ?? environment.projectRoot ?? process.cwd();
+  return path.resolve(environment.startDirectory ?? environment.projectRoot ?? process.cwd());
 }
 
 export function isProfileFileName(name: string): boolean {
@@ -49,7 +49,7 @@ export async function readDirectoryListing(directory: string): Promise<Directory
   for (const dirent of dirents) {
     let isDirectory = dirent.isDirectory();
     if (!isDirectory && dirent.isSymbolicLink()) {
-      try { isDirectory = (await lstat(path.join(directory, dirent.name))).isDirectory(); }
+      try { isDirectory = (await stat(path.join(directory, dirent.name))).isDirectory(); }
       catch { isDirectory = false; }
     }
     entries.push({ name: dirent.name, kind: isDirectory ? "directory" : "file" });
@@ -92,11 +92,13 @@ export function exportDestination(directory: string, fileName: string): string {
 export function fileNameNotice(fileName: string): string | undefined {
   const extension = path.extname(fileName);
   if (extension === "" || extension.toLowerCase() === PROFILE_EXTENSION) return undefined;
-  return `Keeping the ${extension} extension; Agent Depot reads ${PROFILE_EXTENSION} Profiles only.`;
+  return `Keeping the ${extension} extension; import lists ${PROFILE_EXTENSION} files by default; press f to show all files.`;
 }
 
-/** True when the path exists, including a dangling symlink; the exclusive write still guards the race. */
 export async function pathExists(target: string): Promise<boolean> {
   try { await lstat(target); return true; }
-  catch { return false; }
+  catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+    throw error;
+  }
 }

@@ -983,6 +983,26 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
 });
 
 
+test("the Profile file picker fits its wrapped guidance into a narrow real terminal", { timeout: 120_000, skip: process.platform !== "linux" }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "depot-profile-picker-layout-"));
+  const side = await profileSandbox(path.join(root, "side"), path.join(root, "repo"));
+  const session = new TuiSession(side.env, 40, 17);
+  try {
+    await session.waitFor(/n add ·/u);
+    await session.send("5", /e export · i import/u);
+    const picker = await session.send("i", /Showing \.json only/u);
+    assert.match(picker, /Choose import file/u);
+    assert.match(picker, /p full path/u);
+    assert.ok(picker.split("\n").length <= 17, picker);
+    await session.send("\u001b", /e export · i import/u);
+    session.press("q");
+    assert.equal(await session.exitCode(), 0);
+  } finally {
+    session.kill();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("the Profile tab exports choices and imports them into a fresh HOME", { timeout: 120_000, skip: process.platform !== "linux" }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), "depot-profile-tui-"));
   const sessions: TuiSession[] = [];
@@ -1016,7 +1036,7 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await exporting.send("\r", /Export file name/u);
     await exporting.send("\u0015", /Name: _/u);
     await exporting.send("profile.json", /Name: profile\.json_/u);
-    await exporting.send("\r", /Apply Profile\? \(y\/n\)/u);
+    await exporting.send("\r", /Save\/Export Profile\? \(y\/n\)/u);
     await assert.rejects(readFile(file), { code: "ENOENT" });
     await exporting.send("y", /Exported profile to/u);
     const profile = JSON.parse(await readFile(file, "utf8"));

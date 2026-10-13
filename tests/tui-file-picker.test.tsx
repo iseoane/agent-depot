@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { render } from "ink-testing-library";
 import {
-  DEFAULT_PROFILE_FILE_NAME, exportDestination, fileNameNotice, pickerEntries, pickerStartDirectory,
+  DEFAULT_PROFILE_FILE_NAME, exportDestination, fileNameNotice, pathExists, pickerEntries, pickerStartDirectory,
   resolveExportFileName, sortDirectoryEntries, type DirectoryListing, type PickerSelection,
 } from "../src/tui/file-picker-model.js";
 import { FilePicker } from "../src/tui/file-picker.js";
@@ -22,13 +22,15 @@ test("export file names gain .json only when they have no extension, and unsafe 
   assert.equal(resolveExportFileName("sub/profile").kind, "invalid");
   assert.equal(resolveExportFileName("sub\\profile").kind, "invalid");
   assert.equal(exportDestination("/tmp/out", DEFAULT_PROFILE_FILE_NAME), path.join("/tmp/out", "agent-depot-profile.json"));
-  assert.equal(fileNameNotice("notes.txt"), "Keeping the .txt extension; Agent Depot reads .json Profiles only.");
+  assert.equal(fileNameNotice("notes.txt"), "Keeping the .txt extension; import lists .json files by default; press f to show all files.");
   assert.equal(fileNameNotice("profile.json"), undefined);
 });
 
-test("the picker start directory follows startDirectory, then projectRoot", () => {
+test("the picker start directory follows startDirectory, then projectRoot, and is always absolute", () => {
   assert.equal(pickerStartDirectory({ startDirectory: "/picked", projectRoot: "/project" }), "/picked");
   assert.equal(pickerStartDirectory({ projectRoot: "/project" }), "/project");
+  assert.ok(path.isAbsolute(pickerStartDirectory({ startDirectory: "relative" })));
+  assert.equal(pickerStartDirectory({ startDirectory: "relative" }), path.resolve("relative"));
 });
 
 test("directory entries sort folders before files and files by code point", () => {
@@ -149,4 +151,108 @@ test("the picker stays inside a narrow terminal", async t => {
   view.stdout.emit("resize");
   const frame = await waitForFrame(view.lastFrame, frame => frame.includes("Choose export folder") && frame.includes("a-very-long"));
   assert.ok(frame.split("\n").length <= 12, frame);
+});
+
+test("pathExists reports ENOENT as absent, exists as present, and propagates permission errors", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "picker-exists-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "file.json");
+  await writeFile(file, "{}");
+  assert.equal(await pathExists(file), true);
+  assert.equal(await pathExists(path.join(root, "missing.json")), false);
+  if (process.getuid?.() === 0) return t.skip("permission errors cannot be triggered as root");
+  const locked = path.join(root, "locked");
+  await mkdir(locked);
+  await writeFile(path.join(locked, "file.json"), "{}");
+  await chmod(locked, 0o000);
+  try {
+    await assert.rejects(pathExists(path.join(locked, "file.json")), error => error instanceof Error && "code" in error && error.code === "EACCES");
+  } finally {
+    await chmod(locked, 0o700);
+  }
+});
+
+test("a symlink to a directory is classified as a directory and navigated into", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "picker-link-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const real = path.join(root, "real");
+  await mkdir(path.join(real, "inside"), { recursive: true });
+  await writeFile(path.join(root, "file.json"), "{}");
+  await symlink(real, path.join(root, "dir-link"));
+  await symlink(path.join(root, "file.json"), path.join(root, "file-link.json"));
+  const view = render(<FilePicker purpose="file" startDirectory={root} onCancel={() => {}} onChoose={() => {}} />);
+  t.after(() => view.unmount());
+  const frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("dir-link/"));
+  assert.match(frame, /dir-link\//);
+  assert.match(frame, /file-link\.json(?!\.)/);
+  assert.doesNotMatch(frame.replace(/dir-link\//g, ""), /file-link\.json\//);
+  view.stdin.write("j");
+  await waitForFrame(view.lastFrame, candidate => candidate.split("\n").some(line => line.includes("> ") && line.includes("dir-link/")));
+  view.stdin.write("\r");
+  const inside = await waitForFrame(view.lastFrame, candidate => candidate.includes(`Directory: ${path.join(root, "dir-link")}`));
+  assert.match(inside, /inside\//);
+});
+
+test("a failed read recovers through parent navigation, and loading allows leaving a slow directory", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "picker-recover-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "sub"));
+  const failing = path.join(root, "missing");
+  const failingView = render(<FilePicker purpose="directory" startDirectory={failing} onCancel={() => {}} onChoose={() => {}} />);
+  t.after(() => failingView.unmount());
+  const error = await waitForFrame(failingView.lastFrame, candidate => /Error:.*ENOENT/.test(candidate));
+  assert.match(error, /Loading|Error/);
+  failingView.stdin.write("\u001b[D");
+  const recovered = await waitForFrame(failingView.lastFrame, candidate => candidate.includes(`Use this folder: ${root}`));
+  assert.match(recovered, /sub\//);
+
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const blocked = path.join(root, "blocked");
+  await mkdir(blocked);
+  const readDirectory = async (directory: string): Promise<DirectoryListing> => {
+    if (directory === blocked) await gate;
+    const entries = directory === root ? [{ name: "sub", kind: "directory" as const }] : [];
+    return { directory, parent: path.dirname(directory) === directory ? undefined : path.dirname(directory), entries };
+  };
+  const slowView = render(<FilePicker purpose="directory" startDirectory={blocked} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
+  t.after(() => slowView.unmount());
+  await waitForFrame(slowView.lastFrame, candidate => candidate.includes("Loading"));
+  slowView.stdin.write("\u001b[D");
+  const left = await waitForFrame(slowView.lastFrame, candidate => candidate.includes(`Use this folder: ${root}`));
+  assert.match(left, /sub\//);
+  release();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.ok(slowView.lastFrame()!.includes(`Directory: ${root}`), "the released read must not replace the newer directory");
+});
+
+test("the picker fits a wrapped long directory, many entries and its footer without a list height override", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "picker-fit-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const deep = path.join(root, ...Array.from({ length: 6 }, (_, index) => `very-long-directory-name-${index}`));
+  await mkdir(deep, { recursive: true });
+  for (let index = 0; index < 30; index++) await writeFile(path.join(deep, `entry-${index}.json`), "{}");
+  await writeFile(path.join(deep, "notes.txt"), "text");
+  const view = render(<FilePicker purpose="file" startDirectory={deep} onCancel={() => {}} onChoose={() => {}} />);
+  t.after(() => view.unmount());
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 16 });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 30 });
+  view.stdout.emit("resize");
+  await waitForFrame(view.lastFrame, candidate => candidate.includes("1–") && candidate.includes("of 31"));
+  view.stdin.write("j");
+  const frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("entry-0.json"));
+  assert.ok(frame.split("\n").length <= 16, frame);
+  assert.match(frame, /f all files/);
+  assert.match(frame, /p full path/);
+  assert.doesNotMatch(frame, new RegExp(deep.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  view.stdin.write("p");
+  const fullPath = await waitForFrame(view.lastFrame, /p hide path/);
+  const visiblePath = fullPath.replace(/[│╭╮╰╯─\s]/gu, "");
+  for (const segment of ["/tmp", path.basename(root), ...Array.from({ length: 6 }, (_, index) => `very-long-directory-name-${index}`)]) {
+    assert.ok(visiblePath.includes(segment), `${segment} missing from ${fullPath}`);
+  }
+  assert.ok(fullPath.split("\n").length <= 16, fullPath);
+  view.stdin.write("\u001b");
+  const closed = await waitForFrame(view.lastFrame, candidate => candidate.includes("Choose import file"));
+  assert.match(closed, /p hide path/);
 });
