@@ -476,7 +476,7 @@ review Profile export notes; at 24 columns, the app header tab and note title cl
 | 2 Catalog | Available Skills and Packages, plus applicable approved App recipes verified as not installed. App installation has a separate preview and confirmation. Invalid or unapproved recipes remain in Sources; unknown App state is never treated as absence. Host-confirmed installed Packages are hidden; selected-only or unknown-state Packages remain visible. Package-owned Skills keep their existing behavior. |
 | 3 Installations | Confirmed installed Apps, managed Skill installations (user-global and project), Package selections with Host membership and version evidence shown separately, and unmanaged user-global Skills. App installation records remain visible if recipe approval later expires, but recipe actions still require current approval. |
 | 4 Updates | Managed Skills in project and user-global scope, plus user-global installed Apps and Packages with a newer version available. Unknown or unverified Apps are not treated as installed. |
-| 5 Profile | Export or import portable user-global Source choices, individual Skill selections, App recipes and Package selections. Replica entries report confirmed origin-machine identities only. |
+| 5 Profile | Export or import portable user-global choices. See [Profile workflow](#profile-workflow) for the complete checklist and file-picker steps. |
 
 Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 
@@ -486,9 +486,66 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | Catalog | `Enter`/arrows expand and collapse, `space` marks the highlighted loose Skill, `a` marks or clears the visible loose Skills in its Source, and `i` starts installation for marked Skills or the highlighted Skill, Package, or verified-absent approved App. Confirm an App install separately with `y`. `/` filters and `s` widens a Source view to all Sources. Marks in other Sources remain unchanged; Skills hidden by the filter are not installed. |
 | Installations | `Enter`/arrows expand and collapse. On user-global rows, `u` starts an App or managed Skill uninstall, or removes an unmanaged Skill; project Skills cannot be removed. `h` or `i` adds Hosts to a user-global Skill installation, and `A` or `Enter` adopts an unmanaged Skill. `space` marks a leaf and `a` marks all visible leaves; bulk actions skip project installations with a reason. On an App row, `u` previews uninstall and `h` selects setup/teardown; changed recipes must be approved again before commands run. On a Package row, `i` previews the frozen install plan and runs it, approving the receipt first when it is missing; `Enter` approves the install declaration only, `U` updates, `u` uninstalls, and `f` forgets the selection record. Package rows are not markable for bulk actions. |
 | Updates | `space` marks an update, `a` marks all available updates, and `t`/`p`/`g` selects all, project, or user-global scope. `Enter` previews the marked rows; `u` previews the selected batch; neither applies updates. `r` checks again, and left/right arrows fold or unfold the "cannot be checked" group. In a preview, arrows or PageUp/PageDown move by a visible page and `j`/`k` move one row. Review every row before `y`; `n` cancels. Unknown rows are informational. Packages and Apps are user-global only; Packages need action approval before update execution. |
-| Profile | `e` opens the export checklist; inside it, `e` exports the whole marked selection and `Enter` only expands a group or previews a note. `space` toggles a row, `a` toggles all, `Esc` goes back. Export then opens a folder browser (`j`/`k` move, `Enter` opens a folder or picks "Use this folder", Left/Backspace goes to the parent, `Esc` back), a file name editor (default `agent-depot-profile.json`, `Ctrl+U` clears, a missing extension gains `.json`, `Enter` shows the full path), and the preview. Import opens the same browser filtered to `.json` files; `f` shows all files. `j`/`k` scroll previews and results |
+| Profile | Press `e` to export or `i` to import. See [Profile workflow](#profile-workflow) for navigation, selection, previews, and cancellation. |
 
-Scrollable previews show every declaration and execution term. Use `j`/`k` to move one row, or the arrows and `PageUp`/`PageDown` to move by a visible page. Confirm only after every physical row has been displayed. Resizing a preview requires reviewing any rows that have not yet been displayed.
+### Profile workflow
+
+The Profile view transfers portable user-global choices. It does not transfer
+installed state or approvals. Export and import begin in the project root, unless
+the application supplies another start directory.
+
+#### Export
+
+1. Press `e` in the Profile view to build and open the export checklist. Its
+   collapsed **Sources** group contains nested Source, Skill, App, and Package
+   choices. **Installed replicas** and **Export notes** are separate groups.
+   Expand or collapse a group with `Enter` or the arrow keys. `Enter` on an
+   export note opens its details; it never starts an export.
+2. Use `j`/`k` or the arrows to navigate, `space` to toggle a selectable row,
+   and `a` to select all or clear all. Excluded items and informational rows
+   cannot be selected. Press `e` to export the selected rows. If no portable
+   resource is selected, nothing is written. Press `Esc` to leave the checklist.
+3. Choose a destination folder. Move with `j`/`k` or the arrows, press `Enter`
+   to open a folder, or select **Use this folder** to choose the current one.
+   Use Left or Backspace to go to the parent. Press `p` to show the full
+   directory path; press `p` again to return to the listing. `Esc` returns to
+   the checklist.
+4. Edit the file name. The default is `agent-depot-profile.json`. `Ctrl+U`
+   clears the name, and a name without an extension gets `.json`. The editor
+   shows the complete destination path. Press `Enter` to review it. If the path
+   already exists, including a symlink, the view reports an inline error and
+   lets you choose another name; export never overwrites. `Esc` returns to the
+   folder picker.
+5. Review the export preview, including exclusions and warnings. Use `j`/`k`
+   to move one row and the arrows or `PageUp`/`PageDown` to move by a visible
+   page. Press `y` to write the new file, `n` or `Esc` to cancel and return to
+   the name editor. Results show the final path.
+
+#### Import
+
+1. Press `i` in the Profile view to open the file picker. It initially lists
+   `.json` files and folders. Press `f` to show every file, `f` again to filter
+   back to `.json`. Navigate with `j`/`k` or the arrows, use `Enter` to open a
+   folder or select a file, and Left or Backspace to go to the parent. Press
+   `p` to show the full directory path and `p` again to return. `Esc` returns
+   to the Profile view.
+2. The selected file is parsed and previewed. If it is invalid or cannot be
+   read, an inline error appears and the picker stays open so you can choose
+   another file. The import list marks entries as **add**, **same** (skipped), or
+   **conflict** (skipped with differences). Only additions can be selected. Use
+   `space` to toggle a row, `a` to select all additions or clear them, and
+   `Enter` to preview the selected additions. Press `Esc` to return to the
+   Profile view.
+3. Review the exact import preview. Use `j`/`k` for one row and the arrows or
+   `PageUp`/`PageDown` for a visible page. Press `y` to apply the selected
+   additions, or `n`/`Esc` to cancel and return to the import list. Each result
+   is reported; an item failure does not stop the remaining additions.
+
+Imported recipes remain unapproved. Import does not install Apps or Packages or
+run Host commands. Replica entries describe identity on the exporting machine
+only. They do not confer approval or installed state.
+
+Scrollable previews elsewhere in the TUI show every declaration and execution term. Use `j`/`k` to move one row, or the arrows and `PageUp`/`PageDown` to move by a visible page. Confirm only after every physical row has been displayed. Resizing a preview requires reviewing any rows that have not yet been displayed.
 
 Removing an App recipe checks its approved version command and tracked state.
 If the App is installed or tracked, the TUI offers the existing uninstall flow;
@@ -558,7 +615,13 @@ From a source checkout, build and run the CLI directly:
 pnpm install
 pnpm build
 node dist/src/cli.js --version
+pnpm test:skills
 ```
+
+`pnpm test:skills` runs the Python standard-library tests from `tests/skills/`.
+It starts a separate Python process for each bundled skill and sets
+`PYTHONDONTWRITEBYTECODE=1`, so the tests do not create bytecode files in the
+skill directories.
 
 ## Static analysis
 

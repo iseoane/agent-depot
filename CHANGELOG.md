@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-13
+
+### Added
+
+- The Profile TUI guides export through a folder picker and editable filename,
+  then shows the full destination and a confirmation preview. Import filters for
+  JSON files, can show all files, and keeps the picker open with inline read or
+  parse errors.
+- Profile import lets users select additions before previewing and applying
+  them. Identical entries and conflicts remain skipped, and each selected
+  addition is reported independently.
+
+### Changed
+
+- Profile export checklist rows use semantic colors while preserving terminal wrapping.
+
+### Fixed
+
+- Moved bundled-skill tests to `tests/skills/`. `pnpm test:skills` runs each
+  suite in its own Python process with bytecode writes disabled, so tests no
+  longer alter skill trees and cause source-versus-packed hash checks to report
+  false updates.
+
 ## [0.6.0] - 2026-10-12
 
 ### Added

@@ -44,7 +44,7 @@ Cada cita del juez se verifica mecánicamente contra la transcripción por subca
 
 ## Tests
 
-From the Agent Depot repository root, run:
+Desde la raíz del repositorio Agent Depot, ejecuta:
 
 ```bash
 pnpm test:skills

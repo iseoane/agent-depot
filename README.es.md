@@ -525,7 +525,7 @@ se recortan la pestaña del encabezado y el título de la nota.
 | 2 Catalog | Skills y Packages disponibles, además de App recipes aplicables y aprobadas cuya ausencia se ha verificado. La instalación de una App tiene una previsualización y confirmación separadas. Las recetas inválidas o sin aprobar permanecen en Sources; un estado desconocido nunca se trata como ausencia. Los Packages que el Host confirma como instalados se ocultan; los seleccionados o con estado desconocido siguen visibles. Los Skills propiedad de Packages conservan su comportamiento actual. |
 | 3 Installations | Apps cuya instalación está confirmada, instalaciones de Skills gestionadas (globales de usuario y de proyecto), selecciones de Packages con pertenencia al Host y evidencia de versión mostradas por separado, y Skills globales de usuario no gestionados. Un registro de instalación de App permanece visible aunque caduque la aprobación de la receta, pero sus acciones siguen exigiendo aprobación vigente. |
 | 4 Updates | Skills gestionados en el ámbito global de usuario y de proyecto, además de Apps y Packages instalados globales de usuario con una versión más reciente disponible. Las Apps desconocidas o no verificadas no se tratan como instaladas. |
-| 5 Profile | Exportar o importar elecciones portables de Sources globales de usuario, selecciones individuales de Skills, App recipes y selecciones de Packages. Las réplicas solo identifican recursos cuya instalación se confirmó en el origen. |
+| 5 Profile | Exporta o importa elecciones globales de usuario. Consulta el [flujo de Profile](#flujo-de-profile) para ver la lista y los pasos del selector de archivos. |
 
 Teclas por vista (los avisos también aceptan `Esc` para cancelar y `y`/`n` para
 confirmar):
@@ -536,9 +536,73 @@ confirmar):
 | Catalog | `Enter`/flechas expanden y contraen; `space` marca el Skill disponible resaltado; `a` marca o desmarca los Skills disponibles visibles de su Source; `i` inicia la instalación de los Skills marcados o del Skill, Package o App aprobada cuya ausencia se verificó y que está resaltada. Confirma la instalación de una App por separado con `y`. `/` filtra y `s` amplía la vista de una Source a todas. Las marcas de otras Sources se conservan y no se instalan Skills ocultos por el filtro. |
 | Installations | `Enter`/flechas expanden y contraen. En filas globales de usuario, `u` inicia la desinstalación de una App o Skill gestionada, o elimina un Skill no gestionado; los Skills de proyecto no se pueden eliminar. `h` o `i` añade Hosts a una instalación global de usuario, y `A` o `Enter` adopta un Skill no gestionado. `space` marca una hoja y `a` marca todas las hojas visibles; las acciones por lotes omiten instalaciones de proyecto con un motivo. En una fila de App, `u` previsualiza la desinstalación y `h` selecciona setup/teardown; las recetas modificadas requieren una nueva aprobación. En una fila de Package, `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala y `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
 | Updates | `space` marca una actualización, `a` marca todas las actualizaciones disponibles y `t`/`p`/`g` selecciona todo, el ámbito de proyecto o el global de usuario. `Enter` previsualiza las filas marcadas; `u` previsualiza el lote seleccionado; ninguna aplica actualizaciones. `r` vuelve a comprobar y las flechas izquierda/derecha pliegan o despliegan el grupo "cannot be checked". En una previsualización, las flechas o PageUp/PageDown avanzan una página visible y `j`/`k` una fila. Revisa todas las filas antes de `y`; `n` cancela. Las filas desconocidas son informativas. Packages y Apps solo se gestionan en el ámbito global de usuario; Packages requieren aprobación de acción antes de ejecutar una actualización. |
-| Profile | `e` abre la lista de exportación; dentro, `e` exporta toda la selección marcada y `Enter` solo expande un grupo o previsualiza una nota. `space` alterna una fila, `a` alterna todas, `Esc` vuelve atrás. La exportación abre después un navegador de carpetas (`j`/`k` mueven, `Enter` abre una carpeta o elige "Use this folder", Izquierda/Retroceso sube al directorio padre, `Esc` vuelve), un editor de nombre de archivo (por defecto `agent-depot-profile.json`, `Ctrl+U` lo borra, un nombre sin extensión recibe `.json`, `Enter` muestra la ruta completa) y la previsualización. La importación abre el mismo navegador filtrado a archivos `.json`; `f` muestra todos los archivos. `j`/`k` desplazan las previsualizaciones y los resultados |
+| Profile | Pulsa `e` para exportar o `i` para importar. Consulta el [flujo de Profile](#flujo-de-profile) para ver la navegación, la selección, las previsualizaciones y las cancelaciones. |
 
-Las previsualizaciones desplazables muestran todas las declaraciones y los términos de ejecución. Usa `j`/`k` para avanzar una fila, o las flechas y `PageUp`/`PageDown` para avanzar una página visible. Confirma solo después de mostrar cada fila física. Si cambias el tamaño del terminal, revisa las filas que aún no se han mostrado.
+### Flujo de Profile
+
+La vista Profile transfiere elecciones portables globales de usuario. No
+transfiere instalaciones ni aprobaciones. Exportación e importación empiezan en
+la raíz del proyecto, salvo que la aplicación indique otro directorio inicial.
+
+#### Exportar
+
+1. Pulsa `e` en la vista Profile para crear y abrir la lista de exportación.
+   El grupo **Sources**, contraído al inicio, contiene grupos anidados para
+   Sources, Skills, Apps y Packages. **Installed replicas** y **Export notes**
+   son grupos separados. Pulsa `Enter` o las flechas para expandir o contraer un
+   grupo. `Enter` sobre una nota de exportación muestra sus detalles; nunca
+   inicia la exportación.
+2. Usa `j`/`k` o las flechas para moverte, `space` para alternar una fila
+   seleccionable y `a` para seleccionar todo o borrar la selección. Los
+   elementos excluidos y las filas informativas no se pueden seleccionar.
+   Pulsa `e` para exportar las filas seleccionadas. Si no hay ningún recurso
+   portable seleccionado, no se escribe nada. Pulsa `Esc` para salir de la
+   lista.
+3. Elige una carpeta de destino. Muévete con `j`/`k` o las flechas; pulsa
+   `Enter` para abrir una carpeta o selecciona **Use this folder** para elegir
+   la carpeta actual. Usa Izquierda o Retroceso para subir a la carpeta
+   superior. Pulsa `p` para mostrar la ruta completa y otra vez `p` para volver
+   al listado. `Esc` vuelve a la lista de exportación.
+4. Edita el nombre del archivo. El valor predeterminado es
+   `agent-depot-profile.json`. `Ctrl+U` borra el nombre y se añade `.json` si
+   falta una extensión. El editor muestra la ruta completa de destino. Pulsa
+   `Enter` para revisarla. Si la ruta ya existe, incluido un enlace simbólico,
+   aparece un error en línea y puedes elegir otro nombre; la exportación nunca
+   sobrescribe. `Esc` vuelve al selector de carpetas.
+5. Revisa la previsualización de exportación, incluidas las exclusiones y
+   advertencias. Usa `j`/`k` para avanzar una fila y las flechas o
+   `PageUp`/`PageDown` para avanzar una página visible. Pulsa `y` para escribir
+   el archivo nuevo. Pulsa `n` o `Esc` para cancelar y volver al editor del
+   nombre. Los resultados muestran la ruta final.
+
+#### Importar
+
+1. Pulsa `i` en la vista Profile para abrir el selector de archivos. Al
+   principio muestra archivos `.json` y carpetas. Pulsa `f` para mostrar todos
+   los archivos y otra vez `f` para filtrar de nuevo por `.json`. Navega con
+   `j`/`k` o las flechas; pulsa `Enter` para abrir una carpeta o seleccionar un
+   archivo, e Izquierda o Retroceso para subir a la carpeta superior. Pulsa `p`
+   para mostrar la ruta completa y otra vez `p` para volver. `Esc` vuelve a la
+   vista Profile.
+2. El archivo seleccionado se analiza y previsualiza. Si no se puede leer o
+   no es válido, aparece un error en línea y el selector permanece abierto para
+   elegir otro archivo. La lista de importación marca cada elemento como
+   **add**, **same** (omitido) o **conflict** (omitido, con las diferencias).
+   Solo se pueden seleccionar las adiciones. Usa `space` para alternar una
+   fila, `a` para seleccionar todas las adiciones o borrar la selección, y
+   `Enter` para previsualizar las adiciones seleccionadas. `Esc` vuelve a la
+   vista Profile.
+3. Revisa la previsualización exacta de importación. Usa `j`/`k` para avanzar
+   una fila y las flechas o `PageUp`/`PageDown` para una página visible. Pulsa
+   `y` para aplicar las adiciones seleccionadas, o `n`/`Esc` para cancelar y
+   volver a la lista de importación. Se informa del resultado de cada elemento;
+   un fallo no detiene las demás adiciones.
+
+Las recetas importadas siguen sin aprobarse. La importación no instala Apps ni
+Packages ni ejecuta comandos del Host. Las réplicas solo describen identidades
+en la máquina de origen; no transfieren aprobaciones ni estado de instalación.
+
+Las demás previsualizaciones desplazables de la TUI muestran todas las declaraciones y los términos de ejecución. Usa `j`/`k` para avanzar una fila o las flechas y `PageUp`/`PageDown` para avanzar una página visible. Confirma solo después de mostrar cada fila física. Si cambias el tamaño del terminal, revisa las filas que aún no se han mostrado.
 
 Al eliminar una receta App se comprueban su comando de versión aprobado y su
 seguimiento. Si la App está instalada o sigue registrada, la TUI ofrece el flujo
@@ -612,7 +676,13 @@ Desde un checkout de código fuente, compila y ejecuta la CLI directamente:
 pnpm install
 pnpm build
 node dist/src/cli.js --version
+pnpm test:skills
 ```
+
+`pnpm test:skills` ejecuta los tests de la biblioteca estándar de Python
+ubicados en `tests/skills/`. Inicia un proceso Python separado para cada skill
+incluida y define `PYTHONDONTWRITEBYTECODE=1`, por lo que los tests no crean
+archivos de bytecode en los directorios de las skills.
 
 ## Análisis estático
 

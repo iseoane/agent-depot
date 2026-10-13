@@ -19,11 +19,43 @@ A new trusted-publisher configuration expires unless its first successful publis
 
 The package's `repository.url` must continue to point to `https://github.com/iseoane/agent-depot`. npm uses that value to verify the repository identity.
 
+## Prepare a release locally
+
+Update `package.json` to the intended stable version and add the matching
+changelog entry in the reviewed release change. Do not update dependencies to
+prepare a patch release. From that checkout, run the same checks used by the
+publish workflow:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm audit:dead-code
+node --test scripts/release-artifact.test.mjs
+pnpm test:skills
+pnpm test:pack
+```
+
+`pnpm test:skills` runs each bundled skill's Python tests in a separate process
+and disables bytecode writes. Check the compiled CLI version with
+`pnpm build && node dist/src/cli.js --version`. It must print the version in
+`package.json`. `pnpm test:pack` builds and smoke-tests the packed package. These
+checks do not publish, tag, push, or dispatch the workflow.
+
+After review, merge the release change to `main`. Only then follow [Publish a release](#publish-a-release) to manually dispatch the trusted-publishing workflow from `main`.
+
 ## Publish a release
 
 1. Merge the release changes to `main`. Set `package.json` to the intended stable SemVer in a reviewed change. The release workflow never bumps the version.
 2. In GitHub Actions, select **Publish to npm**, choose **Run workflow**, select `main`, and enter the exact `package.json` version, without a leading `v`.
-3. Review the run. The verify job runs type checks, lint, tests, both Python doctor test suites, the dead-code audit, and package smoke checks. It packs and checks the package identity, refuses a version already present on npm, and passes that exact tarball and its checksums to the publish job.
+3. Review the run. The verify job runs type checks, lint, unit tests, the TUI
+   end-to-end tests, both Python doctor test suites, the dead-code audit,
+   release-artifact tests and package smoke checks. The doctor test suites run
+   in separate Python processes with bytecode writes disabled. The job packs and
+   checks package identity, refuses a version already present on npm, and passes
+   that exact tarball and its checksums to the publish job.
 4. The publish job confirms the artifact came from the dispatched commit, checks the npm registry again, and publishes the tarball. It checks up to 24 times for npm to report the requested version as `latest` with the exact tarball integrity, waiting five seconds between checks. Each registry request times out after 30 seconds, and GitHub ends the publish job after ten minutes.
 
 The workflow runs only when dispatched from `main`. It serializes releases without cancelling an active publish. A registry network error or unexpected HTTP response stops the run instead of treating the version as available. A post-publish timeout means publication may have succeeded; check npm before retrying.
