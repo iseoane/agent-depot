@@ -145,7 +145,7 @@ export function createSelfUpdateOperations(options: SelfUpdateOptions): SelfUpda
       const npm = await npmGlobalExecutable();
       if (npm === undefined) throw new Error("this CLI is not verified in npm's global package directory");
       const result = await run(npm, [
-        "install", "--global", "--no-audit", "--no-fund", "--no-update-notifier", "--logs-max=0", "--ignore-scripts",
+        "install", "--global", "--no-audit", "--no-fund", "--no-update-notifier", "--logs-max=0", "--ignore-scripts", "--prefer-online",
         "--registry=https://registry.npmjs.org/", `${options.packageName}@${version}`,
       ], { maxStderrBytes: MAX_NPM_STDERR_BYTES, timeoutMs: COMMAND_TIMEOUT_MS });
       if (result.code !== 0 || result.signal !== null || result.timedOut || result.outputTooLarge) {

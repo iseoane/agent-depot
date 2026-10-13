@@ -124,7 +124,7 @@ test("checks npm global provenance before reading the registry and pins a confir
   assert.deepEqual(setup.calls[2], {
     executable: setup.npmPath,
     args: [
-      "install", "--global", "--no-audit", "--no-fund", "--no-update-notifier", "--logs-max=0", "--ignore-scripts",
+      "install", "--global", "--no-audit", "--no-fund", "--no-update-notifier", "--logs-max=0", "--ignore-scripts", "--prefer-online",
       "--registry=https://registry.npmjs.org/", "@iseoane/agent-depot@0.6.0",
     ],
   });
