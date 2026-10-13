@@ -535,6 +535,48 @@ test("Pi checkout origin mismatch blocks version evidence while local modificati
   }
 });
 
+test("only a matching root-only untracked npm lockfile permits Pi update comparison", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    await git(fixture.checkoutPath, ["rm", "package-lock.json"]);
+    await git(fixture.checkoutPath, ["commit", "-m", "remove tracked lock"]);
+    const commit = await gitOutput(fixture.checkoutPath, ["rev-parse", "HEAD"]);
+    const readEvidence = async () => findInstalledBundle(await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    }), piDescriptor("repo"), piSelection(fixture.url));
+    const lockPath = path.join(fixture.checkoutPath, "package-lock.json");
+    const root = { name: "repo", version: "1.2.3" };
+    const lock = { ...root, lockfileVersion: 3, requires: true, packages: { "": root } };
+    const bytes = JSON.stringify(lock);
+    await writeFile(lockPath, bytes);
+    assert.deepEqual(await readEvidence(), { kind: "installed", version: "1.2.3", commit });
+    assert.equal(await readFile(lockPath, "utf8"), bytes);
+    assert.equal(classifyUpdate(await readEvidence(), { kind: "manifest-version", version: "1.2.3", declaredBy: "bundle" }, "b".repeat(40), true), "update available");
+    for (const invalid of [
+      { ...lock, version: "9.9.9" },
+      { ...lock, packages: { "": { ...root, dependencies: { other: "*" } } } },
+      { ...lock, packages: { "": root, "node_modules/other": { version: "1.0.0" } } },
+    ]) {
+      await writeFile(lockPath, JSON.stringify(invalid));
+      const evidence = await readEvidence();
+      assert.equal(evidence.kind, "installed");
+      if (evidence.kind === "installed") assert.equal(evidence.commit, undefined);
+    }
+    await writeFile(lockPath, bytes);
+    await writeFile(path.join(fixture.checkoutPath, "local.txt"), "local change");
+    const dirty = await readEvidence();
+    if (dirty.kind === "installed") assert.equal(dirty.commit, undefined);
+    else assert.fail("membership must remain installed");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("a modified tracked Pi lockfile keeps the HEAD version but no update identity", async () => {
   const fixture = await piCheckoutFixture();
   try {
