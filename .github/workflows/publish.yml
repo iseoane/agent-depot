@@ -93,7 +93,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
@@ -165,7 +165,7 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
           RELEASE_DIR: ${{ runner.temp }}/release
         run: |
-          for attempt in {1..24}; do
+          for attempt in {1..48}; do
             metadata="$RELEASE_DIR/registry.json"
             if ! status=$(curl --silent --show-error --connect-timeout 10 --max-time 30 --output "$metadata" --write-out '%{http_code}' \
               https://registry.npmjs.org/@iseoane%2fagent-depot); then
@@ -195,14 +195,14 @@ jobs:
                 echo "Verified @iseoane/agent-depot@$RELEASE_VERSION as npm latest with matching tarball integrity"
                 exit 0
               fi
-              echo "Waiting for npm version metadata and latest tag (attempt $attempt/24)"
+              echo "Waiting for npm version metadata and latest tag (attempt $attempt/48)"
             elif [[ "$status" != "404" ]]; then
               echo "npm registry verification returned HTTP $status; publish may have succeeded, but verification failed" >&2
               exit 1
             fi
-            if [[ "$attempt" != 24 ]]; then
-              echo "Waiting for the published version to appear on npm (attempt $attempt/24)"
-              sleep 5
+            if [[ "$attempt" != 48 ]]; then
+              echo "Waiting for the published version to appear on npm (attempt $attempt/48)"
+              sleep 10
             fi
           done
           echo "Publish command completed, but npm did not expose the version before polling stopped. Do not retry until registry state is checked." >&2
