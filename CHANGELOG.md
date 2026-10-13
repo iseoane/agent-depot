@@ -15,16 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   then shows the full destination and a confirmation preview. Import filters for
   JSON files, can show all files, and keeps the picker open with inline read or
   parse errors.
-- Profile import lets users select additions before previewing and applying
-  them. Identical entries and conflicts remain skipped, and each selected
-  addition is reported independently.
 
 ### Changed
 
-- Profile export checklist rows use semantic colors while preserving terminal wrapping.
+- `e` exports the complete Profile selection from any checklist row. `Enter`
+  expands groups or previews notes without starting export.
+- Profile export and import previews use semantic colors for resource names,
+  Hosts, version policies, and fields, including wrapped continuation rows.
 
 ### Fixed
 
+- Profile import applies the exact previewed subset, including selections after
+  unselected entries.
+- Export ignores stale filename checks after edits and refuses existing files
+  or symlinks without overwriting them. Folder navigation follows symlinked
+  directories and keeps the guidance visible in narrow terminals.
 - Moved bundled-skill tests to `tests/skills/`. `pnpm test:skills` runs each
   suite in its own Python process with bytecode writes disabled, so tests no
   longer alter skill trees and cause source-versus-packed hash checks to report
