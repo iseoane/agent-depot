@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { Text } from "ink";
 import { render } from "ink-testing-library";
 
 import { BUILT_IN_SOURCE, type Source, type SourceOperations } from "../src/sources.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { formatHeaderTabs, headerTabRowCount } from "../src/tui/header-layout.js";
 import { previewViewport } from "../src/tui/preview-window.js";
-import { computeWindow, pageStep } from "../src/tui/window.js";
+import { computeWindow, pageStep, useListHeight } from "../src/tui/window.js";
 import { waitForFrame } from "./wait-for-frame.js";
+
+function ListHeightProbe({ override }: { readonly override?: number }) {
+  return <Text>{useListHeight(override, 100)}</Text>;
+}
+
+test("list height keeps the default minimum", () => {
+  const view = render(<ListHeightProbe />);
+  assert.equal(view.lastFrame(), "3");
+  view.unmount();
+});
 
 test("80-column tab layout keeps every numbered destination on one line", () => {
   const tabs = formatHeaderTabs("catalog", 76);
