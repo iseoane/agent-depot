@@ -51,12 +51,20 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
     const unmatchedPreview = frame(React.createElement(PreviewConfirm, {
       lines: ["Skill command [shell command] (custom)"], question: "Review?",
     }));
+    const longProfileLines = [
+      "Source git:" + "0123456789abcdef".repeat(8) + " https://example.test/" + "source-segment/".repeat(12) + "skills.git (included: true)",
+      "Skill skills/" + "long-skill-directory/".repeat(12) + "skill [pi, codex, claude] (latest)",
+      "Package " + "package/".repeat(12) + "demo from https://example.test/" + "package-source/".repeat(10) + "repo.git (latest; saved selection)",
+    ];
+    const longProfile = Array.from({ length: 60 }, (_, cursor) => frame(React.createElement(PreviewConfirm, {
+      lines: longProfileLines, cursor, question: "Apply Profile? (y/n)",
+    }))).join("\\n");
     const prompt = frame(React.createElement(DecisionPrompt, null, "Refresh these Sources?"));
     const header = frame(React.createElement(Header, { view: "updates", columns: 80 }));
     const skillVersion = frame(React.createElement(TreeRowLine, { row: treeRow({ kind: "installation", row: { scope: "user-global", selection: { path: "skills/demo", hosts: ["pi"] }, source: "builtin:agent-depot", policy: "latest", installed: "1.0.0", adopted: false } }), selected: false, marked: false }));
     const appVersion = frame(React.createElement(TreeRowLine, { row: treeRow({ kind: "app", row: { entry: { file: "apps/demo.json", recipe: { name: "demo" } }, inspection: { status: "installed", installedVersion: "1.0.0", evidence: "recorded" } } }), selected: false, marked: false }));
     const packageVersion = frame(React.createElement(TreeRowLine, { row: treeRow({ kind: "package", row: { selection: { host: "pi" }, name: "demo", installed: "installed 1.0.0", installedVersion: "1.0.0", available: "2.0.0", status: { kind: "current" } } }), selected: false, marked: false }));
-    process.stdout.write([browse, result, failure, check, preview, profilePreview, importPreview, unmatchedPreview, prompt, header, skillVersion, appVersion, packageVersion].join("\\n---\\n"));
+    process.stdout.write([browse, result, failure, check, preview, profilePreview, importPreview, unmatchedPreview, longProfile, prompt, header, skillVersion, appVersion, packageVersion].join("\\n---\\n"));
   `;
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: process.cwd(),
@@ -64,7 +72,7 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
     env: { ...process.env, FORCE_COLOR: "3" },
   });
   assert.equal(child.status, 0, child.stderr);
-  const [browse, result, failure, check, preview, profilePreview, importPreview, unmatchedPreview, prompt, header, skillVersion, appVersion, packageVersion] = child.stdout.split("\n---\n");
+  const [browse, result, failure, check, preview, profilePreview, importPreview, unmatchedPreview, longProfile, prompt, header, skillVersion, appVersion, packageVersion] = child.stdout.split("\n---\n");
   assert.ok(browse?.includes(ansi(122, 162, 247, "skills/demo")), "browse path is blue");
   assert.ok(browse?.includes(ansi(122, 162, 247, "user-global")), "browse scope is blue");
   assert.ok(browse?.includes(ansi(192, 202, 245, "1.0.0")), "installed version is light");
@@ -105,6 +113,13 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
   assert.ok(importPreview?.includes(ansi(255, 158, 100, " latest")), "Import version policy is orange");
   assert.ok(importPreview?.includes(ansi(122, 162, 247, "  Source")), "Import Source field is blue");
   assert.ok(unmatchedPreview?.includes(ansi(192, 202, 245, "Skill command [shell command] (custom)")), "unmatched brackets and parentheses stay plain");
+  assert.ok(longProfile?.includes(ansi(65, 72, 104, "git:0123456789abcdef")), "wrapped Source identity keeps its muted color");
+  assert.ok(longProfile?.includes(ansi(192, 202, 245, "ment/source-segment")), "wrapped Source URL continuation keeps its value color");
+  assert.ok(longProfile?.includes(`\u001b[1m${"skills/long-skill-directory/"}`), "wrapped Skill path stays bold");
+  assert.ok(longProfile?.includes(ansi(122, 162, 247, "codex, claude")), "wrapped Skill host continuation keeps its marker color");
+  assert.ok(longProfile?.includes(ansi(255, 158, 100, "latest")), "wrapped Skill policy keeps its version color");
+  assert.ok(longProfile?.includes(`\u001b[1m${"package/package/"}`), "wrapped Package path stays bold");
+  assert.ok(longProfile?.includes(ansi(192, 202, 245, "age-source/package-source/pack")), "wrapped Package Source retains its value color");
 
   assert.ok(preview?.includes(ansi(255, 46, 154, "Confirmation")), "panel title remains fuchsia");
   assert.ok(preview?.includes(ansi(122, 162, 247, "  target:")), "CLI target field label is blue");

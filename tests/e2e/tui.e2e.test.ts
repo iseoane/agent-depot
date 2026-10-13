@@ -983,6 +983,41 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
 });
 
 
+test("wrapped Profile preview retains semantic colors while scrolling in a narrow PTY", { timeout: 120_000, skip: process.platform !== "linux" }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "depot-profile-wrapped-colors-"));
+  const side = await profileSandbox(path.join(root, "side"), path.join(root, "repo"));
+  const file = path.join(projectRoot, "wrapped-profile-colors.json");
+  const sourceUrl = `https://example.test/${"source-segment/".repeat(14)}skills.git`;
+  await writeFile(file, JSON.stringify({
+    format: "agent-depot-profile/v1", agentDepotVersion: "0.6.0",
+    sources: [{ url: sourceUrl, included: true }],
+    skills: [{ source: { kind: "external", url: sourceUrl }, path: `skills/${"long-directory/".repeat(14)}demo`,
+      hosts: ["claude", "codex", "pi"], version: { policy: "latest" } }],
+    apps: [],
+  }));
+  const session = new TuiSession({ ...side.env, FORCE_COLOR: "3" }, 40, 17);
+  try {
+    await session.waitFor(/n add ·/u);
+    await session.send("5", /e export · i import/u);
+    await session.send("i", /Showing \.json only/u);
+    await session.send("j", />\s+wrapped-profile-colors\.json/u);
+    await session.send("\r", /Enter preview/u);
+    const preview = await session.send("\r", /Apply Profile\? \(y\/n\)/u);
+    assert.ok(preview.split("\n").length <= 17, `wrapped Profile exceeded its 40x17 PTY:\n${preview}`);
+    const continuation = await session.send("j".repeat(7), /Review 8 of 41/u);
+    assert.match(continuation, /7–8 of 41/u, "the narrow preview scrolls to wrapped continuation rows");
+    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, "segment/source-segment/source-se")), "wrapped Source URL continuation retains its value color in a narrow PTY");
+    await session.send("n", /Import Profile/u);
+    await session.send("\u001b", /e export · i import/u);
+    session.press("q");
+    assert.equal(await session.exitCode(), 0);
+  } finally {
+    session.kill();
+    await rm(file, { force: true });
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("the Profile file picker fits its wrapped guidance into a narrow real terminal", { timeout: 120_000, skip: process.platform !== "linux" }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), "depot-profile-picker-layout-"));
   const side = await profileSandbox(path.join(root, "side"), path.join(root, "repo"));
