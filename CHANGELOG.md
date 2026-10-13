@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-13
+
+### Fixed
+
+- Pi Package update comparison no longer treats npm's generated dependency-free
+  root `package-lock.json` as a local checkout change. Any other lockfile, and
+  any tracked modification or additional untracked file, still blocks the
+  comparison.
+
 ## [0.6.1] - 2026-10-13
 
 ### Added
