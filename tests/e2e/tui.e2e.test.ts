@@ -1013,7 +1013,7 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await seedProfileSandbox(a, repo);
     // Both sessions run with the shared project cwd as the picker's starting directory.
     const file = path.join(projectRoot, "profile.json");
-    const exporting = new TuiSession(a.env);
+    const exporting = new TuiSession({ ...a.env, FORCE_COLOR: "3" });
     sessions.push(exporting);
     await exporting.waitFor(/n add ·/u);
     await exporting.send("5", /e export · i import/u);
@@ -1036,7 +1036,17 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await exporting.send("\r", /Export file name/u);
     await exporting.send("\u0015", /Name: _/u);
     await exporting.send("profile.json", /Name: profile\.json_/u);
-    await exporting.send("\r", /Save\/Export Profile\? \(y\/n\)/u);
+    const confirmation = await exporting.send("\r", /Save\/Export Profile\? \(y\/n\)/u);
+    assert.ok(confirmation.split("\n").length <= 40, `Profile confirmation exceeded its PTY:\n${confirmation}`);
+    assert.ok(confirmation.includes(`Destination: ${file}`), "Destination text is unchanged");
+    assert.ok(confirmation.includes("Preview: export portable user-global profile"), "Preview text is unchanged");
+    assert.ok(confirmation.includes("Skill skills/alpha [claude, pi] (latest)"), "Skill preview text is unchanged");
+    assert.ok(exporting.terminalOutput.includes(ansiColor(122, 162, 247, "Destination:")), "Destination field is blue");
+    assert.ok(exporting.terminalOutput.includes(ansiColor(122, 162, 247, "Skill")), "Skill category is blue");
+    assert.ok(exporting.terminalOutput.includes("\u001b[1mskills/alpha"), "Skill name is bold");
+    assert.ok(exporting.terminalOutput.includes(ansiColor(122, 162, 247, "claude, pi")), "Skill hosts are blue");
+    assert.ok(exporting.terminalOutput.includes(ansiColor(255, 158, 100, "latest")), "Skill version policy is orange");
+    assert.match(confirmation, /Save\/Export Profile\? \(y\/n\)/u);
     await assert.rejects(readFile(file), { code: "ENOENT" });
     await exporting.send("y", /Exported profile to/u);
     const profile = JSON.parse(await readFile(file, "utf8"));

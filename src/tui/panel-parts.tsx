@@ -70,6 +70,62 @@ function previewField(line: string): { readonly label: string; readonly value: s
   return label === undefined ? undefined : { label, value: line.slice(label.length) };
 }
 
+type PreviewSpan = { readonly text: string; readonly color?: string; readonly bold?: boolean };
+
+function previewSpan(text: string, color: string, bold = false): PreviewSpan {
+  return { text, color, bold };
+}
+
+function profilePreviewSpans(line: string): readonly PreviewSpan[] | undefined {
+  if (line.startsWith("Destination: ")) {
+    return [previewSpan("Destination:", theme.field), previewSpan(line.slice("Destination:".length), theme.value)];
+  }
+  if (line === "Preview: export portable user-global profile" || line === "Preview: import portable user-global profile") {
+    return [previewSpan("Preview:", theme.field), previewSpan(line.slice("Preview:".length), theme.value)];
+  }
+  if (line.startsWith("WARNING:")) return [previewSpan(line, theme.warning)];
+
+  const source = /^Source (git:[^ ]+) (.+) \(included: (true|false)\)$/u.exec(line);
+  if (source) return [previewSpan("Source", theme.field), previewSpan(" ", theme.value),
+    previewSpan(source[1]!, theme.muted), previewSpan(" ", theme.value), previewSpan(source[2]!, theme.value),
+    previewSpan(" (", theme.value), previewSpan("included:", theme.field), previewSpan(` ${source[3]})`, theme.value)];
+
+  const skill = /^Skill (.+) \[([^\]]*)\] \((latest|fixed(?: [^)]+)?)\)$/u.exec(line);
+  if (skill) return [previewSpan("Skill", theme.field), previewSpan(" ", theme.value), previewSpan(skill[1]!, theme.value, true),
+    previewSpan(" [", theme.value), previewSpan(skill[2]!, theme.marker), previewSpan("] (", theme.value),
+    previewSpan(skill[3]!, theme.version), previewSpan(")", theme.value)];
+
+  const app = /^App recipe (.+) \(([^;]+); approval not transferred\)$/u.exec(line);
+  if (app) return [previewSpan("App recipe", theme.field), previewSpan(" ", theme.value), previewSpan(app[1]!, theme.value, true),
+    previewSpan(" (", theme.value), previewSpan(app[2]!, theme.marker), previewSpan("; approval not transferred)", theme.value)];
+
+  const packageLine = /^Package (.+) from (.+) \((latest|fixed [^;]+); saved selection\)(.*)$/u.exec(line);
+  if (packageLine) return [previewSpan("Package", theme.field), previewSpan(" ", theme.value),
+    previewSpan(packageLine[1]!, theme.value, true), previewSpan(" from ", theme.value), previewSpan(packageLine[2]!, theme.value),
+    previewSpan(" (", theme.value), previewSpan(packageLine[3]!, theme.version),
+    previewSpan(`; saved selection)${packageLine[4]}`, theme.value)];
+
+  const replica = /^Replica intent (Installed Skill|Installed App|Installed Package) (.+?)(; .*)?$/u.exec(line);
+  if (replica) return [previewSpan("Replica intent", theme.field), previewSpan(" ", theme.value),
+    previewSpan(replica[1]!, theme.field), previewSpan(" ", theme.value), previewSpan(replica[2]!, theme.value, true),
+    previewSpan(replica[3] ?? "", theme.value)];
+
+  if (line.startsWith("  Source ")) return [previewSpan("  Source", theme.field), previewSpan(line.slice("  Source".length), theme.value)];
+  if (line.startsWith("Origin replica intent:")) return [previewSpan("Origin replica intent:", theme.field),
+    previewSpan(line.slice("Origin replica intent:".length), theme.value)];
+
+  const imported = /^(add|same|conflict|skip)( \(discovery inclusion is not imported\))?: (Source|Skill|App recipe|Package) (.+)$/u.exec(line);
+  if (imported) return [previewSpan(`${imported[1]}${imported[2] ?? ""}:`, theme.field), previewSpan(` ${imported[3]}`, theme.field),
+    previewSpan(" ", theme.value), previewSpan(imported[4]!, theme.value, true)];
+
+  const hosts = /^ {2}hosts: ([^;]*); version policy: (latest|fixed(?: .+)?)$/u.exec(line);
+  if (hosts) return [previewSpan("  hosts:", theme.field), previewSpan(" ", theme.value),
+    previewSpan(hosts[1]!, theme.marker), previewSpan("; ", theme.value), previewSpan("version policy:", theme.field),
+    previewSpan(` ${hosts[2]}`, theme.version)];
+
+  return undefined;
+}
+
 export function PreviewLines({ lines, warnFirst = false }: {
   readonly lines: readonly string[];
   readonly warnFirst?: boolean;
@@ -77,6 +133,9 @@ export function PreviewLines({ lines, warnFirst = false }: {
   return (
     <>
       {lines.map((line, position) => {
+        const profileSpans = profilePreviewSpans(line);
+        if (profileSpans) return <Text key={position}>{profileSpans.map((span, index) =>
+          <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>;
         const field = previewField(line);
         return field ? (
           <Text key={position}>

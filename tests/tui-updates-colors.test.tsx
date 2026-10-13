@@ -34,12 +34,29 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
       lines: ["  target: skills/demo", "  proposed changes: replace 2 managed files"],
       question: "Apply 1 update? y/n · note",
     }));
+    const profilePreview = frame(React.createElement(PreviewConfirm, {
+      lines: ["Destination: /tmp/profile.json", "Preview: export portable user-global profile",
+        "Source git:abc123 https://example.test/skills.git (included: true)",
+        "Skill skills/demo [pi, codex] (latest)", "App recipe demo (linux; approval not transferred)",
+        "Package pi plugins/demo from https://example.test/demo.git (latest; saved selection); no receipt or installed evidence",
+        "Replica intent Installed Skill skills/demo from https://example.test/skills.git; no installed state or approval is transferred",
+        "WARNING: profile Agent Depot 99.0.0 is newer than running 0.6.0"],
+      question: "Save/Export Profile? (y/n)",
+    }));
+    const importPreview = frame(React.createElement(PreviewConfirm, {
+      lines: ["Preview: import portable user-global profile", "add: Skill skills/demo",
+        "  hosts: pi,codex; version policy: latest", "  Source https://example.test/skills.git", "WARNING: invalid recipe"],
+      question: "Apply Profile? (y/n)",
+    }));
+    const unmatchedPreview = frame(React.createElement(PreviewConfirm, {
+      lines: ["Skill command [shell command] (custom)"], question: "Review?",
+    }));
     const prompt = frame(React.createElement(DecisionPrompt, null, "Refresh these Sources?"));
     const header = frame(React.createElement(Header, { view: "updates", columns: 80 }));
     const skillVersion = frame(React.createElement(TreeRowLine, { row: treeRow({ kind: "installation", row: { scope: "user-global", selection: { path: "skills/demo", hosts: ["pi"] }, source: "builtin:agent-depot", policy: "latest", installed: "1.0.0", adopted: false } }), selected: false, marked: false }));
     const appVersion = frame(React.createElement(TreeRowLine, { row: treeRow({ kind: "app", row: { entry: { file: "apps/demo.json", recipe: { name: "demo" } }, inspection: { status: "installed", installedVersion: "1.0.0", evidence: "recorded" } } }), selected: false, marked: false }));
     const packageVersion = frame(React.createElement(TreeRowLine, { row: treeRow({ kind: "package", row: { selection: { host: "pi" }, name: "demo", installed: "installed 1.0.0", installedVersion: "1.0.0", available: "2.0.0", status: { kind: "current" } } }), selected: false, marked: false }));
-    process.stdout.write([browse, result, failure, check, preview, prompt, header, skillVersion, appVersion, packageVersion].join("\\n---\\n"));
+    process.stdout.write([browse, result, failure, check, preview, profilePreview, importPreview, unmatchedPreview, prompt, header, skillVersion, appVersion, packageVersion].join("\\n---\\n"));
   `;
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: process.cwd(),
@@ -47,7 +64,7 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
     env: { ...process.env, FORCE_COLOR: "3" },
   });
   assert.equal(child.status, 0, child.stderr);
-  const [browse, result, failure, check, preview, prompt, header, skillVersion, appVersion, packageVersion] = child.stdout.split("\n---\n");
+  const [browse, result, failure, check, preview, profilePreview, importPreview, unmatchedPreview, prompt, header, skillVersion, appVersion, packageVersion] = child.stdout.split("\n---\n");
   assert.ok(browse?.includes(ansi(122, 162, 247, "skills/demo")), "browse path is blue");
   assert.ok(browse?.includes(ansi(122, 162, 247, "user-global")), "browse scope is blue");
   assert.ok(browse?.includes(ansi(192, 202, 245, "1.0.0")), "installed version is light");
@@ -67,6 +84,27 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
   assert.ok(check?.includes(ansi(247, 118, 142, "[FAIL]")), "check error has a separate red indicator");
   assert.ok(check?.includes(ansi(122, 162, 247, "Error (project):")), "check error field is blue");
   assert.ok(check?.includes(ansi(192, 202, 245, " manifest exploded")), "check error value is light");
+
+  assert.ok(profilePreview?.includes(ansi(122, 162, 247, "Destination:")), "Profile destination label is blue");
+  assert.ok(profilePreview?.includes(ansi(192, 202, 245, " /tmp/profile.json")), "Profile destination value is light");
+  assert.ok(profilePreview?.includes(ansi(122, 162, 247, "Preview:")), "Profile preview label is blue");
+  assert.ok(profilePreview?.includes(ansi(65, 72, 104, "git:abc123")), "Source identity is muted");
+  assert.ok(profilePreview?.includes(ansi(122, 162, 247, "included:")), "Source inclusion field is blue");
+  assert.ok(profilePreview?.includes(ansi(192, 202, 245, " https://example.test/skills.git")), "Source URL is light");
+  assert.ok(profilePreview?.includes(`\u001b[1mskills/demo`), "Skill name is bold");
+  assert.ok(profilePreview?.includes(ansi(122, 162, 247, "pi, codex")), "Skill hosts use the marker color");
+  assert.ok(profilePreview?.includes(ansi(255, 158, 100, "latest")), "Skill version policy is orange");
+  assert.ok(profilePreview?.includes(`\u001b[1mdemo`), "App name is bold");
+  assert.ok(profilePreview?.includes(ansi(255, 158, 100, "latest")), "Package version policy is orange");
+  assert.ok(profilePreview?.includes(ansi(122, 162, 247, "Replica intent")), "Replica intent category is blue");
+  assert.ok(profilePreview?.includes(`\u001b[1mskills/demo`), "Replica Skill name is bold");
+  assert.ok(profilePreview?.includes(ansi(224, 175, 104, "WARNING: profile Agent Depot")), "Profile warnings are amber");
+  assert.ok(importPreview?.includes(ansi(122, 162, 247, "add:")), "Import action is blue");
+  assert.ok(importPreview?.includes(`\u001b[1mskills/demo`), "Import Skill name is bold");
+  assert.ok(importPreview?.includes(ansi(122, 162, 247, "version policy:")), "Import version field is blue");
+  assert.ok(importPreview?.includes(ansi(255, 158, 100, " latest")), "Import version policy is orange");
+  assert.ok(importPreview?.includes(ansi(122, 162, 247, "  Source")), "Import Source field is blue");
+  assert.ok(unmatchedPreview?.includes(ansi(192, 202, 245, "Skill command [shell command] (custom)")), "unmatched brackets and parentheses stay plain");
 
   assert.ok(preview?.includes(ansi(255, 46, 154, "Confirmation")), "panel title remains fuchsia");
   assert.ok(preview?.includes(ansi(122, 162, 247, "  target:")), "CLI target field label is blue");
