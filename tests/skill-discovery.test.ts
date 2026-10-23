@@ -327,3 +327,27 @@ test("reads the full tree of each shipped built-in skill, including large bundle
   const bundle = skillFiles.find((file) => file.path.endsWith("assets/pierre-diffs.js"));
   assert.ok(bundle && bundle.content.byteLength > 1024 * 1024);
 });
+
+for (const totalMiB of [18, 32]) {
+  test(`reads built-in Skill trees of ${totalMiB} MiB with byte preservation`, async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-large-skill-"));
+    try {
+      await mkdir(path.join(directory, "skill"));
+      const content = Buffer.alloc(1024 * 1024, 0xa5);
+      const paths = Array.from({ length: totalMiB }, (_, index) =>
+        index === 0 ? "skill/SKILL.md" : `skill/asset-${index}.bin`);
+      for (const filePath of paths) await writeFile(path.join(directory, filePath), content);
+      const access = new NodeSourceContentAccess({ builtInRoot: directory });
+      const files = await access.readSkillTree(builtin, "skill");
+      assert.deepEqual(files.map((file) => file.path).sort(), [...paths].sort());
+      assert.equal(files.reduce((total, file) => total + file.content.byteLength, 0), totalMiB * 1024 * 1024);
+      for (const file of files) assert.deepEqual(Buffer.from(file.content), content);
+      if (totalMiB === 32) {
+        await writeFile(path.join(directory, "skill", "extra.bin"), Buffer.from([0xff]));
+        await assert.rejects(access.readSkillTree(builtin, "skill"), /safe total size limit/i);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}

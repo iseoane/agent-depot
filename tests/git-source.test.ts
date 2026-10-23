@@ -424,6 +424,40 @@ test("reads a selected Git Skill tree with supporting files using blob object ID
   });
 });
 
+for (const totalMiB of [18, 32]) {
+  test(`reads Git Skill trees of ${totalMiB} MiB with byte preservation`, async () => {
+    await withCache(async (cachePath) => {
+      const source = {
+        id: sourceIdForUrl("https://github.com/example/skills.git"),
+        kind: "git" as const,
+        url: "https://github.com/example/skills.git",
+      };
+      await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
+      const content = Buffer.alloc(1024 * 1024, 0xa5);
+      const objectId = "a".repeat(40);
+      const paths = Array.from({ length: totalMiB }, (_, index) =>
+        index === 0 ? "selected/SKILL.md" : `selected/asset-${index}.bin`);
+      const tree = paths.map((filePath) => `100644 blob ${objectId}\t${filePath}\0`).join("");
+      const blobs = new Map([[objectId, content]]);
+      const access = new GitSourceSnapshotAccess({ cachePath, runner: new FakeSelectedSnapshotRunner(tree, blobs) });
+      const files = await access.readSkillTree(source, "selected");
+      assert.deepEqual(files.map((file) => file.path), paths);
+      assert.equal(files.reduce((total, file) => total + file.content.byteLength, 0), totalMiB * 1024 * 1024);
+      for (const file of files) assert.deepEqual(Buffer.from(file.content), content);
+      if (totalMiB === 32) {
+        const extraId = "b".repeat(40);
+        const oversized = new GitSourceSnapshotAccess({
+          cachePath,
+          runner: new FakeSelectedSnapshotRunner(`${tree}100644 blob ${extraId}\tselected/extra.bin\0`, new Map([
+            [objectId, content], [extraId, Buffer.from([0xff])],
+          ])),
+        });
+        await assert.rejects(oversized.readSkillTree(source, "selected"), /safe total size limit/i);
+      }
+    });
+  });
+}
+
 test("reads the manifest-selected Git ref instead of silently falling back to HEAD", async () => {
   await withCache(async (cachePath) => {
     const source = {
@@ -531,7 +565,7 @@ test("rejects malformed, unsafe, excessive, and incomplete selected Skill trees"
     const big = "x".repeat(SKILL_TREE_LIMITS.maxFileBytes);
     await assert.rejects(
       read(
-        [entry("selected/SKILL.md"), ...Array.from({ length: 8 }, (_, index) => entry(`selected/part-${index}.bin`))].join(""),
+        [entry("selected/SKILL.md"), ...Array.from({ length: Math.floor(SKILL_TREE_LIMITS.maxTotalBytes / SKILL_TREE_LIMITS.maxFileBytes) }, (_, index) => entry(`selected/part-${index}.bin`))].join(""),
         new Map([[objectId, big]]),
       ),
       /safe total size limit/i,

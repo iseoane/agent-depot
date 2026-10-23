@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-23
+
+### Fixed
+
+- Portable Skills can now contain up to 32 MiB of files instead of 8 MiB,
+  allowing larger Skills such as Archify to install and update. The 2 MiB
+  per-file limit and all other safety checks remain unchanged.
+
 ## [0.6.3] - 2026-10-13
 
 ### Fixed
