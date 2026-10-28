@@ -392,6 +392,30 @@ test("a rejected focused check from before a cancelled action cannot replace the
   assert.equal((await fixture.apps.trackedApps())[0]?.installedVersion, "1.0.0");
 });
 
+test("the focused App check shows an inline indicator that does not block keys", async t => {
+  let release!: (executable: string) => void;
+  let deferNextCheck = false;
+  let started = false;
+  const resolution = new Promise<string>(resolve => { release = resolve; });
+  const fixture = await appFixture(t, true, async () => { deferNextCheck = true; }, async name => {
+    if (deferNextCheck) {
+      deferNextCheck = false;
+      started = true;
+      return resolution;
+    }
+    return `/fake-bin/${name}`;
+  });
+  await selectInstalledApp(fixture.view);
+  await waitForFrame(fixture.view.lastFrame, () => started);
+  const checking = await waitForFrame(fixture.view.lastFrame, /Checking App status…/);
+  assert.equal(checking.match(/Checking App status…/g)?.length, 1);
+  // Keys still move the cursor while the check is pending.
+  fixture.view.stdin.write("k");
+  await waitForFrame(fixture.view.lastFrame, frame => frame.split("\n").some(line => line.startsWith("> ") && line.includes("Apps (user-global)")));
+  release("/fake-bin/demo");
+  await waitForFrame(fixture.view.lastFrame, frame => !frame.includes("Checking App status…"));
+});
+
 test("unreadable App tracking state does not hide independently discovered Skills", async t => {
   const fixture = await appFixture(t, false, async (_apps, recipeFile, home) => {
     const skill = path.join(home, ".agents", "skills", "sample");

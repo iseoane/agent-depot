@@ -25,6 +25,7 @@ import { errorText } from "./batch.js";
 import { BULK_KINDS, handleBulkKey, type BulkMode } from "./bulk-actions.js";
 import { answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
 import { handleUnmanagedKey, UNMANAGED_KINDS, type UnmanagedMode } from "./unmanaged-actions.js";
+import { busy, type Busy } from "./working-model.js";
 
 /**
  * Interaction modes for managing an installed user-global Skill (uninstall and
@@ -53,7 +54,7 @@ export type ManageMode =
   | PackageMode
   | UnmanagedMode
   | BulkMode
-  | { readonly kind: "busy"; readonly label: string };
+  | Busy;
 
 const MANAGE_KINDS: ReadonlySet<string> = new Set<ManageMode["kind"]>([
   "remove-scope",
@@ -110,7 +111,7 @@ export function startUninstall(context: ManageContext, skill: SkillCandidate): v
 }
 
 async function startFullUninstall(context: ManageContext, skill: SkillCandidate): Promise<void> {
-  context.setMode({ kind: "busy", label: `Preparing uninstall of ${skill.name}...` });
+  context.setMode(busy(`Preparing uninstall of ${skill.name}…`));
   try {
     const prepared = await prepareUninstall(context.operations, context.env, skill, context.installed);
     if (!context.isMounted()) return;
@@ -139,7 +140,7 @@ export function startHostAddition(context: ManageContext, skill: SkillCandidate)
 
 async function startHostChange(context: ManageContext, mode: Extract<ManageMode, { kind: "hosts-add" | "hosts-remove" }>): Promise<void> {
   const { operations, env, installed } = context;
-  context.setMode({ kind: "busy", label: `Preparing host change of ${mode.skill.name}...` });
+  context.setMode(busy(`Preparing host change of ${mode.skill.name}…`));
   try {
     if (mode.kind === "hosts-add") {
       const prepared = await prepareHostAddition(operations, env, mode.skill, installed, mode.selected);
@@ -159,7 +160,7 @@ async function startHostChange(context: ManageContext, mode: Extract<ManageMode,
 
 /** Runs a confirmed step in the busy mode and finishes with its outcome. */
 async function execute(context: ManageContext, label: string, action: () => Promise<string>): Promise<void> {
-  context.setMode({ kind: "busy", label });
+  context.setMode(busy(label));
   let result: ManageMessage;
   try {
     result = { kind: "ok", text: await action() };
@@ -196,17 +197,17 @@ function handleConfirmKey(context: ManageContext, mode: ModeOf<"confirm-host-add
       return;
     case "confirm-host-exposure":
       answerYesNo(input, key, () => {
-        void execute(context, `Changing hosts of ${mode.skill.name}...`, () => runHostAddition(mode.prepared, operations, env));
+        void execute(context, `Changing hosts of ${mode.skill.name}…`, () => runHostAddition(mode.prepared, operations, env));
       }, cancelWith("Install cancelled"));
       return;
     case "confirm-host-remove":
       answerYesNo(input, key, () => {
-        void execute(context, `Changing hosts of ${mode.skill.name}...`, () => runHostRemoval(mode.prepared, operations, env, mode.skill));
+        void execute(context, `Changing hosts of ${mode.skill.name}…`, () => runHostRemoval(mode.prepared, operations, env, mode.skill));
       }, cancelWith("Uninstall cancelled"));
       return;
     case "confirm-uninstall":
       answerYesNo(input, key, () => {
-        void execute(context, `Removing ${mode.skill.name}...`, async () => {
+        void execute(context, `Removing ${mode.skill.name}…`, async () => {
           await runUninstall(mode.prepared, operations, env);
           return `Removed ${mode.skill.name} (${mode.skill.path})`;
         });

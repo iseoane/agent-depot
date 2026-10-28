@@ -20,6 +20,7 @@ import {
 import type { TuiEnvironment } from "./environment.js";
 import { answerYesNo, moveCursor } from "./mode-keys.js";
 import { homeOf, type UnmanagedGroup, type UnmanagedLocation } from "./installations.js";
+import { busy, type Busy } from "./working-model.js";
 
 /** One location ready to be removed: a real directory or only a symbolic link. */
 export type PlannedUnmanagedRemoval =
@@ -55,7 +56,7 @@ interface Message {
 export interface UnmanagedContext {
   readonly operations: SourceOperations;
   readonly env: TuiEnvironment;
-  setMode(mode: UnmanagedMode | { readonly kind: "busy"; readonly label: string }): void;
+  setMode(mode: UnmanagedMode | Busy): void;
   browse(): void;
   setMessage(message: Message | undefined): void;
   isMounted(): boolean;
@@ -161,7 +162,7 @@ export async function runUnmanagedRemoval(
 }
 
 async function startPreview(context: UnmanagedContext, group: UnmanagedGroup, locations: readonly UnmanagedLocation[]): Promise<void> {
-  context.setMode({ kind: "busy", label: `Preparing removal of ${group.name}...` });
+  context.setMode(busy(`Preparing removal of ${group.name}…`));
   try {
     const prepared = await prepareUnmanagedRemoval(context.operations, context.env, group, locations);
     if (!context.isMounted()) return;
@@ -185,7 +186,7 @@ function cancel(context: UnmanagedContext): void {
 }
 
 async function execute(context: UnmanagedContext, group: UnmanagedGroup, prepared: PreparedUnmanagedRemoval): Promise<void> {
-  context.setMode({ kind: "busy", label: `Removing ${group.name}...` });
+  context.setMode(busy(`Removing ${group.name}…`));
   await context.finish(await runUnmanagedRemoval(prepared, context.operations, context.env));
 }
 

@@ -28,6 +28,7 @@ test("animation is off only for AGENT_DEPOT_NO_ANIMATION=1", () => {
 test("isWorkingFrame tells a Working line from content", () => {
   assert.equal(isWorkingFrame("⠹ Installing foo… 3s"), true);
   assert.equal(isWorkingFrame("· Loading catalog…\n"), true);
+  assert.equal(isWorkingFrame("Loading catalog..."), false);
   assert.equal(isWorkingFrame("▸ Skills\n  alpha"), false);
 });
 

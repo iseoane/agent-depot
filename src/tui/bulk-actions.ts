@@ -20,6 +20,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
 import { skillOf, sourceIdOf, type InstallationRow, type UnmanagedGroup } from "./installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval, type PreparedUnmanagedRemoval } from "./unmanaged-actions.js";
+import { busy, type Busy } from "./working-model.js";
 
 /** A marked leaf of the Installations tree, keyed by its node id so the view can unmark it. */
 export interface BulkTarget {
@@ -98,7 +99,7 @@ export interface BulkContext {
   readonly operations: SourceOperations;
   readonly env: TuiEnvironment;
   readonly installed: InstalledSkills;
-  setMode(mode: BulkMode | { readonly kind: "busy"; readonly label: string }): void;
+  setMode(mode: BulkMode | Busy): void;
   browse(): void;
   setMessage(message: Message | undefined): void;
   isMounted(): boolean;
@@ -288,7 +289,7 @@ async function preparePlan<Plan extends { readonly items: readonly unknown[]; re
   prepare: () => Promise<Plan>,
   confirmation: (plan: Plan) => BulkMode,
 ): Promise<void> {
-  context.setMode({ kind: "busy", label });
+  context.setMode(busy(label));
   try {
     const plan = await prepare();
     if (!context.isMounted()) return;
@@ -309,7 +310,7 @@ async function preparePlan<Plan extends { readonly items: readonly unknown[]; re
 export function startBulkUninstall(context: BulkContext, targets: readonly BulkTarget[]): Promise<void> {
   return preparePlan(
     context,
-    `Preparing uninstall of ${count(targets.length, "item")}...`,
+    `Preparing uninstall of ${count(targets.length, "item")}…`,
     () => prepareBulkUninstall(context, targets),
     (plan) => ({ kind: "confirm-bulk-uninstall", plan }),
   );
@@ -330,14 +331,14 @@ export function startBulkHostAddition(context: BulkContext, targets: readonly Bu
 function prepareHosts(context: BulkContext, mode: Extract<BulkMode, { kind: "bulk-hosts" }>): Promise<void> {
   return preparePlan(
     context,
-    `Preparing host change of ${count(mode.targets.length, "item")}...`,
+    `Preparing host change of ${count(mode.targets.length, "item")}…`,
     () => prepareBulkHostAddition(context, mode.targets, mode.skipped, mode.selected),
     (plan) => ({ kind: "confirm-bulk-hosts", plan }),
   );
 }
 
 async function apply(context: BulkContext, label: string, action: () => Promise<BulkResult>): Promise<void> {
-  context.setMode({ kind: "busy", label });
+  context.setMode(busy(label));
   let result: BulkResult;
   try {
     result = await action();
@@ -364,7 +365,7 @@ export function handleBulkKey(context: BulkContext, mode: { readonly kind: strin
     }
     case "confirm-bulk-uninstall":
       answerYesNo(input, key, () => {
-        void apply(context, `Removing ${count(current.plan.items.length, "item")}...`, () => runBulkUninstall(current.plan, operations, env));
+        void apply(context, `Removing ${count(current.plan.items.length, "item")}…`, () => runBulkUninstall(current.plan, operations, env));
       }, () => cancel(context, "Uninstall cancelled"));
       return true;
     case "confirm-bulk-hosts":
@@ -372,7 +373,7 @@ export function handleBulkKey(context: BulkContext, mode: { readonly kind: strin
       return true;
     case "confirm-bulk-exposure":
       answerYesNo(input, key, () => {
-        void apply(context, `Changing hosts of ${count(current.plan.items.length, "item")}...`, () => runBulkHostAddition(current.plan, operations, env));
+        void apply(context, `Changing hosts of ${count(current.plan.items.length, "item")}…`, () => runBulkHostAddition(current.plan, operations, env));
       }, () => cancel(context, "Add hosts cancelled"));
       return true;
     default:

@@ -25,7 +25,7 @@ export function animationEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
 
 /** Whether a rendered frame starts with a Working line, so tests can wait for the real content. */
 export function isWorkingFrame(text: string): boolean {
-  return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏·] \S[^\n]*…|Loading)/u.test(text.trimStart());
+  return /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏·] \S[^\n]*…/u.test(text.trimStart());
 }
 
 /** A mode held while an operation runs: what it is doing, and when the operation (not this step) began. */
