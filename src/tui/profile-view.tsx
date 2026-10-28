@@ -24,11 +24,12 @@ import {
 import { FilePicker } from "./file-picker.js";
 import { useKeys } from "./keys.js";
 import { answerYesNo, moveCursor, movePreviewCursor, toggleChoice } from "./mode-keys.js";
-import { BorderPanel, PreviewConfirm, PreviewLines } from "./panel-parts.js";
+import { BorderPanel, PreviewConfirm, PreviewLines, Working } from "./panel-parts.js";
 import { fitLines, wrapText } from "./text-wrap.js";
 import { theme } from "./theme.js";
 import { useMirrored, useMounted } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
+import { busy, type Busy } from "./working-model.js";
 
 /** Input ownership and the stages of the two Profile workflows. */
 type Mode = "browse" | "busy" | "export-list" | "export-folder" | "export-name" | "import-browse" | "import-list" | "confirm" | "detail" | "results";
@@ -210,6 +211,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const [cursor, cursorRef, cursorTo] = useMirrored(0);
   const [text, typed, setText] = useMirrored("");
   const [nameError, setNameError] = useState<string | undefined>(undefined);
+  // What the busy mode is doing, and when the name check of the export file began, if one is running.
+  const [working, setWorking] = useState<Busy | undefined>(undefined);
+  const [nameChecking, setNameChecking] = useState<number | undefined>(undefined);
   const [importNotice, setImportNotice] = useState<string | undefined>(undefined);
   const [exportDirectory, setExportDirectory] = useState<string | undefined>(undefined);
   const [importDirectory, setImportDirectory] = useState<string | undefined>(undefined);
@@ -240,8 +244,12 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     cursorTo(0);
     setMode(nextMode);
   };
-  const run = async (work: () => Promise<void>) => {
+  const startBusy = (label: string) => {
+    setWorking(busy(label));
     setMode("busy");
+  };
+  const run = async (label: string, work: () => Promise<void>) => {
+    startBusy(label);
     try { await work(); }
     catch (error) {
       if (mounted.current) {
@@ -289,7 +297,10 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     setNameError(undefined);
     setMode("export-folder");
   };
-  const abandonNameCheck = () => { nameRequest.current += 1; };
+  const abandonNameCheck = () => {
+    nameRequest.current += 1;
+    setNameChecking(undefined);
+  };
   const chooseExportDirectory = (directory: string) => {
     abandonNameCheck();
     setExportDirectory(directory);
@@ -304,14 +315,18 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     const fileName = outcome.fileName;
     const finalPath = exportDestination(directory, fileName);
     const id = ++nameRequest.current;
+    // The check never blocks keys, so a line beside the name field shows it is running.
+    setNameChecking(Date.now());
     void (async () => {
       let exists: boolean;
       try { exists = await existsCheck(finalPath); }
       catch (error) {
         if (!mounted.current || nameRequest.current !== id || modeRef.current !== "export-name") return;
+        setNameChecking(undefined);
         setNameError(`Error: ${error instanceof Error ? error.message : String(error)}`);
         return;
       }
+      if (mounted.current && nameRequest.current === id) setNameChecking(undefined);
       const current = resolveExportFileName(typed.current);
       if (!mounted.current || nameRequest.current !== id || modeRef.current !== "export-name") return;
       if (current.kind !== "ok" || current.fileName !== fileName) return;
@@ -324,7 +339,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const confirmApply = () => {
     const request = confirmRequest.current;
     if (request === undefined) return;
-    void run(async () => {
+    void run(request.kind === "export" ? "Exporting…" : "Applying import…", async () => {
       let result: readonly string[];
       if (request.kind === "export") {
         await writeProfileExport(request.file, chosenProfile());
@@ -341,7 +356,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     });
   };
   const previewImport = () => {
-    void run(async () => {
+    void run("Preparing import preview…", async () => {
       // Reuse the CLI's core preview for the exact selected subset, including argv and Source notes.
       const entries = selectedPlanEntries(plan!, selectedRef.current);
       const subset = selectedImportProfile(profile!, entries);
@@ -355,7 +370,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     if (selection.kind !== "file") return;
     setImportDirectory(selection.directory);
     const id = ++importRequest.current;
-    setMode("busy");
+    startBusy("Loading Profile…");
     void (async () => {
       try {
         const importedProfile = parseProfile(JSON.parse(await readFile(selection.file, "utf8")));
@@ -378,7 +393,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     if (current === "export-folder" || current === "import-browse" || current === "busy") return;
     if (current === "browse" || current === "results") {
       if (input === "e") {
-        void run(async () => {
+        void run("Loading Profile…", async () => {
           const exported = await buildProfileExport(operations, apps, {
             homeDirectory: environment.homeDirectory, packageOperations: packages,
           });
@@ -519,7 +534,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     {mode === "browse" ? <BorderPanel title="Portable Profile">
       <Text color={theme.legend}>e export · i import</Text>
     </BorderPanel> : null}
-    {mode === "busy" ? <Text>Loading Profile…</Text> : null}
+    {mode === "busy" && working ? <Working label={working.label} since={working.startedAt} /> : null}
     {mode === "export-name" ? <BorderPanel title="Export file name">
       <Text><Text color={theme.field}>Folder: </Text><Text color={theme.value}>{exportDirectory ?? startDirectory}</Text></Text>
       <Text><Text color={theme.field}>Name: </Text><Text color={theme.value}>{text}_</Text></Text>
@@ -528,6 +543,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       {nameOutcome.kind === "ok" && nameOutcome.appendedExtension
         ? <Text color={theme.muted}>A name without an extension is saved as {nameOutcome.fileName}.</Text> : null}
       {nameError === undefined ? null : <Text color={theme.error}>{nameError}</Text>}
+      {nameChecking === undefined ? null : <Working label="Checking name…" since={nameChecking} />}
       <Text color={theme.legend}>Type to edit · Ctrl+U clear · Enter continue · Esc back to folder</Text>
     </BorderPanel> : null}
     {mode === "confirm" ? <PreviewConfirm lines={lines} cursor={cursor}

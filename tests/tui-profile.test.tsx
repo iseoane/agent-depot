@@ -702,13 +702,13 @@ test("busy import ignores view, quit, cancel, toggle and action keys until the r
   await waitForFrame(f.view.lastFrame, /Apply Profile/);
   f.view.stdin.write("y");
   await started;
-  await waitForFrame(f.view.lastFrame, /Loading Profile/);
+  await waitForFrame(f.view.lastFrame, /Applying import…/);
   f.view.stdin.write("q12345einy ajk");
   f.view.stdin.write("\u001b");
   f.view.stdin.write("\r");
   await new Promise(resolve => setTimeout(resolve, 50));
   const busy = f.view.lastFrame()!;
-  assert.match(busy, /Loading Profile/);
+  assert.match(busy, /Applying import…/);
   assert.match(busy, /▶ \[5\] Profile/);
   assert.doesNotMatch(busy, /Choose import file|Export file name/);
   assert.equal(f.exits(), 0);
@@ -783,6 +783,21 @@ test("a slow existence check for an older name never confirms after the name is 
   assert.match(confirmation, /Destination: /);
   view.stdin.write("n");
   await waitForFrame(view.lastFrame, frame => frame.includes("Export file name") && !frame.includes("Save/Export Profile"));
+});
+
+test("a pending destination check shows an inline indicator and keys still edit the name", async t => {
+  let release = () => {};
+  const check = new Promise<boolean>(resolve => { release = () => resolve(false); });
+  const { view } = await nameStageFixture(t, () => check);
+  view.stdin.write("out.json");
+  await waitForFrame(view.lastFrame, /out\.json_/);
+  view.stdin.write("\r");
+  const pending = await waitForFrame(view.lastFrame, /Checking name…/);
+  assert.match(pending, /Export file name/);
+  view.stdin.write("2");
+  await waitForFrame(view.lastFrame, /out\.json2_/);
+  release();
+  await waitForFrame(view.lastFrame, frame => !frame.includes("Checking name…"));
 });
 
 test("a failing destination check is reported inline in the name stage", async t => {
