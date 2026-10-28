@@ -13,12 +13,12 @@ import { ActionPanel, CatalogHeader, CatalogRowLine, CatalogSelectionHelp } from
 import { packageOwnedSkillNotice } from "./catalog-ownership.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 import { handlePackageKey, isPackageMode, startPackageAction, type PackageActionHost, type PackageContext } from "./package-actions.js";
-import { ListFooter } from "./panel-parts.js";
+import { ListFooter, Working } from "./panel-parts.js";
 import { useCatalogApps, useCatalogFilter, useCatalogSkills, useInstalledSkills } from "./catalog-state.js";
 import { buildTree, leavesOf, openByDefault, skillKey, type NodeData } from "./catalog-tree.js";
 import { theme } from "./theme.js";
 import { useTreeNavigation } from "./tree-navigation.js";
-import { useMarks, useMounted, type ViewMessage } from "./view-state.js";
+import { useLoadingSince, useMarks, useMounted, type ViewMessage } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 
@@ -113,6 +113,11 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     : 1;
   const height = useListHeight(listHeight, 6 + helpLines);
 
+  // A reload that ends an action continues that action's clock.
+  const runningSince = appMode?.kind === "app-busy" ? appMode.startedAt : action.kind === "busy" ? action.startedAt : undefined;
+  const loading = state.status === "loading" || appCatalog.status === "loading" || (state.status === "ready" && !installedReady);
+  const loadingSince = useLoadingSince(loading, runningSince);
+
   const flow: CatalogFlowContext = {
     operations,
     env,
@@ -183,7 +188,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   });
 
   const scope = all || sourceId === undefined ? "all sources" : sourceId;
-  if (state.status === "loading" || appCatalog.status === "loading" || (state.status === "ready" && !installedReady)) return <Text>Loading catalog...</Text>;
+  if (loading) return <Working label="Loading catalog…" since={loadingSince} />;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
   const window = computeWindow(rows.length, index, height);
   const selectedCount = leavesOf(roots).filter((skill) => marks.marked.has(skillKey(skill))).length;

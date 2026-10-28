@@ -348,3 +348,27 @@ test("install flow captures keys, and Esc cancels it", async (t) => {
   assert.equal(changes.at(-1), false);
   unmount();
 });
+
+test("a slow install preparation shows a specific progress label until the preview opens", async (t) => {
+  const f = await fixture(t);
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const slow: TuiEnvironment = {
+    ...f.environment,
+    sourceAccess: {
+      ...sourceAccess,
+      async readSkillTreeSnapshot() {
+        await gate;
+        return { files: tree, resolvedVersion };
+      },
+    },
+  };
+  const { lastFrame, stdin, unmount } = await mount({ ...f, environment: slow });
+  t.after(unmount);
+  await showDemo(lastFrame, stdin);
+  await chooseInstall(stdin, [" "], "2", "1");
+  const busy = await waitForFrame(lastFrame, /Refreshing source and preparing install of demo…/);
+  assert.match(busy, /^.*Skill install/m);
+  release?.();
+  await waitForFrame(lastFrame, /Skill install preview/);
+});

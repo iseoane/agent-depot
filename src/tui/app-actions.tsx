@@ -5,8 +5,9 @@ import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
 import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
-import { BorderPanel, HostChecklist, PreviewConfirm } from "./panel-parts.js";
+import { BorderPanel, HostChecklist, PreviewConfirm, Working } from "./panel-parts.js";
 import { previewViewport, type PreviewChrome } from "./preview-window.js";
+import { operationStart } from "./working-model.js";
 
 interface Request {
   readonly entry: AppEntry;
@@ -16,7 +17,7 @@ interface Request {
 
 /** App interaction modes capture keys inside the existing Installations view. */
 export type AppMode =
-  | { readonly kind: "app-busy"; readonly label: string }
+  | { readonly kind: "app-busy"; readonly label: string; readonly startedAt: number }
   | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number }
   | {
       readonly kind: "app-hosts";
@@ -115,14 +116,21 @@ function appPreviewLines(mode: Extract<AppMode, { kind: "app-approve" | "app-con
   ];
 }
 
+/** The busy mode of an App step; `previous` is the busy mode this step continues, so the clock keeps running. */
+function appBusy(label: string, previous?: AppMode): AppMode {
+  return { kind: "app-busy", label, startedAt: operationStart(previous) };
+}
+
 async function prepareNext(
   context: AppContext,
   requests: readonly Request[],
   results: readonly string[] = [],
   failures = 0,
+  previous?: AppMode,
 ): Promise<void> {
   const { manage, apps } = context;
-  manage.setMode({ kind: "app-busy", label: "Preparing App step..." });
+  const running = appBusy("Preparing App step…", previous);
+  manage.setMode(running);
   // Independent planning failures never stop the remaining marked Apps.
   const [request, ...remaining] = requests;
   if (!request) {
@@ -139,7 +147,7 @@ async function prepareNext(
     }
   } catch (error) {
     if (manage.isMounted()) {
-      await prepareNext(context, remaining, [...results, `${appName(request.entry)}: failed: ${errorText(error)}`], failures + 1);
+      await prepareNext(context, remaining, [...results, `${appName(request.entry)}: failed: ${errorText(error)}`], failures + 1, running);
     }
   }
 }
@@ -152,7 +160,7 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
     if (input === "approve") {
       const entry = entries[0];
       if (!entry) throw new Error("No App selected");
-      manage.setMode({ kind: "app-busy", label: "Preparing recipe approval..." });
+      manage.setMode(appBusy("Preparing recipe approval…"));
       const [steps, approval] = await Promise.all([apps.preview(entry), apps.approvalStatus(entry)]);
       if (manage.isMounted()) {
         manage.setMode({ kind: "app-approve", entry, lines: appRecipePreviewLines(entry, approval.status, steps), cursor: 0 });
@@ -175,7 +183,8 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
 
 async function execute(context: AppContext, mode: Extract<AppMode, { kind: "app-confirm" | "app-manual" }>): Promise<void> {
   const { manage, apps } = context;
-  manage.setMode({ kind: "app-busy", label: "Running App step..." });
+  const running = appBusy("Running App step…");
+  manage.setMode(running);
   let manualRequired = false;
   const [outcome] = await runBatch([mode.plan], async plan => {
     const result = mode.kind === "app-manual"
@@ -191,7 +200,7 @@ async function execute(context: AppContext, mode: Extract<AppMode, { kind: "app-
     return `${appName(plan.entry)}: ${result.status}${result.installedVersion ? ` ${result.installedVersion}` : ""}`;
   }, (plan, error) => `${appName(plan.entry)}: failed: ${errorText(error)}`);
   if (manage.isMounted() && outcome && !manualRequired) {
-    await prepareNext(context, mode.remaining, [...mode.results, outcome.line], mode.failures + (outcome.ok ? 0 : 1));
+    await prepareNext(context, mode.remaining, [...mode.results, outcome.line], mode.failures + (outcome.ok ? 0 : 1), running);
   }
 }
 
@@ -234,7 +243,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
       void execute(context, mode);
       return;
     }
-    manage.setMode({ kind: "app-busy", label: "Approving recipe..." });
+    manage.setMode(appBusy("Approving recipe…"));
     void apps.approve(mode.entry).then(
       () => manage.finish({ kind: "ok", text: `Approved ${appName(mode.entry)}` }),
       error => manage.finish({ kind: "error", text: errorText(error) }),
@@ -245,7 +254,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
 /** Renders App prompts using the existing checklist and preview-confirm panels. */
 export function AppPanel({ mode }: { readonly mode: AppMode }) {
   const { rows, columns } = useWindowSize();
-  if (mode.kind === "app-busy") return <BorderPanel title="App lifecycle"><Text>{mode.label}</Text></BorderPanel>;
+  if (mode.kind === "app-busy") return <BorderPanel title="App lifecycle"><Working label={mode.label} since={mode.startedAt} /></BorderPanel>;
   if (mode.kind === "app-hosts") {
     return (
       <BorderPanel title="App Host steps">

@@ -35,8 +35,12 @@ export interface Busy {
   readonly startedAt: number;
 }
 
+/** When an operation began: the start time of the busy mode it continues, otherwise now. Only busy modes carry one. */
+export function operationStart(previous?: { readonly kind: string; readonly startedAt?: number }, now: () => number = Date.now): number {
+  return previous?.startedAt ?? now();
+}
+
 /** The busy mode for `label`; it keeps the start time of an operation already busy, so the clock survives label changes. */
 export function busy(label: string, previous?: { readonly kind: string; readonly startedAt?: number }, now: () => number = Date.now): Busy {
-  const startedAt = previous?.kind === "busy" && previous.startedAt !== undefined ? previous.startedAt : now();
-  return { kind: "busy", label, startedAt };
+  return { kind: "busy", label, startedAt: operationStart(previous, now) };
 }
