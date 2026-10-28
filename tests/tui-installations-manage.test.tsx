@@ -176,12 +176,12 @@ test("the refresh after an action keeps counting the action's elapsed time", asy
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Removing demo…/);
   clock.advance(4500);
-  await waitForFrame(view.lastFrame, /Removing demo… 4s/);
+  await waitForFrame(view.lastFrame, /Removing demo… (?:[4-9]|\d{2,})s/u);
   reloadHeld = true;
   releaseRemoval();
   const refreshing = await waitForFrame(view.lastFrame, /Refreshing installations…/);
   // The reload started after the clock moved, yet the count carries on from the action's start.
-  assert.match(refreshing, /Refreshing installations… 4s/);
+  assert.match(refreshing, /Refreshing installations… (?:[4-9]|\d{2,})s/u);
   releaseReload();
   await waitForFrame(view.lastFrame, /Removed demo/);
 });

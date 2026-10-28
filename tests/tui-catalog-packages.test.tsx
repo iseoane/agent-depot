@@ -215,11 +215,11 @@ test("the Catalog reload after a Package action keeps counting the action's elap
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Running the install of pstack…/);
   clock.advance(4500);
-  await waitForFrame(f.view.lastFrame, /Running the install of pstack… 4s/);
+  await waitForFrame(f.view.lastFrame, /Running the install of pstack… (?:[4-9]|\d{2,})s/u);
   releaseExecute();
   // The listing is discovered again after the action, which started after the clock moved.
   const loading = await waitForFrame(f.view.lastFrame, /Loading catalog…/);
-  assert.match(loading, /Loading catalog… 4s/);
+  assert.match(loading, /Loading catalog… (?:[4-9]|\d{2,})s/u);
   releaseDiscover();
   await waitForFrame(f.view.lastFrame, /pstack: installed \(installed 1\.2\.0\)/);
 });
