@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The TUI shows a spinner, a specific label and, after one second, the elapsed
+  time (for example `⠹ Installing foo… 3s`) for every wait: loading views,
+  Source, Catalog, Package, App, Installation and Profile actions, update checks
+  and applies, and the background App status and export-name checks. Set
+  `AGENT_DEPOT_NO_ANIMATION=1` for a static `·` instead of the spinner.
+
+### Fixed
+
+- Importing a Profile no longer reports `Loading Profile…` while it installs and
+  uninstalls; it says `Applying import…`.
+- The Sources list no longer flashes "No sources or App recipes" while recipes
+  load.
+
 ## [0.6.4] - 2026-10-23
 
 ### Fixed
