@@ -355,7 +355,8 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "argv:")), "App install field names use Xeo blue");
     assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " [")), "App install values use Xeo brightText");
     assert.doesNotMatch(await readFile(fixture.log, "utf8").catch(() => ""), /install/u, "previewing does not execute the App recipe");
-    await session.send("n", /fixture-app/u);
+    // The preview already shows `fixture-app`; wait for the cancel result so `3` is not sent mid-transition.
+    await session.send("n", /fixture-app: cancelled/u);
     const trackedDirectory = path.join(paletteHome, ".local", "state", "agent-depot", "app-installations");
     await mkdir(trackedDirectory, { recursive: true });
     const trackedFile = path.join(trackedDirectory, `${createHash("sha256").update("fixture-app").digest("hex")}.json`);
@@ -1109,6 +1110,84 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await rm(file, { force: true });
   } finally {
     for (const session of sessions) session.kill();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a slow App install shows an advancing spinner, elapsed time from 1s, and clears when done", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "depot-working-"));
+  const home = path.join(root, "home");
+  await mkdir(home);
+  const fixture = await fakeAppFixture(root);
+  // The fixture executable holds the install for 2.5s, so the busy line is on screen across several redraws.
+  await writeFile(fixture.file, JSON.stringify({ ...fixture.recipe, install: { argv: ["depot-e2e-app", "install", "--sleep-ms=2500"] } }));
+  const apps = createAppOperations({ homeDirectory: home, recipesDirectory: path.join(fixture.stateDirectory, "apps") });
+  const [entry] = await apps.load();
+  assert.ok(entry, "fixture recipe exists before approval");
+  await apps.approve(entry);
+  // isolated-env sets AGENT_DEPOT_NO_ANIMATION=1 for every test process; this journey needs the real animation.
+  const session = new TuiSession({
+    AGENT_DEPOT_NO_ANIMATION: "0",
+    PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_STATE_HOME: path.join(root, "state"),
+    XDG_CONFIG_HOME: path.join(root, "config"),
+    XDG_CACHE_HOME: path.join(root, "cache"),
+    PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
+  }, 80, 24);
+  // A braille spinner glyph, the busy label and, from one second on, the elapsed time. The static `·` never matches.
+  const working = /([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]) (?:Running|Preparing) App step…(?: (\d+)s)?/u;
+  const anySpinner = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \S[^\n]*…/u;
+  const samples: Array<{ at: number; screen: string }> = [];
+  let sampler: NodeJS.Timeout | undefined;
+  try {
+    await session.waitFor(/n add ·/u);
+    await session.send("\t", /▶ \[2\] Catalog/u);
+    await session.send("/", /Enter submit · Esc cancel/u);
+    await session.send("fixture-app", /Filter: fixture-app/u);
+    await session.send("\r", /j\/k move/u);
+    await session.send("j", />\s+App fixture-app\s+not installed/u);
+    await session.send("i", /Scroll to end before y|install fixture-app\? y\/n/u);
+    await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u);
+    assert.doesNotMatch(session.screen, anySpinner, `the preview must not show a busy line:\n${session.screen}`);
+    await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
+
+    const startedAt = Date.now();
+    sampler = setInterval(() => samples.push({ at: Date.now(), screen: session.screen }), 20);
+    session.press("y");
+    const installed = await session.waitFor(/fixture-app: installed/u);
+    clearInterval(sampler);
+    sampler = undefined;
+
+    const busy = samples.flatMap(({ at, screen }) => {
+      const match = working.exec(screen);
+      return match ? [{ at, glyph: match[1]!, seconds: match[2] === undefined ? undefined : Number(match[2]) }] : [];
+    });
+    assert.ok(busy.length > 0, `no spinner with a busy label was ever on screen; last frame:\n${samples.at(-1)?.screen}`);
+    assert.ok(new Set(busy.map(({ glyph }) => glyph)).size >= 2, `the spinner glyph never advanced: ${[...new Set(busy.map(({ glyph }) => glyph))].join("")}`);
+    // Elapsed time stays hidden under one second, then shows whole seconds that never go backwards.
+    const firstElapsed = busy.find(({ seconds }) => seconds !== undefined);
+    assert.ok(firstElapsed, `elapsed time never appeared on the busy line; ${busy.length} busy frames`);
+    assert.ok(busy.some(({ seconds }) => seconds === undefined), "the busy line is shown before any elapsed time");
+    assert.ok(busy.findIndex(({ seconds }) => seconds === undefined) < busy.indexOf(firstElapsed), "elapsed time was shown before the first second");
+    assert.ok(firstElapsed.at - startedAt >= 1000, `elapsed time appeared ${firstElapsed.at - startedAt}ms after confirming, before one second had passed`);
+    assert.ok(firstElapsed.seconds! >= 1);
+    const seconds = busy.flatMap(({ seconds: value }) => (value === undefined ? [] : [value]));
+    assert.deepEqual(seconds, [...seconds].sort((left, right) => left - right), `elapsed time went backwards: ${seconds.join(",")}`);
+
+    // When the action finishes the busy line goes away and stays away across further redraw ticks.
+    assert.doesNotMatch(installed, working, `the busy label is still shown in the result:\n${installed}`);
+    assert.match(installed, /Result · complete/u);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.doesNotMatch(session.screen, anySpinner, `a busy line reappeared after the result:\n${session.screen}`);
+    assert.equal(await readFile(fixture.state, "utf8"), "1.0.0");
+    assert.match(await readFile(fixture.log, "utf8"), /"--sleep-ms=2500"/u, "the slow install ran through the real executable");
+    session.press("q");
+    assert.equal(await session.exitCode(), 0);
+  } finally {
+    if (sampler) clearInterval(sampler);
+    session.kill();
     await rm(root, { recursive: true, force: true });
   }
 });
