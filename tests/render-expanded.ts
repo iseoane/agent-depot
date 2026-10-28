@@ -1,11 +1,12 @@
 import type { ReactElement } from "react";
 import { render } from "ink-testing-library";
+import { isWorkingFrame } from "../src/tui/working-model.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 /** Action tests explicitly open the first nonempty group before exercising its children. */
 export async function renderExpanded(element: ReactElement): Promise<ReturnType<typeof render>> {
   const view = render(element);
-  const frame = await waitForFrame(view.lastFrame, (text) => text.length > 0 && !text.startsWith("Loading"));
+  const frame = await waitForFrame(view.lastFrame, (text) => text.length > 0 && !isWorkingFrame(text));
   const target = frame.split("\n").find((line) => line.includes("▸"))?.trim().replace(/^>\s*/u, "");
   if (!target) return view;
   const selected = () => (view.lastFrame() ?? "").split("\n").find((line) => line.startsWith("> "))?.slice(2).trim();
