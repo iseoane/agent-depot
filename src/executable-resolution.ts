@@ -56,9 +56,15 @@ export function createPortableExecutableResolver(
     }
 
     let blockedExecutable: string | undefined;
-    const suffixes = platform === "win32"
-      ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")]
-      : [""];
+    // On Windows only PATHEXT candidates are runnable: npm installs an
+    // extensionless sh shim beside `name.cmd`, and spawning it fails (ENOENT).
+    const configuredExtensions = (process.env.PATHEXT ?? "").split(";").map((extension) => extension.trim()).filter(Boolean);
+    const extensions = configuredExtensions.length > 0 ? configuredExtensions : [".COM", ".EXE", ".BAT", ".CMD"];
+    const suffixes = platform !== "win32"
+      ? [""]
+      : extensions.some((extension) => name.toLowerCase().endsWith(extension.toLowerCase()))
+        ? [""]
+        : extensions;
     for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
       if (!path.isAbsolute(directory)) {
         continue;
