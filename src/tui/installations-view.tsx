@@ -93,9 +93,12 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const { rows, index } = navigation;
   const checked = useRef(new Set<string>());
   const highlighted = rows[index]?.node.data;
+  // The entry is kept when the tree is rebuilt with a check's result, and replaced only by a reload,
+  // so the effect below does not re-run for the node objects `buildTree` makes anew.
+  const highlightedEntry = highlighted?.kind === "app" ? highlighted.row.entry : undefined;
   useEffect(() => {
-    if (highlighted?.kind !== "app") return;
-    const { entry } = highlighted.row;
+    if (highlightedEntry === undefined) return;
+    const entry = highlightedEntry;
     const identity = `${entry.file}:${entry.hash}`;
     if (checked.current.has(identity)) return;
     checked.current.add(identity);
@@ -106,6 +109,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
       return apps.inspect(entry);
     }).then(inspection => {
       if (!inspection || !mounted.current || generation !== loadGeneration.current) return;
+      // An unknown result is asked again only when focus returns to the App, never by the rebuilt tree.
       if (inspection.status === "unknown") checked.current.delete(identity);
       setState(previous => previous.status !== "ready" ? previous : {
         ...previous,
@@ -122,7 +126,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     }).finally(() => {
       if (--checks.current === 0 && mounted.current) setCheckingSince(undefined);
     });
-  }, [highlighted, apps, mounted]);
+  }, [highlightedEntry, apps, mounted]);
 
   const installed = useMemo<InstalledSkills>(
     () => ({

@@ -416,6 +416,17 @@ test("the focused App check shows an inline indicator that does not block keys",
   await waitForFrame(fixture.view.lastFrame, frame => !frame.includes("Checking App status…"));
 });
 
+test("a focused App whose status stays unknown is checked once while focused, not in a loop", async t => {
+  const fixture = await appFixture(t, true);
+  fixture.setVersion("not a version");
+  await selectInstalledApp(fixture.view);
+  await waitForFrame(fixture.view.lastFrame, frame => fixture.commands.includes("--version") && !frame.includes("Checking App status…"));
+  // A loop would keep running the version command; give it time to repeat.
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(fixture.commands, ["--version"]);
+  assert.doesNotMatch(fixture.view.lastFrame() ?? "", /Checking App status…/);
+});
+
 test("unreadable App tracking state does not hide independently discovered Skills", async t => {
   const fixture = await appFixture(t, false, async (_apps, recipeFile, home) => {
     const skill = path.join(home, ".agents", "skills", "sample");
