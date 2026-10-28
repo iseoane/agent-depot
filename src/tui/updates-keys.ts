@@ -16,6 +16,8 @@ export interface UpdatesSnapshot extends UpdatesListView {
 /** What the Updates keys need from the view; the view owns the state, mirrored in refs. */
 export interface UpdatesKeyContext {
   readonly height: number;
+  /** The view's clock, so a busy mode starts on the same time base the elapsed time is read from. */
+  readonly now: () => number;
   previewMetrics(mode: UpdatesMode): { readonly length: number; readonly pageSize: number };
   previewAtEnd(mode: UpdatesMode): boolean;
   latest(): UpdatesSnapshot;
@@ -110,10 +112,10 @@ export function handleUpdatesKey(context: UpdatesKeyContext, mode: UpdatesMode, 
       if (cursor !== undefined) { context.setMode({ ...mode, cursor }); return; }
       answerYesNo(input, key, () => {
         if (!context.previewAtEnd(mode)) return;
-        context.setMode(busy("Checking App version…"));
+        context.setMode(busy("Checking App version…", undefined, context.now));
         mode.answer(true);
       }, () => {
-        context.setMode(busy("Continuing updates…"));
+        context.setMode(busy("Continuing updates…", undefined, context.now));
         mode.answer(false);
       });
       return;

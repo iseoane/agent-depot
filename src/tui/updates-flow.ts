@@ -36,7 +36,7 @@ export interface UpdatesFlow {
 
 export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
   const { operations, env, clock, mounted, checkedRef, latest, setChecked, setCursor, setMode, modeRef, setMessage } = inputs;
-  const [state, setState] = useState<LoadState>(() => ({ status: "loading", label: REFRESHING, startedAt: Date.now() }));
+  const [state, setState] = useState<LoadState>(() => ({ status: "loading", label: REFRESHING, startedAt: clock() }));
   const loadToken = useRef(0);
   const pendingAnswer = useRef<((done: boolean) => void) | undefined>(undefined);
   useEffect(() => () => {
@@ -46,7 +46,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
   const load = useCallback(async (refresh: boolean) => {
     const token = ++loadToken.current;
     // The check after an applied update continues that update's clock; a check from browsing starts one.
-    const running = busy(refresh ? REFRESHING : CHECKING, modeRef.current);
+    const running = busy(refresh ? REFRESHING : CHECKING, modeRef.current, clock);
     const phase = (next: UpdatesPhase) => {
       if (!mounted.current || token !== loadToken.current) return;
       setState({ status: "loading", label: PHASE_LABEL[next], startedAt: running.startedAt });
@@ -76,7 +76,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
       return;
     }
     setMessage(undefined);
-    setMode(busy("Preparing preview…"));
+    setMode(busy("Preparing preview…", undefined, clock));
     try {
       const prepared = await prepareUpdates(current, selected);
       if (mounted.current) setMode({ kind: "preview", prepared, cursor: 0 });
@@ -88,7 +88,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
   };
 
   const apply = async (prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[]) => {
-    setMode(busy("Applying updates…"));
+    setMode(busy("Applying updates…", undefined, clock));
     let result: UpdatesMessage;
     try {
       const outcome = await runUpdates(prepared, confirmedPaths, (plan, reason) => new Promise<boolean>(resolve => {

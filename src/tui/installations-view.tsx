@@ -20,6 +20,7 @@ import { ListFooter, Working } from "./panel-parts.js";
 import { useTreeNavigation } from "./tree-navigation.js";
 import { defaultExpanded } from "./tree.js";
 import { theme } from "./theme.js";
+import { busy } from "./working-model.js";
 import { useLoadingSince, useMarks, useMounted, type ViewMessage } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
@@ -134,6 +135,12 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   );
 
   const loadingSince = useLoadingSince(state.status === "loading");
+  /** Reloads after an action: the busy panel, which keeps the action's clock, says what is now running. */
+  const refresh = async () => {
+    const current = modeRef.current;
+    if ("startedAt" in current) setMode(busy("Refreshing installations…", current));
+    await reload();
+  };
   const manage: ManageContext = {
     operations,
     env,
@@ -145,7 +152,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     unmark: (ids) => marks.setMarked(new Set([...marks.markedRef.current].filter((id) => !ids.includes(id)))),
     finish: async (result) => {
       checked.current.clear();
-      await reload();
+      await refresh();
       if (!mounted.current) return;
       setMessage(result);
       setMode(BROWSE);
@@ -159,7 +166,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
     browse: manage.browse,
     setMessage,
     isMounted: manage.isMounted,
-    reload,
+    reload: refresh,
   };
 
   const browse: BrowseContext = {

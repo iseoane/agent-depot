@@ -115,6 +115,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   const keyContext: UpdatesKeyContext = {
     height,
+    now: clock,
     previewMetrics: current => {
       const geometry = previewGeometry(current);
       return { length: geometry.total, pageSize: geometry.height };

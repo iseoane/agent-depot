@@ -343,7 +343,8 @@ test("the elapsed time of a check keeps running when it moves from refreshing to
   const previous = process.env.AGENT_DEPOT_NO_ANIMATION;
   process.env.AGENT_DEPOT_NO_ANIMATION = "0";
   t.after(() => { process.env.AGENT_DEPOT_NO_ANIMATION = previous; });
-  const base = Date.now();
+  // A clock unrelated to the wall clock: the check must start and read its elapsed time on the injected one.
+  const base = 1_000_000;
   let clock = base;
   const { lastFrame, unmount } = mount(f, { now: () => clock });
   t.after(unmount);

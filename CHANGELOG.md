@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time (for example `⠹ Installing foo… 3s`) for every wait: loading views,
   Source, Catalog, Package, App, Installation and Profile actions, update checks
   and applies, and the background App status and export-name checks. Set
-  `AGENT_DEPOT_NO_ANIMATION=1` for a static `·` instead of the spinner.
+  `AGENT_DEPOT_NO_ANIMATION=1` for a static `·` and no elapsed time instead of
+  the animated spinner.
 
 ### Fixed
 

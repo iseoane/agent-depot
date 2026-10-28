@@ -18,6 +18,7 @@ import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
+import { fakePackageOperations } from "./fake-package-operations.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const ESC = "\u001B";
@@ -126,6 +127,27 @@ test("u on a single-host installation previews, confirms and removes it without 
   assert.equal(await exists(canonical(f.home)), false);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
   view.unmount();
+});
+
+test("the reload after an action says it is refreshing and keeps a single indicator", async (t) => {
+  const f = await fixture(t, ["pi"]);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let gateOpen = false;
+  // Only the view's reload lists Packages, so holding that call holds the reload and nothing of the removal.
+  const packages = fakePackageOperations({ list: async () => { if (gateOpen) await gate; return []; } });
+  const view = await mount({ ...f, environment: { ...f.environment, packages } });
+  t.after(() => view.unmount());
+  await revealSkill(view);
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  gateOpen = true;
+  view.stdin.write("y");
+  const refreshing = await waitForFrame(view.lastFrame, /Refreshing installations…/);
+  assert.equal(refreshing.match(/Refreshing installations…/g)?.length, 1);
+  assert.doesNotMatch(refreshing, /Removing demo…/);
+  release();
+  await waitForFrame(view.lastFrame, /Removed demo/);
 });
 
 test("u on an installation with several hosts offers all hosts or a host checklist", async (t) => {
