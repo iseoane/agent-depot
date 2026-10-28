@@ -142,7 +142,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   /** Reloads after an action: the busy panel, which keeps the action's clock, says what is now running. */
   const refresh = async () => {
     const current = modeRef.current;
-    if ("startedAt" in current) setMode(busy("Refreshing installations…", current));
+    if ("startedAt" in current && mounted.current) setMode(busy("Refreshing installations…", current));
     await reload();
   };
   const manage: ManageContext = {

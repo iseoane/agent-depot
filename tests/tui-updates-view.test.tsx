@@ -342,7 +342,10 @@ test("the elapsed time of a check keeps running when it moves from refreshing to
   // The elapsed time only shows while animating, which the test environment turns off.
   const previous = process.env.AGENT_DEPOT_NO_ANIMATION;
   process.env.AGENT_DEPOT_NO_ANIMATION = "0";
-  t.after(() => { process.env.AGENT_DEPOT_NO_ANIMATION = previous; });
+  t.after(() => {
+    if (previous === undefined) delete process.env.AGENT_DEPOT_NO_ANIMATION;
+    else process.env.AGENT_DEPOT_NO_ANIMATION = previous;
+  });
   // A clock unrelated to the wall clock: the check must start and read its elapsed time on the injected one.
   const base = 1_000_000;
   let clock = base;

@@ -189,7 +189,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
 
   /** Runs a mutating action in the busy mode, reports its outcome and reloads the list. */
   const run = async (label: string, action: () => Promise<string | Message>) => {
-    dispatch({ type: "busy", label });
+    dispatch({ type: "busy", label, startedAt: Date.now() });
     setMessage(undefined);
     let outcome: Message;
     try {
@@ -219,7 +219,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       stop("Removing sources is not supported by the configured operations");
       return;
     }
-    dispatch({ type: "busy", label: "Checking dependent Skills…" });
+    dispatch({ type: "busy", label: "Checking dependent Skills…", startedAt: Date.now() });
     setMessage(undefined);
     try {
       const installations = await operations.listUserGlobalInstallations();

@@ -17,7 +17,8 @@ export type ModeEvent =
   | { readonly type: "confirm"; readonly action: "refresh"; readonly sources: readonly GitSource[] }
   | { readonly type: "preview-cursor"; readonly cursor: number }
   | { readonly type: "confirm"; readonly action: "remove"; readonly source: GitSource }
-  | { readonly type: "busy"; readonly label: string }
+  /** `startedAt` is read by the dispatcher, so the reducer stays pure; a busy mode already running keeps its own. */
+  | { readonly type: "busy"; readonly label: string; readonly startedAt: number }
   | { readonly type: "done" };
 
 export const initialMode: Mode = { kind: "browse" };
@@ -37,7 +38,7 @@ export function modeReducer(mode: Mode, event: ModeEvent): Mode {
     case "preview-cursor":
       return mode.kind === "confirm" && mode.action === "refresh" ? { ...mode, cursor: event.cursor } : mode;
     case "busy":
-      return busy(event.label, mode);
+      return busy(event.label, mode, () => event.startedAt);
     case "done":
       return initialMode;
   }
