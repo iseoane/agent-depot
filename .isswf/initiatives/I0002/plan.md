@@ -11,7 +11,7 @@ This coordinator-owned plan records reported progress, not execution permission 
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md) (pending until prepared)
 - Blocker: None
-- Next step: J002 animated e2e journey, then independent review of the full candidate
+- Next step: Independent review V001 of the full candidate (J001+J002)
 
 ### Acceptance
 
@@ -32,12 +32,12 @@ This coordinator-owned plan records reported progress, not execution permission 
 
 ## J002
 
-- Status: pending
+- Status: in-review
 - Objective: A real-PTY e2e journey proves the indicator animates, shows elapsed time and clears, with animation on
 - Depends on: J001
 - Brief: [brief-r1.md](jobs/J002/brief-r1.md) (pending until prepared)
 - Blocker: None
-- Next step: Dispatch worker following isswf-e2e
+- Next step: Independent review V001 of the full candidate (J001+J002)
 
 ### Acceptance
 
@@ -47,4 +47,6 @@ This coordinator-owned plan records reported progress, not execution permission 
 
 ### Evidence
 
-- pending
+- jobs/J002/brief-r1.md
+- jobs/J002/A001.md
+- Commit db8c1bf; coordinator e2e animated 12/12
