@@ -116,7 +116,17 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   // A reload that ends an action continues that action's clock.
   const runningSince = appMode?.kind === "app-busy" ? appMode.startedAt : action.kind === "busy" ? action.startedAt : undefined;
   const loading = state.status === "loading" || appCatalog.status === "loading" || (state.status === "ready" && !installedReady);
-  const loadingSince = useLoadingSince(loading, runningSince);
+  // A Package action reloads after its mode has ended, so its clock is kept until that reload is done.
+  const [resumedSince, setResumedSince] = useState<number | undefined>();
+  const wasLoading = useRef(false);
+  useEffect(() => {
+    if (loading) wasLoading.current = true;
+    else if (wasLoading.current) {
+      wasLoading.current = false;
+      setResumedSince(undefined);
+    }
+  }, [loading]);
+  const loadingSince = useLoadingSince(loading, runningSince ?? resumedSince);
 
   const flow: CatalogFlowContext = {
     operations,
@@ -155,6 +165,8 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     finish: async (result) => {
       await reloadInstalled();
       if (!mounted.current) return;
+      const running = actionRef.current;
+      setResumedSince(running.kind === "busy" ? running.startedAt : undefined);
       setReloadKey((value) => value + 1);
       setMessage(result);
       setAction(BROWSE);

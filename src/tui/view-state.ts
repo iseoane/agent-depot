@@ -23,10 +23,12 @@ export function useMounted(): MutableRefObject<boolean> {
  * though the view re-renders. `seed` continues an operation that was already running (its busy start).
  */
 export function useLoadingSince(loading: boolean, seed?: number): number {
-  const since = useRef<number | undefined>(undefined);
-  if (!loading) since.current = undefined;
-  else since.current ??= seed ?? Date.now();
-  return since.current ?? Date.now();
+  const [since, setSince] = useState<number | undefined>(() => (loading ? seed ?? Date.now() : undefined));
+  useEffect(() => {
+    setSince((previous) => (loading ? previous ?? seed ?? Date.now() : undefined));
+  }, [loading, seed]);
+  // Until the effect records it, the first loading render derives the same start.
+  return since ?? seed ?? Date.now();
 }
 
 export interface Marks {

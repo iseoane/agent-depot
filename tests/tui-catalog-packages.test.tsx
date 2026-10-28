@@ -10,6 +10,7 @@ import type { SkillCandidate } from "../src/skill-discovery.js";
 import type { SourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
+import { animatedClock } from "./animated-clock.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
 import { renderExpanded } from "./render-expanded.js";
 import { waitForFrame } from "./wait-for-frame.js";
@@ -101,6 +102,9 @@ interface Options {
   readonly execute?: (plan: PackageLifecyclePlan) => PackageLifecycleResult;
   readonly planError?: boolean;
   readonly discoverSkills?: readonly SkillCandidate[];
+  /** While a promise is set, running the plan or discovering waits for it. */
+  readonly executeGate?: { promise?: Promise<void> };
+  readonly discoverGate?: { promise?: Promise<void> };
 }
 
 async function fixture(t: { after(callback: () => void | Promise<void>): void }, options: Options = {}): Promise<Fixture> {
@@ -122,13 +126,17 @@ async function fixture(t: { after(callback: () => void | Promise<void>): void },
       calls.push(`approve:${action}`);
     },
     executeLifecycle: async (plan) => {
+      await options.executeGate?.promise;
       calls.push(`execute:${plan.action}`);
       return options.execute?.(plan) ?? installed;
     },
   });
   const environment: TuiEnvironment = { projectManifestStore: new EmptyManifestStore(), packages };
   const view = await renderExpanded(
-    <CatalogView operations={operationsFor(async () => [...(options.discoverSkills ?? skills)])} sourceId={source.id} environment={environment} />,
+    <CatalogView operations={operationsFor(async () => {
+      await options.discoverGate?.promise;
+      return [...(options.discoverSkills ?? skills)];
+    })} sourceId={source.id} environment={environment} />,
   );
   t.after(() => view.unmount());
   return { view, calls, selections };
@@ -190,6 +198,30 @@ test("an approved Catalog bundle runs on the first y with no second gate", async
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /pstack: installed \(installed 1\.2\.0\)/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install", "execute:install"]);
+});
+
+test("the Catalog reload after a Package action keeps counting the action's elapsed time", async (t) => {
+  const clock = animatedClock(t);
+  const executeGate: { promise?: Promise<void> } = {};
+  const discoverGate: { promise?: Promise<void> } = {};
+  const f = await fixture(t, { approval: "approved", executeGate, discoverGate });
+  await revealBundle(f.view);
+  f.view.stdin.write("i");
+  await waitForFrame(f.view.lastFrame, /install pstack\? y\/n/);
+  let releaseExecute = () => {};
+  let releaseDiscover = () => {};
+  executeGate.promise = new Promise<void>((resolve) => { releaseExecute = resolve; });
+  discoverGate.promise = new Promise<void>((resolve) => { releaseDiscover = resolve; });
+  f.view.stdin.write("y");
+  await waitForFrame(f.view.lastFrame, /Running the install of pstack…/);
+  clock.advance(4500);
+  await waitForFrame(f.view.lastFrame, /Running the install of pstack… 4s/);
+  releaseExecute();
+  // The listing is discovered again after the action, which started after the clock moved.
+  const loading = await waitForFrame(f.view.lastFrame, /Loading catalog…/);
+  assert.match(loading, /Loading catalog… 4s/);
+  releaseDiscover();
+  await waitForFrame(f.view.lastFrame, /pstack: installed \(installed 1\.2\.0\)/);
 });
 
 test("n and Esc at either Catalog bundle gate write and run nothing", async (t) => {
