@@ -4,7 +4,7 @@ import { mock, test } from "node:test";
 import { render } from "ink-testing-library";
 
 import { Working } from "../src/tui/panel-parts.js";
-import { animationEnabled, formatElapsed, isWorkingFrame, SPINNER_FRAMES } from "../src/tui/working-model.js";
+import { animationEnabled, busy, formatElapsed, isWorkingFrame, SPINNER_FRAMES } from "../src/tui/working-model.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 test("formatElapsed hides the first second, then counts seconds and minutes", () => {
@@ -92,4 +92,12 @@ test("Working clears an unref'd timer on unmount", (t) => {
   assert.equal(timers[0]!.hasRef(), false);
   unmount();
   assert.ok(clearIntervalMock.mock.calls.some((call) => call.arguments[0] === timers[0]));
+});
+
+test("busy keeps the start time of an operation already busy and restarts otherwise", () => {
+  const first = busy("Refreshing sources…", { kind: "browse" }, () => 100);
+  assert.deepEqual(first, { kind: "busy", label: "Refreshing sources…", startedAt: 100 });
+  assert.deepEqual(busy("Checking for updates…", first, () => 500), { kind: "busy", label: "Checking for updates…", startedAt: 100 });
+  assert.equal(busy("Applying…", { kind: "browse" }, () => 900).startedAt, 900);
+  assert.equal(busy("Applying…", undefined, () => 700).startedAt, 700);
 });

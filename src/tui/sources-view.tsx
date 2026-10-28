@@ -9,7 +9,7 @@ import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
 import { useSourcesRecipes, type RecipeRow } from "./sources-recipes.js";
-import { BorderPanel, DecisionPrompt, FieldLine, PreviewLines } from "./panel-parts.js";
+import { BorderPanel, DecisionPrompt, FieldLine, PreviewLines, Working } from "./panel-parts.js";
 import { previewViewport } from "./preview-window.js";
 import { movePreviewCursor } from "./mode-keys.js";
 
@@ -27,7 +27,7 @@ export interface SourcesViewProps {
 }
 
 type LoadState =
-  | { readonly status: "loading" }
+  | { readonly status: "loading"; readonly startedAt: number }
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly sources: readonly Source[] };
 
@@ -90,7 +90,7 @@ function refreshViewport(mode: Extract<Mode, { readonly kind: "confirm"; readonl
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange }: SourcesViewProps) {
   const { columns, rows: terminalRows } = useWindowSize();
   const height = useListHeight(listHeight, 9);
-  const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [state, setState] = useState<LoadState>(() => ({ status: "loading", startedAt: Date.now() }));
   // The highlight follows the source id; the index is only the fallback once that source is gone.
   // Selection and marks are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
   const [selection, setSelectionState] = useState<Selection>({ index: 0 });
@@ -188,8 +188,8 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   };
 
   /** Runs a mutating action in the busy mode, reports its outcome and reloads the list. */
-  const run = async (action: () => Promise<string | Message>) => {
-    dispatch({ type: "busy" });
+  const run = async (label: string, action: () => Promise<string | Message>) => {
+    dispatch({ type: "busy", label });
     setMessage(undefined);
     let outcome: Message;
     try {
@@ -219,7 +219,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       stop("Removing sources is not supported by the configured operations");
       return;
     }
-    dispatch({ type: "busy" });
+    dispatch({ type: "busy", label: "Checking dependent Skills…" });
     setMessage(undefined);
     try {
       const installations = await operations.listUserGlobalInstallations();
@@ -254,7 +254,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       else if (key.return) {
         const url = typed.current.trim();
         if (url === "") return;
-        void run(async () => `Added Git Source: ${(await operations.addGitSource(url)).id}`);
+        void run("Adding Git Source…", async () => `Added Git Source: ${(await operations.addGitSource(url)).id}`);
       } else if (key.backspace || key.delete) {
         typed.current = typed.current.slice(0, -1);
         dispatch({ type: "edit", value: typed.current });
@@ -274,14 +274,14 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       if (input === "y") {
         if (mode.action === "refresh") {
           const { sources: targets } = mode;
-          void run(async () => {
+          void run(targets.length === 1 ? "Refreshing Git Source…" : "Refreshing Git Sources…", async () => {
             const result = await refreshEach(operations, targets);
             setMarked(new Set());
             return result;
           });
         } else {
           const { source } = mode;
-          void run(async () => {
+          void run("Removing Git Source…", async () => {
             await operations.removeGitSource?.(source.id);
             return `Removed Git Source: ${source.id}`;
           });
@@ -335,7 +335,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   // Sources removed since they were marked no longer count.
   const selectedCount = sources.filter((source) => marked.has(source.id)).length;
 
-  if (state.status === "loading") return <BorderPanel title="Sources"><FieldLine label="Status" value="Loading sources..." /></BorderPanel>;
+  if (state.status === "loading") return <BorderPanel title="Sources"><Working label="Loading sources…" since={state.startedAt} /></BorderPanel>;
   if (state.status === "error") return <BorderPanel title="Source error"><Text color={theme.error}>{state.message}</Text></BorderPanel>;
 
   const window = computeWindow(rows.length, selected, height);
@@ -346,7 +346,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
     <Box flexDirection="column">
       <Text color={theme.muted}>{"      "}ID  KIND  LOCATION / STATUS</Text>
       {builtin ? <Text>{"    "}<Text color={theme.value}>{builtin.id}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>skills</Text><Text color={theme.legend}>  </Text><Text color={theme.warning}>included</Text></Text> : null}
-      {rows.length === 0 ? <Text>No sources or App recipes · n to add</Text> : null}
+      {rows.length === 0 && recipes.loadingSince === undefined ? <Text>No sources or App recipes · n to add</Text> : null}
       {rows.slice(window.start, window.end).map((row, offset) => {
         const index = window.start + offset;
         const id = row.kind === "skills" ? row.source.id : row.recipe.entry.recipe?.name ?? row.recipe.entry.file.split(/[\\/]/u).pop();
@@ -365,6 +365,8 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       })}
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
       {selectedCount > 0 ? <Text>{selectedCount} selected</Text> : null}
+      {recipes.loadingSince !== undefined && mode.kind !== "busy" && !recipes.capturing
+        ? <Working label="Loading App recipes…" since={recipes.loadingSince} /> : null}
       {recipes.panel}
       <Prompt mode={mode} />
       {message ? (
@@ -379,7 +381,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
 function Prompt({ mode, terminalRows = 24, terminalColumns = 80 }: { readonly mode: Mode; readonly terminalRows?: number; readonly terminalColumns?: number }) {
   if (mode.kind === "add-kind") return <Text>Add: 1 Git Source (skills + Packages) · 2 App recipe (Esc cancel)</Text>;
   if (mode.kind === "input") return <Text>URL: {mode.value}</Text>;
-  if (mode.kind === "busy") return <BorderPanel title="Sources"><FieldLine label="Status" value="Working..." /></BorderPanel>;
+  if (mode.kind === "busy") return <BorderPanel title="Sources"><Working label={mode.label} since={mode.startedAt} /></BorderPanel>;
   if (mode.kind === "confirm") {
     return mode.action === "refresh" ? (() => {
       const viewport = refreshViewport(mode, terminalRows, terminalColumns);

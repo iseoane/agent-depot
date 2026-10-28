@@ -1,4 +1,5 @@
 import type { GitSource } from "../git-source.js";
+import { busy, type Busy } from "./working-model.js";
 
 /** Interaction mode of the Sources view; only `browse` lets global keys such as q act. */
 export type Mode =
@@ -7,7 +8,7 @@ export type Mode =
   | { readonly kind: "input"; readonly value: string }
   | { readonly kind: "confirm"; readonly action: "refresh"; readonly sources: readonly GitSource[]; readonly cursor: number }
   | { readonly kind: "confirm"; readonly action: "remove"; readonly source: GitSource }
-  | { readonly kind: "busy" };
+  | Busy;
 
 export type ModeEvent =
   | { readonly type: "add-kind" }
@@ -16,7 +17,7 @@ export type ModeEvent =
   | { readonly type: "confirm"; readonly action: "refresh"; readonly sources: readonly GitSource[] }
   | { readonly type: "preview-cursor"; readonly cursor: number }
   | { readonly type: "confirm"; readonly action: "remove"; readonly source: GitSource }
-  | { readonly type: "busy" }
+  | { readonly type: "busy"; readonly label: string }
   | { readonly type: "done" };
 
 export const initialMode: Mode = { kind: "browse" };
@@ -36,7 +37,7 @@ export function modeReducer(mode: Mode, event: ModeEvent): Mode {
     case "preview-cursor":
       return mode.kind === "confirm" && mode.action === "refresh" ? { ...mode, cursor: event.cursor } : mode;
     case "busy":
-      return { kind: "busy" };
+      return busy(event.label, mode);
     case "done":
       return initialMode;
   }

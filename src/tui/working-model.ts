@@ -27,3 +27,16 @@ export function animationEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
 export function isWorkingFrame(text: string): boolean {
   return /^(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏·] \S[^\n]*…|Loading)/u.test(text.trimStart());
 }
+
+/** A mode held while an operation runs: what it is doing, and when the operation (not this step) began. */
+export interface Busy {
+  readonly kind: "busy";
+  readonly label: string;
+  readonly startedAt: number;
+}
+
+/** The busy mode for `label`; it keeps the start time of an operation already busy, so the clock survives label changes. */
+export function busy(label: string, previous?: { readonly kind: string; readonly startedAt?: number }, now: () => number = Date.now): Busy {
+  const startedAt = previous?.kind === "busy" && previous.startedAt !== undefined ? previous.startedAt : now();
+  return { kind: "busy", label, startedAt };
+}
