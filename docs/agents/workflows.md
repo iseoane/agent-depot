@@ -3,7 +3,7 @@
 ## Supporting skills
 
 Use these Matt Pocock skills when their triggers apply. They supplement
-`poteto-mode`; they do not replace its implementation workflow.
+the isSWF coordinator; they do not replace its implementation workflow.
 
 - Use `domain-modeling` when changing domain concepts, terminology, entities, relationships, or invariants.
 - Use `codebase-design` when designing or restructuring modules, interfaces, seams, boundaries, or abstractions.

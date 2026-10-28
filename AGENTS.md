@@ -16,7 +16,11 @@ Pi environment paths. Verify that writes stay inside the test sandbox.
 
 ## Engineering workflow
 
-For non-trivial engineering work, use `poteto-mode` as the primary orchestrator.
+For non-trivial engineering work, use the isSWF coordinator as the primary
+orchestrator (`/isswf:isswf-coordinator`; project setup in `.isswf/project-setup.md`).
+When the operator addresses the "coordinator"/"coordinador", enter that flow before
+acting. Keep plans, briefs, attempts, reviews and delivery records under
+`.isswf/initiatives/<ID>/` from the first dispatch.
 Keep one implementation workflow active.
 When choosing supporting skills or running an explicit Matt Pocock workflow,
 read `docs/agents/workflows.md`.
