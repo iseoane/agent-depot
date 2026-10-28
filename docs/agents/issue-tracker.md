@@ -1,21 +1,19 @@
-# Issue tracker: Local Markdown
+# Issue tracker: GitHub Issues
 
-Issues and specs for this repo live as markdown files in `.scratch/`.
-
-The current tracker is local Markdown. The planned future tracker is GitHub Issues once this repository has a GitHub remote.
+Issues and specs for this repo live in GitHub Issues at `iseoane/agent-depot`.
+Use the `gh` CLI. Older specs under `.scratch/` remain readable history.
 
 ## Conventions
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The spec is `.scratch/<feature-slug>/spec.md`
-- Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`, never a single combined tickets file
-- Triage state is recorded as a `Status:` line near the top of each issue file
-- Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- One issue per feature or bug; a spec is the issue body or a linked parent issue
+- Implementation tickets are separate issues linked to their parent
+- Triage state is expressed with the canonical labels in `docs/agents/triage-labels.md`
+- Comments and conversation history live in the issue's comments
 
 ## When a skill says "publish to the issue tracker"
 
-Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).
+Create a GitHub issue with `gh issue create` and the `needs-triage` label.
 
 ## When a skill says "fetch the relevant ticket"
 
-Read the file at the referenced path. The user will normally pass the path or issue number directly.
+Run `gh issue view <number> --comments`. The user will normally pass the issue number or URL directly.
