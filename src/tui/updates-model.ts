@@ -1,7 +1,7 @@
 import type { UpdateRow, UpdateScopeFilter, UpdatesData, UpdatesPhase } from "./updates.js";
 
-export const REFRESHING = "Refreshing sources...";
-export const CHECKING = "Checking for updates...";
+export const REFRESHING = "Refreshing sources…";
+export const CHECKING = "Checking for updates…";
 export const PHASE_LABEL: Record<UpdatesPhase, string> = { refreshing: REFRESHING, checking: CHECKING };
 
 /** The result lines shown under the list. */
@@ -11,7 +11,8 @@ export interface UpdatesMessage {
 }
 
 export type LoadState =
-  | { readonly status: "loading"; readonly label: string }
+  /** `startedAt` is when the whole operation began, so the clock survives a change of phase. */
+  | { readonly status: "loading"; readonly label: string; readonly startedAt: number }
   | { readonly status: "ready"; readonly data: UpdatesData };
 
 /** A line the cursor can be on: an updatable item, the fold of unassessable ones, or one of those when unfolded. */

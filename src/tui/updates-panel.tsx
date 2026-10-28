@@ -3,7 +3,7 @@ import { Box, Text, useWindowSize } from "ink";
 import { rowStyle, theme } from "./theme.js";
 import { BorderPanel, FieldLine, PreviewConfirm } from "./panel-parts.js";
 import { previewViewport } from "./preview-window.js";
-import { CHECKING, describeRefresh, describeUnknownReasons, REFRESHING, type Entry, type UpdatesListView, type UpdatesMessage } from "./updates-model.js";
+import { describeRefresh, describeUnknownReasons, type Entry, type UpdatesListView, type UpdatesMessage } from "./updates-model.js";
 import type { UpdatesMode } from "./updates-mode.js";
 import { formatAgo, previewLineText, type UpdatesData } from "./updates.js";
 import { updateModePreviewChrome, updateModePreviewLines, updateModeQuestion } from "./updates-preview.js";
@@ -123,9 +123,8 @@ export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
     case "browse":
       return null;
     case "busy":
-      return mode.label === REFRESHING || mode.label === CHECKING ? null : (
-        <BorderPanel title="Updates"><FieldLine label="Status" value={mode.label} /></BorderPanel>
-      );
+      // The view renders the one indicator of a busy mode, so a check never shows two.
+      return null;
     case "preview":
     case "confirm-paths":
       return <CapturedUpdatePreview mode={mode} />;

@@ -6,6 +6,7 @@ import type { SourceOperations } from "../sources.js";
 import { BROWSE, type UpdatesMode } from "./updates-mode.js";
 import type { UpdatesSnapshot } from "./updates-keys.js";
 import { CHECKING, emptyData, PHASE_LABEL, REFRESHING, type LoadState, type UpdatesMessage } from "./updates-model.js";
+import { busy } from "./working-model.js";
 import { loadUpdateRows, prepareUpdates, runUpdates, type PreparedUpdates, type ScopedPath, type UpdatesPhase } from "./updates.js";
 
 /** What loading, previewing and applying updates need from the Updates view. */
@@ -19,6 +20,8 @@ export interface UpdatesFlowInputs {
   readonly setChecked: (next: readonly string[]) => void;
   readonly setCursor: (next: number) => void;
   readonly setMode: (next: UpdatesMode) => void;
+  /** The mode as of now, so a check that continues an action keeps its clock. */
+  readonly modeRef: MutableRefObject<UpdatesMode>;
   readonly setMessage: (next: UpdatesMessage | undefined) => void;
 }
 
@@ -32,8 +35,8 @@ export interface UpdatesFlow {
 }
 
 export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
-  const { operations, env, clock, mounted, checkedRef, latest, setChecked, setCursor, setMode, setMessage } = inputs;
-  const [state, setState] = useState<LoadState>({ status: "loading", label: REFRESHING });
+  const { operations, env, clock, mounted, checkedRef, latest, setChecked, setCursor, setMode, modeRef, setMessage } = inputs;
+  const [state, setState] = useState<LoadState>(() => ({ status: "loading", label: REFRESHING, startedAt: Date.now() }));
   const loadToken = useRef(0);
   const pendingAnswer = useRef<((done: boolean) => void) | undefined>(undefined);
   useEffect(() => () => {
@@ -42,13 +45,15 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
 
   const load = useCallback(async (refresh: boolean) => {
     const token = ++loadToken.current;
+    // The check after an applied update continues that update's clock; a check from browsing starts one.
+    const running = busy(refresh ? REFRESHING : CHECKING, modeRef.current);
     const phase = (next: UpdatesPhase) => {
       if (!mounted.current || token !== loadToken.current) return;
-      setState({ status: "loading", label: PHASE_LABEL[next] });
+      setState({ status: "loading", label: PHASE_LABEL[next], startedAt: running.startedAt });
     };
     setChecked([]);
     setCursor(0);
-    setMode({ kind: "busy", label: refresh ? REFRESHING : CHECKING });
+    setMode(running);
     let next: LoadState;
     try {
       next = { status: "ready", data: await loadUpdateRows(operations, env, { refresh, onPhase: phase, now: clock }) };
@@ -60,7 +65,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
     if (!mounted.current || token !== loadToken.current) return;
     setState(next);
     setMode(BROWSE);
-  }, [operations, env, mounted, setMode, setChecked, setCursor, clock]);
+  }, [operations, env, mounted, setMode, modeRef, setChecked, setCursor, clock]);
 
   const startPreview = async () => {
     const { data: current, updatable: listed } = latest();
@@ -71,7 +76,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
       return;
     }
     setMessage(undefined);
-    setMode({ kind: "busy", label: "Preparing preview..." });
+    setMode(busy("Preparing preview…"));
     try {
       const prepared = await prepareUpdates(current, selected);
       if (mounted.current) setMode({ kind: "preview", prepared, cursor: 0 });
@@ -83,7 +88,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
   };
 
   const apply = async (prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[]) => {
-    setMode({ kind: "busy", label: "Applying updates..." });
+    setMode(busy("Applying updates…"));
     let result: UpdatesMessage;
     try {
       const outcome = await runUpdates(prepared, confirmedPaths, (plan, reason) => new Promise<boolean>(resolve => {

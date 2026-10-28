@@ -68,6 +68,8 @@ interface Fixture {
   readonly failRefresh: Set<string>;
   /** While set, refreshes wait for it, so the busy state can be observed. */
   readonly gate: { promise?: Promise<void> };
+  /** Holds the assessment, after the Sources were refreshed. */
+  readonly readGate: { promise?: Promise<void> };
   read(root: string, installPath: string): Promise<string>;
 }
 
@@ -84,6 +86,7 @@ async function fixture(t: TestContext): Promise<Fixture> {
   const failMethodFor = new Set<string>();
   const failRefresh = new Set<string>();
   const gate: { promise?: Promise<void> } = {};
+  const readGate: { promise?: Promise<void> } = {};
   const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
   const operations: SourceOperations = {
     ...real,
@@ -109,6 +112,7 @@ async function fixture(t: TestContext): Promise<Fixture> {
     async readSkillTreeSnapshot(source: { readonly kind: string }, skillPath: string) {
       readCalls.push(skillPath);
       events.push(`read:${skillPath}`);
+      if (readGate.promise) await readGate.promise;
       return {
         files: tree(path.posix.basename(skillPath), newText(path.posix.basename(skillPath))),
         resolvedVersion: source.kind === "builtin" ? NEW_VERSION : GIT_NEW,
@@ -127,6 +131,7 @@ async function fixture(t: TestContext): Promise<Fixture> {
     failMethodFor,
     failRefresh,
     gate,
+    readGate,
     environment: { homeDirectory: home, projectRoot: project, sourceAccess, projectManifestStore: manifestStore },
     read: (root, installPath) => readFile(path.join(root, installPath, "SKILL.md"), "utf8"),
   };
@@ -325,6 +330,31 @@ test("changing the scope filter drops selected items so nothing hidden is applie
   await waitForFrame(lastFrame, /scope: user-global/);
   await waitForFrame(lastFrame, /0 selected/);
   unmount();
+});
+
+test("the elapsed time of a check keeps running when it moves from refreshing to checking", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "ext", state: "outdated", url: GIT_URL }]);
+  let releaseRefresh!: () => void;
+  let releaseRead!: () => void;
+  f.gate.promise = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+  f.readGate.promise = new Promise<void>((resolve) => { releaseRead = resolve; });
+  // The elapsed time only shows while animating, which the test environment turns off.
+  const previous = process.env.AGENT_DEPOT_NO_ANIMATION;
+  process.env.AGENT_DEPOT_NO_ANIMATION = "0";
+  t.after(() => { process.env.AGENT_DEPOT_NO_ANIMATION = previous; });
+  const base = Date.now();
+  let clock = base;
+  const { lastFrame, unmount } = mount(f, { now: () => clock });
+  t.after(unmount);
+  await waitForFrame(lastFrame, /Refreshing sources…/);
+  clock = base + 4500;
+  await waitForFrame(lastFrame, /Refreshing sources… 4s/);
+  releaseRefresh();
+  const checking = await waitForFrame(lastFrame, /Checking for updates… 4s/);
+  assert.equal(checking.match(/Checking for updates…/g)?.length, 1, "one indicator for the whole check");
+  releaseRead();
+  await waitForFrame(lastFrame, /portable\/ext/);
 });
 
 test("refreshes the Git sources involved before the assessment, showing a busy state and then when it checked", async (t) => {
