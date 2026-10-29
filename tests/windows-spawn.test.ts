@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import { createPortableExecutableResolver } from "../src/executable-resolution.js";
-import { spawnInvocation } from "../src/process-runner.js";
+import { runProcess, spawnInvocation } from "../src/process-runner.js";
 
 async function withPath<T>(directory: string, run: () => Promise<T>): Promise<T> {
   const previous = { PATH: process.env.PATH, PATHEXT: process.env.PATHEXT };
@@ -146,5 +146,29 @@ test("Windows resolution falls back to the default PATHEXT when it is empty or b
     if (previous === undefined) delete process.env.PATHEXT;
     else process.env.PATHEXT = previous;
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("runProcess round-trips arguments byte-identically through a real .cmd in a path with a space and (x86)", {
+  skip: process.platform !== "win32" && "needs cmd.exe to run a real batch file",
+}, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-depot-win-cmd-"));
+  try {
+    const directory = path.join(root, "Program Files (x86)", "agent depot");
+    await mkdir(directory, { recursive: true });
+    const script = path.join(directory, "echo-args.cjs");
+    const shim = path.join(directory, "echo-args.cmd");
+    await writeFile(script, "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n");
+    // Same shape as an npm cmd-shim: the batch file forwards its arguments with `%*`.
+    await writeFile(shim, `@"${process.execPath}" "${script}" %*\r\n`);
+
+    const args = ["", "a b", "say \"hi\"", "x\\", "x\\\\", "a\\\\\"b", "%PATH%"];
+    const result = await runProcess(shim, args, { captureStdout: true, timeoutMs: 30_000 });
+    const output = Buffer.from(result.stdout).toString("utf8");
+    const detail = `code=${result.code} signal=${result.signal} stdout=${output} stderr=${result.stderr}`;
+    assert.equal(result.code, 0, detail);
+    assert.deepEqual(JSON.parse(output), args, detail);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
