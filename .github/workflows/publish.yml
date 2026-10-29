@@ -207,3 +207,42 @@ jobs:
           done
           echo "Publish command completed, but npm did not expose the version before polling stopped. Do not retry until registry state is checked." >&2
           exit 1
+
+  tag:
+    if: github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # Tags the exact commit that was verified and published. Runs only after npm reported the
+      # version as latest, so a tag always means "this commit is on npm". An existing tag is
+      # accepted only when it already points at this commit, so a rerun never moves a tag.
+      - name: Create the annotated release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          tag="v$RELEASE_VERSION"
+          if ref=$(gh api "repos/$REPOSITORY/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha' 2>"$RUNNER_TEMP/ref.err"); then
+            read -r type target <<<"$ref"
+            if [[ "$type" == "tag" ]]; then
+              target=$(gh api "repos/$REPOSITORY/git/tags/$target" --jq '.object.sha')
+            fi
+            if [[ "$target" == "$SOURCE_SHA" ]]; then
+              echo "$tag already points at $SOURCE_SHA"
+              exit 0
+            fi
+            echo "$tag already exists at $target, not at the published commit $SOURCE_SHA; refusing to move it" >&2
+            exit 1
+          elif ! grep -q "HTTP 404" "$RUNNER_TEMP/ref.err"; then
+            cat "$RUNNER_TEMP/ref.err" >&2
+            echo "Could not check whether $tag exists; npm is published, create the tag by hand" >&2
+            exit 1
+          fi
+          object=$(gh api "repos/$REPOSITORY/git/tags" -f tag="$tag" -f message="$tag" -f object="$SOURCE_SHA" -f type=commit --jq '.sha')
+          gh api "repos/$REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$object" >/dev/null
+          echo "Created $tag at $SOURCE_SHA"

@@ -1,6 +1,6 @@
 # Releasing to npm
 
-Agent Depot publishes `@iseoane/agent-depot` through GitHub Actions trusted publishing. The workflow does not store an npm token and does not change `package.json` or create a Git tag. See [npm's trusted publishing documentation](https://docs.npmjs.com/trusted-publishers) for the current registry requirements.
+Agent Depot publishes `@iseoane/agent-depot` through GitHub Actions trusted publishing. The workflow does not store an npm token and does not change `package.json`. After npm reports the version as `latest`, it creates the annotated Git tag `v<version>` on the published commit. See [npm's trusted publishing documentation](https://docs.npmjs.com/trusted-publishers) for the current registry requirements.
 
 ## Configure npm trusted publishing
 
@@ -57,7 +57,8 @@ After review, merge the release change to `main`. Only then follow [Publish a re
    checks package identity, refuses a version already present on npm, and passes
    that exact tarball and its checksums to the publish job.
 4. The publish job confirms the artifact came from the dispatched commit, checks the npm registry again, and publishes the tarball. It checks up to 48 times for npm to report the requested version as `latest` with the exact tarball integrity, waiting ten seconds between checks. Each registry request times out after 30 seconds, and GitHub ends the publish job after fifteen minutes.
+5. After publication is verified, the tag job creates the annotated tag `v<version>` on the dispatched commit. It succeeds if that tag already points at the commit and refuses to move a tag that points elsewhere.
 
-The workflow runs only when dispatched from `main`. It serializes releases without cancelling an active publish. A registry network error or unexpected HTTP response stops the run instead of treating the version as available. A post-publish timeout means publication may have succeeded; check npm before retrying.
+The workflow runs only when dispatched from `main`. It serializes releases without cancelling an active publish. A registry network error or unexpected HTTP response stops the run instead of treating the version as available. A post-publish timeout means publication may have succeeded; check npm before retrying. If the version is on npm but the run failed before tagging, create the annotated tag `v<version>` on the dispatched commit by hand.
 
-The workflow uses Node 24 and npm 12.2.0. Trusted publishing requires npm 11.5.1 or later and Node 22.14.0 or later. npm 12.2.0 requires Node `^22.22.2`, `^24.15.0`, or `>=26.0.0`; `setup-node` resolves `24` to the latest Node 24 release. The workflow grants `id-token: write` only to the publish job. It uses GitHub-hosted runners and does not set or consume `NODE_AUTH_TOKEN`.
+The workflow uses Node 24 and npm 12.2.0. Trusted publishing requires npm 11.5.1 or later and Node 22.14.0 or later. npm 12.2.0 requires Node `^22.22.2`, `^24.15.0`, or `>=26.0.0`; `setup-node` resolves `24` to the latest Node 24 release. The workflow grants `id-token: write` only to the publish job and `contents: write` only to the tag job. It uses GitHub-hosted runners and does not set or consume `NODE_AUTH_TOKEN`.
