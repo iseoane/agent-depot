@@ -1,6 +1,6 @@
 # TUI end-to-end tests
 
-`tui.e2e.test.ts` drives the built CLI (`dist/src/cli.js tui`) inside a real pseudo-terminal with an
+`tui.e2e.test.ts` drives the built CLI (`dist/src/cli.js tui`, and one non-TUI command) inside a real pseudo-terminal with an
 isolated HOME, XDG and Pi state. Run it with `pnpm test:e2e`. Every journey is named by its test title.
 
 Every test process starts from `tests/isolated-env.ts`, which sets `AGENT_DEPOT_NO_ANIMATION=1` so Working
@@ -10,6 +10,7 @@ for its own session.
 | Journey | Test | Preconditions | Expected result | Coverage limit |
 | --- | --- | --- | --- | --- |
 | Slow action shows live progress | `a slow App install shows an advancing spinner, elapsed time from 1s, and clears when done` | Fixture App recipe, approved, whose install holds for 2.5s (`--sleep-ms=2500`); animation on | A braille glyph with the busy label appears and changes; elapsed `Ns` first appears at least 1s after confirming and never goes backwards; the busy line is gone after `fixture-app: installed` | Matches text and regex only, never exact frames. Covers the App install path; other busy labels are covered by component tests. No visual flicker check. |
+| Slow CLI command shows live progress | `a slow CLI command shows a spinner with elapsed time on a terminal and erases it before the result` | Same fixture App recipe, approved, install held for 2.5s; runs `app install fixture-app --yes` (no TUI) on the PTY; animation on | A braille glyph with `Installing App fixture-app…` appears and advances; elapsed `Ns` first appears at least 1s in and never goes backwards; the preview lines stay above the spinner; after exit the screen holds `fixture-app: installed` and no spinner glyph or label | Matches text and regex only, never exact frames. Covers the animated stderr path of one command; the non-TTY line, `AGENT_DEPOT_NO_ANIMATION=1` and the other commands' labels are covered by `progress.test.ts` and `cli-progress.test.ts`. |
 
 To run the whole suite with animation on, load the override after `isolated-env` (the last `--import` wins):
 
