@@ -45,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pi.cmd`, and `.cmd`/`.bat` files run through `cmd.exe` with escaped arguments.
 - Importing a Profile no longer reports `Loading Profile…` while it installs and
   uninstalls; it says `Applying import…`.
+- On Windows, a timeout or output limit on any command now terminates its whole
+  process tree with `taskkill /T /F` instead of only the command itself. For an
+  npm `.cmd` shim such as `pi` that used to stop only `cmd.exe` and leave the host
+  CLI running with the output pipes open. The result is still reported as
+  terminated by `SIGTERM` and is returned within two seconds of the kill even if
+  a process survives.
 - The Sources list no longer flashes "No sources or App recipes" while recipes
   load.
 
