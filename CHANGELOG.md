@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `self update` no longer reports every Windows install as unsupported: an
+  `npm.cmd` shim is now accepted when the `npm/bin/npm-cli.js` that ships next
+  to it is present, and the global-root provenance checks still apply (#70).
+
 ## [0.6.5] - 2026-10-29
 
 ### Added
