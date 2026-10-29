@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-10-29
+
 ### Fixed
 
 - `self update` no longer reports every Windows install as unsupported: an
