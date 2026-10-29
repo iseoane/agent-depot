@@ -155,7 +155,8 @@
       {
         "from": "progress",
         "allow": [
-          "tui"
+          "tui",
+          "infrastructure"
         ]
       }
     ],
