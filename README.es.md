@@ -533,8 +533,8 @@ confirmar):
 | Vista | Teclas |
 | --- | --- |
 | Sources | `j`/`k` recorren Sources de Git y recetas App. `Enter` abre el Catálogo de una Source de Git o previsualiza/aprueba una receta App. Aprobarla no instala la App. `n` añade una Source reutilizable o guía la creación de recetas; `r` refresca Sources o recarga el estado de recetas; `d` elimina. `space`/`a` solo marcan Sources de Git. La previsualización de refresco muestra todas las Sources seleccionadas; usa `j`/`k` o PgUp/PgDn para revisarlas antes de `y`; `n` cancela. |
-| Catalog | `Enter`/flechas expanden y contraen; `space` marca el Skill disponible resaltado; `a` marca o desmarca los Skills disponibles visibles de su Source; `i` inicia la instalación de los Skills marcados o del Skill, Package o App aprobada cuya ausencia se verificó y que está resaltada. Confirma la instalación de una App por separado con `y`. `/` filtra y `s` amplía la vista de una Source a todas. Las marcas de otras Sources se conservan y no se instalan Skills ocultos por el filtro. |
-| Installations | `Enter`/flechas expanden y contraen. En filas globales de usuario, `u` inicia la desinstalación de una App o Skill gestionada, o elimina un Skill no gestionado; los Skills de proyecto no se pueden eliminar. `h` o `i` añade Hosts a una instalación global de usuario, y `A` o `Enter` adopta un Skill no gestionado. `space` marca una hoja y `a` marca todas las hojas visibles; las acciones por lotes omiten instalaciones de proyecto con un motivo. En una fila de App, `u` previsualiza la desinstalación y `h` selecciona setup/teardown; las recetas modificadas requieren una nueva aprobación. En una fila de Package, `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala y `f` olvida el registro de selección. Las filas de Package no se pueden marcar para acciones por lotes. |
+| Catalog | `Enter`/flechas expanden y contraen; `space` marca el Skill disponible resaltado; `a` marca o desmarca los Skills disponibles visibles de su Source; `i` inicia la instalación de los Skills marcados o del Skill, Package o App aprobada cuya ausencia se verificó y que está resaltada. Un Package abre el mismo panel paginado que en Installations; confirma la instalación de una App por separado con `y`. `/` filtra y `s` amplía la vista de una Source a todas. Las marcas de otras Sources se conservan y no se instalan Skills ocultos por el filtro. |
+| Installations | `Enter`/flechas expanden y contraen. En filas globales de usuario, `u` inicia la desinstalación de una App o Skill gestionada, o elimina un Skill no gestionado; los Skills de proyecto no se pueden eliminar. `h` o `i` añade Hosts a una instalación global de usuario, y `A` o `Enter` adopta un Skill no gestionado. `space` marca una hoja y `a` marca todas las hojas visibles; las acciones por lotes omiten instalaciones de proyecto con un motivo. En una fila de App, `u` previsualiza la desinstalación y `h` selecciona setup/teardown; las recetas modificadas requieren una nueva aprobación. En una fila de Package, `i` previsualiza el plan de instalación congelado y lo ejecuta, aprobando antes el recibo si falta; `Enter` solo aprueba la declaración de instalación; `U` actualiza, `u` desinstala y `f` olvida el registro de selección. Cada una abre su propio panel, que se pagina cuando es más alto que el terminal: las flechas o PageUp/PageDown avanzan una página visible, `j`/`k` una fila, y `Review N of M` con la ventana de filas indica dónde estás. `y` y `n` responden desde cualquier página. Las filas de Package no se pueden marcar para acciones por lotes. |
 | Updates | `space` marca una actualización, `a` marca todas las actualizaciones disponibles y `t`/`p`/`g` selecciona todo, el ámbito de proyecto o el global de usuario. `Enter` previsualiza las filas marcadas; `u` previsualiza el lote seleccionado; ninguna aplica actualizaciones. `r` vuelve a comprobar y las flechas izquierda/derecha pliegan o despliegan el grupo "cannot be checked". En una previsualización, las flechas o PageUp/PageDown avanzan una página visible y `j`/`k` una fila. Revisa todas las filas antes de `y`; `n` cancela. Las filas desconocidas son informativas. Packages y Apps solo se gestionan en el ámbito global de usuario; Packages requieren aprobación de acción antes de ejecutar una actualización. |
 | Profile | Pulsa `e` para exportar o `i` para importar. Consulta el [flujo de Profile](#flujo-de-profile) para ver la navegación, la selección, las previsualizaciones y las cancelaciones. |
 
@@ -561,12 +561,16 @@ la raíz del proyecto, salvo que la aplicación indique otro directorio inicial.
 3. Elige una carpeta de destino. Muévete con `j`/`k` o las flechas; pulsa
    `Enter` para abrir una carpeta o selecciona **Use this folder** para elegir
    la carpeta actual. Usa Izquierda o Retroceso para subir a la carpeta
-   superior. Pulsa `p` para mostrar la ruta completa y otra vez `p` para volver
-   al listado. `Esc` vuelve a la lista de exportación.
+   superior. Pulsa `p` para mostrar la ruta completa, que se desplaza con `j`/`k` o
+   `PageUp`/`PageDown` si es más alta que el terminal, y otra vez `p` para volver
+   al listado. En un terminal bajo, el selector acorta la ruta y las indicaciones
+   de teclas a una línea cada una para que la lista de carpetas siga visible.
+   `Esc` vuelve a la lista de exportación.
 4. Edita el nombre del archivo. El valor predeterminado es
    `agent-depot-profile.json`. `Ctrl+U` borra el nombre y se añade `.json` si
-   falta una extensión. El editor muestra la ruta completa de destino. Pulsa
-   `Enter` para revisarla. Si la ruta ya existe, incluido un enlace simbólico,
+   falta una extensión. El editor muestra la carpeta, el nombre y el destino; en un terminal bajo, una
+   carpeta o un destino largos conservan su final tras un `…` (la confirmación del
+   paso siguiente muestra el destino completo). Pulsa `Enter` para revisarla. Si la ruta ya existe, incluido un enlace simbólico,
    aparece un error en línea y puedes elegir otro nombre; la exportación nunca
    sobrescribe. `Esc` vuelve al selector de carpetas.
 5. Revisa la previsualización de exportación, incluidas las exclusiones y
@@ -582,8 +586,8 @@ la raíz del proyecto, salvo que la aplicación indique otro directorio inicial.
    los archivos y otra vez `f` para filtrar de nuevo por `.json`. Navega con
    `j`/`k` o las flechas; pulsa `Enter` para abrir una carpeta o seleccionar un
    archivo, e Izquierda o Retroceso para subir a la carpeta superior. Pulsa `p`
-   para mostrar la ruta completa y otra vez `p` para volver. `Esc` vuelve a la
-   vista Profile.
+   para mostrar la ruta completa (se desplaza con `j`/`k` o `PageUp`/`PageDown`
+   si es larga) y otra vez `p` para volver. `Esc` vuelve a la vista Profile.
 2. El archivo seleccionado se analiza y previsualiza. Si no se puede leer o
    no es válido, aparece un error en línea y el selector permanece abierto para
    elegir otro archivo. La lista de importación marca cada elemento como
@@ -1105,7 +1109,7 @@ Packages. Las exclusiones y los conflictos no pueden seleccionarse.
 La exportación y la importación comparten un navegador de directorios que empieza en la
 raíz del proyecto, lista carpetas (y, al importar, archivos `.json`) y se mueve con
 `j`/`k` o las flechas. La exportación elige una carpeta y luego rellena
-`agent-depot-profile.json` en un campo editable que muestra el destino completo;
+`agent-depot-profile.json` en un campo editable que muestra la carpeta, el nombre y el destino (en un terminal bajo una ruta larga conserva su final, y la confirmación pagina el destino completo);
 `Ctrl+U` lo borra, un nombre sin extensión recibe `.json`, y un archivo o enlace
 simbólico existente se rechaza en ese paso para volver a escribirlo. La importación
 navega hasta un archivo existente; `f` alterna entre archivos `.json` y todos los
