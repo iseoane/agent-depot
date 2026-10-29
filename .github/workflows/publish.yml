@@ -43,6 +43,11 @@ jobs:
       - run: node --test scripts/release-notes.test.mjs
       - run: pnpm test:skills
       - run: pnpm test:pack
+      # Fails before publishing when the version has no CHANGELOG section for its GitHub release.
+      - name: Check the release notes
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node scripts/release-notes.mjs CHANGELOG.md "$RELEASE_VERSION" "$RUNNER_TEMP/release-notes.md"
       - name: Pack and validate the release artifact
         env:
           RELEASE_VERSION: ${{ inputs.version }}

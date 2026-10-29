@@ -38,6 +38,7 @@ test("releaseNotes accepts CRLF changelogs", () => {
 test("releaseNotes rejects a missing version and does not match a prefix", () => {
   assert.throws(() => releaseNotes(changelog, "0.6.7"), /CHANGELOG\.md has no ## \[0\.6\.7\] section/);
   assert.throws(() => releaseNotes(changelog, "0.6"), /no ## \[0\.6\] section/);
+  assert.throws(() => releaseNotes("## [0.6.10] - 2026-10-30\n\n- Later.\n", "0.6.1"), /no ## \[0\.6\.1\] section/);
 });
 
 test("the CLI writes the notes file and fails without writing for a missing version", () => {
