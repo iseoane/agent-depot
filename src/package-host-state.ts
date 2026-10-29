@@ -1,4 +1,4 @@
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -396,8 +396,10 @@ async function readPiCheckoutEvidence(checkoutPath: string, sourceIdentity: stri
       runPiGit(checkoutPath, ["status", "--porcelain", "--untracked-files=all"]),
       runPiGit(checkoutPath, ["show", "HEAD:package.json"]),
     ]);
-    const expectedRoot = path.resolve(checkoutPath);
-    if (path.resolve(topLevel) !== expectedRoot) return unavailable("the package path is not the root of its Git checkout");
+    // Git prints a forward-slash, long-name path on Windows (C:/Users/runneradmin/...) while the
+    // checkout path may use backslashes or an 8.3 short name (C:\Users\RUNNER~1\...); realpath makes both canonical.
+    const [canonicalTopLevel, canonicalCheckout] = await Promise.all([realpath(topLevel), realpath(checkoutPath)]);
+    if (canonicalTopLevel !== canonicalCheckout) return unavailable("the package path is not the root of its Git checkout");
     if (normalizeRepository(piSourceIdentityFromUrl(origin)) !== normalizeRepository(sourceIdentity)) {
       return unavailable("the Git checkout origin does not match the selected Pi package Source");
     }
