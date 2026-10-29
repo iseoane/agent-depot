@@ -62,6 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI running with the output pipes open. The result is still reported as
   terminated by `SIGTERM` and is returned within two seconds of the kill even if
   a process survives.
+- On Linux and macOS, a timeout or output limit on any command now terminates the
+  command and every process it had started (found with `ps`) instead of only the
+  command itself: `SIGTERM` first, then `SIGKILL` after two seconds. A wrapper that
+  forks, or a command that ignores `SIGTERM`, used to leave `agent-depot` waiting
+  forever for output pipes that never closed. The result is still reported as
+  terminated by `SIGTERM` and is returned within about four seconds of the kill even
+  if a process that had already left the command's process tree survives. The
+  command stays in Agent Depot's process group, so Ctrl-C still stops it and
+  `git`/`ssh` can still prompt on the terminal.
 - The Sources list no longer flashes "No sources or App recipes" while recipes
   load.
 

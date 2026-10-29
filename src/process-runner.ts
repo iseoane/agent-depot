@@ -99,8 +99,13 @@ export function spawnInvocation(
   return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], windowsVerbatimArguments: true };
 }
 
-/** How long `runProcess` waits for stdio to close after killing a Windows process tree before it gives up on it. */
-const WINDOWS_KILL_GRACE_MS = 2_000;
+/**
+ * How long `runProcess` waits after asking a process (tree) to stop before it escalates (POSIX: SIGKILL)
+ * or, once nothing more can be done, gives up on the stdio pipes a surviving descendant holds open.
+ */
+const KILL_GRACE_MS = 2_000;
+/** Upper bound for the `ps` snapshot of the process tree. */
+const PROCESS_LIST_TIMEOUT_MS = 1_000;
 
 /**
  * Terminates a Windows child and everything it started. `child.kill()` ends
@@ -127,11 +132,55 @@ function killWindowsProcessTree(child: ChildProcess): void {
 }
 
 /**
+ * The pids of `rootPid` and every process descended from it, from a single `ps` snapshot. The child
+ * stays in agent-depot's own process group and session (a detached group has no controlling terminal,
+ * so a git or ssh prompt would fail, and a terminal Ctrl-C would no longer reach it), so a group kill
+ * is not available. Falls back to `rootPid` alone when `ps` cannot be run or read.
+ */
+function listProcessTree(rootPid: number): Promise<readonly number[]> {
+  return new Promise((resolve) => {
+    const tree = [rootPid];
+    const ps = spawn("ps", ["-A", "-o", "pid=,ppid="], { stdio: ["ignore", "pipe", "ignore"], timeout: PROCESS_LIST_TIMEOUT_MS });
+    let output = "";
+    ps.stdout.setEncoding("utf8");
+    ps.stdout.on("data", (chunk: string) => { output += chunk; });
+    // A missing `ps` is followed by `close` with no output, which leaves just the root.
+    ps.on("error", () => {});
+    ps.on("close", () => {
+      const children = new Map<number, number[]>();
+      for (const line of output.split("\n")) {
+        const [pid, parent] = line.trim().split(/\s+/u).map(Number);
+        if (pid === undefined || parent === undefined || !Number.isInteger(pid) || !Number.isInteger(parent)) continue;
+        children.set(parent, [...(children.get(parent) ?? []), pid]);
+      }
+      for (const pid of tree) {
+        for (const child of children.get(pid) ?? []) if (!tree.includes(child)) tree.push(child);
+      }
+      resolve(tree);
+    });
+  });
+}
+
+function signalProcesses(pids: readonly number[], signal: NodeJS.Signals): void {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
+/**
  * Runs a command with an argument vector and no shell (except cmd.exe for
- * Windows batch files); rejects only when spawning fails. For every command on
- * Windows, a timeout or output overflow kills the whole process tree and reports
+ * Windows batch files); rejects only when spawning fails. For every command, a timeout or output overflow kills the whole process tree and reports
  * it as terminated by `SIGTERM`, and the result is returned within a bounded
- * time even if a descendant survives and holds the stdio pipes open. Also on Windows, an argument to a `.cmd`/`.bat` file containing a line
+ * time even if a descendant survives and holds the stdio pipes open. On POSIX the
+ * tree is the child and its descendants at the moment of the kill (from a `ps`
+ * snapshot, because the child shares agent-depot's process group): they get
+ * `SIGTERM`, and whichever of them still runs after a grace period gets `SIGKILL`.
+ * A process that left the tree beforehand (daemonized, or orphaned by an exited
+ * child) is not killed. On Windows, an argument to a `.cmd`/`.bat` file containing a line
  * break or `& | < >` is rejected with `EINVAL` because cmd.exe cannot carry it
  * safely.
  */
@@ -160,11 +209,13 @@ export function runProcess(
     let terminating = false;
     let killedByRunner = false;
     let graceTimer: NodeJS.Timeout | undefined;
+    let posixTree: readonly number[] = [];
+    const isRunning = (): boolean => child.exitCode === null && child.signalCode === null;
     const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (settled) return;
       settled = true;
-      // taskkill ends the process with exit code 1 and no signal; report it like child.kill() does, so callers see a terminated process.
-      if (killedByRunner && signal === null) {
+      // taskkill ends the process with exit code 1 and no signal, and an escalated kill ends with SIGKILL; report both like child.kill() does, so callers see a terminated process.
+      if (killedByRunner && (signal === null || signal === "SIGKILL")) {
         code = null;
         signal = "SIGTERM";
       }
@@ -172,24 +223,39 @@ export function runProcess(
       if (graceTimer !== undefined) clearTimeout(graceTimer);
       resolve({ code, signal, stdout: Buffer.concat(stdout), stderr, outputTooLarge, ...(timedOut ? { timedOut: true } : {}) });
     };
+    // A surviving descendant keeps the pipes open, so `close` may never come: give up on them.
+    const giveUp = (): void => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      settle(child.exitCode, child.signalCode);
+    };
     const terminate = (): void => {
-      if (process.platform !== "win32") {
-        child.kill();
-        return;
-      }
       if (terminating) return;
       terminating = true;
       // A child that already exited must not be killed: its pid may have been reused.
-      if (child.exitCode === null && child.signalCode === null) {
-        killedByRunner = true;
-        killWindowsProcessTree(child);
+      const running = isRunning();
+      if (running) killedByRunner = true;
+      if (process.platform === "win32") {
+        if (running) killWindowsProcessTree(child);
+        graceTimer = setTimeout(giveUp, KILL_GRACE_MS);
+        return;
       }
-      // A surviving descendant keeps the pipes open, so `close` may never come: give up on them.
+      if (child.pid === undefined) return; // never spawned: `error` has already rejected
+      if (!running) {
+        graceTimer = setTimeout(giveUp, KILL_GRACE_MS);
+        return;
+      }
+      posixTree = [child.pid];
+      // Snapshot before signalling: once the child dies its descendants are reparented and can no longer be found.
+      void listProcessTree(child.pid).then((tree) => {
+        posixTree = tree;
+        signalProcesses(tree, "SIGTERM");
+      });
       graceTimer = setTimeout(() => {
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        settle(child.exitCode, child.signalCode);
-      }, WINDOWS_KILL_GRACE_MS);
+        // The child's own pid is left alone once it has exited, as it may have been reused.
+        signalProcesses(posixTree.filter((pid) => pid !== child.pid || isRunning()), "SIGKILL");
+        graceTimer = setTimeout(giveUp, KILL_GRACE_MS);
+      }, KILL_GRACE_MS);
     };
     const timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
       timedOut = true;
