@@ -492,8 +492,8 @@ Keys per view (prompts also accept `Esc` to cancel and `y`/`n` to confirm):
 | View | Keys |
 | --- | --- |
 | Sources | `j`/`k` move through Git Sources and App recipes. `Enter` opens the Catalog for a Git Source or previews/approves an App recipe. Approval does not install the App. `n` adds a Git Source or guides recipe authoring; `r` refreshes Sources or reloads recipe status; `d` removes. `space`/`a` mark Git Sources only. Refresh previews show every selected Source; review every physical row before `y`. `n` cancels. |
-| Catalog | `Enter`/arrows expand and collapse, `space` marks the highlighted loose Skill, `a` marks or clears the visible loose Skills in its Source, and `i` starts installation for marked Skills or the highlighted Skill, Package, or verified-absent approved App. Confirm an App install separately with `y`. `/` filters and `s` widens a Source view to all Sources. Marks in other Sources remain unchanged; Skills hidden by the filter are not installed. |
-| Installations | `Enter`/arrows expand and collapse. On user-global rows, `u` starts an App or managed Skill uninstall, or removes an unmanaged Skill; project Skills cannot be removed. `h` or `i` adds Hosts to a user-global Skill installation, and `A` or `Enter` adopts an unmanaged Skill. `space` marks a leaf and `a` marks all visible leaves; bulk actions skip project installations with a reason. On an App row, `u` previews uninstall and `h` selects setup/teardown; changed recipes must be approved again before commands run. On a Package row, `i` previews the frozen install plan and runs it, approving the receipt first when it is missing; `Enter` approves the install declaration only, `U` updates, `u` uninstalls, and `f` forgets the selection record. Package rows are not markable for bulk actions. |
+| Catalog | `Enter`/arrows expand and collapse, `space` marks the highlighted loose Skill, `a` marks or clears the visible loose Skills in its Source, and `i` starts installation for marked Skills or the highlighted Skill, Package, or verified-absent approved App. A Package opens the same paged panel as in Installations; confirm an App install separately with `y`. `/` filters and `s` widens a Source view to all Sources. Marks in other Sources remain unchanged; Skills hidden by the filter are not installed. |
+| Installations | `Enter`/arrows expand and collapse. On user-global rows, `u` starts an App or managed Skill uninstall, or removes an unmanaged Skill; project Skills cannot be removed. `h` or `i` adds Hosts to a user-global Skill installation, and `A` or `Enter` adopts an unmanaged Skill. `space` marks a leaf and `a` marks all visible leaves; bulk actions skip project installations with a reason. On an App row, `u` previews uninstall and `h` selects setup/teardown; changed recipes must be approved again before commands run. On a Package row, `i` previews the frozen install plan and runs it, approving the receipt first when it is missing; `Enter` approves the install declaration only, `U` updates, `u` uninstalls, and `f` forgets the selection record. Each of these opens its own panel, which pages when it is taller than the terminal: arrows or PageUp/PageDown move by a visible page, `j`/`k` by one row, and `Review N of M` with the row window shows where you are. `y` and `n` answer from any page. Package rows are not markable for bulk actions. |
 | Updates | `space` marks an update, `a` marks all available updates, and `t`/`p`/`g` selects all, project, or user-global scope. `Enter` previews the marked rows; `u` previews the selected batch; neither applies updates. `r` checks again, and left/right arrows fold or unfold the "cannot be checked" group. In a preview, arrows or PageUp/PageDown move by a visible page and `j`/`k` move one row. Review every row before `y`; `n` cancels. Unknown rows are informational. Packages and Apps are user-global only; Packages need action approval before update execution. |
 | Profile | Press `e` to export or `i` to import. See [Profile workflow](#profile-workflow) for navigation, selection, previews, and cancellation. |
 
@@ -517,11 +517,15 @@ the application supplies another start directory.
 3. Choose a destination folder. Move with `j`/`k` or the arrows, press `Enter`
    to open a folder, or select **Use this folder** to choose the current one.
    Use Left or Backspace to go to the parent. Press `p` to show the full
-   directory path; press `p` again to return to the listing. `Esc` returns to
-   the checklist.
+   directory path, which scrolls with `j`/`k` or `PageUp`/`PageDown` when it is
+   taller than the terminal; press `p` again to return to the listing. On a
+   short terminal the picker shortens the path and the key hints to one line
+   each so the folder list stays visible. `Esc` returns to the checklist.
 4. Edit the file name. The default is `agent-depot-profile.json`. `Ctrl+U`
    clears the name, and a name without an extension gets `.json`. The editor
-   shows the complete destination path. Press `Enter` to review it. If the path
+   shows the folder, the name and the destination; on a short terminal a long
+   folder or destination keeps its end behind a `…` (the confirmation in the next
+   step shows the whole destination). Press `Enter` to review it. If the path
    already exists, including a symlink, the view reports an inline error and
    lets you choose another name; export never overwrites. `Esc` returns to the
    folder picker.
@@ -536,7 +540,8 @@ the application supplies another start directory.
    `.json` files and folders. Press `f` to show every file, `f` again to filter
    back to `.json`. Navigate with `j`/`k` or the arrows, use `Enter` to open a
    folder or select a file, and Left or Backspace to go to the parent. Press
-   `p` to show the full directory path and `p` again to return. `Esc` returns
+   `p` to show the full directory path (it scrolls with `j`/`k` or
+   `PageUp`/`PageDown` when it is long) and `p` again to return. `Esc` returns
    to the Profile view.
 2. The selected file is parsed and previewed. If it is invalid or cannot be
    read, an inline error appears and the picker stays open so you can choose
@@ -1015,7 +1020,7 @@ automatically installs Apps or Packages. Exclusions and conflicts cannot be sele
 Export and import share one directory browser that starts at the project root, lists
 folders (and, for import, `.json` files), and moves with `j`/`k` or the arrows. Export
 picks a folder, then pre-fills `agent-depot-profile.json` in an editable name field that
-shows the complete destination; `Ctrl+U` clears it, a name without an extension gains
+shows the folder, the name and the destination (a long path keeps its end on a short terminal, and the confirmation pages the whole destination); `Ctrl+U` clears it, a name without an extension gains
 `.json`, and an existing file or symlink is refused at that step so you can retype.
 Import browses to an existing file; `f` switches between `.json` files and every file,
 and a malformed file reports inline while the browser stays open. Export creates a new
