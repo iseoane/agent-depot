@@ -12,6 +12,7 @@ import { describeLifecyclePlan, describePackageResult, describePackageUpdateChec
 import { selectionKey, type PackageSelection, type PackageUpdateCheck } from "./package-model.js";
 import { EXPORT_USAGE, IMPORT_USAGE, runProfileExport, runProfileImport } from "./profile-cli.js";
 import { pathsOverlap } from "./path-safety.js";
+import { withChildOutput } from "./process-runner.js";
 import { createProgress, NO_PROGRESS, type Progress } from "./progress.js";
 import { skillTreeBaseline, type SkillCandidate, type SourceContentAccess } from "./skill-discovery.js";
 import {
@@ -312,7 +313,7 @@ export async function runCli(rawArgv: readonly string[] = process.argv.slice(2),
   // A global flag, so every command's own option parser never sees it.
   const verbose = rawArgv.includes("--verbose");
   const argv = verbose ? rawArgv.filter((argument) => argument !== "--verbose") : rawArgv;
-  const progress = dependencies.progress ?? (dependencies.stderr === undefined ? createProgress({ verbose }) : NO_PROGRESS);
+  const progress = dependencies.progress ?? (dependencies.stderr === undefined ? createProgress({ verbose, tapChildOutput: withChildOutput }) : NO_PROGRESS);
   // Every line is written after erasing any spinner, so a step that prints while it runs is never garbled.
   const writeStdout = dependencies.stdout ?? ((line: string) => console.log(line));
   const writeStderr = dependencies.stderr ?? ((line: string) => console.error(line));

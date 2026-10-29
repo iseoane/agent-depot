@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { runProcess, type ProcessRunOptions } from "../src/process-runner.js";
-import { createProgress, type Progress } from "../src/progress.js";
+import { runProcess, withChildOutput, type ProcessRunOptions } from "../src/process-runner.js";
+import { createProgress as createBareProgress, type Progress, type ProgressOptions } from "../src/progress.js";
 import { fakeStream, fakeTimers, screenOf } from "./progress-fixtures.js";
 
 /**
@@ -10,6 +10,9 @@ import { fakeStream, fakeTimers, screenOf } from "./progress-fixtures.js";
  * every line live under `--verbose`, nothing otherwise. The real runner and real child processes
  * drive each scenario; progress is observed through a fake stderr and a replayed terminal.
  */
+
+/** The reporter as the CLI builds it: child output is tapped through the process runner. */
+const createProgress = (options: ProgressOptions): Progress => createBareProgress({ tapChildOutput: withChildOutput, ...options });
 
 const ANIMATED = {};
 const STATIC = { AGENT_DEPOT_NO_ANIMATION: "1" };
@@ -138,12 +141,13 @@ test("child stdout that a caller captures as data is not shown unless it opts in
 });
 
 test("showing child output leaves the run result, caps and timeout shapes unchanged", async () => {
-  const noisy = ["-e", `const fs=require("node:fs");fs.writeSync(1,"x".repeat(5000));fs.writeSync(2,"e".repeat(300));setTimeout(()=>{},5000);`];
+  // Each cap case floods one stream only: with both, whether the other stream's bytes arrive before the kill is a race.
+  const flood = (fd: 1 | 2, bytes: number) => ["-e", `require("node:fs").writeSync(${fd},"x".repeat(${bytes}));setTimeout(()=>{},5000);`];
   const cases: Array<[string, readonly string[], ProcessRunOptions]> = [
     ["exit code and captured output", ["-e", `console.log("hi");console.error("oops");process.exitCode=3`], { captureStdout: true }],
-    ["stdout cap", noisy, { captureStdout: true, maxOutputBytes: 1000 }],
-    ["stderr cap", noisy, { maxStderrBytes: 100 }],
-    ["timeout", noisy, { timeoutMs: 200 }],
+    ["stdout cap", flood(1, 5000), { captureStdout: true, maxOutputBytes: 1000 }],
+    ["stderr cap", flood(2, 5000), { maxStderrBytes: 100 }],
+    ["timeout", flood(2, 300), { timeoutMs: 200 }],
   ];
   for (const [name, args, options] of cases) {
     const bare = await runProcess(process.execPath, args, options);

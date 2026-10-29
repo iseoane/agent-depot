@@ -1,6 +1,5 @@
 import stringWidth from "string-width";
 
-import { withChildOutput } from "./process-runner.js";
 import { animationEnabled, formatElapsed, SPINNER_FRAMES, SPINNER_TICK_MS, STATIC_GLYPH } from "./tui/working-model.js";
 
 /** The slice of a stream progress needs; `process.stderr` satisfies it. Progress never writes to stdout. */
@@ -17,6 +16,13 @@ export interface ProgressTimers {
   clearInterval(timer: { unref(): unknown }): void;
 }
 
+/**
+ * Runs `work` so that child processes it starts report their output to `sink`; `withChildOutput` from
+ * the process runner. Progress takes it as an option so it never depends on the runner itself, and
+ * without it no child output is shown.
+ */
+export type ChildOutputTap = <T>(sink: (text: string, stream: "stdout" | "stderr") => void, work: () => Promise<T>) => Promise<T>;
+
 export interface ProgressOptions {
   readonly stream?: ProgressStream;
   readonly env?: NodeJS.ProcessEnv;
@@ -24,6 +30,7 @@ export interface ProgressOptions {
   readonly timers?: ProgressTimers;
   /** Stream every child output line to the stream as it arrives, after one plain step line, with no spinner. */
   readonly verbose?: boolean;
+  readonly tapChildOutput?: ChildOutputTap;
 }
 
 /** Reports what a long CLI step is doing, on stderr only. */
@@ -123,6 +130,7 @@ export function createProgress(options: ProgressOptions = {}): Progress {
     setInterval: (callback, ms) => setInterval(callback, ms),
     clearInterval: (timer) => clearInterval(timer as NodeJS.Timeout),
   };
+  const tap = options.tapChildOutput;
   const verbose = options.verbose === true;
   let active = false;
   let drawnRows = 0;
@@ -134,11 +142,12 @@ export function createProgress(options: ProgressOptions = {}): Progress {
     stream.write(eraseFrame(rows));
   }
 
-  /** Runs `work` while child output goes to `onChunk`; the tap goes silent as soon as the step ends. */
-  async function tapChildOutput<T>(work: () => Promise<T>, splitter: ReturnType<typeof lineSplitter>): Promise<T> {
+  /** Runs `work` while its child output goes to `splitter`; the tap goes silent as soon as the step ends. */
+  async function showChildOutput<T>(work: () => Promise<T>, splitter: ReturnType<typeof lineSplitter>): Promise<T> {
+    if (tap === undefined) return work();
     let live = true;
     try {
-      return await withChildOutput((text, source) => { if (live) splitter.write(text, source); }, work);
+      return await tap((text, source) => { if (live) splitter.write(text, source); }, work);
     } finally {
       live = false;
       splitter.flush();
@@ -154,7 +163,7 @@ export function createProgress(options: ProgressOptions = {}): Progress {
       active = true;
       try {
         // Verbose output is plain lines, so it is also safe next to a prompt; otherwise child output stays hidden.
-        return verbose ? await tapChildOutput(work, lineSplitter((line) => stream.write(`${line}\n`))) : await work();
+        return verbose ? await showChildOutput(work, lineSplitter((line) => stream.write(`${line}\n`))) : await work();
       } finally { active = false; }
     }
     const startedAt = now();
@@ -182,7 +191,7 @@ export function createProgress(options: ProgressOptions = {}): Progress {
     // A redraw timer alone must never keep the process alive.
     timer.unref();
     try {
-      return await tapChildOutput(work, splitter);
+      return await showChildOutput(work, splitter);
     } finally {
       timers.clearInterval(timer);
       active = false;
