@@ -577,6 +577,125 @@ test("only a matching root-only untracked npm lockfile permits Pi update compari
   }
 });
 
+test("npm's generated root lock with matching bin metadata is verified clean checkout evidence (#50)", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    const manifest = { name: "isswf-pi-resources", version: "1.5.0", bin: { isswf: "tools/isswf.mjs" } };
+    const commit = await commitManifestWithoutLock(fixture.checkoutPath, manifest);
+    const lockPath = path.join(fixture.checkoutPath, "package-lock.json");
+    const lockFor = (root: Record<string, unknown>, extra: Record<string, unknown> = {}): string => `${JSON.stringify({
+      name: manifest.name, version: manifest.version, lockfileVersion: 3, requires: true, packages: { "": root }, ...extra,
+    }, null, 2)}\n`;
+    const readEvidence = async () => findInstalledBundle(await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    }), piDescriptor("repo"), piSelection(fixture.url));
+    const expectBlocked = async (label: string): Promise<void> => {
+      const evidence = await readEvidence();
+      assert.equal(evidence.kind, "installed", label);
+      if (evidence.kind === "installed") {
+        assert.equal(evidence.commit, undefined, label);
+        assert.match(evidence.reason ?? "", /local modifications/u, label);
+      }
+    };
+
+    // The exact lockfile reported in #50: a verified HEAD commit with no reason is what the Package flow persists.
+    const issueLock = `{
+  "name": "isswf-pi-resources",
+  "version": "1.5.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "isswf-pi-resources",
+      "version": "1.5.0",
+      "bin": { "isswf": "tools/isswf.mjs" }
+    }
+  }
+}
+`;
+    await writeFile(lockPath, issueLock);
+    assert.deepEqual(await readEvidence(), { kind: "installed", version: "1.5.0", commit });
+    assert.equal(await readFile(lockPath, "utf8"), issueLock);
+    assert.equal(classifyUpdate(await readEvidence(), { kind: "manifest-version", version: "1.5.0", declaredBy: "bundle" }, "b".repeat(40), true), "update available");
+
+    const root = { name: manifest.name, version: manifest.version };
+    for (const [label, invalid] of [
+      ["mismatched bin path", lockFor({ ...root, bin: { isswf: "tools/other.mjs" } })],
+      ["mismatched bin name", lockFor({ ...root, bin: { other: "tools/isswf.mjs" } })],
+      ["extra bin entry", lockFor({ ...root, bin: { isswf: "tools/isswf.mjs", extra: "tools/extra.mjs" } })],
+      ["missing bin entry", lockFor(root)],
+      ["unnormalized bin path", lockFor({ ...root, bin: { isswf: "./tools/isswf.mjs" } })],
+      ["string bin in lock", lockFor({ ...root, bin: "tools/isswf.mjs" })],
+      ["unknown root metadata", lockFor({ ...root, bin: manifest.bin, hasInstallScript: true })],
+      ["dependencies in lock root", lockFor({ ...root, bin: manifest.bin, dependencies: { other: "*" } })],
+      ["extra lock package", lockFor({ ...root, bin: manifest.bin }, { packages: { "": { ...root, bin: manifest.bin }, "node_modules/other": { version: "1.0.0" } } })],
+    ] as const) {
+      await writeFile(lockPath, invalid);
+      await expectBlocked(label);
+    }
+
+    // A lock that carries bin for a manifest that does not.
+    await commitManifestWithoutLock(fixture.checkoutPath, { name: manifest.name, version: manifest.version });
+    await writeFile(lockPath, issueLock);
+    await expectBlocked("bin in lock but not in manifest");
+
+    // A manifest that declares dependencies is more than the harmless root-only artifact.
+    await commitManifestWithoutLock(fixture.checkoutPath, { ...manifest, dependencies: { other: "*" } });
+    await writeFile(lockPath, issueLock);
+    await expectBlocked("manifest dependencies");
+
+    // Matching lock, but any other local change still blocks.
+    const restoredCommit = await commitManifestWithoutLock(fixture.checkoutPath, manifest);
+    await writeFile(lockPath, issueLock);
+    assert.deepEqual(await readEvidence(), { kind: "installed", version: "1.5.0", commit: restoredCommit });
+    await writeFile(path.join(fixture.checkoutPath, "local.txt"), "local change");
+    await expectBlocked("other untracked file");
+    await rm(path.join(fixture.checkoutPath, "local.txt"));
+    await writeFile(path.join(fixture.checkoutPath, "package.json"), JSON.stringify({ ...manifest, description: "edited" }));
+    await expectBlocked("tracked modification");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("npm's generated root lock normalizes a string bin to the unscoped package name", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    const readEvidence = async () => findInstalledBundle(await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    }), piDescriptor("repo"), piSelection(fixture.url));
+    const lockPath = path.join(fixture.checkoutPath, "package-lock.json");
+    const lockFor = (name: string, bin: unknown): string => JSON.stringify({
+      name, version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name, version: "1.0.0", bin } },
+    });
+    // Shapes below were produced by `npm install --package-lock-only` (npm 12).
+    const commit = await commitManifestWithoutLock(fixture.checkoutPath, { name: "@scope/pkg", version: "1.0.0", bin: "./tools/x.mjs" });
+    await writeFile(lockPath, lockFor("@scope/pkg", { pkg: "tools/x.mjs" }));
+    assert.deepEqual(await readEvidence(), { kind: "installed", version: "1.0.0", commit });
+    for (const wrong of [{ "@scope/pkg": "tools/x.mjs" }, { pkg: "./tools/x.mjs" }, "tools/x.mjs"]) {
+      await writeFile(lockPath, lockFor("@scope/pkg", wrong));
+      const evidence = await readEvidence();
+      assert.equal(evidence.kind === "installed" ? evidence.commit : "unexpected", undefined);
+    }
+    // Object-form targets lose a leading ./ too.
+    const objectCommit = await commitManifestWithoutLock(fixture.checkoutPath, { name: "plain", version: "1.0.0", bin: { tool: "./t/x.mjs" } });
+    await writeFile(lockPath, lockFor("plain", { tool: "t/x.mjs" }));
+    assert.deepEqual(await readEvidence(), { kind: "installed", version: "1.0.0", commit: objectCommit });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("a modified tracked Pi lockfile keeps the HEAD version but no update identity", async () => {
   const fixture = await piCheckoutFixture();
   try {
@@ -710,6 +829,15 @@ async function piCheckoutFixture(): Promise<{
   await git(checkoutPath, ["commit", "-m", "fixture"]);
   const commit = await gitOutput(checkoutPath, ["rev-parse", "HEAD"]);
   return { root, home, agentDirectory, checkoutPath, settingsPath, url, source, commit };
+}
+
+async function commitManifestWithoutLock(checkoutPath: string, manifest: Record<string, unknown>): Promise<string> {
+  await rm(path.join(checkoutPath, "package-lock.json"), { force: true });
+  await writeFile(path.join(checkoutPath, "package.json"), JSON.stringify(manifest), "utf8");
+  await git(checkoutPath, ["rm", "--cached", "--ignore-unmatch", "--quiet", "package-lock.json"]);
+  await git(checkoutPath, ["add", "package.json"]);
+  await git(checkoutPath, ["commit", "--allow-empty", "-m", "manifest"]);
+  return gitOutput(checkoutPath, ["rev-parse", "HEAD"]);
 }
 
 async function git(cwd: string, args: readonly string[]): Promise<void> {

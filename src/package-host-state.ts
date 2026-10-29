@@ -446,7 +446,7 @@ async function isMatchingRootOnlyNpmLock(checkoutPath: string, manifest: unknown
     for (const key of ["dependencies", "devDependencies", "optionalDependencies"]) {
       if (manifest[key] !== undefined && (!isRecord(manifest[key]) || Object.keys(manifest[key]).length !== 0)) return false;
     }
-    const allowed = ["name", "version", "license", "peerDependencies", "peerDependenciesMeta"];
+    const allowed = ["name", "version", "license", "peerDependencies", "peerDependenciesMeta", "bin"];
     const equalJson = (left: unknown, right: unknown): boolean => {
       if (left === right) return true;
       if (!isRecord(left) || !isRecord(right)) return false;
@@ -454,11 +454,43 @@ async function isMatchingRootOnlyNpmLock(checkoutPath: string, manifest: unknown
       return keys.length === Object.keys(right).length
         && keys.every((key) => Object.hasOwn(right, key) && equalJson(left[key], right[key]));
     };
-    return Object.keys(root).every((key) => allowed.includes(key) && equalJson(root[key], manifest[key]))
-      && ["peerDependencies", "peerDependenciesMeta"].every((key) => equalJson(root[key], manifest[key]));
+    // npm records `bin` in its normalized form, so compare against that, not the raw manifest value.
+    const expectedBin = normalizeNpmBin(manifest);
+    return Object.keys(root).every((key) => allowed.includes(key)
+        && equalJson(root[key], key === "bin" ? expectedBin : manifest[key]))
+      && ["peerDependencies", "peerDependenciesMeta"].every((key) => equalJson(root[key], manifest[key]))
+      && equalJson(root.bin, expectedBin);
   } catch {
     return false;
   }
+}
+
+/**
+ * npm's `bin` normalization for the string and object forms (npm-normalize-package-bin): a string
+ * becomes `{ [unscoped name]: path }` and every target loses a leading `./`. Verified against
+ * `npm install --package-lock-only` (npm 12). Array and malformed forms yield `undefined`, so a
+ * lock that carries `bin` for them is rejected instead of guessed.
+ */
+function normalizeNpmBin(manifest: Record<string, unknown>): Record<string, string> | undefined {
+  const raw = manifest.bin;
+  let entries: Record<string, unknown>;
+  if (typeof raw === "string") {
+    if (typeof manifest.name !== "string") return undefined;
+    entries = { [manifest.name.replace(/^@[^/]+\//u, "")]: raw };
+  } else if (isRecord(raw)) {
+    entries = raw;
+  } else {
+    return undefined;
+  }
+  const clean: Record<string, string> = {};
+  for (const [key, target] of Object.entries(entries)) {
+    const name = path.posix.basename(key.replace(/[\\:]/gu, "/"));
+    if (typeof target !== "string" || name === "" || name === "." || name === "..") return undefined;
+    const normalizedTarget = path.posix.join("/", target.replace(/\\/gu, "/")).slice(1);
+    if (normalizedTarget === "") return undefined;
+    clean[name] = normalizedTarget;
+  }
+  return Object.keys(clean).length === 0 ? undefined : clean;
 }
 
 async function runPiGit(checkoutPath: string, args: readonly string[]): Promise<string> {
