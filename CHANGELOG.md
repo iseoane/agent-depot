@@ -73,6 +73,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `git`/`ssh` can still prompt on the terminal.
 - The Sources list no longer flashes "No sources or App recipes" while recipes
   load.
+- The Package approval, lifecycle confirmation and forget panels no longer
+  overlap their text when they are taller than the terminal, as a long working
+  directory makes them. They now page like the Updates preview (arrows, PgUp/PgDn,
+  `j`/`k`, with `Review N of M` in the footer) and take the panel's own view
+  instead of sitting under the list. `y` is accepted only once the last row has
+  been shown, so what you approve is never partly hidden; `n` and Esc still
+  cancel at any row.
+- The Profile export name stage and the file picker now stay inside short
+  terminals. A long folder or destination in the name stage keeps its first and
+  last rows with a `…` where rows are cut (the confirmation that follows pages the
+  full destination). The picker trims its path and key hints to one line when the
+  full ones would leave no room for the folder list, and its full-path view
+  (`p`) scrolls with `j`/`k` or PgUp/PgDn.
+- The Profile export and import confirmation could not be paged past the number of
+  source lines, so the rows of a long wrapped destination at the end of a short
+  terminal stayed out of reach. It now pages over every wrapped row.
 
 ## [0.6.4] - 2026-10-23
 

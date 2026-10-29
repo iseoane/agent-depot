@@ -23,9 +23,10 @@ import {
 } from "./file-picker-model.js";
 import { FilePicker } from "./file-picker.js";
 import { useKeys } from "./keys.js";
+import { previewViewport, type PreviewChrome } from "./preview-window.js";
 import { answerYesNo, moveCursor, movePreviewCursor, toggleChoice } from "./mode-keys.js";
 import { BorderPanel, PreviewConfirm, PreviewLines, Working } from "./panel-parts.js";
-import { fitLines, wrapText } from "./text-wrap.js";
+import { elideMiddle, fitLines, wrapText } from "./text-wrap.js";
 import { theme } from "./theme.js";
 import { useMirrored, useMounted } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
@@ -148,6 +149,34 @@ function physicalListWindow(rows: readonly DisplayRow[], rowHeights: readonly nu
 }
 
 /** The four import blocks in one indexed list, so the checklist and the confirmation share positions. */
+/** An error naming a long path keeps its first and last rows, where the path starts and the reason ends. */
+const NAME_ERROR_ROWS = 3;
+const NAME_HINT = "Type to edit · Ctrl+U clear · Enter continue · Esc back to folder";
+
+/**
+ * A `Label: value` line of the export name stage, wrapped to the panel and kept within `rows` rows. A path
+ * keeps its first and last rows; the typed name (`tail`) keeps its last rows so the cursor stays in view.
+ */
+function NameField({ label, value, rows, width, tail = false }: {
+  readonly label: string;
+  readonly value: string;
+  readonly rows: number;
+  readonly width: number;
+  readonly tail?: boolean;
+}) {
+  const wrapped = wrapText(`${label}${value}`, width);
+  const cut = wrapped.length > rows;
+  const shown = !cut ? wrapped
+    : tail ? [`…${wrapped[wrapped.length - rows]!.slice(1)}`, ...wrapped.slice(wrapped.length - rows + 1)]
+      : elideMiddle(wrapped, rows, width);
+  return <>{shown.map((line, index) => {
+    if (index === 0 && line.startsWith(label)) {
+      return <Text key={index}><Text color={theme.field}>{label}</Text><Text color={theme.value}>{line.slice(label.length)}</Text></Text>;
+    }
+    return <Text key={index} color={cut && !tail && index === 1 && line.startsWith("… ") ? theme.muted : theme.value}>{line}</Text>;
+  })}</>;
+}
+
 function planEntries(plan: ProfileImportPlan): readonly ProfileImportEntry[] {
   return [...plan.items, ...plan.packages];
 }
@@ -225,7 +254,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const [profile, setProfile] = useState<Profile>();
   const [plan, setPlan] = useState<ProfileImportPlan>();
   const diagnostics = useRef<readonly ProfileExportDiagnostic[]>([]);
-  const { columns: terminalColumns } = useWindowSize();
+  const { rows: terminalRows, columns: terminalColumns } = useWindowSize();
   const panelWidth = Math.max((terminalColumns || 80) - 4, 1);
   const hintCursorRow = (mode === "export-list" ? exportDisplayRows(rows, expandedGroupsRef.current) : rows)[cursorRef.current];
   const enterHint = hintCursorRow === undefined ? undefined
@@ -239,6 +268,13 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const titleRows = Math.max(Math.ceil(stringWidth("Export Profile") / panelWidth), 1);
   const hintRows = Math.max(Math.ceil(stringWidth(hintText) / panelWidth), 1);
   const height = useListHeight(listHeight, 4 + titleRows + hintRows);
+  const confirmChrome = (): PreviewChrome => ({
+    title: "Confirmation",
+    questions: [confirmRequest.current?.kind === "export"
+      ? "Save/Export Profile? (y/n) · arrows/PgUp/PgDn page · j/k line"
+      : "Apply Profile? (y/n) · arrows/PgUp/PgDn page · j/k line"],
+    footerRows: 2,
+  });
   const showLines = (next: readonly string[], nextMode: "confirm" | "detail" | "results") => {
     setLines(next);
     cursorTo(0);
@@ -435,7 +471,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     if (current === "confirm") {
       answerYesNo(input, key, confirmApply, () => setMode(confirmRequest.current?.kind === "import" ? "import-list" : "export-name"));
       if (input === "y" || input === "n" || key.escape) return;
-      const next = movePreviewCursor(cursorRef.current, lines.length, input, key, height);
+      // The preview cursor counts wrapped rows, not source lines, or a long destination would cap the paging.
+      const viewport = previewViewport(lines, cursorRef.current, terminalRows || 24, terminalColumns || 80, confirmChrome());
+      const next = movePreviewCursor(cursorRef.current, viewport.total, input, key, viewport.height);
       if (next !== undefined) cursorTo(Math.max(0, next));
       return;
     }
@@ -518,6 +556,19 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const liveDestination = nameOutcome.kind === "ok"
     ? exportDestination(exportDirectory ?? startDirectory, nameOutcome.fileName) : undefined;
   const nameNote = nameOutcome.kind === "ok" ? fileNameNotice(nameOutcome.fileName) : undefined;
+  const extensionNote = nameOutcome.kind === "ok" && nameOutcome.appendedExtension
+    ? `A name without an extension is saved as ${nameOutcome.fileName}.` : undefined;
+  const textRows = (value: string | undefined) => value === undefined ? 0 : wrapText(value, panelWidth).length;
+  const nameErrorLines = nameError === undefined ? [] : wrapText(nameError, panelWidth);
+  // Keys type into the name, so the stage cannot scroll; instead each long field keeps its first and last
+  // rows within a share of the terminal. The confirmation after it pages the complete destination.
+  const nameFixedRows = 3 + textRows(nameNote) + textRows(extensionNote) + Math.min(nameErrorLines.length, NAME_ERROR_ROWS)
+    + (nameChecking === undefined ? 0 : 1) + textRows(NAME_HINT);
+  const fieldRows = useListHeight(listHeight, nameFixedRows, 3);
+  // Leftover rows go to the paths, which are the long fields, before the typed name.
+  const folderRows = Math.floor(fieldRows / 3) + (fieldRows % 3 >= 2 ? 1 : 0);
+  const destinationRows = Math.floor(fieldRows / 3) + (fieldRows % 3 >= 1 ? 1 : 0);
+  const nameRows = fieldRows - folderRows - destinationRows;
   return <Box flexDirection="column">
     {mode === "export-folder" ? <FilePicker purpose="directory" listHeight={listHeight}
       startDirectory={exportDirectory ?? startDirectory}
@@ -536,20 +587,19 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     </BorderPanel> : null}
     {mode === "busy" && working ? <Working label={working.label} since={working.startedAt} /> : null}
     {mode === "export-name" ? <BorderPanel title="Export file name">
-      <Text><Text color={theme.field}>Folder: </Text><Text color={theme.value}>{exportDirectory ?? startDirectory}</Text></Text>
-      <Text><Text color={theme.field}>Name: </Text><Text color={theme.value}>{text}_</Text></Text>
-      {liveDestination === undefined ? null : <Text><Text color={theme.field}>Destination: </Text><Text color={theme.value}>{liveDestination}</Text></Text>}
+      <NameField label="Folder: " value={exportDirectory ?? startDirectory} rows={folderRows} width={panelWidth} />
+      <NameField label="Name: " value={`${text}_`} rows={nameRows} width={panelWidth} tail />
+      {liveDestination === undefined ? null : <NameField label="Destination: " value={liveDestination} rows={destinationRows} width={panelWidth} />}
       {nameNote === undefined ? null : <Text color={theme.warning}>{nameNote}</Text>}
-      {nameOutcome.kind === "ok" && nameOutcome.appendedExtension
-        ? <Text color={theme.muted}>A name without an extension is saved as {nameOutcome.fileName}.</Text> : null}
-      {nameError === undefined ? null : <Text color={theme.error}>{nameError}</Text>}
+      {extensionNote === undefined ? null : <Text color={theme.muted}>{extensionNote}</Text>}
+      {nameError === undefined ? null : nameErrorLines.length <= NAME_ERROR_ROWS
+        ? <Text color={theme.error}>{nameError}</Text>
+        : elideMiddle(nameErrorLines, NAME_ERROR_ROWS, panelWidth).map((line, index) => <Text key={index} color={theme.error}>{line}</Text>)}
       {nameChecking === undefined ? null : <Working label="Checking name…" since={nameChecking} />}
-      <Text color={theme.legend}>Type to edit · Ctrl+U clear · Enter continue · Esc back to folder</Text>
+      <Text color={theme.legend}>{NAME_HINT}</Text>
     </BorderPanel> : null}
-    {mode === "confirm" ? <PreviewConfirm lines={lines} cursor={cursor}
-      question={confirmRequest.current?.kind === "export"
-        ? "Save/Export Profile? (y/n) · arrows/PgUp/PgDn page · j/k line"
-        : "Apply Profile? (y/n) · arrows/PgUp/PgDn page · j/k line"} /> : null}
+    {mode === "confirm" ? <PreviewConfirm lines={lines} cursor={cursor} chrome={confirmChrome()}
+      question={confirmChrome().questions[0]!} /> : null}
     {mode === "detail" ? <PreviewConfirm title="Export note" lines={lines} cursor={cursor}
       question="Esc close · arrows/PgUp/PgDn page · j/k line" /> : null}
     {mode === "results" ? <>
