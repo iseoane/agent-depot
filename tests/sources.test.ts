@@ -320,7 +320,7 @@ test("fails closed on corrupt or unsupported state and preserves bytes when addi
       await assert.rejects(operations.listSources(), SourceStateError);
       await assert.rejects(
         operations.addGitSource("https://github.com/example/recovered.git"),
-        (error: unknown) => error instanceof SourceStateError && error.message.includes(statePath),
+        (error: unknown) => error instanceof SourceStateError && error.message.includes(JSON.stringify(statePath)),
       );
       assert.equal(await readFile(statePath, "utf8"), before);
     }

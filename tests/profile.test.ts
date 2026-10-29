@@ -159,6 +159,7 @@ test("approved App recipes are available choices, but only a tracked installatio
   let installedNow = false;
   const versionCalls: string[] = [];
   const apps = createAppOperations({ homeDirectory: home, recipesDirectory: path.join(home, "apps"),
+    platform: "linux", // the recipe targets linux; pin the platform so it applies on any host
     resolveExecutable: async name => name === "gentle-shell" ? "/fixture/gentle-shell" : undefined,
     runner: async (_command, args) => {
       versionCalls.push(args.join(" "));

@@ -57,9 +57,9 @@ test("Sources lists every recipe status and path without running commands or fet
   await writeFile(path.join(f.directory, "invalid.json"), "{}");
   const view = f.mount();
   const frame = await waitForFrame(view.lastFrame, /not applicable here/);
-  assert.match(frame, /demo.json.*approved/);
-  assert.match(frame, /new.json.*needs approval/);
-  assert.match(frame, /invalid.json.*invalid recipe:/);
+  assert.match(frame, /demo\.json\s+·\s+approved/);
+  assert.match(frame, /new\.json\s+·\s+needs\s+approval/);
+  assert.match(frame, /invalid\.json\s+·\s+invalid\s+recipe:/);
   assert.ok(frame.includes(f.directory));
   assert.match(frame, /builtin:agent-depot/);
   assert.deepEqual(f.commands, []);

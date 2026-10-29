@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { runCli } from "../src/cli.js";
 import { createSourceOperations } from "../src/sources.js";
+import { isolateUserState } from "./state-home.js";
 import { inspectUserGlobalSymlinkRemoval, scanUserGlobalSkillInventory } from "../src/user-global-skill-inventory.js";
 
 const declaration = {
@@ -17,7 +18,9 @@ const declaration = {
 test("CLI excludes App-owned skills from listing, adoption and explicit removal without running commands", async t => {
   const home = await mkdtemp(path.join(tmpdir(), "ad-owned-"));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const apps = path.join(home, ".local", "state", "agent-depot", "apps");
+  const state = isolateUserState(home);
+  t.after(state.restore);
+  const apps = path.join(state.stateDirectory, "apps");
   await mkdir(apps, { recursive: true });
   await writeFile(path.join(apps, "owner.json"), JSON.stringify(declaration));
   const skill = path.join(home, ".agents", "skills", "doctor-md-agents");
@@ -61,7 +64,9 @@ test("a recipe added after removal preview protects the selected path at executi
   const { inspectUserGlobalSkillRemoval, removeUserGlobalSkill } = await import("../src/user-global-skill-inventory.js");
   const options = { homeDirectory: home, managedInstallations: [] };
   const inspection = await inspectUserGlobalSkillRemoval(skill, options);
-  const apps = path.join(home, ".local", "state", "agent-depot", "apps");
+  const state = isolateUserState(home);
+  t.after(state.restore);
+  const apps = path.join(state.stateDirectory, "apps");
   await mkdir(apps, { recursive: true });
   await writeFile(path.join(apps, "owner.json"), JSON.stringify(declaration));
   await assert.rejects(removeUserGlobalSkill(inspection, options), /App-owned/);

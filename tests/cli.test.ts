@@ -268,7 +268,7 @@ test("previews and permanently deletes explicitly selected unmanaged user-global
     assert.equal(await runCli(["uninstall", "--unmanaged-skill", first, "--unmanaged-skill", second], dependencies), 1);
     assert.match(errors.join("\\n"), /not confirmed/);
     assert.match(output.join("\\n"), /permanent deletion/i);
-    assert.ok(output.join("\\n").includes(first));
+    assert.ok(output.join("\\n").includes(JSON.stringify(first))); // the preview prints the path JSON-quoted
     assert.equal((await lstat(first)).isDirectory(), true);
     assert.equal((await lstat(second)).isDirectory(), true);
 
@@ -2923,7 +2923,7 @@ const skillDirectory = (homeDirectory: string, name: string) => path.join(homeDi
 test("skill remove previews and requires --yes before deleting", async () => {
   await withUserGlobalSkills(["portable/one", "portable/two"], async ({ operations, homeDirectory, lines, errors, cli }) => {
     assert.equal(await cli(["skill", "remove", "portable/one"]), 1);
-    assert.match(lines.join("\n"), /remove "portable\/one" at .*\.agents\/skills\/one/u);
+    assert.match(lines.join("\n"), /remove "portable\/one" at .*\.agents[/\\]skills[/\\]one/u);
     assert.match(errors.join("\n"), /Removal not confirmed; rerun with --yes/u);
     assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
     assert.equal((await operations.listUserGlobalInstallations!()).length, 2);

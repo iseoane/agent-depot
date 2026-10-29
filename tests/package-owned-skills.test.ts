@@ -20,6 +20,8 @@ import {
   packageOwnedSkillMatcher,
 } from "../src/package-owned-skills.js";
 import { PackageStateStore } from "../src/package-state.js";
+import { defaultSourceStatePath } from "../src/source-state.js";
+import { isolateUserState } from "./state-home.js";
 import { runProcess } from "../src/process-runner.js";
 import { NodeSourceContentAccess, type SourceContentAccess, type SourceContentFile } from "../src/skill-discovery.js";
 import { executeSingleInstall, planSingleInstall, type InstallEnvironment } from "../src/skill-install.js";
@@ -83,7 +85,7 @@ function cliInstall(dependencies: Parameters<typeof runCli>[1], skillPath: strin
 
 /** The user-state directory the default Source and Package resolvers pick under a fixture home. */
 function fixtureStateDirectory(home: string): string {
-  return path.join(home, ".local", "state", "agent-depot");
+  return path.dirname(defaultSourceStatePath(process.env, process.platform, home));
 }
 
 /** Writes the recorded selections to the default Package state store under this home. */
@@ -105,6 +107,7 @@ interface SourceFixture {
 /** One temporary user home and one temporary Source root holding the pstack bundle plus a loose Skill. */
 async function withFixture<T>(prefix: string, run: (fixture: SourceFixture) => Promise<T>): Promise<T> {
   const home = await mkdtemp(path.join(tmpdir(), prefix));
+  const state = isolateUserState(home);
   try {
     const root = path.join(home, "source");
     await cp(PSTACK_FIXTURE, root, { recursive: true });
@@ -118,6 +121,7 @@ async function withFixture<T>(prefix: string, run: (fixture: SourceFixture) => P
       files: await access.readSnapshot(BUILT_IN_SOURCE),
     });
   } finally {
+    state.restore();
     await rm(home, { recursive: true, force: true });
   }
 }

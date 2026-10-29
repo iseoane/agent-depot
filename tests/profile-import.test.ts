@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { runCli } from "../src/cli.js";
 import { test } from "node:test";
 import { createAppOperations } from "../src/app-flow.js";
@@ -276,7 +277,7 @@ test("built CLI fetches an unregistered pinned Git Source without registering it
   const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_STATE_HOME: path.join(home, "state"),
     XDG_CACHE_HOME: path.join(home, "cache"), GIT_CONFIG_GLOBAL: path.join(home, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1",
     GIT_AUTHOR_NAME: "test", GIT_AUTHOR_EMAIL: "test@example.test", GIT_COMMITTER_NAME: "test", GIT_COMMITTER_EMAIL: "test@example.test" };
-  await writeFile(env.GIT_CONFIG_GLOBAL, `[url "file://${repo}"]\n\tinsteadOf = ${sourceUrl}\n[protocol "file"]\n\tallow = always\n`);
+  await writeFile(env.GIT_CONFIG_GLOBAL, `[url "${pathToFileURL(repo).href}"]\n\tinsteadOf = ${sourceUrl}\n[protocol "file"]\n\tallow = always\n`);
   function git(...args: string[]) {
     const result = spawnSync("git", args, { cwd: repo, env, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);

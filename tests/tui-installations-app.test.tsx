@@ -459,6 +459,7 @@ test("an approved recipe without a verified installation record is not listed as
   const appEnvironment = {
     homeDirectory: home,
     recipesDirectory: recipes,
+    platform: "linux" as const, // the fixture recipe targets linux; pin the platform so it applies on any host
     resolveExecutable: async () => undefined,
   };
   const appOperations = createAppOperations(appEnvironment);

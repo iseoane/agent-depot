@@ -116,7 +116,7 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
   f.view.stdin.write("e");
   await waitForFrame(f.view.lastFrame, /▸ Sources/);
   await enterExportName(f.view, "out.json");
-  const refusedFrame = await waitForFrame(f.view.lastFrame, /already exists; choose another name/);
+  const refusedFrame = await waitForFrame(f.view.lastFrame, /already exists; choose[\s│]+another name/);
   assert.match(refusedFrame, /out\.json/);
   assert.doesNotMatch(refusedFrame, /Apply Profile|Save\/Export Profile/);
   assert.equal(await readFile(file, "utf8"), original);
@@ -591,13 +591,13 @@ test("export refuses an existing file and a dangling symlink at the name stage",
   f.view.stdin.write("e");
   await waitForFrame(f.view.lastFrame, /▸ Sources/);
   await enterExportName(f.view, "taken.json");
-  await waitForFrame(f.view.lastFrame, /already exists; choose another name/);
+  await waitForFrame(f.view.lastFrame, /already exists; choose[\s│]+another name/);
   assert.equal(await readFile(existing, "utf8"), "keep");
   f.view.stdin.write("\u0015");
   f.view.stdin.write("link.json");
   await waitForFrame(f.view.lastFrame, /Name: link\.json_/);
   f.view.stdin.write("\r");
-  await waitForFrame(f.view.lastFrame, /already exists; choose another name/);
+  await waitForFrame(f.view.lastFrame, /already exists; choose[\s│]+another name/);
   assert.equal(await readlink(link), path.join(f.picker, "nowhere.json"));
   assert.ok((await lstat(link)).isSymbolicLink());
 });

@@ -18,7 +18,7 @@ import { skillTreeBaseline } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { squash, waitForFrame } from "./wait-for-frame.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -211,9 +211,11 @@ test("u with marks shows ONE combined preview with every path, warnings and the 
   const { f, view, loose } = await markedEverything(t);
   view.stdin.write("u");
   const preview = await waitForFrame(view.lastFrame, /Uninstall 4 items\? y\/n/);
-  for (const name of ["alpha", "beta", "gamma"]) assert.ok(preview.includes(agentsDir(f.home, name)), `${name} path in:\n${preview}`);
-  assert.ok(preview.includes(claudeDir(f.home, "beta")), preview);
-  assert.ok(preview.includes(JSON.stringify(loose)), preview);
+  // Long paths wrap across rows, so compare without borders and whitespace.
+  const flat = squash(preview);
+  for (const name of ["alpha", "beta", "gamma"]) assert.ok(flat.includes(squash(agentsDir(f.home, name))), `${name} path in:\n${preview}`);
+  assert.ok(flat.includes(squash(claudeDir(f.home, "beta"))), preview);
+  assert.ok(flat.includes(squash(JSON.stringify(loose))), preview);
   assert.match(preview, /locally modified/);
   assert.match(preview, /agent-depot did not create these files/);
   assert.match(preview, /Skipped portable\/proj \(project\): Project uninstall is not supported/);

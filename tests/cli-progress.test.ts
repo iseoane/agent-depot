@@ -62,6 +62,8 @@ async function observe(scenario: Scenario, progress: Progress, overrides: (sandb
   try {
     const home = path.join(root, "home");
     await mkdir(home);
+    // Paths print raw and JSON-escaped (backslashes double on Windows); both forms hide the random sandbox name.
+    const scrub = (line: string) => line.replaceAll(root, "<sandbox>").replaceAll(JSON.stringify(root).slice(1, -1), "<sandbox>");
     const operations = createSourceOperations({ statePath: path.join(root, "state", "sources.json") });
     const source = await operations.addGitSource(SOURCE_URL);
     const dependencies: CliDependencies = {
@@ -70,8 +72,8 @@ async function observe(scenario: Scenario, progress: Progress, overrides: (sandb
       projectRoot: path.join(root, "project"),
       sourceAccess: demoSourceAccess,
       appOperations: createAppOperations({ recipesDirectory: path.join(root, "apps"), homeDirectory: home }),
-      stdout: (line) => stdout.push(line.replaceAll(root, "<sandbox>")),
-      stderr: (line) => stderr.push(line.replaceAll(root, "<sandbox>")),
+      stdout: (line) => stdout.push(scrub(line)),
+      stderr: (line) => stderr.push(scrub(line)),
       progress,
       ...overrides(root),
     };

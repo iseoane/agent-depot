@@ -84,6 +84,7 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
   const appEnvironment = {
     homeDirectory: home,
     recipesDirectory,
+    platform: "linux" as const, // the fixture recipe targets linux; pin the platform so it applies on any host
     resolveExecutable: async (name: string) => name === "npm" || name === "missing-app" ? `/test-bin/${name}`
       : name === "gentle-shell" && installed ? "/test-bin/gentle-shell" : undefined,
     runner: async (command: string, args: readonly string[]) => {

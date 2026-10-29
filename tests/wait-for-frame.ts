@@ -18,3 +18,8 @@ export async function waitForFrame(
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+/** A frame without box borders and whitespace, so text that wrapped across rows (long paths) still matches. */
+export function squash(frame: string): string {
+  return frame.replace(/[│╭╮╰╯─\s]/gu, "");
+}

@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { after, before, describe, test } from "node:test";
 
 /**
@@ -95,7 +96,7 @@ before(async () => {
   const gitConfig = path.join(sandbox, "gitconfig");
   await writeFile(
     gitConfig,
-    `[url "file://${sourceRepo}"]\n\tinsteadOf = ${sourceUrl}\n[protocol "file"]\n\tallow = always\n`,
+    `[url "${pathToFileURL(sourceRepo).href}"]\n\tinsteadOf = ${sourceUrl}\n[protocol "file"]\n\tallow = always\n`,
   );
   env = {
     PATH: process.env.PATH,

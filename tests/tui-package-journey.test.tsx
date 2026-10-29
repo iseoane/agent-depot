@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 
 import { render } from "ink-testing-library";
@@ -42,7 +43,7 @@ after(() => rm(root, { recursive: true, force: true }));
 const repository = path.join(root, "pstack");
 await cp(path.resolve("tests", "fixtures", "packages", "pstack"), repository, { recursive: true });
 const gitConfig = path.join(root, "gitconfig");
-await writeFile(gitConfig, `[url "file://${repository}"]\n\tinsteadOf = ${PORTABLE_URL}\n[protocol "file"]\n\tallow = always\n[user]\n\tname = journey\n\temail = journey@example.test\n`);
+await writeFile(gitConfig, `[url "${pathToFileURL(repository).href}"]\n\tinsteadOf = ${PORTABLE_URL}\n[protocol "file"]\n\tallow = always\n[user]\n\tname = journey\n\temail = journey@example.test\n`);
 process.env.GIT_CONFIG_GLOBAL = gitConfig;
 process.env.GIT_CONFIG_NOSYSTEM = "1";
 process.env.GIT_TERMINAL_PROMPT = "0";
