@@ -21,7 +21,8 @@ Applied per delegation through the Agent tool's `model`/`effort` parameters
 
 ## Delivery
 
-- Default: feature branch → PR against `main` on `origin`; no merge, auto-merge or direct push to `main`.
+- Default: feature branch → PR against `main` on `origin`; no direct push to `main`.
+- Integration: low-risk PRs are merged into `main` by the coordinator without asking once independent review passes and CI is green on the exact head; medium or high risk waits for the operator. Use a merge commit (`gh pr merge --merge`), never squash or rebase. No auto-merge.
 - Correction budget: at most 2 correction cycles per feature.
 - Checks: `pnpm typecheck`, `pnpm lint`, `pnpm test`; CI `.github/workflows/ci.yml` on the PR head.
 
