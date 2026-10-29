@@ -32,6 +32,7 @@ jobs:
       - run: pnpm test
       - run: pnpm test:e2e
       - run: node --test scripts/release-artifact.test.mjs
+      - run: node --test scripts/release-notes.test.mjs
 
   windows:
     runs-on: windows-latest

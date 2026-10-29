@@ -40,8 +40,14 @@ jobs:
       - run: pnpm test:e2e
       - run: pnpm audit:dead-code
       - run: node --test scripts/release-artifact.test.mjs
+      - run: node --test scripts/release-notes.test.mjs
       - run: pnpm test:skills
       - run: pnpm test:pack
+      # Fails before publishing when the version has no CHANGELOG section for its GitHub release.
+      - name: Check the release notes
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: node scripts/release-notes.mjs CHANGELOG.md "$RELEASE_VERSION" "$RUNNER_TEMP/release-notes.md"
       - name: Pack and validate the release artifact
         env:
           RELEASE_VERSION: ${{ inputs.version }}
@@ -216,6 +222,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       # Tags the exact commit that was verified and published. Runs only after npm reported the
       # version as latest, so a tag always means "this commit is on npm". An existing tag is
       # accepted only when it already points at this commit, so a rerun never moves a tag.
@@ -246,3 +256,22 @@ jobs:
           object=$(gh api "repos/$REPOSITORY/git/tags" -f tag="$tag" -f message="$tag" -f object="$SOURCE_SHA" -f type=commit --jq '.sha')
           gh api "repos/$REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$object" >/dev/null
           echo "Created $tag at $SOURCE_SHA"
+      # Publishes the GitHub Release for that tag, using the version's CHANGELOG section as notes
+      # and marking it latest. An existing release is left untouched, so a rerun never duplicates it.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          tag="v$RELEASE_VERSION"
+          if gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists"
+            exit 0
+          fi
+          notes="$RUNNER_TEMP/release-notes.md"
+          node scripts/release-notes.mjs CHANGELOG.md "$RELEASE_VERSION" "$notes" || {
+            echo "npm and $tag are published; create the GitHub release by hand" >&2
+            exit 1
+          }
+          gh release create "$tag" --repo "$REPOSITORY" --verify-tag --latest --title "Agent Depot $RELEASE_VERSION" --notes-file "$notes"
