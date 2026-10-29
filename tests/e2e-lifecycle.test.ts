@@ -326,7 +326,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
 
     const check = ok(cli(project, "update", "check", "--scope", "user-global"));
     assert.match(check, /Current \(2\):/);
-    assert.match(check, new RegExp(`Unmanaged \\(1\\):\\n  ${path.join(home, ".agents/skills/stray").replaceAll(".", "\\.")}\\n`));
+    assert.match(check, new RegExp(`Unmanaged \\(1\\):\\n  ${path.join(home, ".agents/skills/stray").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n`));
     assert.doesNotMatch(check, /Skipped\/unsafe/);
 
     const stray = path.join(home, ".agents/skills/stray");
