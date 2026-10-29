@@ -406,14 +406,21 @@ test("package lifecycle shows a progress step around the host command only", asy
     const f = fixture();
     const progress = recordingProgress();
     assert.equal(await runPackageCommand([action, PI_TOKEN, "--host", "pi", "--yes"], f.packages, fakeSources(), (line) => f.lines.push(line), progress), 0);
-    assert.deepEqual(progress.labels, [`${label} Package ${formatPackageSelection(PI)}`]);
+    // Planning refreshes the Git Source, so it is a static prompting-safe step; the host command animates.
+    assert.deepEqual(progress.labels, [`Refreshing Source for Package ${formatPackageSelection(PI)}`, `${label} Package ${formatPackageSelection(PI)}`]);
+    assert.deepEqual(progress.prompting, [`Refreshing Source for Package ${formatPackageSelection(PI)}`]);
 
     const quiet = fixture();
     assert.equal(await runPackageCommand([action, PI_TOKEN, "--host", "pi", "--yes"], quiet.packages, fakeSources(), (line) => quiet.lines.push(line)), 0);
     assert.deepEqual(f.lines, quiet.lines);
   }
+  const approving = fixture();
+  const approval = recordingProgress();
+  assert.equal(await runPackageCommand(["approve", PI_TOKEN, "--host", "pi"], approving.packages, fakeSources(), () => undefined, approval), 0);
+  assert.deepEqual(approval.prompting, [`Refreshing Source for Package ${formatPackageSelection(PI)}`]);
+
   const unconfirmed = fixture();
   const idle = recordingProgress();
   await assert.rejects(runPackageCommand(["install", PI_TOKEN, "--host", "pi"], unconfirmed.packages, fakeSources(), () => undefined, idle));
-  assert.deepEqual(idle.labels, []);
+  assert.deepEqual(idle.labels, [`Refreshing Source for Package ${formatPackageSelection(PI)}`]);
 });

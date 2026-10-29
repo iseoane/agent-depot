@@ -74,7 +74,8 @@ export async function runProfileImport(values: readonly string[], operations: So
   const plan = await progress.run("Building import preview", () => buildProfileImport(input, operations, apps, filters, environment.packageOperations));
   for (const line of plan.preview) output(line);
   if (!confirmed) { output("Import not confirmed; rerun with --yes. Nothing was written."); return 0; }
-  const results = await progress.run("Applying import", () => applyProfileImport(plan, operations, apps, confirmed, output, environment));
+  // Skill and Package items refresh their Git Sources, and git may ask for credentials on the terminal.
+  const results = await progress.run("Applying import", () => applyProfileImport(plan, operations, apps, confirmed, output, environment), { mayPrompt: true });
   for (const result of results) output(`${result.status}: ${result.item.label}${result.detail ? `; ${result.detail}` : ""}`);
   return results.some(result => result.status === "failed") ? 1 : 0;
 }

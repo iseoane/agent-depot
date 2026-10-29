@@ -105,8 +105,9 @@ async function assertProgress(scenario: Scenario, expectedLabels: readonly strin
     return;
   }
   assert.ok(stream.writes.length > 0, "the animated run drew a spinner");
-  assert.equal(stream.writes.at(-1), ERASE, "the spinner line is erased at the end");
-  assert.ok(stream.writes.every((text) => text.startsWith("\r")), "only spinner frames and erases reach stderr");
+  const last = stream.writes.at(-1)!;
+  assert.ok(last === ERASE || last.endsWith("\n"), "no spinner frame is left drawn at the end");
+  assert.ok(stream.writes.every((text) => text.startsWith("\r") || text.endsWith("\n")), "only spinner frames, erases and static lines reach stderr");
 }
 
 const externalSource: Source = { id: sourceIdForUrl(SOURCE_URL), kind: "git", url: SOURCE_URL };
@@ -308,4 +309,39 @@ test("an unconfirmed command waits on no spinner: nothing runs after the preview
   }, animated);
 
   assert.deepEqual(order, [ERASE]);
+});
+
+test("import --yes of a Git Source Skill never animates the apply step, because git may ask for credentials", async () => {
+  const scenario: Scenario = async ({ home }, run) => {
+    const file = path.join(home, "profile.json");
+    await writeFile(file, JSON.stringify({
+      format: "agent-depot-profile/v1",
+      agentDepotVersion: "99.0.0",
+      sources: [],
+      skills: [{ source: { kind: "external", url: SOURCE_URL }, path: "portable/demo", version: { policy: "latest" }, hosts: ["pi"] }],
+      apps: [],
+    }));
+    assert.equal(await run(["import", file, "--yes"]), 0);
+  };
+  let refreshed = 0;
+  const overrides = (root: string): Partial<CliDependencies> => ({
+    operations: {
+      ...createSourceOperations({ statePath: path.join(root, "state", "sources.json") }),
+      // Stand in for the git refresh and the mirror read so the test stays offline.
+      refreshProjectSource: async () => { refreshed += 1; return externalSource; },
+      readSkillTreeSnapshot: async () => ({ files: demoTree, resolvedVersion: { kind: "git-commit" as const, commit: "a".repeat(40) } }),
+    },
+    sourceContentAccess: { async readSnapshot() { return []; } },
+  });
+  const stream = fakeStream({ isTTY: true, columns: 120 });
+  const recorder = recordingProgress();
+  const quiet = await observe(scenario, NO_PROGRESS, overrides);
+  const animated = await observe(scenario, createProgress({ stream, env: {}, timers: fakeTimers().timers }), overrides);
+  await observe(scenario, recorder, overrides);
+
+  assert.ok(refreshed >= 3, "the import refreshed the Git Source through git's entry point");
+  assert.deepEqual(recorder.prompting, ["Applying import"]);
+  assert.ok(stream.writes.includes("· Applying import…\n"), "the apply step is one static line");
+  assert.ok(!stream.writes.some((text) => text.includes("Applying import") && text.startsWith("\r")), "the apply step is never redrawn");
+  assert.deepEqual(animated.stdout, quiet.stdout);
 });

@@ -8,7 +8,7 @@ import path from "node:path";
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck } from "./app-flow.js";
 import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
 import { createPackageOperations, type PackageOperations } from "./package-flow.js";
-import { describeLifecyclePlan, describePackageResult, describePackageUpdateCheck, formatPackageSelection, packageSelectionMatches, runPackageCommand } from "./package-cli.js";
+import { describeLifecyclePlan, describePackageResult, describePackageUpdateCheck, formatPackageSelection, packageSelectionMatches, planWithRefresh, runPackageCommand } from "./package-cli.js";
 import { selectionKey, type PackageSelection, type PackageUpdateCheck } from "./package-model.js";
 import { EXPORT_USAGE, IMPORT_USAGE, runProfileExport, runProfileImport } from "./profile-cli.js";
 import { pathsOverlap } from "./path-safety.js";
@@ -1110,7 +1110,7 @@ async function runUpdate(
   }
   for (const item of selectedPackages) {
     try {
-      const plan = await packages.planLifecycle(item.installed.selection, "update");
+      const plan = await planWithRefresh(packages, item.installed.selection, "update", progress);
       const approval = await packages.approvalStatus(item.installed.selection, "update");
       describeLifecyclePlan(plan, approval, output);
       if (approval === "approved") {
