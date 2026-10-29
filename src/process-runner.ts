@@ -135,15 +135,21 @@ function killWindowsProcessTree(child: ChildProcess): void {
  * The pids of `rootPid` and every process descended from it, from a single `ps` snapshot. The child
  * stays in agent-depot's own process group and session (a detached group has no controlling terminal,
  * so a git or ssh prompt would fail, and a terminal Ctrl-C would no longer reach it), so a group kill
- * is not available. Falls back to `rootPid` alone when `ps` cannot be run or read.
+ * is not available. Never rejects: falls back to `rootPid` alone when `ps` cannot be run or read.
  */
 function listProcessTree(rootPid: number): Promise<readonly number[]> {
   return new Promise((resolve) => {
     const tree = [rootPid];
-    const ps = spawn("ps", ["-A", "-o", "pid=,ppid="], { stdio: ["ignore", "pipe", "ignore"], timeout: PROCESS_LIST_TIMEOUT_MS });
+    let ps: ChildProcess;
+    try {
+      ps = spawn("ps", ["-A", "-o", "pid=,ppid="], { stdio: ["ignore", "pipe", "ignore"], timeout: PROCESS_LIST_TIMEOUT_MS });
+    } catch {
+      resolve(tree);
+      return;
+    }
     let output = "";
-    ps.stdout.setEncoding("utf8");
-    ps.stdout.on("data", (chunk: string) => { output += chunk; });
+    ps.stdout?.setEncoding("utf8");
+    ps.stdout?.on("data", (chunk: string) => { output += chunk; });
     // A missing `ps` is followed by `close` with no output, which leaves just the root.
     ps.on("error", () => {});
     ps.on("close", () => {
@@ -178,7 +184,8 @@ function signalProcesses(pids: readonly number[], signal: NodeJS.Signals): void 
  * time even if a descendant survives and holds the stdio pipes open. On POSIX the
  * tree is the child and its descendants at the moment of the kill (from a `ps`
  * snapshot, because the child shares agent-depot's process group): they get
- * `SIGTERM`, and whichever of them still runs after a grace period gets `SIGKILL`.
+ * `SIGTERM`, and if the command has still not closed its output after a grace
+ * period, the members of that snapshot still running get `SIGKILL`.
  * A process that left the tree beforehand (daemonized, or orphaned by an exited
  * child) is not killed. On Windows, an argument to a `.cmd`/`.bat` file containing a line
  * break or `& | < >` is rejected with `EINVAL` because cmd.exe cannot carry it
@@ -246,14 +253,17 @@ export function runProcess(
         return;
       }
       posixTree = [child.pid];
+      // The child's own pid is left alone once it has exited, as it may have been reused.
+      const alive = (pids: readonly number[]): readonly number[] => pids.filter((pid) => pid !== child.pid || isRunning());
       // Snapshot before signalling: once the child dies its descendants are reparented and can no longer be found.
-      void listProcessTree(child.pid).then((tree) => {
+      listProcessTree(child.pid).then((tree) => {
         posixTree = tree;
-        signalProcesses(tree, "SIGTERM");
+        signalProcesses(alive(tree), "SIGTERM");
+      }, () => {
+        signalProcesses(alive(posixTree), "SIGTERM");
       });
       graceTimer = setTimeout(() => {
-        // The child's own pid is left alone once it has exited, as it may have been reused.
-        signalProcesses(posixTree.filter((pid) => pid !== child.pid || isRunning()), "SIGKILL");
+        signalProcesses(alive(posixTree), "SIGKILL");
         graceTimer = setTimeout(giveUp, KILL_GRACE_MS);
       }, KILL_GRACE_MS);
     };
