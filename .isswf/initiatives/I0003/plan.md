@@ -24,3 +24,6 @@ Labels and evidence comments applied to #44-#48 and #50 (operator approved).
 - Created follow-ups: https://github.com/iseoane/agent-depot/issues/51 (spinner real-terminal/Windows check), https://github.com/iseoane/agent-depot/issues/52 (child-process streaming).
 - Operator 2026-10-29: low-risk PRs may be merged into main without asking, after passing review and green CI.
 - Operator 2026-10-29: accepts Windows CI cost for #46 → ready-for-agent. Queue: #44 → #46 → #47.
+- Operator 2026-10-29: #54 and #52 ready-for-agent (#52 = tail of last lines); #51 left pending in needs-triage. Queue: #46 + #47 (parallel) → #54 → #52.
+- Operator 2026-10-29: #52 also includes a global --verbose flag (full child output to stderr, no spinner).
+- 2026-10-29: #58 ready-for-agent (low priority), queued after #52.

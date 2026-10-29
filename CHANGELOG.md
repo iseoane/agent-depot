@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when npm's generated dependency-free root `package-lock.json` records `bin`
   metadata. The lock is accepted only when its `bin` equals npm's normalized form
   of the `HEAD` manifest `bin`; any other lock content or local change still blocks.
+- On Windows, Pi Package checkouts are no longer reported as "not the root of
+  its Git checkout", which hid their installed version and update evidence. The
+  checkout root is now compared by canonical path.
+- On Windows, concurrent Agent Depot processes now wait for a busy Source,
+  Package or Git cache lock instead of failing with a raw `EPERM`/`EACCES`.
 - On Windows, installing a Package whose host CLI is an npm global such as `pi`
   no longer fails with `spawn ... ENOENT`. Executable lookup now only accepts
   `PATHEXT` candidates, so npm's extensionless shell shim is skipped in favor of
