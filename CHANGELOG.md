@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A fresh Pi Package install no longer reports `local changes` and `verified=unknown`
+  when npm's generated dependency-free root `package-lock.json` records `bin`
+  metadata. The lock is accepted only when its `bin` equals npm's normalized form
+  of the `HEAD` manifest `bin`; any other lock content or local change still blocks.
 - On Windows, installing a Package whose host CLI is an npm global such as `pi`
   no longer fails with `spawn ... ENOENT`. Executable lookup now only accepts
   `PATHEXT` candidates, so npm's extensionless shell shim is skipped in favor of
