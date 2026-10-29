@@ -324,7 +324,7 @@ test("export panel stays inside a resized terminal with wrapped choices and the 
   assert.match(name, /Destination: .*…/s, "the destination is marked as cut too");
   // What matters most in a path is where it ends: the folder's last segment and the file name.
   assert.match(squash(name), /Folder:.*name-stage.*Name:/, "the end of the folder is visible");
-  assert.match(squash(name), /Destination:.*stage\/agent-depot-profile\.json/, "the end of the destination is visible");
+  assert.match(squash(name), /Destination:.*stage[\\/]agent-depot-profile\.json/, "the end of the destination is visible");
   view.stdin.write("\u0015");
   view.stdin.write("review.json");
   await waitForFrame(view.lastFrame, /review\.json_/);
