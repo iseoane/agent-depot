@@ -295,7 +295,7 @@ test("choosing only the canonical directory also removes the Claude link that wo
   view.stdin.write(ENTER);
   const preview = await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
   assert.ok(squash(preview).includes(squash(`also removes link ${JSON.stringify(claude)}`)), preview); // long paths wrap
-  assert.match(preview, /would dangle/);
+  assert.ok(squash(preview).includes("woulddangle"), preview); // a long path can wrap between the words
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(0\)/);
   assert.equal(await exists(agents), false);

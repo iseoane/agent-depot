@@ -10,6 +10,7 @@ import { GitSourceAccessAdapter } from "../src/git-source.js";
 import { createSourceOperations, type SourceOperationsOptions } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import { ProfileView } from "../src/tui/profile-view.js";
+import { pagedRows, pageToEnd } from "./package-panel.js";
 import { fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 
@@ -39,10 +40,10 @@ async function expandExportGroup(view: ReturnType<typeof render>, label: string)
   return frame;
 }
 
-async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = {}) {
+async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = {}, pickerName = "picker") {
   const home = await mkdtemp(path.join(tmpdir(), "profile-tui-"));
   const directory = path.join(home, "apps");
-  const picker = path.join(home, "picker");
+  const picker = path.join(home, pickerName);
   await mkdir(directory);
   await mkdir(picker);
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json"), ...sourceOptions });
@@ -271,21 +272,15 @@ test("export renders real group headers and plain exclusions rather than synthet
 });
 
 test("export panel stays inside a resized terminal with wrapped choices and the picker and name stages", async t => {
-  const f = await fixture(t);
+  // A long export folder wraps the name stage's Folder and Destination onto several rows on any machine.
+  const f = await fixture(t, {}, "long-export-folder-name-for-the-wrapped-name-stage");
   const url = `https://example.com/${"long-path-segment/".repeat(8)}skills.git`;
   await f.operations.addGitSource(url);
   const unmanaged = path.join(f.home, ".agents", "skills", `${"very-long-unmanaged-name-".repeat(3)}skill`);
   await mkdir(unmanaged, { recursive: true });
   await writeFile(path.join(unmanaged, "SKILL.md"), "---\nname: unmanaged\ndescription: fixture\n---\n");
   const view = f.view;
-  // The name stage wraps the folder and destination paths at this width; a longer temp path than
-  // the reference one needs proportionally more rows (the panel is not paged).
-  const wrapRows = (text: string) => Math.ceil(text.length / 36);
-  const reference = "/tmp/profile-tui-XXXXXX/picker";
-  const rows = 17
-    + wrapRows(`Folder: ${f.picker}`) - wrapRows(`Folder: ${reference}`)
-    + wrapRows(`Destination: ${path.join(f.picker, "agent-depot-profile.json")}`)
-    - wrapRows(`Destination: ${path.join(reference, "agent-depot-profile.json")}`);
+  const rows = 17;
   Object.defineProperty(view.stdout, "rows", { configurable: true, value: rows });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: 40 });
   view.stdout.emit("resize");
@@ -325,12 +320,21 @@ test("export panel stays inside a resized terminal with wrapped choices and the 
   const name = await waitForFrame(view.lastFrame, /Export file name/);
   assert.ok(name.split("\n").length <= rows, name);
   assert.match(name, /Ctrl\+U clear/);
+  assert.match(name, /Folder: .*…/s, "a path the stage cannot show whole is marked as cut");
+  assert.match(name, /Destination: .*…/s, "the destination is marked as cut too");
+  // What matters most in a path is where it ends: the folder's last segment and the file name.
+  assert.match(squash(name), /Folder:.*name-stage.*Name:/, "the end of the folder is visible");
+  assert.match(squash(name), /Destination:.*stage[\\/]agent-depot-profile\.json/, "the end of the destination is visible");
   view.stdin.write("\u0015");
   view.stdin.write("review.json");
   await waitForFrame(view.lastFrame, /review\.json_/);
   view.stdin.write("\r");
   const confirmation = await waitForFrame(view.lastFrame, /Save\/Export Profile\? \(y\/n\)/);
   assert.ok(confirmation.split("\n").length <= rows, confirmation);
+  const confirmationPages = await pageToEnd(view.lastFrame, view.stdin, rows);
+  assert.ok(confirmationPages.length > 1, "the confirmation needs paging at this height");
+  assert.ok(squash(pagedRows(confirmationPages).join("")).includes(squash(`Destination: ${path.join(f.picker, "review.json")}`)),
+    "paging the confirmation reveals the whole destination");
   assert.match(confirmation, /arrows\/PgUp\/PgDn page/);
   assert.doesNotMatch(confirmation, /Portable Profile|▸ Sources/);
 });

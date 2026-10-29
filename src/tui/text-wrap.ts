@@ -37,6 +37,18 @@ export function fitLines(lines: readonly string[], maxRows: number, width: numbe
   return visible;
 }
 
+/**
+ * `lines` capped to `maxRows` by dropping the middle: the first and last rows stay (the start and end of
+ * a path) with a row counting what was left out. With two rows or fewer it falls back to `fitLines`.
+ */
+export function elideMiddle(lines: readonly string[], maxRows: number, width: number): readonly string[] {
+  if (lines.length <= maxRows) return lines;
+  if (maxRows <= 2) return fitLines(lines, maxRows, width);
+  const tail = lines.slice(lines.length - (maxRows - 2));
+  const hidden = lines.length - 1 - tail.length;
+  return [lines[0]!, `… ${hidden} more ${hidden === 1 ? "row" : "rows"}`, ...tail];
+}
+
 /** One line shortened to `width` columns plus an ellipsis, for single-row labels. */
 export function clipText(value: string, width: number): string {
   if (stringWidth(value) <= width) return value;

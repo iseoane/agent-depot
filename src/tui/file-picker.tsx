@@ -3,9 +3,9 @@ import { Text, useWindowSize } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pickerEntries, readDirectoryListing, PROFILE_EXTENSION, type DirectoryListing, type DirectoryEntry, type PickerPurpose, type PickerSelection } from "./file-picker-model.js";
 import { useKeys } from "./keys.js";
-import { moveCursor } from "./mode-keys.js";
+import { moveCursor, movePreviewCursor } from "./mode-keys.js";
 import { BorderPanel, Working } from "./panel-parts.js";
-import { clipText, wrapText } from "./text-wrap.js";
+import { clipText, fitLines, wrapText } from "./text-wrap.js";
 import { theme } from "./theme.js";
 import { useMirrored, useMounted } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
@@ -48,8 +48,12 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
   const [state, setState] = useState<PickerState>(() => ({ status: "loading", directory: startDirectory, startedAt: Date.now() }));
   const [cursor, cursorRef, cursorTo] = useMirrored(0);
   const [showAllFiles, showAllFilesRef, setShowAllFiles] = useMirrored(false);
-  const [showFullPath, setShowFullPath] = useState(false);
+  const [showFullPath, showFullPathRef, setShowFullPath] = useMirrored(false);
+  const [pathCursor, pathCursorRef, pathCursorTo] = useMirrored(0);
+  // The page size of the full path view, which the key handler needs before the render computes it.
+  const pathPageRef = useRef(1);
   const requestId = useRef(0);
+  const pathLineCount = useRef(1);
   const mounted = useMounted();
   const { columns } = useWindowSize();
   const panelWidth = Math.max((columns || 80) - 4, 1);
@@ -91,8 +95,12 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
 
   useKeys((input, key) => {
     if (key.escape) { settle(onCancel); return; }
-    if (showFullPath) {
+    if (showFullPathRef.current) {
       if (input === "p") setShowFullPath(false);
+      else {
+        const next = movePreviewCursor(pathCursorRef.current, pathLineCount.current, input, key, pathPageRef.current);
+        if (next !== undefined) pathCursorTo(next);
+      }
       return;
     }
     if (state.status !== "ready") {
@@ -109,7 +117,7 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
       cursorTo(0);
       return;
     }
-    if (input === "p") { setShowFullPath(true); return; }
+    if (input === "p") { pathCursorTo(0); setShowFullPath(true); return; }
     const next = moveCursor(cursorRef.current, rows.length, input, key);
     if (next !== undefined) { cursorTo(Math.max(next, 0)); return; }
     if (key.return) choose(rows[Math.min(cursorRef.current, rows.length - 1)]);
@@ -117,20 +125,36 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
 
   const directory = state.directory;
   const wrappedDirectory = wrapText(`Directory: ${directory}`, panelWidth);
-  const directoryLines = showFullPath || wrappedDirectory.length <= 3
+  const ordinaryFooter = purpose === "directory"
+    ? ["j/k move · Enter open/use · ←", "parent · p full path · Esc back"]
+    : ["j/k move · Enter open · ← parent", `f ${showAllFiles ? "json only" : "all files"} · p full path · Esc back`];
+  const noticeLines = notice === undefined ? [] : wrapText(notice, panelWidth);
+  const statusLineCount = !showFullPath && (state.status === "loading" || state.status === "error" || (state.status === "ready" && rows.length === 0)) ? 1 : 0;
+  const listRowsNeeded = rows.length > 0 ? 1 : 0;
+
+  // The roomy layout collapses a long path to three rows and wraps the key hints; the compact one keeps a
+  // folder list on screen when that roomy chrome alone would fill a short terminal.
+  const roomyDirectoryLines = wrappedDirectory.length <= 3
     ? wrappedDirectory
     : [wrappedDirectory[0]!, ...wrapText(`… ${wrappedDirectory.length - 2} lines · press p for full path`, panelWidth), wrappedDirectory.at(-1)!];
-  const ordinaryFooterLines = (purpose === "directory"
-    ? ["j/k move · Enter open/use · ←", "parent · p full path · Esc back"]
-    : ["j/k move · Enter open · ← parent", `f ${showAllFiles ? "json only" : "all files"} · p full path · Esc back`])
-    .flatMap(line => wrapText(line, panelWidth));
-  const noticeLines = notice === undefined ? [] : wrapText(notice, panelWidth);
-  const filterNoteLines = !showFullPath && purpose === "file" && state.status === "ready" && !showAllFiles
-    ? wrapText(`Showing ${PROFILE_EXTENSION} only · f shows all files`, panelWidth)
-    : [];
-  const statusLineCount = !showFullPath && (state.status === "loading" || state.status === "error" || (state.status === "ready" && rows.length === 0)) ? 1 : 0;
-  const visibleNoticeLines = showFullPath ? [] : noticeLines;
-  const footerLines = showFullPath ? wrapText("p hide path · Esc back", panelWidth) : ordinaryFooterLines;
+  const roomyFooterLines = ordinaryFooter.flatMap(line => wrapText(line, panelWidth));
+  const filterNote = purpose === "file" && state.status === "ready" && !showAllFiles
+    ? `Showing ${PROFILE_EXTENSION} only · f shows all files`
+    : undefined;
+  const roomyFilterNoteLines = filterNote === undefined ? [] : wrapText(filterNote, panelWidth);
+  // The compact legend keeps the keys a user would not guess (the filter, the full path, going up).
+  const compactFooter = purpose === "directory" ? "← parent · p full path · Esc back"
+    : `f ${showAllFiles ? "json only" : "all files"} · p full path · Esc back`;
+  const roomyReserved = 3 + roomyDirectoryLines.length + statusLineCount + roomyFilterNoteLines.length + noticeLines.length
+    + roomyFooterLines.length + (rows.length > 0 && listHeight === undefined ? 1 : 0);
+  const roomyHeight = useListHeight(listHeight, roomyReserved, 0);
+  const compact = !showFullPath && listHeight === undefined && roomyHeight < listRowsNeeded;
+
+  const directoryLines = compact ? [clipText(`Directory: ${directory}`, panelWidth)] : roomyDirectoryLines;
+  const footerLines = showFullPath ? wrapText("j/k scroll · p hide path · Esc back", panelWidth)
+    : compact ? [clipText(compactFooter, panelWidth)] : roomyFooterLines;
+  const filterNoteLines = showFullPath ? [] : compact ? (filterNote === undefined ? [] : [clipText(filterNote, panelWidth)]) : roomyFilterNoteLines;
+  const visibleNoticeLines = showFullPath ? [] : compact ? fitLines(noticeLines, 2, panelWidth) : noticeLines;
   const reservesWindowIndicator = !showFullPath && rows.length > 0 && listHeight === undefined ? 1 : 0;
   const reserved = 3 + directoryLines.length + statusLineCount + filterNoteLines.length + visibleNoticeLines.length + footerLines.length + reservesWindowIndicator;
   const available = useListHeight(listHeight, reserved, 1);
@@ -138,9 +162,17 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
   const window = computeWindow(rows.length, cursor, height);
   const listedRows = showFullPath ? [] : rows.slice(window.start, window.end);
 
+  // The full path view pages the wrapped path, so a path longer than the terminal is still readable.
+  const pathAvailable = useListHeight(listHeight, 3 + footerLines.length, 1);
+  const pathHeight = wrappedDirectory.length > pathAvailable ? Math.max(pathAvailable - 1, 1) : pathAvailable;
+  const pathWindow = computeWindow(wrappedDirectory.length, pathCursor, pathHeight);
+  pathLineCount.current = wrappedDirectory.length;
+  pathPageRef.current = pathHeight;
+  const shownDirectoryLines = showFullPath ? wrappedDirectory.slice(pathWindow.start, pathWindow.end) : directoryLines;
+
   return (
     <BorderPanel title={purpose === "directory" ? "Choose export folder" : "Choose import file"}>
-      {directoryLines.map((line, index) => <Text key={index} color={theme.value}>{line}</Text>)}
+      {shownDirectoryLines.map((line, index) => <Text key={index} color={theme.value}>{line}</Text>)}
       {!showFullPath && state.status === "loading" ? <Working label="Loading folder…" since={state.startedAt} /> : null}
       {!showFullPath && state.status === "error" ? <Text color={theme.error}>Error: {clipText(state.message, panelWidth)}</Text> : null}
       {!showFullPath && state.status === "ready" && rows.length === 0 ? <Text color={theme.muted}>Empty folder</Text> : null}
@@ -155,7 +187,8 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
       })}
       {visibleNoticeLines.map((line, index) => <Text key={`notice-${index}`} color={theme.warning}>{line}</Text>)}
       {footerLines.map((line, index) => <Text key={`footer-${index}`} color={theme.legend}>{line}</Text>)}
-      {!showFullPath && window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {showFullPath ? (pathWindow.indicator ? <Text color={theme.muted}>{pathWindow.indicator}</Text> : null)
+        : window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
     </BorderPanel>
   );
 }

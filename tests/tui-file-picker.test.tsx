@@ -141,21 +141,29 @@ test("a directory read error is shown in the picker and Esc leaves it", async t 
   assert.equal(cancelled, 1);
 });
 
-test("the picker stays inside a narrow terminal", async t => {
-  // A stubbed listing under a short directory: `listHeight` is trusted as given, so a long real temp
-  // path (Windows) would wrap onto extra rows and have nothing to do with the narrow-width behavior.
-  const root = path.resolve("/picker");
-  const readDirectory = async () => ({
-    directory: root, parent: path.dirname(root),
-    entries: [{ name: "a-very-long-directory-name-that-wraps-at-narrow-widths", kind: "directory" as const }],
-  });
-  const view = render(<FilePicker purpose="directory" startDirectory={root} listHeight={6} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
+test("the picker stays inside a narrow terminal at its default list height with a long real path", async t => {
+  const base = await mkdtemp(path.join(tmpdir(), "picker-narrow-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  // A long real directory wraps the path onto several rows, which the picker must budget for itself.
+  const root = path.join(base, "a-long-parent-folder-name-that-wraps", "another-long-folder-name-to-wrap");
+  await mkdir(path.join(root, "a-very-long-directory-name-that-wraps-at-narrow-widths"), { recursive: true });
+  for (let index = 0; index < 8; index++) await mkdir(path.join(root, `folder-${index}`));
+  const view = render(<FilePicker purpose="directory" startDirectory={root} onCancel={() => {}} onChoose={() => {}} />);
   t.after(() => view.unmount());
   Object.defineProperty(view.stdout, "rows", { configurable: true, value: 12 });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: 30 });
   view.stdout.emit("resize");
-  const frame = await waitForFrame(view.lastFrame, frame => frame.includes("Choose export folder") && frame.includes("a-very-long"));
+  let frame = await waitForFrame(view.lastFrame, frame => frame.includes("Choose export folder") && frame.includes("Use this folder"));
   assert.ok(frame.split("\n").length <= 12, frame);
+  assert.match(frame, /Directory: /);
+  // Fitting is not enough: every folder must still be reachable one row at a time.
+  for (let moves = 0; moves < 12 && !frame.split("\n").some(line => line.includes("> ") && line.includes("folder-7")); moves++) {
+    const before = frame;
+    view.stdin.write("j");
+    frame = await waitForFrame(view.lastFrame, next => next !== before);
+    assert.ok(frame.split("\n").length <= 12, frame);
+  }
+  assert.match(frame, /> .*folder-7/);
 });
 
 test("pathExists reports ENOENT as absent, exists as present, and propagates permission errors", async t => {
@@ -248,16 +256,42 @@ test("the picker fits a wrapped long directory, many entries and its footer with
   view.stdin.write("j");
   const frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("entry-0.json"));
   assert.ok(frame.split("\n").length <= 16, frame);
-  assert.match(frame, /f all files/);
-  assert.match(frame, /p full path/);
   assert.doesNotMatch(frame, new RegExp(deep.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  // With room the key hints are spelled out; at 16 rows the picker budgets its own chrome and keeps one legend line.
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 30 });
+  view.stdout.emit("resize");
+  const roomy = await waitForFrame(view.lastFrame, candidate => candidate.includes("f all files"));
+  assert.ok(roomy.split("\n").length <= 30, roomy);
+  assert.match(roomy, /p full path/);
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 16 });
+  view.stdout.emit("resize");
+  const compact = await waitForFrame(view.lastFrame, candidate => !candidate.includes("j/k move") && candidate.includes("entry-0.json"));
+  assert.match(compact, /p full path/, "the compact legend still names the full path key");
   view.stdin.write("p");
-  const fullPath = await waitForFrame(view.lastFrame, /p hide path/);
-  const visiblePath = fullPath.replace(/[│╭╮╰╯─\s]/gu, "");
-  for (const segment of [tmpdir(), path.basename(root), ...Array.from({ length: 6 }, (_, index) => `very-long-directory-name-${index}`)]) {
-    assert.ok(visiblePath.includes(segment), `${segment} missing from ${fullPath}`);
+  let fullPath = await waitForFrame(view.lastFrame, /p hide path/);
+  const visited = [fullPath];
+  // The wrapped path is longer than the terminal's list rows, so reading all of it takes paging.
+  for (let pages = 0; pages < 20 && /of (\d+)/.test(fullPath) && !new RegExp(`(\\d+)–(\\d+) of \\2$`, "m").test(fullPath.replace(/[│\s]+$/gmu, "")); pages++) {
+    const before = fullPath;
+    view.stdin.write("\u001b[6~");
+    fullPath = await waitForFrame(view.lastFrame, next => next !== before);
+    assert.ok(fullPath.split("\n").length <= 16, fullPath);
+    visited.push(fullPath);
   }
-  assert.ok(fullPath.split("\n").length <= 16, fullPath);
+  // Rebuild the path from the rows each page shows, placed by the page's `from–to of total` indicator.
+  const pathRows: string[] = [];
+  for (const page of visited) {
+    const [, from] = /(\d+)–\d+ of \d+/u.exec(page) ?? [];
+    const shown = page.split("\n").slice(2).map(line => line.replace(/^│ | *│$/gu, "")).filter(line => !line.startsWith("j/k scroll") && !line.startsWith(" Esc") && !/^[╰─╯]+$/u.test(line.trim()));
+    const pageRows = shown.slice(0, shown.findIndex(line => /\d+–\d+ of \d+/u.test(line)));
+    pageRows.forEach((row, index) => { pathRows[Number(from) - 1 + index] = row; });
+  }
+  const visiblePath = pathRows.join("").replace(/\s/gu, "");
+  for (const segment of [tmpdir(), path.basename(root), ...Array.from({ length: 6 }, (_, index) => `very-long-directory-name-${index}`)]) {
+    assert.ok(visiblePath.includes(segment), `${segment} missing from ${visiblePath}`);
+  }
+  assert.ok(visited.length > 1, "the path needs more than one page at 16 rows");
+  assert.ok(visited.every(page => page.split("\n").length <= 16), "every page fits the terminal");
   view.stdin.write("\u001b");
   const closed = await waitForFrame(view.lastFrame, candidate => candidate.includes("Choose import file"));
   assert.match(closed, /p hide path/);

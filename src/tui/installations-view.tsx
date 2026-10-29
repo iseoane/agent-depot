@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createAppOperations } from "../app-flow.js";
 import { AppPanel, handleAppKey, isAppMode, startAppAction } from "./app-actions.js";
-import { handlePackageKey, isPackageMode } from "./package-actions.js";
+import { handlePackageKey, isPackageMode, PackagePanel } from "./package-actions.js";
 import type { SourceOperations } from "../sources.js";
 import type { InstalledSkills } from "./catalog-installs.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
@@ -188,7 +188,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   useKeys((input, key) => {
     const current = modeRef.current;
     if (current.kind === "browse") handleBrowseKey(browse, input, key);
-    else if (isPackageMode(current)) handlePackageKey({ packages, manage }, current, input, key);
+    else if (isPackageMode(current)) handlePackageKey({ packages, manage, terminalRows: terminalRows || 24, terminalColumns: terminalColumns || 80 }, current, input, key);
     else if (isAppMode(current)) handleAppKey({ apps, manage, terminalRows: terminalRows || 24, terminalColumns: terminalColumns || 80 }, current, input, key);
     else if (!handleManageKey(manage, current, input, key)) handleAdoptionKey(adoption, current, input, key);
   });
@@ -196,6 +196,8 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   if (state.status === "loading") return <Working label="Loading installations…" since={loadingSince} />;
   if (state.status === "error") return <Text color={theme.error}>Error: {state.message}</Text>;
   if (isAppMode(mode)) return <AppPanel mode={mode} />;
+  // A paged declaration owns the view: rows of the tree above it would not be counted in its height.
+  if (isPackageMode(mode)) return <PackagePanel mode={mode} />;
   const ready = state.data;
   const window = computeWindow(rows.length, index, height);
   const listed = rows.slice(window.start, window.end);

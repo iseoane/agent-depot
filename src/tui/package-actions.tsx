@@ -4,9 +4,10 @@ import { describeCoordinates, type PackageAction, type PackageLifecyclePlan, typ
 import type { PackageOperations } from "../package-flow.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { errorText } from "./batch.js";
-import { answerYesNo } from "./mode-keys.js";
+import { movePreviewCursor } from "./mode-keys.js";
 import { installedEvidenceLabel, packagePlanLines } from "./package-rows.js";
 import { PreviewConfirm } from "./panel-parts.js";
+import { previewViewport, type PreviewChrome } from "./preview-window.js";
 import type { ViewMessage } from "./view-state.js";
 import { busy, type Busy } from "./working-model.js";
 
@@ -24,11 +25,11 @@ export const PACKAGE_ACTION_KEYS: ReadonlyMap<string, PackageAction> = new Map([
   ["f", "forget"],
 ]);
 
-/** Package interaction modes capture keys inside the existing Installations view. */
+/** Package interaction modes capture keys inside the existing Installations view. `cursor` is the review position. */
 export type PackageMode =
-  | { readonly kind: "package-approve"; readonly target: PackageTarget; readonly lines: readonly string[] }
-  | { readonly kind: "package-confirm"; readonly plan: PackageLifecyclePlan; readonly approval: PackageApprovalStatus }
-  | { readonly kind: "package-forget"; readonly target: PackageTarget; readonly lines: readonly string[] };
+  | { readonly kind: "package-approve"; readonly target: PackageTarget; readonly lines: readonly string[]; readonly cursor: number }
+  | { readonly kind: "package-confirm"; readonly plan: PackageLifecyclePlan; readonly approval: PackageApprovalStatus; readonly cursor: number }
+  | { readonly kind: "package-forget"; readonly target: PackageTarget; readonly lines: readonly string[]; readonly cursor: number };
 
 export const PACKAGE_KINDS: readonly PackageMode["kind"][] = ["package-approve", "package-confirm", "package-forget"];
 
@@ -51,10 +52,12 @@ export function isPackageMode(mode: { readonly kind: string }): mode is PackageM
 export interface PackageContext {
   readonly packages: PackageOperations;
   readonly manage: PackageActionHost;
+  readonly terminalRows: number;
+  readonly terminalColumns: number;
 }
 
 /** `install`, `update`, `uninstall` and `forget` plan a step; `approve` writes the install receipt. */
-export async function startPackageAction(context: PackageContext, target: PackageTarget, input: string): Promise<void> {
+export async function startPackageAction(context: Pick<PackageContext, "packages" | "manage">, target: PackageTarget, input: string): Promise<void> {
   const { manage, packages } = context;
   manage.setMessage(undefined);
   try {
@@ -62,7 +65,7 @@ export async function startPackageAction(context: PackageContext, target: Packag
       manage.setMode(busy(`Preparing the declaration of ${target.name}…`));
       const plan = await packages.planLifecycle(target.selection, "install");
       if (manage.isMounted()) {
-        manage.setMode({ kind: "package-approve", target, lines: packagePlanLines(plan, "needs approval") });
+        manage.setMode({ kind: "package-approve", target, lines: packagePlanLines(plan, "needs approval"), cursor: 0 });
       }
       return;
     }
@@ -80,6 +83,7 @@ export async function startPackageAction(context: PackageContext, target: Packag
             `Installed: ${installedEvidenceLabel(inspection.installed)}`,
             "Forgetting drops the Agent Depot selection record only; the host install is left as it is and no host command runs.",
           ],
+          cursor: 0,
         });
       }
       return;
@@ -88,7 +92,7 @@ export async function startPackageAction(context: PackageContext, target: Packag
       manage.setMode(busy(`Preparing the ${action} of ${target.name}…`));
       const plan = await packages.planLifecycle(target.selection, action);
       const approval = await packages.approvalStatus(target.selection, action);
-      if (manage.isMounted()) manage.setMode({ kind: "package-confirm", plan, approval });
+      if (manage.isMounted()) manage.setMode({ kind: "package-confirm", plan, approval, cursor: 0 });
       return;
     }
     await manage.finish({ kind: "error", text: `The action ${JSON.stringify(input)} is not available for Packages` });
@@ -158,50 +162,75 @@ async function forgetSelection(context: PackageContext, mode: Extract<PackageMod
   }
 }
 
-/** Applies the y/n keys of every Package confirmation; `n` and Esc run nothing. */
+/** What the preview shows for a mode, so the key handler and the panel page the same rows. */
+function packagePreview(mode: PackageMode): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+  switch (mode.kind) {
+    case "package-approve":
+      return {
+        lines: mode.lines,
+        chrome: reviewChrome("Package approval", `Approve this install declaration for ${mode.target.name}? y/n`),
+      };
+    case "package-forget":
+      return {
+        lines: mode.lines,
+        chrome: reviewChrome("Forget Package selection", `Forget the selection record of ${mode.target.name}? y/n`),
+      };
+    case "package-confirm":
+      return {
+        lines: packagePlanLines(mode.plan, mode.approval),
+        chrome: reviewChrome(`Package ${mode.plan.action} confirmation`, mode.approval === "needs approval"
+          ? "Approve this declaration and continue? y/n"
+          : `${mode.plan.action} ${mode.plan.descriptor.name}? y/n`),
+      };
+  }
+}
+
+function reviewChrome(title: string, question: string): PreviewChrome {
+  return { title, questions: [question], footerRows: 2 };
+}
+
+/**
+ * Pages the declaration with the arrows, PgUp/PgDn and j/k. `y` answers from any page: the panel shows
+ * the `Review N of M` position and the row window while more remains. `n` and Esc run nothing.
+ */
 export function handlePackageKey(context: PackageContext, mode: PackageMode, input: string, key: Key): void {
   const { manage, packages } = context;
   const cancel = (text: string) => {
     manage.setMessage({ kind: "ok", text });
     manage.browse();
   };
+  const { lines, chrome } = packagePreview(mode);
+  const viewport = previewViewport(lines, mode.cursor, context.terminalRows, context.terminalColumns, chrome);
+  const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
+  if (cursor !== undefined) {
+    manage.setMode({ ...mode, cursor });
+    return;
+  }
+  if (input === "n" || key.escape) {
+    cancel("Package action cancelled");
+    return;
+  }
+  if (input !== "y") return;
   switch (mode.kind) {
     case "package-approve":
-      answerYesNo(input, key, () => {
-        manage.setMode(busy(`Approving the install declaration of ${mode.target.name}…`));
-        void packages.approve(mode.target.selection, "install").then(
-          () => manage.finish({ kind: "ok", text: `Approved the install declaration of ${mode.target.name}` }),
-          error => manage.finish({ kind: "error", text: errorText(error) }),
-        );
-      }, () => cancel("Package action cancelled"));
+      manage.setMode(busy(`Approving the install declaration of ${mode.target.name}…`));
+      void packages.approve(mode.target.selection, "install").then(
+        () => manage.finish({ kind: "ok", text: `Approved the install declaration of ${mode.target.name}` }),
+        error => manage.finish({ kind: "error", text: errorText(error) }),
+      );
       return;
     case "package-forget":
-      answerYesNo(input, key, () => void forgetSelection(context, mode), () => cancel("Package action cancelled"));
+      void forgetSelection(context, mode);
       return;
     case "package-confirm":
-      answerYesNo(input, key, () => {
-        if (mode.approval === "needs approval") void approveThenConfirm(context, mode);
-        else void executePackagePlan(context, mode.plan);
-      }, () => cancel("Package action cancelled"));
+      if (mode.approval === "needs approval") void approveThenConfirm(context, mode);
+      else void executePackagePlan(context, mode.plan);
       return;
   }
 }
 
 /** Renders a Package prompt with the existing preview panel and y/n confirmation. */
 export function PackagePanel({ mode }: { readonly mode: PackageMode }) {
-  switch (mode.kind) {
-    case "package-approve":
-      return <PreviewConfirm lines={mode.lines} question={`Approve this install declaration for ${mode.target.name}? y/n`} />;
-    case "package-forget":
-      return <PreviewConfirm lines={mode.lines} question={`Forget the selection record of ${mode.target.name}? y/n`} />;
-    case "package-confirm":
-      return (
-        <PreviewConfirm
-          lines={packagePlanLines(mode.plan, mode.approval)}
-          question={mode.approval === "needs approval"
-            ? "Approve this declaration and continue? y/n"
-            : `${mode.plan.action} ${mode.plan.descriptor.name}? y/n`}
-        />
-      );
-  }
+  const { lines, chrome } = packagePreview(mode);
+  return <PreviewConfirm title={chrome.title} lines={lines} cursor={mode.cursor} question={chrome.questions[0]!} chrome={chrome} />;
 }
