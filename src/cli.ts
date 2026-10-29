@@ -161,6 +161,10 @@ const USAGE = [
   `  ${IMPORT_USAGE}`,
   "  agent-depot tui",
   "  agent-depot --version",
+  "",
+  "Options for every command, anywhere on the line:",
+  "  --verbose  stream the full child output (npm, pi, git, App commands) to stderr line by line as it runs,",
+  "             instead of a spinner and the last few lines; stdout is unchanged.",
 ].join("\n");
 const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
@@ -304,8 +308,11 @@ async function runSourceRefresh(
 }
 
 /** Runs the CLI application and returns a process exit code. */
-export async function runCli(argv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
-  const progress = dependencies.progress ?? (dependencies.stderr === undefined ? createProgress() : NO_PROGRESS);
+export async function runCli(rawArgv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
+  // A global flag, so every command's own option parser never sees it.
+  const verbose = rawArgv.includes("--verbose");
+  const argv = verbose ? rawArgv.filter((argument) => argument !== "--verbose") : rawArgv;
+  const progress = dependencies.progress ?? (dependencies.stderr === undefined ? createProgress({ verbose }) : NO_PROGRESS);
   // Every line is written after erasing any spinner, so a step that prints while it runs is never garbled.
   const writeStdout = dependencies.stdout ?? ((line: string) => console.log(line));
   const writeStderr = dependencies.stderr ?? ((line: string) => console.error(line));

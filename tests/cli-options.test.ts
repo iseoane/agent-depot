@@ -110,3 +110,27 @@ test("help explains App batch execution order and project-scope exclusion", asyn
   assert.match(lines.join("\n"), /Apps and Packages run after Skills/u);
   assert.match(lines.join("\n"), /--all --scope project skips Apps and Packages/u);
 });
+
+test("the global --verbose flag is accepted anywhere and changes neither stdout nor the exit code", async () => {
+  const run = async (argv: readonly string[]) => {
+    const lines: string[] = [];
+    const code = await runCli(argv, {
+      stdout: (line) => lines.push(line),
+      stderr: (line) => lines.push(`stderr: ${line}`),
+      operations: { listSources: async () => [{ id: "builtin:agent-depot", kind: "builtin" }] } as never,
+    });
+    return { code, lines };
+  };
+  const plain = await run(["source", "list"]);
+
+  assert.equal(plain.code, 0);
+  assert.deepEqual(await run(["--verbose", "source", "list"]), plain);
+  assert.deepEqual(await run(["source", "--verbose", "list"]), plain);
+  assert.deepEqual(await run(["source", "list", "--verbose"]), plain);
+});
+
+test("the help text documents --verbose", async () => {
+  const lines: string[] = [];
+  assert.equal(await runCli(["--help"], { stdout: (line) => lines.push(line) }), 0);
+  assert.match(lines.join("\n"), /--verbose.*child output.*stderr/u);
+});
