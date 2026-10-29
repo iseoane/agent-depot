@@ -135,6 +135,7 @@ test("on win32 a timeout terminates the whole process tree of a batch file withi
     const result = await runProcess(shim, [], { timeoutMs });
     const elapsed = Date.now() - started;
     assert.equal(result.timedOut, true);
+    assert.deepEqual([result.code, result.signal], [null, "SIGTERM"]);
     assert.ok(elapsed < timeoutMs + 10_000, `settled after ${elapsed}ms; the grandchild kept the stdio pipes open`);
     await assertGrandchildGone(pidFile);
   });
@@ -147,6 +148,7 @@ test("on win32 output overflow terminates the whole process tree of a batch file
     const elapsed = Date.now() - started;
     assert.equal(result.outputTooLarge, true);
     assert.equal(result.timedOut, undefined);
+    assert.deepEqual([result.code, result.signal], [null, "SIGTERM"]);
     assert.ok(elapsed < 20_000, `settled after ${elapsed}ms; the grandchild kept the stdio pipes open`);
     await assertGrandchildGone(pidFile);
   });
@@ -171,8 +173,10 @@ test("on win32 the result is still returned within a bound when taskkill is unav
     }
     const elapsed = Date.now() - started;
     assert.equal(result.timedOut, true);
+    assert.deepEqual([result.code, result.signal], [null, "SIGTERM"]);
     assert.ok(elapsed < timeoutMs + 10_000, `settled after ${elapsed}ms; the surviving grandchild kept the stdio pipes open`);
     const pid = Number(await readFile(pidFile, "utf8").catch(() => ""));
+    assert.ok(Number.isInteger(pid) && pid > 0, "the grandchild never recorded its pid");
     assert.ok(isRunning(pid), "the grandchild should have survived, otherwise the taskkill fallback was not exercised");
   });
 });
