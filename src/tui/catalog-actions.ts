@@ -1,6 +1,7 @@
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { PackageMode } from "./package-actions.js";
+import type { Busy } from "./working-model.js";
 import type {
   InstallScope,
   PreparedInstall,
@@ -40,6 +41,6 @@ export type ActionMode =
   /** A Package bundle action reuses the shared Package modes and preview. */
   | PackageMode
   /** A step is running (refreshing, installing); keys are ignored until it ends. */
-  | { readonly kind: "busy"; readonly label: string };
+  | Busy;
 
 export const BROWSE: ActionMode = { kind: "browse" };

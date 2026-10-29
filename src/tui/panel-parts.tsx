@@ -1,9 +1,10 @@
 import { Box, Text, useWindowSize } from "ink";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
 import { previewViewport, type PreviewChrome } from "./preview-window.js";
+import { animationEnabled, formatElapsed, SPINNER_FRAMES, SPINNER_TICK_MS, STATIC_GLYPH } from "./working-model.js";
 
 /** A titled, color-independent boundary for a focused interaction or result. */
 export function BorderPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {
@@ -17,6 +18,35 @@ export function BorderPanel({ title, children }: { readonly title: string; reado
 
 export function FieldLine({ label, value }: { readonly label: string; readonly value: ReactNode }) {
   return <Text><Text color={theme.field}>{label}</Text><Text color={theme.value}> {value}</Text></Text>;
+}
+
+/**
+ * A spinner, the label and, from one second on, the time since `since` (when the operation began, not
+ * when this line mounted, so the clock survives label changes). Without animation it is a static line.
+ */
+export function Working({ label, since, now, animate }: {
+  readonly label: string;
+  readonly since: number;
+  readonly now?: () => number;
+  readonly animate?: boolean;
+}) {
+  const animated = animate ?? animationEnabled();
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!animated) return undefined;
+    const timer = setInterval(() => setTick((value) => value + 1), SPINNER_TICK_MS);
+    // A redraw timer alone must never keep the process alive.
+    timer.unref();
+    return () => clearInterval(timer);
+  }, [animated]);
+  const elapsed = animated ? formatElapsed((now ?? Date.now)() - since) : "";
+  return (
+    <Text>
+      <Text color={theme.accent}>{animated ? SPINNER_FRAMES[tick % SPINNER_FRAMES.length] : STATIC_GLYPH}</Text>
+      <Text color={theme.value}> {label}</Text>
+      {elapsed ? <Text color={theme.legend}> {elapsed}</Text> : null}
+    </Text>
+  );
 }
 
 export function DecisionPrompt({ children }: { readonly children: ReactNode }) {

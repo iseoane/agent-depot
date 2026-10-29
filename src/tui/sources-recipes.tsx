@@ -12,10 +12,11 @@ import type { TuiEnvironment } from "./environment.js";
 import { appName, appRecipePreviewLines, appStepLines } from "./app-actions.js";
 import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
-import { BorderPanel, DecisionPrompt, PreviewConfirm } from "./panel-parts.js";
+import { BorderPanel, DecisionPrompt, PreviewConfirm, Working } from "./panel-parts.js";
 import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
 import { previewViewport, type PreviewChrome } from "./preview-window.js";
 import { theme } from "./theme.js";
+import { busy, type Busy } from "./working-model.js";
 
 /** One recipe file with its command-free approval status. */
 export interface RecipeRow {
@@ -42,7 +43,7 @@ function uninstallChrome(mode: Extract<RecipeMode, { kind: "uninstall-confirm" |
 /** Captured approval, guide and delegated Catalog install interactions. */
 type RecipeMode =
   | { readonly kind: "browse" }
-  | { readonly kind: "busy" }
+  | Busy
   | { readonly kind: "guide" | "manual" | "prompt" }
   | { readonly kind: "install"; readonly action: ActionMode }
   | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number; readonly removeAfterApproval?: boolean }
@@ -80,6 +81,9 @@ export function useSourcesRecipes({
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [loadError, setLoadError] = useState<string>();
+  // When the oldest running reload began; reloads can overlap, so a count decides when loading ends.
+  const [loadingSince, setLoadingSince] = useState<number | undefined>(() => Date.now());
+  const reloading = useRef(0);
   const [mode, setModeState] = useState<RecipeMode>({ kind: "browse" });
   const modeRef = useRef<RecipeMode>(mode);
   const setMode = (next: RecipeMode) => {
@@ -87,13 +91,15 @@ export function useSourcesRecipes({
     onCapturingChange?.(next.kind !== "browse");
     setModeState(next);
   };
+  /** Shows the busy panel; an operation already busy keeps its start time. */
+  const setBusy = (label: string) => setMode(busy(label, modeRef.current));
   const finish = async () => {
     await reload();
     if (mounted.current) setMode({ kind: "browse" });
   };
   const preview = async (entry: AppEntry, status: string, removeAfterApproval = false) => {
     setError(undefined);
-    setMode({ kind: "busy" });
+    setBusy("Preparing App recipe preview…");
     try {
       const steps = await apps.preview(entry);
       if (mounted.current) {
@@ -129,7 +135,7 @@ export function useSourcesRecipes({
     },
   };
   const startAI = async () => {
-    setMode({ kind: "busy" });
+    setBusy("Checking the authoring Skill…");
     try {
       if (!operations.discoverSkills) throw new Error("Discovery is not supported by the configured operations");
       const [skills, installed] = await Promise.all([
@@ -153,7 +159,7 @@ export function useSourcesRecipes({
   };
   const startRemoval = async (entry: AppEntry) => {
     setError(undefined);
-    setMode({ kind: "busy" });
+    setBusy("Checking App recipe…");
     try {
       const approval = await apps.approvalStatus(entry);
       if (approval.status === "needs approval") {
@@ -170,7 +176,7 @@ export function useSourcesRecipes({
     }
   };
   const uninstall = async (current: Extract<RecipeMode, { kind: "uninstall-confirm" | "uninstall-manual" }>) => {
-    setMode({ kind: "busy" });
+    setBusy(current.kind === "uninstall-manual" ? "Checking App uninstall…" : "Uninstalling App…");
     try {
       const result = current.kind === "uninstall-manual"
         ? await apps.completeManual(current.plan, true)
@@ -215,7 +221,7 @@ export function useSourcesRecipes({
       if (cursor !== undefined) setMode({ ...current, cursor });
       else if (input === "n" || key.escape) cancel();
       else if (input === "y" && viewport.reachedEnd) {
-        setMode({ kind: "busy" });
+        setBusy("Approving App recipe…");
         void apps.approve(current.entry).then(async () => {
           await reload();
           if (!mounted.current) return;
@@ -229,7 +235,7 @@ export function useSourcesRecipes({
     }
     if (current.kind === "uninstall-question") {
       answerYesNo(input, key, () => {
-        setMode({ kind: "busy" });
+        setBusy("Preparing App uninstall…");
         void apps.planLifecycle(current.removal.entry, "uninstall").then(plan => {
           if (mounted.current) setMode({ kind: !plan.argv && plan.manual ? "uninstall-manual" : "uninstall-confirm", removal: current.removal, plan, cursor: 0 });
         }, error => { if (mounted.current) { setError(errorText(error)); cancel(); } });
@@ -247,7 +253,7 @@ export function useSourcesRecipes({
     }
     if (current.kind === "remove") {
       answerYesNo(input, key, () => {
-        setMode({ kind: "busy" });
+        setBusy("Removing App recipe…");
         void removeAppRecipe(apps, current.removal, true).then(async () => {
           if (mounted.current) setNotice(`Removed App recipe: ${current.removal.file}`);
           await finish();
@@ -268,6 +274,7 @@ export function useSourcesRecipes({
   };
   /** Reloads parsing and approval receipts, never version/latest commands. */
   const reload = useCallback(async () => {
+    if (reloading.current++ === 0 && mounted.current) setLoadingSince(Date.now());
     try {
       const entries = await apps.load();
       const rows = await Promise.all(entries.map(async entry => {
@@ -283,6 +290,8 @@ export function useSourcesRecipes({
       }
     } catch (error) {
       if (mounted.current) setLoadError(errorText(error));
+    } finally {
+      if (--reloading.current === 0 && mounted.current) setLoadingSince(undefined);
     }
   }, [apps, mounted]);
   useEffect(() => { void reload(); }, [reload]);
@@ -311,7 +320,7 @@ export function useSourcesRecipes({
         </BorderPanel>
       ) : null}
       {mode.kind === "install" ? <ActionPanel mode={mode.action} /> : null}
-      {mode.kind === "busy" ? <BorderPanel title="App recipe workflow"><Text>Working...</Text></BorderPanel> : null}
+      {mode.kind === "busy" ? <BorderPanel title="App recipe workflow"><Working label={mode.label} since={mode.startedAt} /></BorderPanel> : null}
       {mode.kind === "approve" ? (() => {
         const chrome = recipeApprovalChrome(mode.entry);
         const viewport = previewViewport(mode.lines, mode.cursor, terminalRows, terminalColumns, chrome);
@@ -337,5 +346,5 @@ export function useSourcesRecipes({
       ) : null}
     </Box>
   );
-  return { rows, handleKey, startAdd, reload, clearMessage: () => { setError(undefined); setNotice(undefined); }, panel, directory: apps.directory, capturing: mode.kind !== "browse" };
+  return { rows, loadingSince, handleKey, startAdd, reload, clearMessage: () => { setError(undefined); setNotice(undefined); }, panel, directory: apps.directory, capturing: mode.kind !== "browse" };
 }

@@ -9,6 +9,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { errorText, runBatch } from "./batch.js";
 import { answerYesNo, applyChecklistOutcome, hostChecklistKey, versionInputKey } from "./mode-keys.js";
 import type { ViewMessage } from "./view-state.js";
+import { busy } from "./working-model.js";
 
 /** What the install flow needs from the Catalog view; the view owns its state and reloading. */
 export interface CatalogFlowContext {
@@ -35,7 +36,7 @@ async function startInstall(
   skills: readonly SkillCandidate[],
   choice: Parameters<typeof prepareInstall>[3],
 ): Promise<void> {
-  context.setAction({ kind: "busy", label: `Refreshing source and preparing install of ${describeSkills(skills)}...` });
+  context.setAction(busy(`Refreshing source and preparing install of ${describeSkills(skills)}…`));
   const items: BatchItem[] = [];
   for (const skill of skills) {
     try {
@@ -56,7 +57,7 @@ async function startInstall(
 
 /** Applies the prepared items one by one; a failure is reported for that item and the rest still run. */
 async function confirmInstall(context: CatalogFlowContext, items: readonly BatchItem[], exposure: boolean): Promise<void> {
-  context.setAction({ kind: "busy", label: `Installing ${describeSkills(items.map((item) => item.skill))}...` });
+  context.setAction(busy(`Installing ${describeSkills(items.map((item) => item.skill))}…`));
   const outcomes = await runBatch(items, async ({ prepared, error }) => {
     if (prepared === undefined) throw new Error(error);
     return (await runInstall(prepared, context.operations, exposure && prepared.additionalHostExposure)).join(" ");

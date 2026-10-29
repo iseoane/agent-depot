@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pickerEntries, readDirectoryListing, PROFILE_EXTENSION, type DirectoryListing, type DirectoryEntry, type PickerPurpose, type PickerSelection } from "./file-picker-model.js";
 import { useKeys } from "./keys.js";
 import { moveCursor } from "./mode-keys.js";
-import { BorderPanel } from "./panel-parts.js";
+import { BorderPanel, Working } from "./panel-parts.js";
 import { clipText, wrapText } from "./text-wrap.js";
 import { theme } from "./theme.js";
 import { useMirrored, useMounted } from "./view-state.js";
@@ -12,7 +12,7 @@ import { computeWindow, useListHeight } from "./window.js";
 
 /** Explicit picker state: a read is in flight, a listing is shown, or the read failed recoverably. */
 type PickerState =
-  | { readonly status: "loading"; readonly directory: string }
+  | { readonly status: "loading"; readonly directory: string; readonly startedAt: number }
   | { readonly status: "ready"; readonly directory: string; readonly parent: string | undefined; readonly entries: readonly DirectoryEntry[] }
   | { readonly status: "error"; readonly directory: string; readonly message: string };
 
@@ -45,7 +45,7 @@ function settle(action: () => void): void {
  * request generation, so a slow listing never overwrites a newer directory or an unmount.
  */
 export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose, listHeight, readDirectory = readDirectoryListing }: FilePickerProps) {
-  const [state, setState] = useState<PickerState>({ status: "loading", directory: startDirectory });
+  const [state, setState] = useState<PickerState>(() => ({ status: "loading", directory: startDirectory, startedAt: Date.now() }));
   const [cursor, cursorRef, cursorTo] = useMirrored(0);
   const [showAllFiles, showAllFilesRef, setShowAllFiles] = useMirrored(false);
   const [showFullPath, setShowFullPath] = useState(false);
@@ -57,7 +57,7 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
   const navigate = useCallback((directory: string) => {
     const id = ++requestId.current;
     cursorTo(0);
-    setState({ status: "loading", directory });
+    setState({ status: "loading", directory, startedAt: Date.now() });
     void readDirectory(directory).then(
       listing => {
         if (!mounted.current || requestId.current !== id) return;
@@ -141,7 +141,7 @@ export function FilePicker({ purpose, startDirectory, notice, onCancel, onChoose
   return (
     <BorderPanel title={purpose === "directory" ? "Choose export folder" : "Choose import file"}>
       {directoryLines.map((line, index) => <Text key={index} color={theme.value}>{line}</Text>)}
-      {!showFullPath && state.status === "loading" ? <Text color={theme.muted}>Loading…</Text> : null}
+      {!showFullPath && state.status === "loading" ? <Working label="Loading folder…" since={state.startedAt} /> : null}
       {!showFullPath && state.status === "error" ? <Text color={theme.error}>Error: {clipText(state.message, panelWidth)}</Text> : null}
       {!showFullPath && state.status === "ready" && rows.length === 0 ? <Text color={theme.muted}>Empty folder</Text> : null}
       {filterNoteLines.map((line, index) => <Text key={`filter-${index}`} color={theme.muted}>{line}</Text>)}

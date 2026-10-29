@@ -17,6 +17,9 @@ const state = ${JSON.stringify(state)};
 const log = ${JSON.stringify(log)};
 const [action, host] = process.argv.slice(2);
 fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }) + '\\n');
+// \`--sleep-ms=N\` holds any action for N ms, so a journey can observe a slow step.
+const sleep = process.argv.slice(2).find(argument => argument.startsWith('--sleep-ms='));
+if (sleep) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(sleep.slice('--sleep-ms='.length)));
 switch (action) {
   case '--version': if (!fs.existsSync(state)) process.exit(1); console.log(fs.readFileSync(state, 'utf8')); break;
   case 'latest': console.log('2.0.0'); break;

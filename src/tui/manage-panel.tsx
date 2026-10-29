@@ -4,7 +4,7 @@ import { AppPanel } from "./app-actions.js";
 import { PackagePanel } from "./package-actions.js";
 import type { BulkHostPlan, BulkUninstallPlan, SkippedTarget } from "./bulk-actions.js";
 import type { ManageMode } from "./manage-actions.js";
-import { ChecklistLines, DecisionPrompt, HostChecklist, PreviewConfirm, PreviewLines } from "./panel-parts.js";
+import { ChecklistLines, DecisionPrompt, HostChecklist, PreviewConfirm, PreviewLines, Working } from "./panel-parts.js";
 import { theme } from "./theme.js";
 
 const plural = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
@@ -132,6 +132,6 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
         </Text>
       );
     case "busy":
-      return <Text>{mode.label}</Text>;
+      return <Working label={mode.label} since={mode.startedAt} />;
   }
 }

@@ -18,6 +18,19 @@ export function useMounted(): MutableRefObject<boolean> {
   return mounted;
 }
 
+/**
+ * When the current stretch of loading began, so a loading line shows how long it has waited even
+ * though the view re-renders. `seed` continues an operation that was already running (its busy start).
+ */
+export function useLoadingSince(loading: boolean, seed?: number): number {
+  const [since, setSince] = useState<number | undefined>(() => (loading ? seed ?? Date.now() : undefined));
+  useEffect(() => {
+    setSince((previous) => (loading ? previous ?? seed ?? Date.now() : undefined));
+  }, [loading, seed]);
+  // Until the effect records it, the first loading render derives the same start.
+  return since ?? seed ?? Date.now();
+}
+
 export interface Marks {
   /** For rendering. */
   readonly marked: ReadonlySet<string>;

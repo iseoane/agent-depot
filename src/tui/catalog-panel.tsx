@@ -7,7 +7,7 @@ import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
 import type { FilterState } from "./catalog-filter.js";
 import { describeRow, truncateDescription, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
 import { isPackageMode, PackagePanel } from "./package-actions.js";
-import { BorderPanel, DecisionPrompt, HostChecklist, PreviewLines } from "./panel-parts.js";
+import { BorderPanel, DecisionPrompt, HostChecklist, PreviewLines, Working } from "./panel-parts.js";
 import { rowStyle } from "./theme.js";
 import type { VisibleRow } from "./tree.js";
 import { theme } from "./theme.js";
@@ -124,6 +124,6 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       );
     }
     case "busy":
-      return <BorderPanel title="Skill install"><Text>{mode.label}</Text></BorderPanel>;
+      return <BorderPanel title="Skill install"><Working label={mode.label} since={mode.startedAt} /></BorderPanel>;
   }
 }

@@ -18,6 +18,8 @@ import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
+import { animatedClock } from "./animated-clock.js";
+import { fakePackageOperations } from "./fake-package-operations.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 const ESC = "\u001B";
@@ -126,6 +128,62 @@ test("u on a single-host installation previews, confirms and removes it without 
   assert.equal(await exists(canonical(f.home)), false);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
   view.unmount();
+});
+
+test("the reload after an action says it is refreshing and keeps a single indicator", async (t) => {
+  const f = await fixture(t, ["pi"]);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let gateOpen = false;
+  // Only the view's reload lists Packages, so holding that call holds the reload and nothing of the removal.
+  const packages = fakePackageOperations({ list: async () => { if (gateOpen) await gate; return []; } });
+  const view = await mount({ ...f, environment: { ...f.environment, packages } });
+  t.after(() => view.unmount());
+  await revealSkill(view);
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  gateOpen = true;
+  view.stdin.write("y");
+  const refreshing = await waitForFrame(view.lastFrame, /Refreshing installations…/);
+  assert.equal(refreshing.match(/Refreshing installations…/g)?.length, 1);
+  assert.doesNotMatch(refreshing, /Removing demo…/);
+  release();
+  await waitForFrame(view.lastFrame, /Removed demo/);
+});
+
+test("the refresh after an action keeps counting the action's elapsed time", async (t) => {
+  const clock = animatedClock(t);
+  const f = await fixture(t, ["pi"]);
+  let releaseRemoval = () => {};
+  const removalGate = new Promise<void>((resolve) => { releaseRemoval = resolve; });
+  let releaseReload = () => {};
+  const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
+  let reloadHeld = false;
+  // Holding the removal lets the action's clock run; holding the Package listing holds only the reload after it.
+  const operations: SourceOperations = {
+    ...f.operations,
+    removeUserGlobalInstallations: async (selections) => {
+      await removalGate;
+      return f.operations.removeUserGlobalInstallations!(selections);
+    },
+  };
+  const packages = fakePackageOperations({ list: async () => { if (reloadHeld) await reloadGate; return []; } });
+  const view = await mount({ ...f, operations, environment: { ...f.environment, packages } });
+  t.after(() => view.unmount());
+  await revealSkill(view);
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Removing demo…/);
+  clock.advance(4500);
+  await waitForFrame(view.lastFrame, /Removing demo… (?:[4-9]|\d{2,})s/u);
+  reloadHeld = true;
+  releaseRemoval();
+  const refreshing = await waitForFrame(view.lastFrame, /Refreshing installations…/);
+  // The reload started after the clock moved, yet the count carries on from the action's start.
+  assert.match(refreshing, /Refreshing installations… (?:[4-9]|\d{2,})s/u);
+  releaseReload();
+  await waitForFrame(view.lastFrame, /Removed demo/);
 });
 
 test("u on an installation with several hosts offers all hosts or a host checklist", async (t) => {

@@ -15,7 +15,7 @@ import { CheckStatus, EntryLine, ModePanel, UpdatesFooter } from "./updates-pane
 import { previewLineText, type UpdateScopeFilter, type UpdatesData } from "./updates.js";
 import { updateModePreviewChrome, updateModePreviewLines } from "./updates-preview.js";
 import { useKeys } from "./keys.js";
-import { BorderPanel, FieldLine } from "./panel-parts.js";
+import { BorderPanel, Working } from "./panel-parts.js";
 
 export interface UpdatesViewProps {
   readonly operations: SourceOperations;
@@ -89,7 +89,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   };
 
   const { state, load, startPreview, apply } = useUpdatesFlow({
-    operations, env, clock, mounted, checkedRef, latest, setChecked, setCursor, setMode, setMessage,
+    operations, env, clock, mounted, checkedRef, latest, setChecked, setCursor, setMode, modeRef, setMessage,
   });
 
   // Entering the view refreshes the Git sources first, like `r`.
@@ -115,6 +115,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   const keyContext: UpdatesKeyContext = {
     height,
+    now: clock,
     previewMetrics: current => {
       const geometry = previewGeometry(current);
       return { length: geometry.total, pageSize: geometry.height };
@@ -144,11 +145,13 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const view = { shown, updatable, unknown, upToDate, entries };
   const hasErrors = data?.appError !== undefined || (data?.results ?? []).some((result) => result.error !== undefined);
   const showingBrowse = mode.kind === "browse";
+  // One indicator for the whole operation: a check's own phase label, else the busy mode's.
+  const working = state.status === "loading" ? state : mode.kind === "busy" ? mode : undefined;
 
   return (
     <Box flexDirection="column">
       {showingBrowse ? <Text color={theme.title} bold>Updates (scope: {scope})  t all · p project · g user-global · u update</Text> : null}
-      {state.status === "loading" ? <BorderPanel title="Update check"><FieldLine label="Status" value={state.label} /></BorderPanel> : null}
+      {working ? <BorderPanel title={state.status === "loading" ? "Update check" : "Updates"}><Working label={working.label} since={working.startedAt} now={clock} /></BorderPanel> : null}
       {showingBrowse && data ? <CheckStatus data={data} now={clock()} /> : null}
       {showingBrowse && data && !hasErrors && shown.length === 0 ? <Text>No installations</Text> : null}
       {showingBrowse ? entries.slice(window.start, window.end).map((entry, offset) => (

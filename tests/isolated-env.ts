@@ -5,12 +5,15 @@
 //   order-dependent; tests that need recipes inject their own `recipesDirectory`.
 // - XDG_STATE_HOME and PI_CODING_AGENT_DIR: deleted, so shell overrides cannot redirect tests to
 //   real user state or away from the isolated HOME.
+// - AGENT_DEPOT_NO_ANIMATION: set to 1 so Working renders one static frame; a ticking spinner would
+//   change every frame and break tests that wait for `frame !== before`.
 // - FORCE_COLOR: `node --test` sets it for its child processes when run from a real terminal, which
 //   makes Ink render ANSI colors into the frames the TUI tests match (so `npm publish` failed in a TTY).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+process.env.AGENT_DEPOT_NO_ANIMATION = "1";
 delete process.env.FORCE_COLOR;
 delete process.env.XDG_STATE_HOME;
 delete process.env.PI_CODING_AGENT_DIR;

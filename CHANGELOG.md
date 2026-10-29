@@ -7,12 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The TUI shows a spinner, a specific label and, after one second, the elapsed
+  time (for example `⠹ Installing foo… 3s`) for every wait: loading views,
+  Source, Catalog, Package, App, Installation and Profile actions, update checks
+  and applies, and the background App status and export-name checks. Set
+  `AGENT_DEPOT_NO_ANIMATION=1` for a static `·` and no elapsed time instead of
+  the animated spinner.
+
 ### Fixed
 
 - On Windows, installing a Package whose host CLI is an npm global such as `pi`
   no longer fails with `spawn ... ENOENT`. Executable lookup now only accepts
   `PATHEXT` candidates, so npm's extensionless shell shim is skipped in favor of
   `pi.cmd`, and `.cmd`/`.bat` files run through `cmd.exe` with escaped arguments.
+- Importing a Profile no longer reports `Loading Profile…` while it installs and
+  uninstalls; it says `Applying import…`.
+- The Sources list no longer flashes "No sources or App recipes" while recipes
+  load.
 
 ## [0.6.4] - 2026-10-23
 

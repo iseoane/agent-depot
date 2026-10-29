@@ -236,7 +236,7 @@ test("a busy action ignores other keys", async () => {
   stdin.write("r");
   await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   stdin.write("y");
-  await waitForFrame(lastFrame, /Working/);
+  await waitForFrame(lastFrame, /Refreshing Git Source…/);
   // Keys are handled in order: once "j" (a no-op while busy) had its turn, "a" would already have opened the input.
   stdin.write("n");
   stdin.write("j");
@@ -300,7 +300,7 @@ test("App does not quit or switch views while an action is busy", async () => {
   stdin.write("y");
   stdin.write("q");
   stdin.write("2");
-  await waitForFrame(lastFrame, /Working/);
+  await waitForFrame(lastFrame, /Refreshing Git Source…/);
   release?.();
   const frame = await waitForFrame(lastFrame, /Refreshed Git Source/);
   assert.equal(exits, 0);
@@ -345,7 +345,7 @@ test("no reload is issued after the view unmounts mid-action", async () => {
   stdin.write("r");
   await waitForFrame(lastFrame, /Refresh these Sources\? y\/n/);
   stdin.write("y");
-  await waitForFrame(lastFrame, /Working/);
+  await waitForFrame(lastFrame, /Refreshing Git Source…/);
   unmount();
   const before = lists;
   release?.();

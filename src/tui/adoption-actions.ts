@@ -9,6 +9,7 @@ import { defaultAdoptionHosts, findAdoptionCandidates, prepareAdoption, type Unm
 import type { InstallationsMode } from "./installations-mode.js";
 import { answerYesNo, applyChecklistOutcome, hostChecklistKey, moveCursor, versionInputKey } from "./mode-keys.js";
 import type { ViewMessage } from "./view-state.js";
+import { busy } from "./working-model.js";
 
 /** What the adoption flow needs from the hosting view; the view owns its mode state and reloading. */
 export interface AdoptionContext {
@@ -44,7 +45,7 @@ export async function startAdoption(context: AdoptionContext, group: UnmanagedGr
     return;
   }
   context.setMessage(undefined);
-  context.setMode({ kind: "busy", label: `Looking for a Source Skill named ${entry.name}...` });
+  context.setMode(busy(`Looking for a Source Skill named ${entry.name}…`));
   try {
     const candidates = await findAdoptionCandidates(context.operations, entry);
     if (!context.isMounted()) return;
@@ -66,7 +67,7 @@ async function prepare(
   mode: ModeOf<"version" | "fixed">,
   version: Parameters<typeof prepareAdoption>[4]["version"],
 ): Promise<void> {
-  context.setMode({ kind: "busy", label: `Refreshing source and checking that ${mode.entry.name} matches...` });
+  context.setMode(busy(`Refreshing source and checking that ${mode.entry.name} matches…`));
   try {
     const adoption = await prepareAdoption(context.operations, context.env, mode.entry, mode.skill, { hosts: mode.hosts, version });
     if (!context.isMounted()) return;
@@ -77,7 +78,7 @@ async function prepare(
 }
 
 async function confirm(context: AdoptionContext, mode: ModeOf<"confirm" | "confirm-exposure">, exposure: boolean): Promise<void> {
-  context.setMode({ kind: "busy", label: `Adopting ${mode.entry.name}...` });
+  context.setMode(busy(`Adopting ${mode.entry.name}…`));
   let result: ViewMessage;
   try {
     result = { kind: "ok", text: (await runInstall(mode.adoption.prepared, context.operations, exposure)).join(" ") };

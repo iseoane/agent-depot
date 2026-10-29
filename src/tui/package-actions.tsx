@@ -8,6 +8,7 @@ import { answerYesNo } from "./mode-keys.js";
 import { installedEvidenceLabel, packagePlanLines } from "./package-rows.js";
 import { PreviewConfirm } from "./panel-parts.js";
 import type { ViewMessage } from "./view-state.js";
+import { busy, type Busy } from "./working-model.js";
 
 /** A Package row the Installations view can act on. */
 export interface PackageTarget {
@@ -33,7 +34,7 @@ export const PACKAGE_KINDS: readonly PackageMode["kind"][] = ["package-approve",
 
 /** Narrower than ManageContext so the Catalog and the Installations view both host a Package action. */
 export interface PackageActionHost {
-  setMode(mode: PackageMode | { readonly kind: "busy"; readonly label: string }): void;
+  setMode(mode: PackageMode | Busy): void;
   /** Returns the view to browsing. */
   browse(): void;
   setMessage(message: ViewMessage | undefined): void;
@@ -58,7 +59,7 @@ export async function startPackageAction(context: PackageContext, target: Packag
   manage.setMessage(undefined);
   try {
     if (input === "approve") {
-      manage.setMode({ kind: "busy", label: `Preparing the declaration of ${target.name}...` });
+      manage.setMode(busy(`Preparing the declaration of ${target.name}…`));
       const plan = await packages.planLifecycle(target.selection, "install");
       if (manage.isMounted()) {
         manage.setMode({ kind: "package-approve", target, lines: packagePlanLines(plan, "needs approval") });
@@ -67,7 +68,7 @@ export async function startPackageAction(context: PackageContext, target: Packag
     }
     const action = PACKAGE_ACTION_KEYS.get(input);
     if (action === "forget") {
-      manage.setMode({ kind: "busy", label: `Preparing to forget ${target.name}...` });
+      manage.setMode(busy(`Preparing to forget ${target.name}…`));
       const inspection = await packages.inspect(target.selection);
       if (manage.isMounted()) {
         manage.setMode({
@@ -84,7 +85,7 @@ export async function startPackageAction(context: PackageContext, target: Packag
       return;
     }
     if (action !== undefined) {
-      manage.setMode({ kind: "busy", label: `Preparing the ${action} of ${target.name}...` });
+      manage.setMode(busy(`Preparing the ${action} of ${target.name}…`));
       const plan = await packages.planLifecycle(target.selection, action);
       const approval = await packages.approvalStatus(target.selection, action);
       if (manage.isMounted()) manage.setMode({ kind: "package-confirm", plan, approval });
@@ -99,7 +100,7 @@ export async function startPackageAction(context: PackageContext, target: Packag
 /** The `y` of a lifecycle confirmation whose receipt is missing approves it first, then asks again. */
 async function approveThenConfirm(context: PackageContext, mode: Extract<PackageMode, { kind: "package-confirm" }>): Promise<void> {
   const { manage, packages } = context;
-  manage.setMode({ kind: "busy", label: `Approving the ${mode.plan.action} declaration of ${mode.plan.descriptor.name}...` });
+  manage.setMode(busy(`Approving the ${mode.plan.action} declaration of ${mode.plan.descriptor.name}…`));
   try {
     await packages.approve(mode.plan.selection, mode.plan.action);
     if (manage.isMounted()) manage.setMode({ ...mode, approval: "approved" });
@@ -134,7 +135,7 @@ function resultLine(plan: PackageLifecyclePlan, result: PackageLifecycleResult):
 
 async function executePackagePlan(context: PackageContext, plan: PackageLifecyclePlan): Promise<void> {
   const { manage, packages } = context;
-  manage.setMode({ kind: "busy", label: `Running the ${plan.action} of ${plan.descriptor.name}...` });
+  manage.setMode(busy(`Running the ${plan.action} of ${plan.descriptor.name}…`));
   let result: PackageLifecycleResult;
   try {
     result = await packages.executeLifecycle(plan, true);
@@ -148,7 +149,7 @@ async function executePackagePlan(context: PackageContext, plan: PackageLifecycl
 
 async function forgetSelection(context: PackageContext, mode: Extract<PackageMode, { kind: "package-forget" }>): Promise<void> {
   const { manage, packages } = context;
-  manage.setMode({ kind: "busy", label: `Forgetting ${mode.target.name}...` });
+  manage.setMode(busy(`Forgetting ${mode.target.name}…`));
   try {
     await packages.forget(mode.target.selection, true);
     await manage.finish({ kind: "ok", text: `Forgot ${mode.target.name}; no host command ran` });
@@ -167,7 +168,7 @@ export function handlePackageKey(context: PackageContext, mode: PackageMode, inp
   switch (mode.kind) {
     case "package-approve":
       answerYesNo(input, key, () => {
-        manage.setMode({ kind: "busy", label: `Approving the install declaration of ${mode.target.name}...` });
+        manage.setMode(busy(`Approving the install declaration of ${mode.target.name}…`));
         void packages.approve(mode.target.selection, "install").then(
           () => manage.finish({ kind: "ok", text: `Approved the install declaration of ${mode.target.name}` }),
           error => manage.finish({ kind: "error", text: errorText(error) }),
