@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, before, describe, test } from "node:test";
+import { defaultSourceStatePath } from "../src/source-state.js";
 
 /**
  * Characterization of the built CLI end to end. Everything lives in one temporary
@@ -66,6 +67,11 @@ async function makeProject(name: string): Promise<string> {
   await mkdir(directory, { recursive: true });
   git(directory, "init", "-q");
   return directory;
+}
+
+/** Where the spawned CLI keeps its Source state: XDG on POSIX, APPDATA on Windows. */
+function sourceStatePath(): string {
+  return defaultSourceStatePath(env, process.platform, home);
 }
 
 async function exists(target: string): Promise<boolean> {
@@ -352,12 +358,12 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     assert.match(ok(cli(project, "uninstall", "--skills", "--yes")), /Removed 1 managed user-global Skill/);
     assert.deepEqual(await readdir(path.join(home, ".agents/skills")), []);
     assert.deepEqual(await readdir(path.join(home, ".claude/skills")), []);
-    const state = JSON.parse(await readFile(path.join(sandbox, "state/agent-depot/sources.json"), "utf8"));
+    const state = JSON.parse(await readFile(sourceStatePath(), "utf8"));
     assert.deepEqual(state, { version: 1, gitSources: [], userGlobalInstallations: [] });
     fails(cli(project, "source", "remove", sourceId, "--yes"), /Source is not registered/);
 
     assert.match(ok(cli(project, "uninstall", "--data", "--yes")), /Removed user-global catalog\/configuration data/);
-    assert.equal(await exists(path.join(sandbox, "state/agent-depot/sources.json")), false);
+    assert.equal(await exists(sourceStatePath()), false);
     assert.match(ok(cli(project, "uninstall", "--cli")), /package-manager handoff only/);
   });
 });
