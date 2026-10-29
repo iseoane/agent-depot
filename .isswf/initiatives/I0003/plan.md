@@ -28,3 +28,5 @@ Labels and evidence comments applied to #44-#48 and #50 (operator approved).
 - Operator 2026-10-29: #52 also includes a global --verbose flag (full child output to stderr, no spinner).
 - 2026-10-29: #58 ready-for-agent (low priority), queued after #52.
 - 2026-10-29: #59 ready-for-agent, queued after #54. Queue: #54 → #59 → #52 → #58. #51 still pending by operator choice.
+- 2026-10-29: #51 verified by operator in real terminals (incl. Windows) and closed.
+- 2026-10-29: #65 ready-for-agent; queue: #59 and #65 (parallel).
