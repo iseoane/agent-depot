@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 
-import { writeFileAtomically } from "./atomic-file.js";
+import { isLockContention, writeFileAtomically } from "./atomic-file.js";
 import { canonicalizeGitSourceUrl, sourceIdForUrl, type GitSource } from "./git-source.js";
 import { parseProjectManifest, type ProjectSkillSelection } from "./project-manifest.js";
 
@@ -261,7 +261,7 @@ export class SourceStateStore {
           await rmdir(lockPath);
         };
       } catch (error) {
-        if (!isAlreadyExists(error)) {
+        if (!isLockContention(error)) {
           throw error;
         }
         if (Date.now() >= deadline) {
@@ -279,8 +279,4 @@ function errorCode(error: unknown): unknown {
 
 function isMissingFile(error: unknown): boolean {
   return errorCode(error) === "ENOENT";
-}
-
-function isAlreadyExists(error: unknown): boolean {
-  return errorCode(error) === "EEXIST";
 }
