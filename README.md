@@ -559,7 +559,7 @@ Imported recipes remain unapproved. Import does not install Apps or Packages or
 run Host commands. Replica entries describe identity on the exporting machine
 only. They do not confer approval or installed state.
 
-Scrollable previews elsewhere in the TUI show every declaration and execution term. Use `j`/`k` to move one row, or the arrows and `PageUp`/`PageDown` to move by a visible page. Confirm only after every physical row has been displayed. Resizing a preview requires reviewing any rows that have not yet been displayed.
+Scrollable previews elsewhere in the TUI show every declaration and execution term. Use `j`/`k` to move one row, or the arrows and `PageUp`/`PageDown` to move by a visible page. App, recipe, Sources refresh and Updates previews accept `y` only after every physical row has been displayed, and resizing one requires reviewing any rows not yet displayed. Package panels and Profile confirmations show the same row window and accept `y`/`n` from any page.
 
 Removing an App recipe checks its approved version command and tracked state.
 If the App is installed or tracked, the TUI offers the existing uninstall flow;

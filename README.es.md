@@ -606,7 +606,7 @@ Las recetas importadas siguen sin aprobarse. La importación no instala Apps ni
 Packages ni ejecuta comandos del Host. Las réplicas solo describen identidades
 en la máquina de origen; no transfieren aprobaciones ni estado de instalación.
 
-Las demás previsualizaciones desplazables de la TUI muestran todas las declaraciones y los términos de ejecución. Usa `j`/`k` para avanzar una fila o las flechas y `PageUp`/`PageDown` para avanzar una página visible. Confirma solo después de mostrar cada fila física. Si cambias el tamaño del terminal, revisa las filas que aún no se han mostrado.
+Las demás previsualizaciones desplazables de la TUI muestran todas las declaraciones y los términos de ejecución. Usa `j`/`k` para avanzar una fila o las flechas y `PageUp`/`PageDown` para avanzar una página visible. Las previsualizaciones de Apps, recetas, actualización de Sources y Updates solo aceptan `y` después de mostrar cada fila física; si cambias el tamaño del terminal, revisa las filas que aún no se han mostrado. Los paneles de Packages y las confirmaciones de Perfil muestran la misma ventana de filas y aceptan `y`/`n` desde cualquier página.
 
 Al eliminar una receta App se comprueban su comando de versión aprobado y su
 seguimiento. Si la App está instalada o sigue registrada, la TUI ofrece el flujo

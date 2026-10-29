@@ -569,8 +569,8 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     ? `A name without an extension is saved as ${nameOutcome.fileName}.` : undefined;
   const textRows = (value: string | undefined) => value === undefined ? 0 : wrapText(value, panelWidth).length;
   const nameErrorLines = nameError === undefined ? [] : wrapText(nameError, panelWidth);
-  // Keys type into the name, so the stage cannot scroll; instead each long field keeps its first and last
-  // rows within a share of the terminal. The confirmation after it pages the complete destination.
+  // Keys type into the name, so the stage cannot scroll; instead each long field keeps its end (and, given
+  // three rows or more, its first row) within a share of the terminal. The confirmation pages the full destination.
   const nameFixedRows = 3 + textRows(nameNote) + textRows(extensionNote) + Math.min(nameErrorLines.length, NAME_ERROR_ROWS)
     + (nameChecking === undefined ? 0 : 1) + textRows(NAME_HINT);
   const fieldRows = useListHeight(listHeight, nameFixedRows, 3);
