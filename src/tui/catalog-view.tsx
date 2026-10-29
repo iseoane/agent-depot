@@ -12,7 +12,7 @@ import { AppPanel, handleAppKey, startAppAction, type AppActionHost, type AppMod
 import { ActionPanel, CatalogHeader, CatalogRowLine, CatalogSelectionHelp } from "./catalog-panel.js";
 import { packageOwnedSkillNotice } from "./catalog-ownership.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
-import { handlePackageKey, isPackageMode, startPackageAction, type PackageActionHost, type PackageContext } from "./package-actions.js";
+import { handlePackageKey, isPackageMode, PackagePanel, startPackageAction, type PackageActionHost, type PackageContext } from "./package-actions.js";
 import { ListFooter, Working } from "./panel-parts.js";
 import { useCatalogApps, useCatalogFilter, useCatalogSkills, useInstalledSkills } from "./catalog-state.js";
 import { buildTree, leavesOf, openByDefault, skillKey, type NodeData } from "./catalog-tree.js";
@@ -172,7 +172,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       setAction(BROWSE);
     },
   };
-  const packageContext: PackageContext = { packages, manage: packageHost };
+  const packageContext: PackageContext = { packages, manage: packageHost, terminalRows: terminalRows || 24, terminalColumns: columns || 80 };
   const browse: CatalogBrowseContext = {
     navigation,
     height,
@@ -206,6 +206,8 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const selectedCount = leavesOf(roots).filter((skill) => marks.marked.has(skillKey(skill))).length;
 
   if (appMode !== undefined) return <AppPanel mode={appMode} />;
+  // A paged declaration owns the view: rows of the tree above it would not be counted in its height.
+  if (isPackageMode(action)) return <PackagePanel mode={action} />;
 
   return (
     <Box flexDirection="column">

@@ -14,7 +14,8 @@ import { parseProjectManifest, ProjectManifestStore } from "../src/project-manif
 import { createSourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { pagedRows, pageToQuestion } from "./package-panel.js";
+import { squash, waitForFrame } from "./wait-for-frame.js";
 
 const PORTABLE_URL = "https://example.test/packages/pstack.git";
 const PI_IDENTITY = "git:example.test/packages/pstack";
@@ -94,7 +95,9 @@ interface Journey {
 
 /** Renders the real App over a temp home and the real Source and Package operations. */
 async function journey(t: { after(callback: () => void | Promise<void>): void }): Promise<Journey> {
-  const base = path.join(root, `journey-${Math.random().toString(16).slice(2)}`);
+  // The long segment puts the plan's working directory past the panel width on every platform, so the
+  // wrapped rows that used to overflow the Package panel do not depend on the machine's TMPDIR.
+  const base = path.join(root, `journey-with-a-long-directory-name-${Math.random().toString(16).slice(2)}`);
   const home = path.join(base, "home");
   await mkdir(home, { recursive: true });
   const sources = createSourceOperations({ homeDirectory: home, statePath: path.join(base, "sources.json") });
@@ -115,10 +118,6 @@ async function journey(t: { after(callback: () => void | Promise<void>): void })
     packages,
   };
   const view = render(<App operations={sources} environment={environment} onExit={() => undefined} />);
-  // The Package approval panel is not paged, and Ink squeezes it into the terminal height. A long
-  // temp path (Windows) wraps the working directory onto extra rows, so give the panel room.
-  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 60 });
-  view.stdout.emit("resize");
   t.after(() => view.unmount());
   return { view, calls, packages, home };
 }
@@ -183,9 +182,9 @@ test("a Claude install disappears from Catalog and shows a verified available up
   await waitForFrame(j.view.lastFrame, /Package pstack \(pi\)/u);
   await moveDownTo(j.view.lastFrame, j.view.stdin, /> .*Package pstack \(claude\)/u);
   j.view.stdin.write("i");
-  await waitForFrame(j.view.lastFrame, /Approval: needs approval/u);
+  await pageToQuestion(j.view.lastFrame, j.view.stdin, /Approve this declaration and continue\? y\/n/u);
   j.view.stdin.write("y");
-  await waitForFrame(j.view.lastFrame, /Approval: approved/u);
+  await pageToQuestion(j.view.lastFrame, j.view.stdin, /install pstack\? y\/n/u);
   j.view.stdin.write("y");
   await waitForFrame(j.view.lastFrame, /pstack: installed/u);
 
@@ -229,12 +228,23 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   await moveDownTo(j.view.lastFrame, j.view.stdin, /> .*Package pstack \(pi\)/);
 
   j.view.stdin.write("i");
-  const preview = await waitForFrame(j.view.lastFrame, /Approve this declaration and continue\? y\/n/);
-  assert.match(preview, /Step 1 \(apply\): \["pi","install","git:example\.test\/packages\/pstack"\]/);
-  assert.match(preview, /Approval: needs approval/);
+  const first = await waitForFrame(j.view.lastFrame, /Review 1 of \d+/u);
+  assert.match(first, /Scroll to end before y; n cancels\./u, "a panel that does not fit says so instead of offering the question");
+  assert.match(first, /arrows\/Pg page/u, "the panel legend names the paging keys");
+  j.view.stdin.write("y");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.match(j.view.lastFrame() ?? "", /Review 1 of \d+/u, "y before the end of the declaration approves nothing");
+  const pages = await pageToQuestion(j.view.lastFrame, j.view.stdin, /Approve this declaration and continue\? y\/n/u);
+  assert.ok(pages.length > 1, "the declaration needs more than one page at the default height");
+  const preview = squash(pagedRows(pages).join(""));
+  for (const line of [
+    `Step1(apply):["pi","install","git:example.test/packages/pstack"]`,
+    `Workingdirectory:${j.home}`,
+    "Approval:needsapproval",
+  ]) assert.ok(preview.includes(squash(line)), `paging never showed ${line}`);
   assert.equal(j.calls.length, 0, "the preview runs no host command");
   j.view.stdin.write("y");
-  await waitForFrame(j.view.lastFrame, /install pstack\? y\/n/);
+  await pageToQuestion(j.view.lastFrame, j.view.stdin, /install pstack\? y\/n/u);
   assert.equal(j.calls.length, 0, "the approval gate runs no host command");
   j.view.stdin.write("y");
   await waitForFrame(j.view.lastFrame, /pstack: installed/);
