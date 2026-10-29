@@ -6,7 +6,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-const PRELOAD = path.resolve("dist", "tests", "isolated-env.js");
+// `--import` takes a file URL on Windows; a drive-letter path is rejected as an unsupported scheme.
+const PRELOAD = pathToFileURL(path.resolve("dist", "tests", "isolated-env.js")).href;
 const GIT_SOURCE = pathToFileURL(path.resolve("dist", "src", "git-source.js")).href;
 const SOURCE_STATE = pathToFileURL(path.resolve("dist", "src", "source-state.js")).href;
 
