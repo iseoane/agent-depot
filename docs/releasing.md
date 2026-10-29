@@ -1,6 +1,6 @@
 # Releasing to npm
 
-Agent Depot publishes `@iseoane/agent-depot` through GitHub Actions trusted publishing. The workflow does not store an npm token and does not change `package.json` or create a Git tag. See [npm's trusted publishing documentation](https://docs.npmjs.com/trusted-publishers) for the current registry requirements.
+Agent Depot publishes `@iseoane/agent-depot` through GitHub Actions trusted publishing. The workflow does not store an npm token and does not change `package.json`. After npm reports the version as `latest`, it creates the annotated Git tag `v<version>` on the published commit. See [npm's trusted publishing documentation](https://docs.npmjs.com/trusted-publishers) for the current registry requirements.
 
 ## Configure npm trusted publishing
 
@@ -56,6 +56,7 @@ After review, merge the release change to `main`. Only then follow [Publish a re
    in separate Python processes with bytecode writes disabled. The job packs and
    checks package identity, refuses a version already present on npm, and passes
    that exact tarball and its checksums to the publish job.
+   After publication is verified, the tag job creates `v<version>` on the dispatched commit. It refuses to move an existing tag that points elsewhere.
 4. The publish job confirms the artifact came from the dispatched commit, checks the npm registry again, and publishes the tarball. It checks up to 48 times for npm to report the requested version as `latest` with the exact tarball integrity, waiting ten seconds between checks. Each registry request times out after 30 seconds, and GitHub ends the publish job after fifteen minutes.
 
 The workflow runs only when dispatched from `main`. It serializes releases without cancelling an active publish. A registry network error or unexpected HTTP response stops the run instead of treating the version as available. A post-publish timeout means publication may have succeeded; check npm before retrying.
