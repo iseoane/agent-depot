@@ -19,7 +19,7 @@ import type {
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
-import { pagedRows, pageToQuestion } from "./package-panel.js";
+import { pagedRows, pageToEnd } from "./package-panel.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
 
 const ENTER = "\r";
@@ -210,7 +210,8 @@ test("i previews the frozen install declaration, approves it, then confirms befo
   await waitForFrame(f.view.lastFrame, /Packages \(user-global\) \(1\)/);
   await revealPackage(f.view);
   f.view.stdin.write("i");
-  const preview = (await pageToQuestion(f.view.lastFrame, f.view.stdin, /Approve this declaration and continue\? y\/n/)).join("\n");
+  await waitForFrame(f.view.lastFrame, /Approve this declaration and continue\? y\/n/);
+  const preview = (await pageToEnd(f.view.lastFrame, f.view.stdin)).join("\n");
   assert.match(preview, /Step 1 \(apply\): \["pi","install","github\.com\/iseoane\/pstack"\]/);
   assert.match(preview, /Executable: \/usr\/bin\/pi/);
   assert.match(preview, /runs a host process/);
@@ -219,7 +220,8 @@ test("i previews the frozen install declaration, approves it, then confirms befo
   assert.match(preview, /Approval: needs approval/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install"]);
   f.view.stdin.write("y");
-  const approved = (await pageToQuestion(f.view.lastFrame, f.view.stdin, /install pstack\? y\/n/)).join("\n");
+  await waitForFrame(f.view.lastFrame, /install pstack\? y\/n/);
+  const approved = (await pageToEnd(f.view.lastFrame, f.view.stdin)).join("\n");
   assert.match(approved, /Approval: approved/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install", "approve:install"]);
   f.view.stdin.write("y");
@@ -232,11 +234,11 @@ test("U updates and u uninstalls an approved Package with one confirmation each"
   await waitForFrame(f.view.lastFrame, /Packages \(user-global\) \(1\)/);
   await revealPackage(f.view);
   f.view.stdin.write("U");
-  await pageToQuestion(f.view.lastFrame, f.view.stdin, /update pstack\? y\/n/);
+  await waitForFrame(f.view.lastFrame, /update pstack\? y\/n/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /pstack: updated \(installed 1\.0\.0 -> installed 1\.1\.0\)/);
   f.view.stdin.write("u");
-  await pageToQuestion(f.view.lastFrame, f.view.stdin, /uninstall pstack\? y\/n/);
+  await waitForFrame(f.view.lastFrame, /uninstall pstack\? y\/n/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /pstack: removed/);
   assert.deepEqual(f.calls, [
@@ -250,7 +252,8 @@ test("f forgets only the selection record and runs no host command", async (t) =
   await waitForFrame(f.view.lastFrame, /Packages \(user-global\) \(1\)/);
   await revealPackage(f.view);
   f.view.stdin.write("f");
-  const preview = (await pageToQuestion(f.view.lastFrame, f.view.stdin, /Forget the selection record of pstack\? y\/n/)).join("\n");
+  await waitForFrame(f.view.lastFrame, /Forget the selection record of pstack\? y\/n/);
+  const preview = (await pageToEnd(f.view.lastFrame, f.view.stdin)).join("\n");
   assert.match(preview, /Forgetting drops the Agent Depot selection record only/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Forgot pstack; no host command ran/);
@@ -262,13 +265,13 @@ test("Enter approves the install declaration without executing it", async (t) =>
   await waitForFrame(f.view.lastFrame, /Packages \(user-global\) \(1\)/);
   await revealPackage(f.view);
   f.view.stdin.write(ENTER);
-  await pageToQuestion(f.view.lastFrame, f.view.stdin, /Approve this install declaration for pstack\? y\/n/);
+  await waitForFrame(f.view.lastFrame, /Approve this install declaration for pstack\? y\/n/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Approved the install declaration of pstack/);
   assert.deepEqual(f.calls, ["plan:install", "approve:install"]);
 });
 
-test("approval and forget panels page inside a short terminal, and y waits for the last row", async (t) => {
+test("approval and forget panels page inside a short terminal, and y works from the first page", async (t) => {
   const longDirectory = path.join("/home/user", "a-long-working-directory-name".repeat(3), "agent-depot");
   const f = await fixture(t, { planLifecycle: async (_selection, action) => ({ ...plan(action), cwd: longDirectory }) });
   Object.defineProperty(f.view.stdout, "rows", { configurable: true, value: 12 });
@@ -279,26 +282,29 @@ test("approval and forget panels page inside a short terminal, and y waits for t
 
   f.view.stdin.write(ENTER);
   const first = await waitForFrame(f.view.lastFrame, /Review 1 of \d+/);
-  assert.match(first, /Scroll to end before y; n cancels\./, "the panel says there is more before it asks");
+  assert.match(first, /Approve this install declaration for pstack\? y\/n/, "the question is on every page");
+  assert.match(first, /arrows\/Pg page/, "the legend names the paging keys");
   assert.ok(first.split("\n").length <= 12, first);
-  f.view.stdin.write("y");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.ok(!f.calls.includes("approve:install"), "y before the last row approves nothing");
-  const approvePages = await pageToQuestion(f.view.lastFrame, f.view.stdin, /Approve this install declaration for pstack\? y\/n/, 12);
+  const approvePages = await pageToEnd(f.view.lastFrame, f.view.stdin, 12);
   assert.ok(approvePages.length > 1, "the declaration needs several pages at 12 rows");
   assert.ok(squash(pagedRows(approvePages).join("")).includes(squash(`Working directory: ${longDirectory}`)), "paging reveals the whole working directory");
   f.view.stdin.write(ESC);
   await waitForFrame(f.view.lastFrame, /Package action cancelled/);
+  assert.deepEqual(f.calls, [], "cancelling approves nothing");
 
-  f.view.stdin.write("f");
+  f.view.stdin.write(ENTER);
   await waitForFrame(f.view.lastFrame, /Review 1 of \d+/);
   f.view.stdin.write("y");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.ok(!f.calls.includes("forget"), "y before the last row forgets nothing");
-  await pageToQuestion(f.view.lastFrame, f.view.stdin, /Forget the selection record of pstack\? y\/n/, 12);
-  f.view.stdin.write(ESC);
-  await waitForFrame(f.view.lastFrame, /Package action cancelled/);
-  assert.deepEqual(f.calls, [], "the overridden plan records nothing, and nothing was approved, forgotten or run");
+  await waitForFrame(f.view.lastFrame, /Approved the install declaration of pstack/);
+  assert.deepEqual(f.calls, ["approve:install"], "y approves from the first page");
+
+  f.view.stdin.write("f");
+  const forget = await waitForFrame(f.view.lastFrame, /Review 1 of \d+/);
+  assert.match(forget, /Forget the selection record of pstack\? y\/n/);
+  assert.ok(forget.split("\n").length <= 12, forget);
+  f.view.stdin.write("y");
+  await waitForFrame(f.view.lastFrame, /Forgot pstack; no host command ran/);
+  assert.deepEqual(f.calls, ["approve:install", "forget"]);
 });
 
 test("n and Esc cancel at every Package confirmation without approving or running", async (t) => {
@@ -306,19 +312,19 @@ test("n and Esc cancel at every Package confirmation without approving or runnin
   await waitForFrame(f.view.lastFrame, /Packages \(user-global\) \(1\)/);
   await revealPackage(f.view);
   f.view.stdin.write("i");
-  await pageToQuestion(f.view.lastFrame, f.view.stdin, /Approve this declaration and continue\? y\/n/);
+  await waitForFrame(f.view.lastFrame, /Approve this declaration and continue\? y\/n/);
   f.view.stdin.write("y");
-  await pageToQuestion(f.view.lastFrame, f.view.stdin, /install pstack\? y\/n/);
+  await waitForFrame(f.view.lastFrame, /install pstack\? y\/n/);
   f.view.stdin.write("n");
   await waitForFrame(f.view.lastFrame, /Package action cancelled/);
   assert.ok(!f.calls.some((call) => call.startsWith("execute")), "n must not execute");
   f.view.stdin.write("f");
-  await pageToQuestion(f.view.lastFrame, f.view.stdin, /Forget the selection record of pstack\? y\/n/);
+  await waitForFrame(f.view.lastFrame, /Forget the selection record of pstack\? y\/n/);
   f.view.stdin.write(ESC);
   await waitForFrame(f.view.lastFrame, /Package action cancelled/);
   assert.ok(!f.calls.includes("forget"), "Esc must not forget");
   f.view.stdin.write("U");
-  await pageToQuestion(f.view.lastFrame, f.view.stdin, /update pstack\? y\/n/);
+  await waitForFrame(f.view.lastFrame, /update pstack\? y\/n/);
   f.view.stdin.write(ESC);
   await waitForFrame(f.view.lastFrame, /Package action cancelled/);
   assert.ok(!f.calls.includes("execute:update"), "Esc must not update");

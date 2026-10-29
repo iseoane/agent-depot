@@ -1,4 +1,4 @@
-import { useWindowSize, type Key } from "ink";
+import type { Key } from "ink";
 
 import { describeCoordinates, type PackageAction, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection } from "../package-model.js";
 import type { PackageOperations } from "../package-flow.js";
@@ -185,14 +185,13 @@ function packagePreview(mode: PackageMode): { readonly lines: readonly string[];
   }
 }
 
-/** The question is offered only once the last row is on screen; before that the footer says so. */
 function reviewChrome(title: string, question: string): PreviewChrome {
-  return { title, questions: ["Scroll to end before y; n cancels.", question], footerRows: 2 };
+  return { title, questions: [question], footerRows: 2 };
 }
 
 /**
- * Pages the declaration with the arrows, PgUp/PgDn and j/k, and applies `y` only once the last row has
- * been shown, so what the user approves is never partly hidden. `n` and Esc run nothing.
+ * Pages the declaration with the arrows, PgUp/PgDn and j/k. `y` answers from any page: the panel shows
+ * the `Review N of M` position and the row window while more remains. `n` and Esc run nothing.
  */
 export function handlePackageKey(context: PackageContext, mode: PackageMode, input: string, key: Key): void {
   const { manage, packages } = context;
@@ -211,7 +210,7 @@ export function handlePackageKey(context: PackageContext, mode: PackageMode, inp
     cancel("Package action cancelled");
     return;
   }
-  if (input !== "y" || !viewport.reachedEnd) return;
+  if (input !== "y") return;
   switch (mode.kind) {
     case "package-approve":
       manage.setMode(busy(`Approving the install declaration of ${mode.target.name}…`));
@@ -232,16 +231,6 @@ export function handlePackageKey(context: PackageContext, mode: PackageMode, inp
 
 /** Renders a Package prompt with the existing preview panel and y/n confirmation. */
 export function PackagePanel({ mode }: { readonly mode: PackageMode }) {
-  const { rows, columns } = useWindowSize();
   const { lines, chrome } = packagePreview(mode);
-  const viewport = previewViewport(lines, mode.cursor, rows || 24, columns || 80, chrome);
-  return (
-    <PreviewConfirm
-      title={chrome.title}
-      lines={lines}
-      cursor={mode.cursor}
-      question={viewport.reachedEnd ? chrome.questions[1]! : chrome.questions[0]!}
-      chrome={chrome}
-    />
-  );
+  return <PreviewConfirm title={chrome.title} lines={lines} cursor={mode.cursor} question={chrome.questions[0]!} chrome={chrome} />;
 }

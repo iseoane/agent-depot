@@ -5,31 +5,6 @@ import { waitForFrame } from "./wait-for-frame.js";
 /** The rows of the default terminal, which ink-testing-library reports no size for. */
 const TERMINAL_ROWS = 24;
 
-/**
- * Pages a Package panel with PgDn until `question` shows and returns every frame visited. The panel
- * offers `y` only once its last row has been shown, so a test must reach the question this way.
- * Each frame must fit the terminal, so a panel that Ink squeezes instead of paging fails here.
- */
-export async function pageToQuestion(
-  lastFrame: () => string | undefined,
-  stdin: { write(data: string): void },
-  question: RegExp,
-  rows = TERMINAL_ROWS,
-): Promise<string[]> {
-  const position = (frame: string) => Number(/Review (\d+) of \d+/u.exec(frame)?.[1] ?? Number.NaN);
-  const visited: string[] = [];
-  for (let page = 0; page < 100; page += 1) {
-    const frame = await waitForFrame(lastFrame, /Review \d+ of \d+/u);
-    visited.push(frame);
-    assert.ok(frame.split("\n").length <= rows, `Package panel exceeded ${rows} rows:\n${frame}`);
-    if (question.test(frame)) return visited;
-    const current = position(frame);
-    stdin.write("\u001B[6~");
-    await waitForFrame(lastFrame, (next) => question.test(next) || position(next) > current);
-  }
-  assert.fail(`Package panel never reached ${String(question)}:\n${lastFrame()}`);
-}
-
 /** Presses PgDn until the window reaches the last row (or the content fits) and returns every frame visited. */
 export async function pageToEnd(
   lastFrame: () => string | undefined,

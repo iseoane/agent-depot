@@ -192,7 +192,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     if (runningAppMode !== undefined) handleAppKey({ apps, manage: appManage, terminalRows: terminalRows || 24, terminalColumns: columns || 80 }, runningAppMode, input, key);
     else {
       const mode = actionRef.current;
-        if (isPackageMode(mode)) handlePackageKey(packageContext, mode, input, key);
+      if (isPackageMode(mode)) handlePackageKey(packageContext, mode, input, key);
       else if (mode.kind !== "browse") handleCatalogActionKey(flow, mode, input, key);
       else if (filter.filterRef.current.editing) filter.handleEditKey(input, key, navigation.restart);
       else handleCatalogBrowseKey(browse, input, key);
