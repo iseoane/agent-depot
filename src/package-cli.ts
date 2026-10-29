@@ -1,6 +1,7 @@
 import { sourceIdForUrl } from "./git-source.js";
 import { PACKAGE_HOSTS, bundleRoot, describeCoordinates, selectionKey, type BundleDescriptor, type InstalledBundleEvidence, type InstalledPackage, type PackageAction, type PackageComponent, type PackageComponentEffect, type PackageCoordinates, type PackageHost, type PackageInspection, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection, type PackageUpdateCheck, type PackageVersionEvidence } from "./package-model.js";
 import type { PackageOperations } from "./package-flow.js";
+import { NO_PROGRESS, type Progress } from "./progress.js";
 import type { ProjectSource } from "./project-manifest.js";
 import { projectSourceOf, type Source, type SourceOperations } from "./sources.js";
 import { CliUsageError } from "./usage-error.js";
@@ -36,6 +37,7 @@ export async function runPackageCommand(
   packages: PackageOperations,
   sources: SourceOperations,
   output: (line: string) => void,
+  progress: Progress = NO_PROGRESS,
 ): Promise<number> {
   const [command, ...args] = values;
   if (command === "list") {
@@ -86,7 +88,7 @@ export async function runPackageCommand(
     if (!parsed.confirmed) {
       throw new Error(`Package ${command} not confirmed; rerun with --yes after reviewing the preview`);
     }
-    const result = await packages.executeLifecycle(plan, true);
+    const result = await progress.run(`${command === "install" ? "Installing" : command === "update" ? "Updating" : "Uninstalling"} Package ${formatPackageSelection(selection)}`, () => packages.executeLifecycle(plan, true));
     output(`Package ${formatPackageSelection(selection)}: ${describePackageResult(result)}`);
     return packageResultSucceeded(result) ? 0 : 1;
   }

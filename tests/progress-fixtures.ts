@@ -1,4 +1,4 @@
-import type { ProgressStream, ProgressTimers } from "../src/progress.js";
+import type { Progress, ProgressStream, ProgressTimers } from "../src/progress.js";
 
 /** A stream that records what progress writes; `isTTY` decides whether progress animates. */
 export function fakeStream(options: { isTTY?: boolean; columns?: number } = {}): ProgressStream & { readonly writes: string[] } {
@@ -27,4 +27,10 @@ export function fakeTimers() {
     get everUnreffed() { return unreffed.size; },
     tick() { for (const callback of [...live.values()]) callback(); },
   };
+}
+
+/** Progress that records each step label and otherwise stays out of the way. */
+export function recordingProgress(): Progress & { readonly labels: string[] } {
+  const labels: string[] = [];
+  return { labels, run: (label, work) => { labels.push(label); return work(); }, clear: () => undefined };
 }

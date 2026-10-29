@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { PACKAGE_USAGE, formatPackageSelection, runPackageCommand } from "../src/package-cli.js";
 import type { PackageOperations } from "../src/package-flow.js";
+import { recordingProgress } from "./progress-fixtures.js";
 import type {
   BundleDescriptor,
   InstalledPackage,
@@ -398,4 +399,21 @@ test("package lifecycle reports a non-zero code for a failed host command", asyn
   };
   assert.equal(await runPackageCommand(["install", PI_TOKEN, "--host", "pi", "--yes"], failing, fakeSources(), (line) => f.lines.push(line)), 1);
   assert.match(f.lines.join("\n"), /failed: pi exited 1; boom/u);
+});
+
+test("package lifecycle shows a progress step around the host command only", async () => {
+  for (const [action, label] of [["install", "Installing"], ["update", "Updating"], ["uninstall", "Uninstalling"]] as const) {
+    const f = fixture();
+    const progress = recordingProgress();
+    assert.equal(await runPackageCommand([action, PI_TOKEN, "--host", "pi", "--yes"], f.packages, fakeSources(), (line) => f.lines.push(line), progress), 0);
+    assert.deepEqual(progress.labels, [`${label} Package ${formatPackageSelection(PI)}`]);
+
+    const quiet = fixture();
+    assert.equal(await runPackageCommand([action, PI_TOKEN, "--host", "pi", "--yes"], quiet.packages, fakeSources(), (line) => quiet.lines.push(line)), 0);
+    assert.deepEqual(f.lines, quiet.lines);
+  }
+  const unconfirmed = fixture();
+  const idle = recordingProgress();
+  await assert.rejects(runPackageCommand(["install", PI_TOKEN, "--host", "pi"], unconfirmed.packages, fakeSources(), () => undefined, idle));
+  assert.deepEqual(idle.labels, []);
 });

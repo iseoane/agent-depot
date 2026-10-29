@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { createAppOperations } from "../src/app-flow.js";
+import { recordingProgress } from "./progress-fixtures.js";
 
 test("CLI schema, validation approval and listing use the shared core", async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), "app-cli-"));
@@ -396,4 +397,35 @@ test("validate and list report invalid owned-skill patterns without running comm
     assert.match(lines.join("\n"), /skills\[0\]/u);
     assert.ok(lines.join("\n").includes(file));
   }
+});
+
+test("App lifecycle steps show progress and stdout is unchanged", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-progress-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  try {
+    await writeFile(path.join(directory, "example.json"), JSON.stringify({
+      name: "example", install: { argv: ["example", "install"], manual: "install yourself" },
+      update: { manual: "update" }, uninstall: { manual: "remove yourself" },
+      version: { argv: ["example", "--version"], pattern: "(1\\.2\\.3)" },
+    }));
+    const apps = createAppOperations({ recipesDirectory: directory, homeDirectory: home, isWsl: false,
+      resolveExecutable: async () => "/usr/bin/example",
+      runner: async () => ({ code: 0, signal: null, stdout: Buffer.from("1.2.3"), stderr: "", outputTooLarge: false }) });
+    await apps.approve((await apps.load())[0]!);
+    const runWith = async (progress: ReturnType<typeof recordingProgress> | undefined, ...args: string[]) => {
+      const lines: string[] = [];
+      const code = await runCli(["app", ...args], { appOperations: apps, stdout: line => lines.push(line), stderr: line => lines.push(line), ...(progress === undefined ? {} : { progress }) });
+      return { code, lines };
+    };
+    const progress = recordingProgress();
+    const shown = await runWith(progress, "install", "example", "--yes");
+    assert.deepEqual(progress.labels, ["Installing App example"]);
+    assert.deepEqual(shown, await runWith(undefined, "install", "example", "--yes"));
+
+    const done = recordingProgress();
+    await runWith(done, "install", "example", "--manual-done", "--yes");
+    await runWith(done, "list");
+    assert.deepEqual(done.labels, ["Checking App example", "Checking App updates"]);
+  } finally { await rm(home, { recursive: true, force: true }); }
 });
