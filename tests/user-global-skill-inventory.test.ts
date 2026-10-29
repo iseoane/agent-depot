@@ -435,9 +435,7 @@ test("app declarations exclude directories and links before inspecting their con
   }
 });
 
-test("ownership matches whole names case-sensitively with only star special and only applicable recipes", {
-  skip: process.platform === "win32" && "needs a case-sensitive file system and '?' and newline in directory names",
-}, async () => {
+test("ownership matches whole names case-sensitively with only star special and only applicable recipes", async () => {
   const home = await makeHome();
   try {
     const apps = path.join(home, "apps");
@@ -448,11 +446,16 @@ test("ownership matches whole names case-sensitively with only star special and 
     };
     await writeFile(path.join(apps, "app.json"), JSON.stringify({ ...base, skills: ["owned-*", "a?b", "[ab]", "dot.name", "end*"] }));
     await writeFile(path.join(apps, "foreign.json"), JSON.stringify({ ...base, name: "foreign", platform: "windows", skills: ["other"] }));
-    for (const name of ["owned-", "owned-demo", "Owned-demo", "xowned-demo", "a?b", "acb", "[ab]", "a", "dot.name", "dotXname", "end", "ending", "other", "dot.name\n"]) {
+    // Windows cannot create "?" or newline names and folds case ("Owned-demo" would collide with
+    // "owned-demo"); those three cases need a POSIX file system, the rest still run there.
+    const posixOnly = new Set(["Owned-demo", "a?b", "dot.name\n"]);
+    const keep = (name: string) => process.platform !== "win32" || !posixOnly.has(name);
+    for (const name of ["owned-", "owned-demo", "Owned-demo", "xowned-demo", "a?b", "acb", "[ab]", "a", "dot.name", "dotXname", "end", "ending", "other", "dot.name\n"].filter(keep)) {
       await makeSkill(home, ".agents", name);
     }
     const inventory = await scanUserGlobalSkillInventory({ homeDirectory: home, appEnvironment: { recipesDirectory: apps, platform: "linux", runner: async () => { throw new Error("must not execute"); } } });
-    assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["Owned-demo", "a", "acb", "dot.name\n", "dotXname", "other", "xowned-demo"]);
+    assert.deepEqual(inventory.unmanaged.map(entry => entry.name),
+      ["Owned-demo", "a", "acb", "dot.name\n", "dotXname", "other", "xowned-demo"].filter(keep));
   } finally {
     await rm(home, { recursive: true, force: true });
   }

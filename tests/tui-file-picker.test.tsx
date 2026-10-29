@@ -158,15 +158,14 @@ test("the picker stays inside a narrow terminal", async t => {
   assert.ok(frame.split("\n").length <= 12, frame);
 });
 
-test("pathExists reports ENOENT as absent, exists as present, and propagates permission errors", {
-  skip: process.platform === "win32" && "chmod 000 does not deny directory access on Windows",
-}, async t => {
+test("pathExists reports ENOENT as absent, exists as present, and propagates permission errors", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-exists-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const file = path.join(root, "file.json");
   await writeFile(file, "{}");
   assert.equal(await pathExists(file), true);
   assert.equal(await pathExists(path.join(root, "missing.json")), false);
+  if (process.platform === "win32") return t.skip("chmod 000 does not deny directory access on Windows");
   if (process.getuid?.() === 0) return t.skip("permission errors cannot be triggered as root");
   const locked = path.join(root, "locked");
   await mkdir(locked);
