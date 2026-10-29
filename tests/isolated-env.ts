@@ -3,8 +3,9 @@
 //   does not inject its own home cannot read or write the developer's real Agent Depot state (App
 //   recipes, approval receipts). Tests that read the real state directory are machine- and
 //   order-dependent; tests that need recipes inject their own `recipesDirectory`.
-// - XDG_STATE_HOME and PI_CODING_AGENT_DIR: deleted, so shell overrides cannot redirect tests to
-//   real user state or away from the isolated HOME.
+// - XDG_STATE_HOME, XDG_CACHE_HOME and PI_CODING_AGENT_DIR: deleted, so shell overrides cannot
+//   redirect tests to real user state or the real Git Source cache, or away from the isolated HOME.
+//   XDG_CONFIG_HOME and XDG_DATA_HOME are not read by the product, so they need no handling.
 // - AGENT_DEPOT_NO_ANIMATION: set to 1 so Working renders one static frame; a ticking spinner would
 //   change every frame and break tests that wait for `frame !== before`.
 // - FORCE_COLOR: `node --test` sets it for its child processes when run from a real terminal, which
@@ -16,6 +17,7 @@ import path from "node:path";
 process.env.AGENT_DEPOT_NO_ANIMATION = "1";
 delete process.env.FORCE_COLOR;
 delete process.env.XDG_STATE_HOME;
+delete process.env.XDG_CACHE_HOME;
 delete process.env.PI_CODING_AGENT_DIR;
 
 const home = mkdtempSync(path.join(tmpdir(), "agent-depot-test-home-"));
