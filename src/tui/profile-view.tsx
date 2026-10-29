@@ -154,8 +154,10 @@ const NAME_ERROR_ROWS = 3;
 const NAME_HINT = "Type to edit · Ctrl+U clear · Enter continue · Esc back to folder";
 
 /**
- * A `Label: value` line of the export name stage, wrapped to the panel and kept within `rows` rows. A path
- * keeps its first and last rows; the typed name (`tail`) keeps its last rows so the cursor stays in view.
+ * A `Label: value` line of the export name stage, wrapped to the panel and kept within `rows` rows. The
+ * end of a path (its last folder, the file name) and the end of the typed name (where the cursor is) are
+ * what matter, so with fewer than three rows the field keeps its label and its tail behind a `…`; with
+ * three or more a path keeps its first row too, around a count of the rows left out.
  */
 function NameField({ label, value, rows, width, tail = false }: {
   readonly label: string;
@@ -166,14 +168,21 @@ function NameField({ label, value, rows, width, tail = false }: {
 }) {
   const wrapped = wrapText(`${label}${value}`, width);
   const cut = wrapped.length > rows;
-  const shown = !cut ? wrapped
-    : tail ? [`…${wrapped[wrapped.length - rows]!.slice(1)}`, ...wrapped.slice(wrapped.length - rows + 1)]
-      : elideMiddle(wrapped, rows, width);
+  const keepsMiddleCount = cut && !tail && rows > 2;
+  let shown = wrapped;
+  if (keepsMiddleCount) shown = elideMiddle(wrapped, rows, width);
+  else if (cut) {
+    const characters = Array.from(value);
+    for (let dropped = 1; dropped <= characters.length; dropped += 1) {
+      shown = wrapText(`${label}…${characters.slice(dropped).join("")}`, width);
+      if (shown.length <= rows) break;
+    }
+  }
   return <>{shown.map((line, index) => {
     if (index === 0 && line.startsWith(label)) {
       return <Text key={index}><Text color={theme.field}>{label}</Text><Text color={theme.value}>{line.slice(label.length)}</Text></Text>;
     }
-    return <Text key={index} color={cut && !tail && index === 1 && line.startsWith("… ") ? theme.muted : theme.value}>{line}</Text>;
+    return <Text key={index} color={keepsMiddleCount && index === 1 ? theme.muted : theme.value}>{line}</Text>;
   })}</>;
 }
 
