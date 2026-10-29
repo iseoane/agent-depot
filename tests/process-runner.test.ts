@@ -289,6 +289,27 @@ test("on POSIX the result is still returned within a bound when a descendant has
   });
 });
 
+test("on POSIX a timeout still kills the child and settles when the process list cannot be read", { skip: posixOnly, timeout: 60_000 }, async () => {
+  await withPosixSleeper({}, async ({ script, pidFile }) => {
+    const timeoutMs = 1_000;
+    const pending = runProcess(node, [script, pidFile], { timeoutMs });
+    // The child has been spawned with the real PATH; the later `ps` for the process tree finds nothing.
+    const emptyPath = await mkdtemp(path.join(tmpdir(), "agent-depot-no-ps-"));
+    const previous = process.env.PATH;
+    process.env.PATH = emptyPath;
+    try {
+      const result = await settlesWithin(pending, timeoutMs + POSIX_SETTLE_BOUND_MS);
+      assert.equal(result.timedOut, true);
+      assert.deepEqual([result.code, result.signal], [null, "SIGTERM"]);
+      await assertGrandchildGone(pidFile);
+    } finally {
+      if (previous === undefined) delete process.env.PATH;
+      else process.env.PATH = previous;
+      await rm(emptyPath, { recursive: true, force: true });
+    }
+  });
+});
+
 /** Non-regression guard (green before the fix too): see the Ctrl-C test below. */
 const SIGINT_DRIVER = [
   "import(process.argv[1]).then(({ runProcess }) =>",
