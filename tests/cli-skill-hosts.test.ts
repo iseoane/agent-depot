@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { runCli } from "../src/cli.js";
 import type { ProjectHost } from "../src/project-manifest.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
+import { recordingProgress } from "./progress-fixtures.js";
 
 interface Context {
   readonly home: string;
@@ -126,5 +127,16 @@ test("skill remove --host rejects unrecorded hosts and multiple Skills", async (
     assert.match(errors.join("\n"), /Usage: agent-depot skill remove/u);
     assert.ok(await exists(claude(home)));
     assert.deepEqual(await hostsOf(operations), ["pi", "claude"]);
+  });
+});
+
+test("host changes show their execution step on the progress reporter", async () => {
+  await withSkill(["pi"], async ({ home, operations }) => {
+    const progress = recordingProgress();
+    const cli = (argv: string[]) => runCli(argv, { operations, homeDirectory: home, stdout: () => undefined, stderr: () => undefined, progress });
+    assert.equal(await cli(["skill", "host", "add", "one", "--host", "claude", "--yes", "--confirm-additional-host"]), 0);
+    assert.equal(await cli(["skill", "remove", "one", "--host", "claude", "--yes"]), 0);
+    assert.equal(await cli(["skill", "remove", "one", "--host", "pi", "--yes"]), 0);
+    assert.deepEqual(progress.labels, ["Adding Hosts to portable/one", "Removing Hosts from portable/one", "Removing 1 user-global Skill"]);
   });
 });

@@ -3,6 +3,7 @@ import type { AppOperations } from "./app-flow.js";
 import { buildProfileExport, requireProfileExportSelection, writeProfileExport, type ProfileFilters } from "./profile-export.js";
 import { applyProfileImport, buildProfileImport, type ProfileImportEnvironment } from "./profile-import.js";
 import { serializeProfile, type ProfilePackageOperations } from "./profile.js";
+import { NO_PROGRESS, type Progress } from "./progress.js";
 import type { SourceOperations } from "./sources.js";
 import { CliUsageError } from "./usage-error.js";
 
@@ -12,13 +13,13 @@ export const IMPORT_USAGE = "agent-depot import <file> [--yes] [--no-sources] [-
 
 export async function runProfileExport(values: readonly string[], operations: SourceOperations, apps: AppOperations,
   output: (line: string) => void, diagnostic: (line: string) => void, homeDirectory?: string,
-  packageOperations?: ProfilePackageOperations): Promise<number> {
+  packageOperations?: ProfilePackageOperations, progress: Progress = NO_PROGRESS): Promise<number> {
   const { filters, out } = parseProfileOptions(values, false);
-  const plan = await buildProfileExport(operations, apps, {
+  const plan = await progress.run("Building Profile export", () => buildProfileExport(operations, apps, {
     ...filters,
     homeDirectory,
     ...(packageOperations === undefined ? {} : { packageOperations }),
-  });
+  }));
   for (const line of plan.preview) diagnostic(line);
   requireProfileExportSelection(plan.profile);
   const content = serializeProfile(plan.profile);
@@ -62,7 +63,7 @@ function parseProfileOptions(values: readonly string[], importing: boolean) {
 }
 
 export async function runProfileImport(values: readonly string[], operations: SourceOperations, apps: AppOperations,
-  output: (line: string) => void, environment: ProfileImportEnvironment = {}): Promise<number> {
+  output: (line: string) => void, environment: ProfileImportEnvironment = {}, progress: Progress = NO_PROGRESS): Promise<number> {
   const file = values[0];
   if (!file || file.startsWith("--")) throw new CliUsageError(`Usage: ${IMPORT_USAGE}`);
   const { filters, confirmed } = parseProfileOptions(values.slice(1), true);
@@ -70,10 +71,11 @@ export async function runProfileImport(values: readonly string[], operations: So
   let input: unknown;
   try { input = JSON.parse(content); }
   catch (error) { throw new Error(`${file}: invalid JSON (${error instanceof Error ? error.message : String(error)})`); }
-  const plan = await buildProfileImport(input, operations, apps, filters, environment.packageOperations);
+  const plan = await progress.run("Building import preview", () => buildProfileImport(input, operations, apps, filters, environment.packageOperations));
   for (const line of plan.preview) output(line);
   if (!confirmed) { output("Import not confirmed; rerun with --yes. Nothing was written."); return 0; }
-  const results = await applyProfileImport(plan, operations, apps, confirmed, output, environment);
+  // Skill and Package items refresh their Git Sources, and git may ask for credentials on the terminal.
+  const results = await progress.run("Applying import", () => applyProfileImport(plan, operations, apps, confirmed, output, environment), { mayPrompt: true });
   for (const result of results) output(`${result.status}: ${result.item.label}${result.detail ? `; ${result.detail}` : ""}`);
   return results.some(result => result.status === "failed") ? 1 : 0;
 }

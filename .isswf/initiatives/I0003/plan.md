@@ -23,3 +23,4 @@ Labels and evidence comments applied to #44-#48 and #50 (operator approved).
 - #44 excluded live child-process streaming; a separate issue was suggested but never created.
 - Created follow-ups: https://github.com/iseoane/agent-depot/issues/51 (spinner real-terminal/Windows check), https://github.com/iseoane/agent-depot/issues/52 (child-process streaming).
 - Operator 2026-10-29: low-risk PRs may be merged into main without asking, after passing review and green CI.
+- Operator 2026-10-29: accepts Windows CI cost for #46 → ready-for-agent. Queue: #44 → #46 → #47.

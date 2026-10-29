@@ -1,6 +1,7 @@
 import { sourceIdForUrl } from "./git-source.js";
 import { PACKAGE_HOSTS, bundleRoot, describeCoordinates, selectionKey, type BundleDescriptor, type InstalledBundleEvidence, type InstalledPackage, type PackageAction, type PackageComponent, type PackageComponentEffect, type PackageCoordinates, type PackageHost, type PackageInspection, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection, type PackageUpdateCheck, type PackageVersionEvidence } from "./package-model.js";
 import type { PackageOperations } from "./package-flow.js";
+import { NO_PROGRESS, type Progress } from "./progress.js";
 import type { ProjectSource } from "./project-manifest.js";
 import { projectSourceOf, type Source, type SourceOperations } from "./sources.js";
 import { CliUsageError } from "./usage-error.js";
@@ -36,6 +37,7 @@ export async function runPackageCommand(
   packages: PackageOperations,
   sources: SourceOperations,
   output: (line: string) => void,
+  progress: Progress = NO_PROGRESS,
 ): Promise<number> {
   const [command, ...args] = values;
   if (command === "list") {
@@ -68,7 +70,7 @@ export async function runPackageCommand(
       throw new CliUsageError("Package approval only applies to install, update, and uninstall actions");
     }
     const selection = await resolveSelection(parsed, packages, sources);
-    const plan = await packages.planLifecycle(selection, action);
+    const plan = await planWithRefresh(packages, selection, action, progress);
     describeLifecyclePlan(plan, await packages.approvalStatus(selection, action), output);
     await packages.approve(selection, action);
     output(`Approved Package ${action}: ${formatPackageSelection(selection)}`);
@@ -77,7 +79,7 @@ export async function runPackageCommand(
   if (command === "install" || command === "update" || command === "uninstall") {
     const parsed = parseSelectionArgs(args, { allowConfirmation: true });
     const selection = await resolveSelection(parsed, packages, sources);
-    const plan = await packages.planLifecycle(selection, command);
+    const plan = await planWithRefresh(packages, selection, command, progress);
     const approval = await packages.approvalStatus(selection, command);
     describeLifecyclePlan(plan, approval, output);
     if (approval !== "approved") {
@@ -86,7 +88,7 @@ export async function runPackageCommand(
     if (!parsed.confirmed) {
       throw new Error(`Package ${command} not confirmed; rerun with --yes after reviewing the preview`);
     }
-    const result = await packages.executeLifecycle(plan, true);
+    const result = await progress.run(`${command === "install" ? "Installing" : command === "update" ? "Updating" : "Uninstalling"} Package ${formatPackageSelection(selection)}`, () => packages.executeLifecycle(plan, true));
     output(`Package ${formatPackageSelection(selection)}: ${describePackageResult(result)}`);
     return packageResultSucceeded(result) ? 0 : 1;
   }
@@ -103,6 +105,16 @@ export async function runPackageCommand(
     return 0;
   }
   throw new CliUsageError(PACKAGE_USAGE);
+}
+
+/** Planning refreshes the Package's Git Source (ADR 0004), and git may ask for credentials, so the step never animates. */
+export function planWithRefresh(
+  packages: PackageOperations,
+  selection: PackageSelection,
+  action: PackageAction,
+  progress: Progress,
+): Promise<PackageLifecyclePlan> {
+  return progress.run(`Refreshing Source for Package ${formatPackageSelection(selection)}`, () => packages.planLifecycle(selection, action), { mayPrompt: true });
 }
 
 export function formatPackageSelection(selection: PackageSelection): string {

@@ -1,12 +1,18 @@
 import { PROJECT_HOSTS, type ProjectHost } from "./project-manifest.js";
 import { APP_RECIPE_SCHEMA } from "./app-schema.js";
 import { checkAppUpdates, type AppUpdateCheck, type AppOperations, type AppEntry, type AppLifecyclePlan, type AppLifecycleResult } from "./app-flow.js";
+import { NO_PROGRESS, type Progress } from "./progress.js";
 import { CliUsageError } from "./usage-error.js";
+
+const ACTION_PROGRESS: Readonly<Record<AppLifecyclePlan["action"], string>> = {
+  install: "Installing", update: "Updating", uninstall: "Uninstalling", setup: "Setting up", teardown: "Tearing down",
+};
 
 export async function runAppCommand(
   values: readonly string[],
   apps: AppOperations,
   output: (line: string) => void,
+  progress: Progress = NO_PROGRESS,
 ): Promise<number> {
   const [command, ...args] = values;
   const usage = "Usage: agent-depot app schema|list; app validate <file>...; app approve <name> [--yes]; app install|update|uninstall <name> [--yes] [--manual-done]; app setup|teardown <name> --host <host>... [--yes] [--manual-done]; app uninstall <name> --forget [--yes] (--manual-done requires a declared manual step)";
@@ -15,11 +21,11 @@ export async function runAppCommand(
     return 0;
   }
   if (command === "list" && args.length === 0) {
-    for (const update of await checkAppUpdates(apps)) await show(update.entry, update);
+    for (const update of await progress.run("Checking App updates", () => checkAppUpdates(apps))) await show(update.entry, update);
     return 0;
   }
   if (command === "install" || command === "update" || command === "uninstall" || command === "setup" || command === "teardown") {
-    return runLifecycle(command, args, apps, output, usage);
+    return runLifecycle(command, args, apps, output, usage, progress);
   }
   if (command !== "validate" && command !== "approve") throw new CliUsageError(usage);
   const confirmations = args.filter((arg) => arg === "--yes").length;
@@ -82,6 +88,7 @@ async function runLifecycle(
   apps: AppOperations,
   output: (line: string) => void,
   usage: string,
+  progress: Progress,
 ): Promise<number> {
   const hostAction = action === "setup" || action === "teardown";
   const hosts: ProjectHost[] = [];
@@ -142,7 +149,8 @@ async function runLifecycle(
   }
 
   async function applyPlan(plan: AppLifecyclePlan): Promise<number> {
-    const result = done ? await apps.completeManual(plan, true) : await apps.executeLifecycle(plan, true);
+    const label = `${done ? "Checking" : ACTION_PROGRESS[action]} App ${name}${plan.host ? ` (${plan.host})` : ""}`;
+    const result = await progress.run(label, () => done ? apps.completeManual(plan, true) : apps.executeLifecycle(plan, true));
     output(`${name}${plan.host ? ` (${plan.host})` : ""}: ${describeAppResult(result)}`);
     if (result.reason) output(result.reason);
     if (result.status === "manual required") {

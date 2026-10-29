@@ -60,7 +60,8 @@ class TuiSession {
   private synchronizedUpdateOpen = false;
   private pendingOutput = "";
 
-  constructor(environment: NodeJS.ProcessEnv = {}, cols = 110, rows = 40) {
+  /** `args` is the CLI command line; the default opens the TUI. */
+  constructor(environment: NodeJS.ProcessEnv = {}, cols = 110, rows = 40, args: readonly string[] = ["tui"]) {
     this.columns = cols;
     this.rows = rows;
     this.cells = Array.from({ length: rows }, () => []);
@@ -81,7 +82,7 @@ class TuiSession {
       // FORCE_COLOR=3 still resolves to 256-color for TERM=xterm-256color without this hint.
       inherited.COLORTERM = "truecolor";
     }
-    this.terminal = pty.spawn(process.execPath, [CLI, "tui"], {
+    this.terminal = pty.spawn(process.execPath, [CLI, ...args], {
       name: "xterm-256color",
       cols,
       rows,
@@ -1187,6 +1188,61 @@ test("a slow App install shows an advancing spinner, elapsed time from 1s, and c
     assert.equal(await session.exitCode(), 0);
   } finally {
     if (sampler) clearInterval(sampler);
+    session.kill();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a slow CLI command shows a spinner with elapsed time on a terminal and erases it before the result", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "depot-cli-working-"));
+  const home = path.join(root, "home");
+  await mkdir(home);
+  const fixture = await fakeAppFixture(root);
+  await writeFile(fixture.file, JSON.stringify({ ...fixture.recipe, install: { argv: ["depot-e2e-app", "install", "--sleep-ms=2500"] } }));
+  const apps = createAppOperations({ homeDirectory: home, recipesDirectory: path.join(fixture.stateDirectory, "apps") });
+  const [entry] = await apps.load();
+  assert.ok(entry, "fixture recipe exists before approval");
+  await apps.approve(entry);
+  const session = new TuiSession({
+    AGENT_DEPOT_NO_ANIMATION: "0",
+    PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_STATE_HOME: path.join(root, "state"),
+    XDG_CONFIG_HOME: path.join(root, "config"),
+    XDG_CACHE_HOME: path.join(root, "cache"),
+    PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
+  }, 100, 24, ["app", "install", "fixture-app", "--yes"]);
+  const working = /([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]) Installing App fixture-app…(?: (\d+)s)?/u;
+  const anySpinner = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u;
+  const samples: Array<{ at: number; screen: string }> = [];
+  const startedAt = Date.now();
+  const sampler = setInterval(() => samples.push({ at: Date.now(), screen: session.screen }), 20);
+  try {
+    assert.equal(await session.exitCode(), 0, `the install failed:\n${session.screen}`);
+    clearInterval(sampler);
+
+    const busy = samples.flatMap(({ at, screen }) => {
+      const match = working.exec(screen);
+      return match ? [{ at, screen, glyph: match[1]!, seconds: match[2] === undefined ? undefined : Number(match[2]) }] : [];
+    });
+    assert.ok(busy.length > 0, `no spinner with the step label was ever on screen; last frame:\n${samples.at(-1)?.screen}`);
+    assert.ok(new Set(busy.map(({ glyph }) => glyph)).size >= 2, "the spinner glyph never advanced");
+    const firstElapsed = busy.find(({ seconds }) => seconds !== undefined);
+    assert.ok(firstElapsed, `elapsed time never appeared; ${busy.length} busy frames`);
+    assert.ok(firstElapsed.at - startedAt >= 1000, `elapsed time appeared after ${firstElapsed.at - startedAt}ms, before one second`);
+    const seconds = busy.flatMap(({ seconds: value }) => (value === undefined ? [] : [value]));
+    assert.deepEqual(seconds, [...seconds].sort((left, right) => left - right), `elapsed time went backwards: ${seconds.join(",")}`);
+    // The preview printed before the step stays above the spinner, never overwritten by it.
+    assert.ok(busy.every(({ screen }) => screen.includes("App fixture-app install")), "the preview stayed on screen while the spinner ran");
+
+    // The spinner line is erased: the final screen holds the result and no spinner glyph or label.
+    assert.match(session.screen, /fixture-app: installed/u);
+    assert.doesNotMatch(session.screen, anySpinner, `a spinner glyph is left on screen:\n${session.screen}`);
+    assert.doesNotMatch(session.screen, /Installing App/u, `the spinner label is left on screen:\n${session.screen}`);
+    assert.equal(await readFile(fixture.state, "utf8"), "1.0.0");
+  } finally {
+    clearInterval(sampler);
     session.kill();
     await rm(root, { recursive: true, force: true });
   }

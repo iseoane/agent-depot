@@ -8,12 +8,14 @@ import path from "node:path";
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck } from "./app-flow.js";
 import { describeAppResult, describeManualCompletion, runAppCommand } from "./app-cli.js";
 import { createPackageOperations, type PackageOperations } from "./package-flow.js";
-import { describeLifecyclePlan, describePackageResult, describePackageUpdateCheck, formatPackageSelection, packageSelectionMatches, runPackageCommand } from "./package-cli.js";
+import { describeLifecyclePlan, describePackageResult, describePackageUpdateCheck, formatPackageSelection, packageSelectionMatches, planWithRefresh, runPackageCommand } from "./package-cli.js";
 import { selectionKey, type PackageSelection, type PackageUpdateCheck } from "./package-model.js";
 import { EXPORT_USAGE, IMPORT_USAGE, runProfileExport, runProfileImport } from "./profile-cli.js";
 import { pathsOverlap } from "./path-safety.js";
+import { createProgress, NO_PROGRESS, type Progress } from "./progress.js";
 import { skillTreeBaseline, type SkillCandidate, type SourceContentAccess } from "./skill-discovery.js";
 import {
+  BUILT_IN_SOURCE,
   BuiltInSourceError,
   createSourceOperations,
   resolveProjectSource,
@@ -119,6 +121,11 @@ export interface CliDependencies {
   readonly renderTui?: (operations: SourceOperations, environment?: TuiEnvironment) => Promise<void>;
   /** Test seam: whether stdin supports raw-mode keyboard input; defaults to the real stdin. */
   readonly isInteractive?: () => boolean;
+  /**
+   * Where long steps report progress. Defaults to the process's stderr, unless `stderr` is
+   * injected: a caller that redirects stderr lines gets no progress unless it passes its own.
+   */
+  readonly progress?: Progress;
 }
 
 const USAGE = [
@@ -167,6 +174,8 @@ interface CommandContext {
   readonly operations: SourceOperations;
   readonly dependencies: CliDependencies;
   readonly output: (line: string) => void;
+  readonly errorOutput: (line: string) => void;
+  readonly progress: Progress;
 }
 
 type CommandHandler = (values: readonly string[], context: CommandContext) => Promise<number>;
@@ -181,11 +190,12 @@ const SOURCE_SUBCOMMANDS = new Map<string, SourceSubcommandHandler>([
   }],
   ["add", async (values, { operations, output }) => {
     requireArgumentCount(values, 1, "source add <url>");
+    // Registration only: nothing is cloned until the first refresh, so there is no long step to report.
     const source = await operations.addGitSource(values[0]);
     output(`Added Git Source: ${source.id}\t${source.url}`);
   }],
   ["refresh", runSourceRefresh],
-  ["remove", (values, { operations, dependencies, output }) => runSourceRemoval(values, operations, dependencies, output)],
+  ["remove", (values, { operations, dependencies, output, progress }) => runSourceRemoval(values, operations, dependencies, output, progress)],
   ["migrate", (values, { operations, dependencies, output }) => runSourceMigration(values, operations, dependencies, output)],
 ]);
 
@@ -198,36 +208,36 @@ function packageOperationsFor(dependencies: CliDependencies, operations: SourceO
 }
 
 const COMMANDS = new Map<string, CommandHandler>([
-  ["import", (values, { operations, dependencies, output }) => runProfileImport(values, operations,
+  ["import", (values, { operations, dependencies, output, progress }) => runProfileImport(values, operations,
     dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output,
-    { ...dependencies, packageOperations: packageOperationsFor(dependencies, operations) })],
-  ["export", (values, { operations, dependencies, output }) => runProfileExport(values, operations,
+    { ...dependencies, packageOperations: packageOperationsFor(dependencies, operations) }, progress)],
+  ["export", (values, { operations, dependencies, output, errorOutput, progress }) => runProfileExport(values, operations,
     dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }),
-    output, dependencies.stderr ?? (line => console.error(line)), dependencies.homeDirectory,
-    packageOperationsFor(dependencies, operations))],
-  ["app", (values, { dependencies, output }) => runAppCommand(values, dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output)],
-  ["package", (values, { operations, dependencies, output }) => runPackageCommand(values, packageOperationsFor(dependencies, operations), operations, output)],
-  ["install", async (values, { operations, dependencies, output }) => {
-    await runInstall(values, operations, dependencies, output);
+    output, errorOutput, dependencies.homeDirectory,
+    packageOperationsFor(dependencies, operations), progress)],
+  ["app", (values, { dependencies, output, progress }) => runAppCommand(values, dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory }), output, progress)],
+  ["package", (values, { operations, dependencies, output, progress }) => runPackageCommand(values, packageOperationsFor(dependencies, operations), operations, output, progress)],
+  ["install", async (values, { operations, dependencies, output, progress }) => {
+    await runInstall(values, operations, dependencies, output, progress);
     return 0;
   }],
-  ["update", (values, { operations, dependencies, output }) => runUpdate(values, operations, dependencies, output)],
-  ["self", async (values, { dependencies, output }) => {
+  ["update", (values, { operations, dependencies, output, progress }) => runUpdate(values, operations, dependencies, output, progress)],
+  ["self", async (values, { dependencies, output, progress }) => {
     if (values[0] !== "update") throw new CliUsageError("Usage: agent-depot self update [--yes]");
-    return runSelfUpdate(values.slice(1), dependencies, output);
+    return runSelfUpdate(values.slice(1), dependencies, output, progress);
   }],
-  ["skill", async (values, { operations, dependencies, output }) => {
+  ["skill", async (values, { operations, dependencies, output, progress }) => {
     if (values[0] === "remove") {
-      await runSkillRemoval(values.slice(1), operations, dependencies, output);
+      await runSkillRemoval(values.slice(1), operations, dependencies, output, progress);
     } else if (values[0] === "host" && values[1] === "add") {
-      await runSkillHostAdd(values.slice(2), operations, dependencies, output);
+      await runSkillHostAdd(values.slice(2), operations, dependencies, output, progress);
     } else {
       throw new CliUsageError(USAGE);
     }
     return 0;
   }],
-  ["uninstall", async (values, { operations, dependencies, output }) => {
-    await runUninstall(values, operations, dependencies, output);
+  ["uninstall", async (values, { operations, dependencies, output, progress }) => {
+    await runUninstall(values, operations, dependencies, output, progress);
     return 0;
   }],
   ["discover", async (values, { operations, output }) => {
@@ -275,7 +285,7 @@ const COMMANDS = new Map<string, CommandHandler>([
 
 async function runSourceRefresh(
   values: readonly string[],
-  { operations, output }: CommandContext,
+  { operations, output, progress }: CommandContext,
 ): Promise<void> {
   if (values.length < 1 || values.length > 2 || (values.length === 2 && values[1] !== "--yes")) {
     throw new CliUsageError("Usage: agent-depot source refresh <id> [--yes]");
@@ -288,14 +298,19 @@ async function runSourceRefresh(
   if (values[1] !== "--yes") {
     throw new CliUsageError("Refresh not confirmed; rerun with --yes to continue");
   }
-  const refreshed = await operations.refreshSource(source.id);
+  // `git clone`/`fetch` may ask for credentials on the terminal, so this step never animates.
+  const refreshed = await progress.run(`Refreshing Git Source ${source.id}`, () => operations.refreshSource(source.id), { mayPrompt: true });
   output(`Refreshed Git Source: ${refreshed.id}\t${refreshed.url}`);
 }
 
 /** Runs the CLI application and returns a process exit code. */
 export async function runCli(argv: readonly string[] = process.argv.slice(2), dependencies: CliDependencies = {}): Promise<number> {
-  const output = dependencies.stdout ?? ((line: string) => console.log(line));
-  const errorOutput = dependencies.stderr ?? ((line: string) => console.error(line));
+  const progress = dependencies.progress ?? (dependencies.stderr === undefined ? createProgress() : NO_PROGRESS);
+  // Every line is written after erasing any spinner, so a step that prints while it runs is never garbled.
+  const writeStdout = dependencies.stdout ?? ((line: string) => console.log(line));
+  const writeStderr = dependencies.stderr ?? ((line: string) => console.error(line));
+  const output = (line: string): void => { progress.clear(); writeStdout(line); };
+  const errorOutput = (line: string): void => { progress.clear(); writeStderr(line); };
   const operations = dependencies.operations ?? createSourceOperations({ homeDirectory: dependencies.homeDirectory });
 
   try {
@@ -314,7 +329,7 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2), de
     if (!command) {
       throw new CliUsageError(USAGE);
     }
-    return await command(argv.slice(1), { operations, dependencies, output });
+    return await command(argv.slice(1), { operations, dependencies, output, errorOutput, progress });
   } catch (error) {
     errorOutput(`Error: ${error instanceof Error ? error.message : "unknown error"}`);
     return 1;
@@ -344,6 +359,7 @@ async function runSourceRemoval(
   operations: SourceOperations,
   dependencies: CliDependencies,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<void> {
   const options = parseRemoveSourceOptions(argv);
   const source = await findSource(operations, options.sourceId);
@@ -371,17 +387,20 @@ async function runSourceRemoval(
   }
   output("  Default: keep all dependent Skills tracked by default after Source removal");
 
-  const plan = await inspectSkillRemovals(selected, removalOptions, (selection, inspection) => {
-    for (const line of describeSkillRemoval(selection, inspection, "Skill ")) output(line);
-  });
+  const plan = await progress.run(`Inspecting ${selected.length} Skill${selected.length === 1 ? "" : "s"} for removal`,
+    () => inspectSkillRemovals(selected, removalOptions, (selection, inspection) => {
+      for (const line of describeSkillRemoval(selection, inspection, "Skill ")) output(line);
+    }));
 
   assertNoOverlappingProjectSkillRemovalTargets(plan.inspections);
   requireConfirmation(options.confirmed, "Removal not confirmed; rerun with --yes after reviewing every Source and Skill preview");
   // Recheck every selected target before deleting the first one. A changed later
   // target must never result in a partially removed batch.
-  const rechecked = await recheckSkillRemoval(plan, removalOptions);
-  await removeSkillFiles(plan, rechecked, removalOptions);
-  await operations.removeGitSource(source.id, selected);
+  await progress.run("Removing Skill files", async () => {
+    const rechecked = await recheckSkillRemoval(plan, removalOptions);
+    await removeSkillFiles(plan, rechecked, removalOptions);
+  });
+  await progress.run(`Removing Git Source ${source.id}`, () => operations.removeGitSource!(source.id, selected));
   output(`Removed Git Source: ${source.id}`);
   if (selected.length > 0) {
     output(`Removed ${selected.length} dependent user-global Skill${selected.length === 1 ? "" : "s"}; other dependent Skills remain tracked`);
@@ -583,6 +602,7 @@ async function runSkillRemoval(
   operations: SourceOperations,
   dependencies: CliDependencies,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<void> {
   const requested: string[] = [];
   const hosts: ProjectHost[] = [];
@@ -608,7 +628,7 @@ async function runSkillRemoval(
   const selected = selectManagedSkills(installations, requested);
   const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), dependencies.installationOptions);
   if (hosts.length > 0) {
-    await runSkillHostRemoval(selected[0]!, hosts, installations, confirmed, operations, removalOptions, output);
+    await runSkillHostRemoval(selected[0]!, hosts, installations, confirmed, operations, removalOptions, output, progress);
     return;
   }
 
@@ -617,7 +637,8 @@ async function runSkillRemoval(
   for (const line of plan.preview) output(line);
   output("  Installation records are reconciled after each successful Skill removal");
   requireConfirmation(confirmed, "Removal not confirmed; rerun with --yes after reviewing every Skill preview");
-  await executeSkillRemoval(plan, operations, removalOptions, installations);
+  await progress.run(`Removing ${selected.length} user-global Skill${selected.length === 1 ? "" : "s"}`,
+    () => executeSkillRemoval(plan, operations, removalOptions, installations));
   output(`Removed ${selected.length} user-global Skill${selected.length === 1 ? "" : "s"}`);
 }
 
@@ -642,6 +663,7 @@ async function runSkillHostRemoval(
   operations: SourceOperations,
   options: ProjectInstallationOptions,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<void> {
   const plan = await planHostRemoval(selection, hosts, options).catch(rethrowSelectionError);
   output(plan.kind === "full"
@@ -650,7 +672,8 @@ async function runSkillHostRemoval(
   for (const line of plan.kind === "full" ? plan.plan.preview : plan.preview) output(line);
   output("  The installation record is reconciled after the locations are removed");
   requireConfirmation(confirmed, "Removal not confirmed; rerun with --yes after reviewing the preview");
-  await executeHostRemoval(plan, operations, options, installations);
+  await progress.run(plan.kind === "full" ? "Removing 1 user-global Skill" : `Removing Hosts from ${selection.path}`,
+    () => executeHostRemoval(plan, operations, options, installations));
   output(plan.kind === "full"
     ? "Removed 1 user-global Skill"
     : `Removed hosts ${plan.removed.join(", ")} from ${JSON.stringify(selection.path)}`);
@@ -661,6 +684,7 @@ async function runSkillHostAdd(
   operations: SourceOperations,
   dependencies: CliDependencies,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<void> {
   const requested: string[] = [];
   const hosts: ProjectHost[] = [];
@@ -693,7 +717,7 @@ async function runSkillHostAdd(
   for (const line of plan.preview) output(line);
   requireConfirmation(confirmed, "Host change not confirmed; rerun with --yes after reviewing the preview");
   requireConfirmation(confirmAdditionalHost, "Adding a Host exposes the installed Skill to more hosts; rerun with --yes --confirm-additional-host");
-  await executeHostAddition(plan, operations, options, installations, true);
+  await progress.run(`Adding Hosts to ${plan.selection.path}`, () => executeHostAddition(plan, operations, options, installations, true));
   output(`Added hosts ${plan.hosts.join(", ")} to ${JSON.stringify(plan.selection.path)}`);
 }
 
@@ -868,6 +892,7 @@ async function runUninstall(
   operations: SourceOperations,
   dependencies: CliDependencies,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<void> {
   const options = parseUninstallOptions(argv);
   assertUninstallCapabilities(options, operations);
@@ -896,7 +921,8 @@ async function runUninstall(
     requireConfirmation(options.confirmed, "Uninstall not confirmed; rerun with --yes after reviewing every user-global deletion preview");
   }
 
-  const managedRechecked = await recheckSkillRemoval(managedPlan, removalOptions);
+  const recheckManaged = () => recheckSkillRemoval(managedPlan, removalOptions);
+  const managedRechecked = options.skills ? await progress.run("Rechecking Skills before removal", recheckManaged) : await recheckManaged();
   const rechecked = managedRechecked.inspections;
   const unmanagedRechecked: UserGlobalSkillRemovalInspection[] = [];
   for (const inspection of unmanagedInspections) {
@@ -910,12 +936,16 @@ async function runUninstall(
     "An unmanaged Skill target changed into an overlap with a selected managed Skill; no path was changed");
 
   const expectedManagedInstallations = options.skills
-    ? await removeSkillsAndRecords(managedPlan, managedRechecked, operations, removalOptions, selectedInstallations)
+    ? await progress.run(`Removing ${selectedInstallations.length} managed Skill${selectedInstallations.length === 1 ? "" : "s"}`,
+      () => removeSkillsAndRecords(managedPlan, managedRechecked, operations, removalOptions, selectedInstallations))
     : selectedInstallations;
-  await removeInspectedUnmanagedSkills(context, unmanagedInspections, expectedManagedInstallations);
+  if (unmanagedInspections.length > 0) {
+    await progress.run(`Removing ${unmanagedInspections.length} unmanaged Skill${unmanagedInspections.length === 1 ? "" : "s"}`,
+      () => removeInspectedUnmanagedSkills(context, unmanagedInspections, expectedManagedInstallations));
+  }
 
   if (options.data) {
-    await operations.removeCatalogData!();
+    await progress.run("Removing catalog data", () => operations.removeCatalogData!());
   }
   outputUninstallSummary(options, selectedInstallations.length, output);
 }
@@ -948,13 +978,14 @@ async function runSelfUpdate(
   argv: readonly string[],
   dependencies: CliDependencies,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<number> {
   if (argv.length > 1 || (argv.length === 1 && argv[0] !== "--yes")) {
     throw new CliUsageError("Usage: agent-depot self update [--yes]");
   }
   const confirmed = argv[0] === "--yes";
   const selfUpdate = selfUpdateOperationsFor(dependencies);
-  const status = await selfUpdate.check();
+  const status = await progress.run("Checking for Agent Depot updates", () => selfUpdate.check());
   switch (status.kind) {
     case "unsupported":
       output(`Self-update is unavailable: ${status.reason}`);
@@ -975,7 +1006,7 @@ async function runSelfUpdate(
       output(`  command: npm install --global --no-audit --no-fund --no-update-notifier --logs-max=0 --ignore-scripts --registry=https://registry.npmjs.org/ ${AGENT_DEPOT_PACKAGE_NAME ?? "@iseoane/agent-depot"}@${status.latest}`);
       output("  npm package scripts will not run; no elevated privileges will be requested");
       requireConfirmation(confirmed, "Self-update not confirmed; rerun with --yes after reviewing the preview");
-      await selfUpdate.apply(status.latest);
+      await progress.run(`Updating Agent Depot to ${status.latest}`, () => selfUpdate.apply(status.latest));
       output(`Updated Agent Depot to ${status.latest}; restart the CLI to use the new version`);
       return 0;
     default: {
@@ -990,6 +1021,7 @@ async function runUpdate(
   operations: SourceOperations,
   dependencies: CliDependencies,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<number> {
   const options = parseUpdateOptions(argv);
   const apps = dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory });
@@ -1003,13 +1035,14 @@ async function runUpdate(
   let packageCheckFailed = false;
   if (options.scope === "user-global") {
     try {
-      appUpdates = await checkAppUpdates(apps);
+      appUpdates = await progress.run("Checking App updates", () => checkAppUpdates(apps));
     } catch (error) {
       appCheckFailed = true;
       output(`Error (Apps): ${error instanceof Error ? error.message : String(error)}`);
     }
     try {
-      packageUpdates = await packages.checkUpdates(requestedPackages.length === 0 ? undefined : requestedPackages);
+      packageUpdates = await progress.run("Checking Package updates",
+        () => packages.checkUpdates(requestedPackages.length === 0 ? undefined : requestedPackages));
     } catch (error) {
       packageCheckFailed = true;
       output(`Error (Packages): ${error instanceof Error ? error.message : String(error)}`);
@@ -1017,7 +1050,7 @@ async function runUpdate(
   }
   let loaded: Awaited<ReturnType<typeof loadUpdates>> | undefined;
   try {
-    loaded = await loadUpdates({
+    loaded = await progress.run(`Checking ${options.scope} Skill updates`, () => loadUpdates({
       scope: options.scope,
       operations,
       ...(dependencies.homeDirectory === undefined ? {} : { homeDirectory: dependencies.homeDirectory }),
@@ -1025,7 +1058,7 @@ async function runUpdate(
       ...(dependencies.sourceAccess === undefined ? {} : { sourceAccess: dependencies.sourceAccess }),
       ...(dependencies.projectManifestStore === undefined ? {} : { projectManifestStore: dependencies.projectManifestStore }),
       ...(dependencies.installationOptions?.fileSystem === undefined ? {} : { installationFileSystem: dependencies.installationOptions.fileSystem }),
-    });
+    }));
   } catch (error) {
     output(`Error (Skills, ${options.scope}): ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -1077,7 +1110,7 @@ async function runUpdate(
   }
   for (const item of selectedPackages) {
     try {
-      const plan = await packages.planLifecycle(item.installed.selection, "update");
+      const plan = await planWithRefresh(packages, item.installed.selection, "update", progress);
       const approval = await packages.approvalStatus(item.installed.selection, "update");
       describeLifecyclePlan(plan, approval, output);
       if (approval === "approved") {
@@ -1093,7 +1126,9 @@ async function runUpdate(
   }
 
   const selected = selectUpdateCandidates(assessment, options);
-  const { plans, failures: previewFailures, nonCanonicalPaths } = await previewUpdateCandidates(selected, context);
+  const { plans, failures: previewFailures, nonCanonicalPaths } = selected.length === 0
+    ? await previewUpdateCandidates(selected, context)
+    : await progress.run("Previewing Skill updates", () => previewUpdateCandidates(selected, context));
   // Successes and failures are reported in candidate order, as the preview runs.
   const failedIds = new Set(previewFailures.map(({ item }) => item.id));
   const plansById = new Map(plans.map((plan) => [plan.item.id, plan]));
@@ -1110,7 +1145,10 @@ async function runUpdate(
   requireConfirmation(options.confirmed, "Update not confirmed; rerun with --yes after reviewing every candidate preview");
   const pathProblem = findPathConfirmationProblem(nonCanonicalPaths, options.confirmedPaths);
   if (pathProblem !== undefined) throw new CliUsageError(pathProblem);
-  const result = await applyConfirmedUpdates(selected, context, options.confirmedPaths);
+  const result = selected.length === 0
+    ? await applyConfirmedUpdates(selected, context, options.confirmedPaths)
+    : await progress.run(`Updating ${selected.length} Skill${selected.length === 1 ? "" : "s"}`,
+      () => applyConfirmedUpdates(selected, context, options.confirmedPaths));
 
   for (const { item } of previewFailures) {
     if (!result.failed.some((failed) => failed.id === item.id)) {
@@ -1126,7 +1164,7 @@ async function runUpdate(
   let appUpdated = 0;
   for (const plan of appPlans) {
     try {
-      const outcome = await apps.executeLifecycle(plan, true);
+      const outcome = await progress.run(`Updating App ${plan.entry.recipe!.name}`, () => apps.executeLifecycle(plan, true));
       output(`App ${plan.entry.recipe!.name}: ${describeAppResult(outcome)}${outcome.reason ? `: ${outcome.reason}` : ""}`);
       if (outcome.status === "installed") appUpdated++;
       else {
@@ -1144,7 +1182,7 @@ async function runUpdate(
   let packageUpdated = 0;
   for (const plan of packagePlans) {
     try {
-      const outcome = await packages.executeLifecycle(plan, true);
+      const outcome = await progress.run(`Updating Package ${formatPackageSelection(plan.selection)}`, () => packages.executeLifecycle(plan, true));
       output(`Package ${formatPackageSelection(plan.selection)}: ${describePackageResult(outcome)}`);
       if (outcome.status === "updated") {
         packageUpdated++;
@@ -1341,18 +1379,19 @@ async function runInstall(
   operations: SourceOperations,
   dependencies: CliDependencies,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<void> {
   const options = parseInstallOptions(argv);
   const sourceAccess = dependencies.sourceAccess ?? defaultProjectSkillTreeAccess();
   if (options.scope === "user-global") {
-    await runUserGlobalInstall(options, operations, dependencies, sourceAccess, output);
+    await runUserGlobalInstall(options, operations, dependencies, sourceAccess, output, progress);
     return;
   }
 
   const projectRoot = path.resolve(dependencies.projectRoot ?? process.cwd());
   const manifestStore = dependencies.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot));
 
-  const context: ProjectInstallContext = { options, operations, dependencies, sourceAccess, output, projectRoot, manifestStore };
+  const context: ProjectInstallContext = { options, operations, dependencies, sourceAccess, output, progress, projectRoot, manifestStore };
   if (options.fromManifest) {
     await runManifestInstall(context);
     return;
@@ -1366,12 +1405,13 @@ interface ProjectInstallContext {
   readonly dependencies: CliDependencies;
   readonly sourceAccess: ProjectSkillTreeAccess;
   readonly output: (line: string) => void;
+  readonly progress: Progress;
   readonly projectRoot: string;
   readonly manifestStore: ProjectManifestStore;
 }
 
 async function runManifestInstall(context: ProjectInstallContext): Promise<void> {
-  const { options, operations, dependencies, sourceAccess, output, projectRoot, manifestStore } = context;
+  const { options, operations, dependencies, sourceAccess, output, progress, projectRoot, manifestStore } = context;
   const manifest = await manifestStore.load();
   if (manifest.skills.length === 0) {
     throw new CliUsageError("The project manifest contains no selected Skills");
@@ -1397,7 +1437,9 @@ async function runManifestInstall(context: ProjectInstallContext): Promise<void>
   if (skipped > 0) {
     output(`Skipped ${skipped} of ${manifest.skills.length} Skills pinned to another Agent Depot version`);
   }
-  const resolved = await resolveManifestSelections(installable, operations, sourceAccess, options.confirmed);
+  const resolved = await progress.run(`Resolving ${installable.length} manifest Skill${installable.length === 1 ? "" : "s"}`,
+    () => resolveManifestSelections(installable, operations, sourceAccess, options.confirmed),
+    { mayPrompt: options.confirmed && installable.some((selection) => selection.source.kind !== "builtin") });
   if (resolved.some((item) => item.method !== undefined) && resolved.length > 1) {
     throw new SourceMetadataError("A batch install containing an external method is refused because command side effects cannot be rolled back safely; install that Skill separately");
   }
@@ -1420,7 +1462,8 @@ async function runManifestInstall(context: ProjectInstallContext): Promise<void>
   try {
     for (let index = 0; index < resolved.length; index += 1) {
       const item = resolved[index]!;
-      const transaction = await installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, item.resolvedVersion, options.confirmAdditionalHostExposure, false, inspections[index]);
+      const transaction = await progress.run(`Installing ${item.selection.path}`,
+        () => installOne(item.selection, item.source, sourceAccess, projectRoot, dependencies, item.method, options.portableV1, item.files, item.resolvedVersion, options.confirmAdditionalHostExposure, false, inspections[index]));
       if (transaction) {
         transactions.push(transaction);
         installed.push({ item, result: transaction.result });
@@ -1456,20 +1499,21 @@ async function runManifestInstall(context: ProjectInstallContext): Promise<void>
 }
 
 async function runSingleProjectInstall(context: ProjectInstallContext): Promise<void> {
-  const { options, operations, dependencies, sourceAccess, output, projectRoot, manifestStore } = context;
+  const { options, operations, dependencies, sourceAccess, output, progress, projectRoot, manifestStore } = context;
   if (!options.sourceId || !options.skillPath || !options.version || options.hosts.length === 0) {
     throw new CliUsageError(INSTALL_USAGE);
   }
   const existing = await manifestStore.load();
-  const plan = await planSingleInstall(
-    { ...options, scope: "project", sourceId: options.sourceId, skillPath: options.skillPath, version: options.version },
+  const request = { ...options, scope: "project" as const, sourceId: options.sourceId, skillPath: options.skillPath, version: options.version };
+  const plan = await progress.run(`Resolving ${options.skillPath}`, () => planSingleInstall(
+    request,
     { operations, sourceAccess, environment: dependencies, root: projectRoot, existing: existing.skills, recordedIn: manifestStore.path },
-  );
+  ), { mayPrompt: refreshesSource(options) });
   outputSingleInstallPreview(plan, output);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
-  await executeSingleInstall(plan, async (record) => {
+  await progress.run(`Installing ${options.skillPath}`, () => executeSingleInstall(plan, async (record) => {
     await manifestStore.save(parseProjectManifest({ version: 1, skills: [...existing.skills, record] }));
-  }, output);
+  }, output));
   output(`Saved project manifest: ${manifestStore.path}`);
 }
 
@@ -1479,6 +1523,7 @@ async function runUserGlobalInstall(
   dependencies: CliDependencies,
   sourceAccess: ProjectSkillTreeAccess,
   output: (line: string) => void,
+  progress: Progress,
 ): Promise<void> {
   if (options.fromManifest || !options.sourceId || !options.skillPath || !options.version || options.hosts.length === 0) {
     throw new CliUsageError(INSTALL_USAGE);
@@ -1488,14 +1533,22 @@ async function runUserGlobalInstall(
     throw new Error("Configured Source operations cannot manage user-global installation state");
   }
   const homeDirectory = path.resolve(dependencies.homeDirectory ?? homedir());
-  const plan = await planSingleInstall(
-    { ...options, scope: "user-global", sourceId: options.sourceId, skillPath: options.skillPath, version: options.version },
-    { operations, sourceAccess, environment: dependencies, root: homeDirectory, existing: await listUserGlobalInstallations.call(operations), recordedIn: "user-global state" },
-  );
+  const existing = await listUserGlobalInstallations.call(operations);
+  const request = { ...options, scope: "user-global" as const, sourceId: options.sourceId, skillPath: options.skillPath, version: options.version };
+  const plan = await progress.run(`Resolving ${options.skillPath}`, () => planSingleInstall(
+    request,
+    { operations, sourceAccess, environment: dependencies, root: homeDirectory, existing, recordedIn: "user-global state" },
+  ), { mayPrompt: refreshesSource(options) });
   outputSingleInstallPreview(plan, output);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
-  await executeSingleInstall(plan, (record) => addUserGlobalInstallation.call(operations, record), output);
+  await progress.run(`Installing ${options.skillPath}`,
+    () => executeSingleInstall(plan, (record) => addUserGlobalInstallation.call(operations, record), output));
   output("Saved user-global installation state: shared Source state");
+}
+
+/** A confirmed install of a non-built-in Source refreshes it with `git`, which may ask for credentials. */
+function refreshesSource(options: InstallOptions): boolean {
+  return options.confirmed && options.sourceId !== BUILT_IN_SOURCE.id;
 }
 
 interface InstallOptions {
