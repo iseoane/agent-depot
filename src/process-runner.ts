@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
 export interface ProcessRunOptions {
@@ -77,11 +77,40 @@ export function spawnInvocation(
   return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], windowsVerbatimArguments: true };
 }
 
+/** How long `runProcess` waits for stdio to close after killing a Windows process tree before it gives up on it. */
+const WINDOWS_KILL_GRACE_MS = 2_000;
+
+/**
+ * Terminates a Windows child and everything it started. `child.kill()` ends
+ * only the direct child, so for a batch file it would stop cmd.exe and leave
+ * the real program running with the stdio pipes open. Falls back to
+ * `child.kill()` when taskkill cannot be started or fails (for example because
+ * the child already exited). Never throws and does not wait for taskkill.
+ */
+function killWindowsProcessTree(child: ChildProcess): void {
+  const { pid } = child;
+  if (pid === undefined) {
+    child.kill();
+    return;
+  }
+  const taskkill = path.win32.join(process.env.SystemRoot || process.env.windir || "C:\\Windows", "System32", "taskkill.exe");
+  try {
+    spawn(taskkill, ["/pid", String(pid), "/T", "/F"], { shell: false, stdio: "ignore", windowsHide: true })
+      .on("error", () => { child.kill(); })
+      .on("close", (code) => { if (code !== 0) child.kill(); });
+  } catch {
+    child.kill();
+  }
+}
+
 /**
  * Runs a command with an argument vector and no shell (except cmd.exe for
- * Windows batch files); rejects only when spawning fails. On Windows, an
- * argument to a `.cmd`/`.bat` file containing a line break or `& | < >` is
- * rejected with `EINVAL` because cmd.exe cannot carry it safely.
+ * Windows batch files); rejects only when spawning fails. On Windows a timeout
+ * or output overflow kills the whole process tree, and the result is returned
+ * within a bounded time even if a descendant survives and holds the stdio pipes
+ * open. Also on Windows, an argument to a `.cmd`/`.bat` file containing a line
+ * break or `& | < >` is rejected with `EINVAL` because cmd.exe cannot carry it
+ * safely.
  */
 export function runProcess(
   command: string,
@@ -102,16 +131,41 @@ export function runProcess(
     let stderrBytes = 0;
     let outputTooLarge = false;
     let timedOut = false;
+    let settled = false;
+    let terminating = false;
+    let graceTimer: NodeJS.Timeout | undefined;
+    const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
+      if (graceTimer !== undefined) clearTimeout(graceTimer);
+      resolve({ code, signal, stdout: Buffer.concat(stdout), stderr, outputTooLarge, ...(timedOut ? { timedOut: true } : {}) });
+    };
+    const terminate = (): void => {
+      if (process.platform !== "win32") {
+        child.kill();
+        return;
+      }
+      if (terminating) return;
+      terminating = true;
+      killWindowsProcessTree(child);
+      // A surviving descendant keeps the pipes open, so `close` may never come: give up on them.
+      graceTimer = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle(child.exitCode, child.signalCode);
+      }, WINDOWS_KILL_GRACE_MS);
+    };
     const timeout = options.timeoutMs === undefined ? undefined : setTimeout(() => {
       timedOut = true;
-      child.kill();
+      terminate();
     }, options.timeoutMs);
     timeout?.unref();
     child.stdout?.on("data", (chunk: Buffer) => {
       stdoutBytes += chunk.length;
       if (options.maxOutputBytes !== undefined && stdoutBytes > options.maxOutputBytes) {
         outputTooLarge = true;
-        child.kill();
+        terminate();
         return;
       }
       stdout.push(chunk);
@@ -125,13 +179,10 @@ export function runProcess(
       stderr += bytes.subarray(0, remaining).toString("utf8");
       if (options.maxStderrBytes !== undefined && stderrBytes > options.maxStderrBytes) {
         outputTooLarge = true;
-        child.kill();
+        terminate();
       }
     });
     child.on("error", reject);
-    child.on("close", (code, signal) => {
-      if (timeout !== undefined) clearTimeout(timeout);
-      resolve({ code, signal, stdout: Buffer.concat(stdout), stderr, outputTooLarge, ...(timedOut ? { timedOut: true } : {}) });
-    });
+    child.on("close", settle);
   });
 }
