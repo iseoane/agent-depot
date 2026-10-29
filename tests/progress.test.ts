@@ -103,6 +103,23 @@ test("AGENT_DEPOT_NO_ANIMATION=1 on a terminal prints one static line with no ti
   assert.deepEqual(timers.intervals, []);
 });
 
+test("a step that may prompt on the terminal prints one static line and never animates or redraws", async () => {
+  const stream = fakeStream({ isTTY: true });
+  const timers = fakeTimers();
+  const time = clock();
+  const progress = createProgress({ stream, env: ANIMATED, timers: timers.timers, now: time.now });
+
+  let during = -1;
+  await progress.run("Refreshing Git Source", async () => { during = timers.active; time.advance(5_000); }, { mayPrompt: true });
+
+  assert.equal(during, 0);
+  assert.deepEqual(stream.writes, ["· Refreshing Git Source…\n"]);
+  assert.deepEqual(timers.intervals, []);
+
+  await progress.run("Next step", async () => undefined);
+  assert.equal(stream.writes[1], `${ERASE}${SPINNER_FRAMES[0]} Next step…`);
+});
+
 test("clear() erases a drawn spinner so printed lines are not garbled, and the next tick redraws it", async () => {
   const stream = fakeStream({ isTTY: true });
   const timers = fakeTimers();

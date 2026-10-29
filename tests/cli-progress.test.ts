@@ -84,8 +84,8 @@ async function observe(scenario: Scenario, progress: Progress, overrides: (sandb
 }
 
 /** A command with no long step shows no progress at all. */
-async function assertProgressNone(scenario: Scenario): Promise<void> {
-  await assertProgress(scenario, [], undefined, true);
+async function assertProgressNone(scenario: Scenario, overrides?: (sandbox: string) => Partial<CliDependencies>): Promise<void> {
+  await assertProgress(scenario, [], overrides, true);
 }
 
 /** Runs the scenario with and without progress, asserts the labels and that stdout never changes. */
@@ -109,18 +109,58 @@ async function assertProgress(scenario: Scenario, expectedLabels: readonly strin
   assert.ok(stream.writes.every((text) => text.startsWith("\r")), "only spinner frames and erases reach stderr");
 }
 
-test("source add and refresh show their network steps and keep stdout identical", async () => {
-  const external: Source = { id: "git:1234567890abcdef12345678", kind: "git", url: SOURCE_URL };
-  const operations: SourceOperations = {
-    async addGitSource() { return external; },
-    async listSources() { return [BUILT_IN_SOURCE, external]; },
-    async refreshSource() { return external; },
-    async selectSources() { return [external]; },
-  };
-  await assertProgress(async (_sandbox, run) => {
+const externalSource: Source = { id: sourceIdForUrl(SOURCE_URL), kind: "git", url: SOURCE_URL };
+const registryOnly: SourceOperations = {
+  async addGitSource() { return externalSource; },
+  async listSources() { return [BUILT_IN_SOURCE, externalSource]; },
+  async refreshSource() { return externalSource; },
+  async selectSources() { return [externalSource]; },
+};
+
+test("source add only registers a Source, so it shows no progress and keeps stdout identical", async () => {
+  await assertProgressNone(async (_sandbox, run) => {
     assert.equal(await run(["source", "add", SOURCE_URL]), 0);
-    assert.equal(await run(["source", "refresh", external.id, "--yes"]), 0);
-  }, [`Cloning ${SOURCE_URL}`, `Refreshing Git Source ${external.id}`], () => ({ operations }));
+  }, () => ({ operations: registryOnly }));
+});
+
+test("source refresh never animates, because git may ask for credentials on the terminal", async () => {
+  const scenario: Scenario = async (_sandbox, run) => {
+    assert.equal(await run(["source", "refresh", externalSource.id, "--yes"]), 0);
+  };
+  const stream = fakeStream({ isTTY: true, columns: 120 });
+  const recorder = recordingProgress();
+  const quiet = await observe(scenario, NO_PROGRESS, () => ({ operations: registryOnly }));
+  const animated = await observe(scenario, createProgress({ stream, env: {}, timers: fakeTimers().timers }), () => ({ operations: registryOnly }));
+  await observe(scenario, recorder, () => ({ operations: registryOnly }));
+
+  assert.deepEqual(stream.writes, [`· Refreshing Git Source ${externalSource.id}…\n`]);
+  assert.deepEqual(animated.stdout, quiet.stdout);
+  assert.deepEqual(recorder.prompting, [`Refreshing Git Source ${externalSource.id}`]);
+});
+
+test("a confirmed install of a non-built-in Source marks resolving as possibly prompting, and installing as not", async () => {
+  const recorder = recordingProgress();
+  await observe(async ({ operations }, run) => {
+    assert.equal(await run([
+      "install", "--scope", "user-global", "--source", externalSource.id, "--skill", "portable/demo",
+      "--host", "pi", "--version", "latest", "--portable-v1", "--yes",
+    ]), 0);
+    assert.ok(operations);
+  }, recorder, (root) => {
+    const real = createSourceOperations({ statePath: path.join(root, "state", "sources.json") });
+    // Stand in for the git refresh so the test stays offline.
+    return {
+      operations: { ...real, refreshProjectSource: async () => externalSource },
+      sourceContentAccess: { async readSnapshot() { return []; } },
+      sourceAccess: {
+        async readSkillTree() { return demoTree; },
+        async readSkillTreeSnapshot() { return { files: demoTree, resolvedVersion: { kind: "git-commit" as const, commit: "a".repeat(40) } }; },
+      },
+    };
+  });
+
+  assert.deepEqual(recorder.labels, ["Resolving portable/demo", "Installing portable/demo"]);
+  assert.deepEqual(recorder.prompting, ["Resolving portable/demo"]);
 });
 
 test("source remove shows inspection, file removal and Source removal", async () => {
@@ -217,7 +257,7 @@ test("update apply shows the checks, the preview and the application", async () 
   ]);
 });
 
-test("export keeps stdout parseable JSON while it builds", async () => {
+test("export keeps stdout parseable JSON while it builds, with and without a spinner", async () => {
   const stdoutOf = async (progress: Progress) => {
     let json = "";
     await observe(async (_sandbox, run) => {
@@ -226,12 +266,16 @@ test("export keeps stdout parseable JSON while it builds", async () => {
     return json;
   };
   const recorder = recordingProgress();
+  const stream = fakeStream({ isTTY: true, columns: 120 });
   const quiet = await stdoutOf(NO_PROGRESS);
-  const withProgress = await stdoutOf(recorder);
+  const recorded = await stdoutOf(recorder);
+  const animated = await stdoutOf(createProgress({ stream, env: {}, timers: fakeTimers().timers }));
 
-  assert.equal(JSON.parse(withProgress).sources[0].url, SOURCE_URL);
-  assert.equal(withProgress, quiet);
+  assert.equal(JSON.parse(quiet).sources[0].url, SOURCE_URL);
+  assert.equal(recorded, quiet);
+  assert.equal(animated, quiet);
   assert.deepEqual(recorder.labels, ["Building Profile export"]);
+  assert.ok(stream.writes.length > 0 && stream.writes.every((text) => text.startsWith("\r")), "the spinner stayed on stderr");
 });
 
 test("import shows the preview build and the apply step", async () => {

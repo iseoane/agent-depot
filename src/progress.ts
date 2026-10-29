@@ -26,8 +26,10 @@ export interface Progress {
    * Runs `work` while showing `label`: an animated spinner with elapsed time on an interactive
    * stderr, otherwise one plain line. The spinner line is erased before this settles, on success
    * and on error. A step started while another is running is not shown separately.
+   * `mayPrompt` marks a step whose child process (for example `git` asking for credentials on the
+   * terminal) can wait for the user: it gets one static line and is never redrawn over a prompt.
    */
-  run<T>(label: string, work: () => Promise<T>): Promise<T>;
+  run<T>(label: string, work: () => Promise<T>, options?: { readonly mayPrompt?: boolean }): Promise<T>;
   /** Erases a drawn spinner line so a line printed now is not garbled; the next tick redraws it. */
   clear(): void;
 }
@@ -66,10 +68,10 @@ export function createProgress(options: ProgressOptions = {}): Progress {
     stream.write(ERASE_LINE);
   }
 
-  async function run<T>(label: string, work: () => Promise<T>): Promise<T> {
+  async function run<T>(label: string, work: () => Promise<T>, runOptions: { readonly mayPrompt?: boolean } = {}): Promise<T> {
     if (active) return work();
     const text = withEllipsis(label);
-    if (stream.isTTY !== true || !animationEnabled(env)) {
+    if (stream.isTTY !== true || !animationEnabled(env) || runOptions.mayPrompt === true) {
       // Not animated: one persistent line, so logs and pipes stay readable and nothing needs erasing.
       stream.write(`${stream.isTTY === true ? `${STATIC_GLYPH} ` : ""}${text}\n`);
       active = true;

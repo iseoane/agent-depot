@@ -15,6 +15,7 @@ import { pathsOverlap } from "./path-safety.js";
 import { createProgress, NO_PROGRESS, type Progress } from "./progress.js";
 import { skillTreeBaseline, type SkillCandidate, type SourceContentAccess } from "./skill-discovery.js";
 import {
+  BUILT_IN_SOURCE,
   BuiltInSourceError,
   createSourceOperations,
   resolveProjectSource,
@@ -187,9 +188,10 @@ const SOURCE_SUBCOMMANDS = new Map<string, SourceSubcommandHandler>([
       output(formatSource(source));
     }
   }],
-  ["add", async (values, { operations, output, progress }) => {
+  ["add", async (values, { operations, output }) => {
     requireArgumentCount(values, 1, "source add <url>");
-    const source = await progress.run(`Cloning ${values[0]}`, () => operations.addGitSource(values[0]));
+    // Registration only: nothing is cloned until the first refresh, so there is no long step to report.
+    const source = await operations.addGitSource(values[0]);
     output(`Added Git Source: ${source.id}\t${source.url}`);
   }],
   ["refresh", runSourceRefresh],
@@ -296,7 +298,8 @@ async function runSourceRefresh(
   if (values[1] !== "--yes") {
     throw new CliUsageError("Refresh not confirmed; rerun with --yes to continue");
   }
-  const refreshed = await progress.run(`Refreshing Git Source ${source.id}`, () => operations.refreshSource(source.id));
+  // `git clone`/`fetch` may ask for credentials on the terminal, so this step never animates.
+  const refreshed = await progress.run(`Refreshing Git Source ${source.id}`, () => operations.refreshSource(source.id), { mayPrompt: true });
   output(`Refreshed Git Source: ${refreshed.id}\t${refreshed.url}`);
 }
 
@@ -1435,7 +1438,8 @@ async function runManifestInstall(context: ProjectInstallContext): Promise<void>
     output(`Skipped ${skipped} of ${manifest.skills.length} Skills pinned to another Agent Depot version`);
   }
   const resolved = await progress.run(`Resolving ${installable.length} manifest Skill${installable.length === 1 ? "" : "s"}`,
-    () => resolveManifestSelections(installable, operations, sourceAccess, options.confirmed));
+    () => resolveManifestSelections(installable, operations, sourceAccess, options.confirmed),
+    { mayPrompt: options.confirmed && installable.some((selection) => selection.source.kind !== "builtin") });
   if (resolved.some((item) => item.method !== undefined) && resolved.length > 1) {
     throw new SourceMetadataError("A batch install containing an external method is refused because command side effects cannot be rolled back safely; install that Skill separately");
   }
@@ -1504,7 +1508,7 @@ async function runSingleProjectInstall(context: ProjectInstallContext): Promise<
   const plan = await progress.run(`Resolving ${options.skillPath}`, () => planSingleInstall(
     request,
     { operations, sourceAccess, environment: dependencies, root: projectRoot, existing: existing.skills, recordedIn: manifestStore.path },
-  ));
+  ), { mayPrompt: refreshesSource(options) });
   outputSingleInstallPreview(plan, output);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
   await progress.run(`Installing ${options.skillPath}`, () => executeSingleInstall(plan, async (record) => {
@@ -1534,12 +1538,17 @@ async function runUserGlobalInstall(
   const plan = await progress.run(`Resolving ${options.skillPath}`, () => planSingleInstall(
     request,
     { operations, sourceAccess, environment: dependencies, root: homeDirectory, existing, recordedIn: "user-global state" },
-  ));
+  ), { mayPrompt: refreshesSource(options) });
   outputSingleInstallPreview(plan, output);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
   await progress.run(`Installing ${options.skillPath}`,
     () => executeSingleInstall(plan, (record) => addUserGlobalInstallation.call(operations, record), output));
   output("Saved user-global installation state: shared Source state");
+}
+
+/** A confirmed install of a non-built-in Source refreshes it with `git`, which may ask for credentials. */
+function refreshesSource(options: InstallOptions): boolean {
+  return options.confirmed && options.sourceId !== BUILT_IN_SOURCE.id;
 }
 
 interface InstallOptions {

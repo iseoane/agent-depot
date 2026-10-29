@@ -29,8 +29,18 @@ export function fakeTimers() {
   };
 }
 
-/** Progress that records each step label and otherwise stays out of the way. */
-export function recordingProgress(): Progress & { readonly labels: string[] } {
+/** Progress that records each step label (and which steps were marked `mayPrompt`) and otherwise stays out of the way. */
+export function recordingProgress(): Progress & { readonly labels: string[]; readonly prompting: string[] } {
   const labels: string[] = [];
-  return { labels, run: (label, work) => { labels.push(label); return work(); }, clear: () => undefined };
+  const prompting: string[] = [];
+  return {
+    labels,
+    prompting,
+    run: (label, work, options) => {
+      labels.push(label);
+      if (options?.mayPrompt === true) prompting.push(label);
+      return work();
+    },
+    clear: () => undefined,
+  };
 }

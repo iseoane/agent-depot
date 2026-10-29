@@ -16,15 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AGENT_DEPOT_NO_ANIMATION=1` for a static `·` and no elapsed time instead of
   the animated spinner.
 - CLI commands now report progress on stderr during long steps instead of
-  printing nothing: `source add`/`refresh`/`remove`, `skill remove` and host
+  printing nothing: `source refresh`/`remove`, `skill remove` and host
   changes, `install`, `update`, `uninstall`, `self update`, `app`, `package
   install|update|uninstall` and profile `export`/`import`. On an interactive
   terminal a spinner with the step label and, after one second, the elapsed time
   is shown and erased before results or errors print; when stderr is not a
   terminal (CI, pipes, logs) each step prints one plain line such as
   `Installing portable/demo…`. `AGENT_DEPOT_NO_ANIMATION=1` prints that static
-  line with a `·` on a terminal. stdout is unchanged, so JSON output stays
-  parseable.
+  line with a `·` on a terminal, and so do the steps that run `git` (`source
+  refresh` and confirmed installs from a Git Source), because git can ask for
+  credentials on the terminal and a spinner must never redraw over a prompt.
+  stdout is unchanged, so JSON output stays parseable.
 
 ### Fixed
 
