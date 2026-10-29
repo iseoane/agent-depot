@@ -227,13 +227,20 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           tag="v$RELEASE_VERSION"
-          if existing=$(gh api "repos/$REPOSITORY/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null); then
-            target=$(gh api "repos/$REPOSITORY/git/tags/$existing" --jq '.object.sha' 2>/dev/null || echo "$existing")
+          if ref=$(gh api "repos/$REPOSITORY/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha' 2>"$RUNNER_TEMP/ref.err"); then
+            read -r type target <<<"$ref"
+            if [[ "$type" == "tag" ]]; then
+              target=$(gh api "repos/$REPOSITORY/git/tags/$target" --jq '.object.sha')
+            fi
             if [[ "$target" == "$SOURCE_SHA" ]]; then
               echo "$tag already points at $SOURCE_SHA"
               exit 0
             fi
             echo "$tag already exists at $target, not at the published commit $SOURCE_SHA; refusing to move it" >&2
+            exit 1
+          elif ! grep -q "HTTP 404" "$RUNNER_TEMP/ref.err"; then
+            cat "$RUNNER_TEMP/ref.err" >&2
+            echo "Could not check whether $tag exists; npm is published, create the tag by hand" >&2
             exit 1
           fi
           object=$(gh api "repos/$REPOSITORY/git/tags" -f tag="$tag" -f message="$tag" -f object="$SOURCE_SHA" -f type=commit --jq '.sha')
