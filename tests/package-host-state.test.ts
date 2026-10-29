@@ -499,7 +499,33 @@ test("a clean Pi checkout yields its HEAD and package manifest version", async (
     const evidence = findInstalledBundle(view, piDescriptor("repo"), piSelection(fixture.url));
     assert.deepEqual(evidence, { kind: "installed", version: "1.2.3", commit: fixture.commit });
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
+  }
+});
+
+test("a Pi package path inside a parent Git repository is refused as not the checkout root", async () => {
+  const fixture = await piCheckoutFixture();
+  try {
+    // Move the repository one level up: the package path becomes a plain subdirectory of a repo whose
+    // origin, HEAD and manifest all still verify, so only the root comparison can refuse it.
+    await rename(path.join(fixture.checkoutPath, ".git"), path.join(path.dirname(fixture.checkoutPath), ".git"));
+    const view = await readHostInstallView({
+      homeDirectory: fixture.home,
+      piAgentDirectory: fixture.agentDirectory,
+      readHostStateFile: async (filePath) => {
+        if (filePath === fixture.settingsPath) return JSON.stringify({ packages: [fixture.source] });
+        throw Object.assign(new Error("not found"), { code: "ENOENT" });
+      },
+    });
+    const evidence = findInstalledBundle(view, piDescriptor("repo"), piSelection(fixture.url));
+    assert.equal(evidence.kind, "installed");
+    if (evidence.kind === "installed") {
+      assert.equal(evidence.version, undefined);
+      assert.equal(evidence.commit, undefined);
+      assert.match(evidence.reason ?? "", /not the root of its Git checkout/u);
+    }
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 
@@ -531,7 +557,7 @@ test("Pi checkout origin mismatch blocks version evidence while local modificati
       reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
     });
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 
@@ -573,7 +599,7 @@ test("only a matching root-only untracked npm lockfile permits Pi update compari
     if (dirty.kind === "installed") assert.equal(dirty.commit, undefined);
     else assert.fail("membership must remain installed");
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 
@@ -659,7 +685,7 @@ test("npm's generated root lock with matching bin metadata is verified clean che
     await writeFile(path.join(fixture.checkoutPath, "package.json"), JSON.stringify({ ...manifest, description: "edited" }));
     await expectBlocked("tracked modification");
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 
@@ -692,7 +718,7 @@ test("npm's generated root lock normalizes a string bin to the unscoped package 
     await writeFile(lockPath, lockFor("plain", { tool: "t/x.mjs" }));
     assert.deepEqual(await readEvidence(), { kind: "installed", version: "1.0.0", commit: objectCommit });
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 
@@ -714,7 +740,7 @@ test("a modified tracked Pi lockfile keeps the HEAD version but no update identi
       reason: "Pi reports this Package installed, but the Pi Git checkout has local modifications. Update assessment is unavailable; inspect the checkout before updating.",
     });
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 
@@ -742,7 +768,7 @@ test("a modified working-tree Pi manifest cannot replace HEAD version evidence",
       "b".repeat(40),
     ), "unknown");
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 
@@ -767,7 +793,7 @@ test("an untracked Pi manifest cannot provide installed version evidence", async
       assert.match(evidence.reason ?? "", /checkout could not be read safely/u);
     }
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 
@@ -792,7 +818,7 @@ test("a Pi checkout symlink preserves installation membership but cannot provide
       assert.match(evidence.reason ?? "", /symbolic link/u);
     }
   } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a git child may still hold the directory on Windows
   }
 });
 

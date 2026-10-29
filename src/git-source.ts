@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, rename, rm, rmdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { isLockContention } from "./atomic-file.js";
 import { assertNoSymlinkPath } from "./path-safety.js";
 import { runProcess, type ProcessRunResult } from "./process-runner.js";
 
@@ -531,7 +532,7 @@ async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>>
         await rmdir(lockPath);
       };
     } catch (error) {
-      if (!isAlreadyExists(error)) {
+      if (!isLockContention(error)) {
         throw error;
       }
       if ((await pathType(lockPath)) === "symlink") {
@@ -593,10 +594,6 @@ function isSafeSourcePath(candidate: string): boolean {
 
 function isMissing(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
-}
-
-function isAlreadyExists(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
 }
 
 const GIT_PROTOCOLS = new Set(["git:", "http:", "https:", "ssh:"]);

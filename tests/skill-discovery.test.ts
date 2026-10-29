@@ -224,7 +224,7 @@ test("reads a selected built-in Skill tree without changing discovery reads", as
       { path: "docs/assets/image.bin", content: Buffer.from([0x00, 0xff, 0x01, 0x80]), executable: false },
       { path: "docs/nested/example.txt", content: Buffer.from("nested example"), executable: false },
       { path: "docs/README.md", content: Buffer.from("supporting reference"), executable: false },
-      { path: "docs/scripts/check.sh", content: Buffer.from([0x23, 0x21, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68, 0x0a, 0x00, 0xff]), executable: true },
+      { path: "docs/scripts/check.sh", content: Buffer.from([0x23, 0x21, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x73, 0x68, 0x0a, 0x00, 0xff]), executable: process.platform !== "win32" /* no POSIX execute bit on Windows */ },
       { path: "docs/SKILL.md", content: Buffer.from("---\nname: Docs\ndescription: Docs skill\n---\n"), executable: false },
     ]);
     assert.deepEqual(readPaths, [

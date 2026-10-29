@@ -33,6 +33,29 @@ jobs:
       - run: pnpm test:e2e
       - run: node --test scripts/release-artifact.test.mjs
 
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # windows-latest ships core.autocrlf=true; without this the checkout (and every
+      # repository the tests create) would carry CRLF and break byte-exact comparisons.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
   audit:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest

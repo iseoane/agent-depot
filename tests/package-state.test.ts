@@ -413,8 +413,9 @@ test("an invalid digest is refused before the filesystem is touched", async () =
   });
 });
 
-test("receipts are 0600 inside a 0700 directory even when both already exist looser", async () => {
-  if (process.platform === "win32") return;
+test("receipts are 0600 inside a 0700 directory even when both already exist looser", {
+  skip: process.platform === "win32" && "Windows does not enforce POSIX file and directory modes",
+}, async () => {
   await withState(async (directory) => {
     const store = new PackageStateStore(directory);
     const digest = "c".repeat(64);
@@ -468,7 +469,7 @@ test("uses portable per-user state locations under the Source state directory", 
     defaultPackageStateDirectory({ APPDATA: "C:\\Users\\alice\\AppData\\Roaming" }, "win32", "C:\\Users\\alice"),
     "C:\\Users\\alice\\AppData\\Roaming\\Agent Depot",
   );
-  assert.equal(new PackageStateStore("/tmp/agent-depot-package-test").path, "/tmp/agent-depot-package-test/packages.json");
+  assert.equal(new PackageStateStore("/tmp/agent-depot-package-test").path, path.join("/tmp/agent-depot-package-test", "packages.json"));
 });
 
 test("package-state.ts is the only module that names the state file or the receipts directory", async () => {

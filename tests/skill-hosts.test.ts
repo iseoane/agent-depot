@@ -67,7 +67,7 @@ const recordedHosts = async (operations: SourceOperations) => (await operations.
 test("adding claude creates only the managed symlink and records the host", async () => {
   await withInstallation(["pi"], async ({ home, operations, options, record }) => {
     const plan = await planHostAddition(record, ["claude"], options);
-    assert.match(plan.preview.join("\n"), /\.claude\/skills\/one/u);
+    assert.match(plan.preview.join("\n"), /\.claude[/\\]skills[/\\]one/u);
     await executeHostAddition(plan, operations, options, await operations.listUserGlobalInstallations!(), true);
     assert.equal(await readlink(claude(home)), path.join("..", "..", ".agents", "skills", "one"));
     assert.equal(await readFile(path.join(canonical(home), "SKILL.md"), "utf8"), "one");
@@ -259,7 +259,7 @@ test("adding claude refuses a foreign symlink at the claude location and leaves 
     await mkdir(path.dirname(claude(home)), { recursive: true });
     await symlink("/somewhere/else", claude(home), "dir");
     await assert.rejects(planHostAddition(record, ["claude"], options), /already exists/u);
-    assert.equal(await readlink(claude(home)), "/somewhere/else");
+    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
   });
 });
 
@@ -268,7 +268,7 @@ test("removing claude refuses a foreign symlink at the claude location and leave
     await rm(claude(home));
     await symlink("/somewhere/else", claude(home), "dir");
     await assert.rejects(planHostRemoval(record, ["claude"], options), /does not point to the canonical/u);
-    assert.equal(await readlink(claude(home)), "/somewhere/else");
+    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
   });
 });
 
@@ -278,7 +278,7 @@ test("removing claude replaced by a foreign symlink after the plan deletes nothi
     await rm(claude(home));
     await symlink("/somewhere/else", claude(home), "dir");
     await assert.rejects(executeHostRemoval(plan, operations, options, await operations.listUserGlobalInstallations!()));
-    assert.equal(await readlink(claude(home)), "/somewhere/else");
+    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
     assert.deepEqual(await recordedHosts(operations), ["pi", "claude"]);
   });
 });

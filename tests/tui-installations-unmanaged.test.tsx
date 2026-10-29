@@ -12,7 +12,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import type { UnmanagedGroup } from "../src/tui/installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval } from "../src/tui/unmanaged-actions.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { squash, waitForFrame } from "./wait-for-frame.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -294,7 +294,7 @@ test("choosing only the canonical directory also removes the Claude link that wo
   await waitForFrame(view.lastFrame, /\[x\] 1 /);
   view.stdin.write(ENTER);
   const preview = await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
-  assert.ok(preview.includes(`also removes link ${JSON.stringify(claude)}`), preview);
+  assert.ok(squash(preview).includes(squash(`also removes link ${JSON.stringify(claude)}`)), preview); // long paths wrap
   assert.match(preview, /would dangle/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(0\)/);

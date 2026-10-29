@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { profileSandbox, seedProfileSandbox } from "../profile-e2e-fixture.js";
 
@@ -634,7 +634,7 @@ test("the Catalog keeps numbered destinations and Packages readable in a narrow 
   const piSkillDirectory = path.join(repository, "plugins", "pi", "skills", "pty-pi-owner");
   await mkdir(piSkillDirectory, { recursive: true });
   await writeFile(path.join(piSkillDirectory, "SKILL.md"), "---\nname: pty-pi-owner\ndescription: PTY fixture for Pi ownership\n---\n");
-  await writeFile(gitConfig, `[url "file://${repository}"]\n\tinsteadOf = ${url}\n[protocol "file"]\n\tallow = always\n[user]\n\tname = e2e\n\temail = e2e@example.test\n`);
+  await writeFile(gitConfig, `[url "${pathToFileURL(repository).href}"]\n\tinsteadOf = ${url}\n[protocol "file"]\n\tallow = always\n[user]\n\tname = e2e\n\temail = e2e@example.test\n`);
   for (const args of [["init", "-q", "-b", "main"], ["add", "."], ["-c", "user.name=e2e", "-c", "user.email=e2e@example.test", "commit", "-qm", "fixture"]]) {
     execFileSync("git", args, { cwd: repository, stdio: "pipe" });
   }

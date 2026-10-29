@@ -13,6 +13,7 @@ import {
   type UserGlobalSkillInventoryOptions,
 } from "../src/user-global-skill-inventory.js";
 import type { ProjectSkillSelection } from "../src/project-manifest.js";
+import { isolateUserState } from "./state-home.js";
 
 async function makeHome(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "agent-depot-global-inventory-"));
@@ -239,7 +240,7 @@ test("excludes Agent Depot backup and staging names without traversing them", as
       ".agent-depot-temp-copy",
       "ordinary.tmp",
       ".AGENT-DEPOT-BACKUP-UPPER",
-      "ORDINARY.TMP",
+      "OTHER.TMP", // a distinct name: "ORDINARY.TMP" would collide with "ordinary.tmp" on case-insensitive file systems
     ]) {
       await makeSkill(home, ".agents", name);
     }
@@ -410,8 +411,9 @@ test("reports a symlinked global root as unsafe and does not scan through it", a
 
 test("app declarations exclude directories and links before inspecting their content, without approval", async () => {
   const home = await makeHome();
+  const state = isolateUserState(home);
   try {
-    const apps = path.join(home, ".local", "state", "agent-depot", "apps");
+    const apps = path.join(state.stateDirectory, "apps");
     await mkdir(apps, { recursive: true });
     await writeFile(path.join(apps, "app.json"), JSON.stringify({
       name: "owner", install: { manual: "install" }, update: { manual: "update" },
@@ -428,6 +430,7 @@ test("app declarations exclude directories and links before inspecting their con
       homeDirectory: home, managedInstallations: [],
     }), /App-owned/);
   } finally {
+    state.restore();
     await rm(home, { recursive: true, force: true });
   }
 });
@@ -443,11 +446,16 @@ test("ownership matches whole names case-sensitively with only star special and 
     };
     await writeFile(path.join(apps, "app.json"), JSON.stringify({ ...base, skills: ["owned-*", "a?b", "[ab]", "dot.name", "end*"] }));
     await writeFile(path.join(apps, "foreign.json"), JSON.stringify({ ...base, name: "foreign", platform: "windows", skills: ["other"] }));
-    for (const name of ["owned-", "owned-demo", "Owned-demo", "xowned-demo", "a?b", "acb", "[ab]", "a", "dot.name", "dotXname", "end", "ending", "other", "dot.name\n"]) {
+    // Windows cannot create "?" or newline names and folds case ("Owned-demo" would collide with
+    // "owned-demo"); those three cases need a POSIX file system, the rest still run there.
+    const posixOnly = new Set(["Owned-demo", "a?b", "dot.name\n"]);
+    const keep = (name: string) => process.platform !== "win32" || !posixOnly.has(name);
+    for (const name of ["owned-", "owned-demo", "Owned-demo", "xowned-demo", "a?b", "acb", "[ab]", "a", "dot.name", "dotXname", "end", "ending", "other", "dot.name\n"].filter(keep)) {
       await makeSkill(home, ".agents", name);
     }
     const inventory = await scanUserGlobalSkillInventory({ homeDirectory: home, appEnvironment: { recipesDirectory: apps, platform: "linux", runner: async () => { throw new Error("must not execute"); } } });
-    assert.deepEqual(inventory.unmanaged.map(entry => entry.name), ["Owned-demo", "a", "acb", "dot.name\n", "dotXname", "other", "xowned-demo"]);
+    assert.deepEqual(inventory.unmanaged.map(entry => entry.name),
+      ["Owned-demo", "a", "acb", "dot.name\n", "dotXname", "other", "xowned-demo"].filter(keep));
   } finally {
     await rm(home, { recursive: true, force: true });
   }

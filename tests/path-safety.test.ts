@@ -94,10 +94,15 @@ test("assertNoSymlinkPath accepts the filesystem root and surfaces non-ENOENT er
   try {
     await writeFile(path.join(root, "file"), "x");
     // A regular file used as a directory yields ENOTDIR, which is not treated as a missing path.
-    await assert.rejects(
-      assertNoSymlinkPath(path.join(root, "file", "child"), "file parent"),
-      (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOTDIR",
-    );
+    // Windows reports ENOENT for this case (no ENOTDIR), which is the missing-path outcome.
+    if (process.platform === "win32") {
+      await assertNoSymlinkPath(path.join(root, "file", "child"), "file parent");
+    } else {
+      await assert.rejects(
+        assertNoSymlinkPath(path.join(root, "file", "child"), "file parent"),
+        (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOTDIR",
+      );
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { runCli } from "../src/cli.js";
 import { test } from "node:test";
 import { createAppOperations } from "../src/app-flow.js";
 import type { InstalledPackage } from "../src/package-model.js";
 import { buildProfileExport } from "../src/profile-export.js";
 import { createSourceOperations } from "../src/sources.js";
+import { defaultSourceStatePath } from "../src/source-state.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
 import { buildProfileImport, applyProfileImport } from "../src/profile-import.js";
 import { claudePackage, createPackageSide, fakePackageOperations, hostedSelection, installedPackage, piPackage } from "./profile-package-fixture.js";
@@ -274,9 +276,9 @@ test("built CLI fetches an unregistered pinned Git Source without registering it
   await mkdir(path.join(repo, "skills", "pinned"), { recursive: true });
   await writeFile(path.join(repo, "skills", "pinned", "SKILL.md"), "---\nname: pinned\ndescription: Fixture\n---\nPINNED\n");
   const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_STATE_HOME: path.join(home, "state"),
-    XDG_CACHE_HOME: path.join(home, "cache"), GIT_CONFIG_GLOBAL: path.join(home, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1",
+    XDG_CACHE_HOME: path.join(home, "cache"), APPDATA: path.join(home, "AppData", "Roaming"), LOCALAPPDATA: path.join(home, "AppData", "Local"), GIT_CONFIG_GLOBAL: path.join(home, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1",
     GIT_AUTHOR_NAME: "test", GIT_AUTHOR_EMAIL: "test@example.test", GIT_COMMITTER_NAME: "test", GIT_COMMITTER_EMAIL: "test@example.test" };
-  await writeFile(env.GIT_CONFIG_GLOBAL, `[url "file://${repo}"]\n\tinsteadOf = ${sourceUrl}\n[protocol "file"]\n\tallow = always\n`);
+  await writeFile(env.GIT_CONFIG_GLOBAL, `[url "${pathToFileURL(repo).href}"]\n\tinsteadOf = ${sourceUrl}\n[protocol "file"]\n\tallow = always\n`);
   function git(...args: string[]) {
     const result = spawnSync("git", args, { cwd: repo, env, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
@@ -299,7 +301,7 @@ test("built CLI fetches an unregistered pinned Git Source without registering it
   assert.match(result.stdout, /Source https:\/\/example\.test\/fixture\.git will be fetched but not registered/);
   assert.match(result.stdout, /scope: user-global; hosts: pi,claude; version policy: fixed:/);
   assert.match(await readFile(path.join(home, ".agents", "skills", "pinned", "SKILL.md"), "utf8"), /PINNED/);
-  const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "agent-depot", "sources.json") });
+  const operations = createSourceOperations({ homeDirectory: home, statePath: defaultSourceStatePath(env, process.platform, home) });
   assert.equal((await operations.listSources()).length, 1);
   const installed = await operations.listUserGlobalInstallations!();
   assert.deepEqual(installed[0]!.hosts, ["pi", "claude"]);

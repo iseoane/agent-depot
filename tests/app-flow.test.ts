@@ -274,7 +274,9 @@ test("a missing version executable proves absence; failed checks remain unknown"
   }
 });
 
-test("WSL skips Windows PATH hits and spawns the Linux shim rather than its realpath", async () => {
+test("WSL skips Windows PATH hits and spawns the Linux shim rather than its realpath", {
+  skip: process.platform === "win32" && "simulates a Linux/WSL host with POSIX mount-root paths, which a Windows temp path cannot express",
+}, async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), "app-resolution-"));
   const root = path.join(fixture, "workspace");
   await mkdir(root);

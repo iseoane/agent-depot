@@ -32,3 +32,13 @@ export async function writeFileAtomically(
     });
   }
 }
+
+/**
+ * Whether a failed `mkdir` of a lock directory means another process holds it. Windows reports
+ * EPERM or EACCES instead of EEXIST while the holder's `rmdir` is still completing, so a concurrent
+ * waiter must retry rather than fail.
+ */
+export function isLockContention(error: unknown, platform: NodeJS.Platform = process.platform): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+  return code === "EEXIST" || (platform === "win32" && (code === "EPERM" || code === "EACCES"));
+}

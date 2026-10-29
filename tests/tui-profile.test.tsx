@@ -11,7 +11,7 @@ import { createSourceOperations, type SourceOperationsOptions } from "../src/sou
 import { App } from "../src/tui/app.js";
 import { ProfileView } from "../src/tui/profile-view.js";
 import { fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { squash, waitForFrame } from "./wait-for-frame.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
@@ -116,7 +116,7 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
   f.view.stdin.write("e");
   await waitForFrame(f.view.lastFrame, /▸ Sources/);
   await enterExportName(f.view, "out.json");
-  const refusedFrame = await waitForFrame(f.view.lastFrame, /already exists; choose another name/);
+  const refusedFrame = await waitForFrame(f.view.lastFrame, /already[\s│]+exists;[\s│]+choose[\s│]+another[\s│]+name/);
   assert.match(refusedFrame, /out\.json/);
   assert.doesNotMatch(refusedFrame, /Apply Profile|Save\/Export Profile/);
   assert.equal(await readFile(file, "utf8"), original);
@@ -270,25 +270,33 @@ test("export panel stays inside a resized terminal with wrapped choices and the 
   await mkdir(unmanaged, { recursive: true });
   await writeFile(path.join(unmanaged, "SKILL.md"), "---\nname: unmanaged\ndescription: fixture\n---\n");
   const view = f.view;
-  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 17 });
+  // The name stage wraps the folder and destination paths at this width; a longer temp path than
+  // the reference one needs proportionally more rows (the panel is not paged).
+  const wrapRows = (text: string) => Math.ceil(text.length / 36);
+  const reference = "/tmp/profile-tui-XXXXXX/picker";
+  const rows = 17
+    + wrapRows(`Folder: ${f.picker}`) - wrapRows(`Folder: ${reference}`)
+    + wrapRows(`Destination: ${path.join(f.picker, "agent-depot-profile.json")}`)
+    - wrapRows(`Destination: ${path.join(reference, "agent-depot-profile.json")}`);
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: rows });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: 40 });
   view.stdout.emit("resize");
   view.stdin.write("e");
   let frame = await waitForFrame(view.lastFrame, /Export Profile/);
-  assert.ok(frame.split("\n").length <= 17, frame);
+  assert.ok(frame.split("\n").length <= rows, frame);
   frame = await expandExportGroup(view, "Export notes");
   view.stdin.write("j".repeat(2));
   frame = await waitForFrame(view.lastFrame, candidate => candidate.split("\n").some(line =>
     line.includes(">") && line.includes("very-long")));
-  assert.ok(frame.split("\n").length <= 17, frame);
+  assert.ok(frame.split("\n").length <= rows, frame);
   assert.ok(frame.replace(/[│\s]/g, "").includes("very-long-unmanaged-name-"), frame);
   view.stdin.write("\r");
   const detail = await waitForFrame(view.lastFrame, /Export note/);
-  assert.ok(detail.split("\n").length <= 17, detail);
+  assert.ok(detail.split("\n").length <= rows, detail);
   assert.match(detail, /Excluded unmanaged Skill/);
   view.stdin.write("j".repeat(30));
   const detailTail = await waitForFrame(view.lastFrame, /not tracked/);
-  assert.ok(detailTail.split("\n").length <= 17, detailTail);
+  assert.ok(detailTail.split("\n").length <= rows, detailTail);
   view.stdin.write("\u001b");
   frame = await waitForFrame(view.lastFrame, frame => frame.includes("Export Profile") &&
     frame.split("\n").some(line => line.includes("> ") && line.includes("Excluded unmanaged Skill very-long")));
@@ -302,19 +310,19 @@ test("export panel stays inside a resized terminal with wrapped choices and the 
   view.stdin.write("j");
   view.stdin.write("e");
   const folder = await waitForFrame(view.lastFrame, /Choose export folder/);
-  assert.ok(folder.split("\n").length <= 17, folder);
+  assert.ok(folder.split("\n").length <= rows, folder);
   assert.match(folder, /Esc/);
   await waitForFrame(view.lastFrame, /Use this folder/);
   view.stdin.write("\r");
   const name = await waitForFrame(view.lastFrame, /Export file name/);
-  assert.ok(name.split("\n").length <= 17, name);
+  assert.ok(name.split("\n").length <= rows, name);
   assert.match(name, /Ctrl\+U clear/);
   view.stdin.write("\u0015");
   view.stdin.write("review.json");
   await waitForFrame(view.lastFrame, /review\.json_/);
   view.stdin.write("\r");
   const confirmation = await waitForFrame(view.lastFrame, /Save\/Export Profile\? \(y\/n\)/);
-  assert.ok(confirmation.split("\n").length <= 17, confirmation);
+  assert.ok(confirmation.split("\n").length <= rows, confirmation);
   assert.match(confirmation, /arrows\/PgUp\/PgDn page/);
   assert.doesNotMatch(confirmation, /Portable Profile|▸ Sources/);
 });
@@ -591,13 +599,13 @@ test("export refuses an existing file and a dangling symlink at the name stage",
   f.view.stdin.write("e");
   await waitForFrame(f.view.lastFrame, /▸ Sources/);
   await enterExportName(f.view, "taken.json");
-  await waitForFrame(f.view.lastFrame, /already exists; choose another name/);
+  await waitForFrame(f.view.lastFrame, /already[\s│]+exists;[\s│]+choose[\s│]+another[\s│]+name/);
   assert.equal(await readFile(existing, "utf8"), "keep");
   f.view.stdin.write("\u0015");
   f.view.stdin.write("link.json");
   await waitForFrame(f.view.lastFrame, /Name: link\.json_/);
   f.view.stdin.write("\r");
-  await waitForFrame(f.view.lastFrame, /already exists; choose another name/);
+  await waitForFrame(f.view.lastFrame, /already[\s│]+exists;[\s│]+choose[\s│]+another[\s│]+name/);
   assert.equal(await readlink(link), path.join(f.picker, "nowhere.json"));
   assert.ok((await lstat(link)).isSymbolicLink());
 });
@@ -822,7 +830,7 @@ test("the Enter that chooses the export folder is not also submitted to the name
   view.stdin.write("profile");
   const appended = await waitForFrame(view.lastFrame, /Name: profile_/);
   assert.match(appended, /A name without an extension is saved as profile\.json\./);
-  assert.match(appended, new RegExp(`Destination: ${path.join(picker, "profile.json").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.ok(squash(appended).includes(squash(`Destination: ${path.join(picker, "profile.json")}`)), appended); // a long path wraps
   await new Promise(resolve => setTimeout(resolve, 50));
   const settled = view.lastFrame()!;
   assert.match(settled, /Export file name/);

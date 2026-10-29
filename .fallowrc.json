@@ -89,6 +89,12 @@
         ]
       },
       {
+        "name": "progress",
+        "patterns": [
+          "src/progress.ts"
+        ]
+      },
+      {
         "name": "tooling",
         "patterns": [
           "scripts/**"
@@ -108,7 +114,8 @@
           "tui",
           "application",
           "core",
-          "infrastructure"
+          "infrastructure",
+          "progress"
         ]
       },
       {
@@ -123,7 +130,8 @@
         "from": "application",
         "allow": [
           "core",
-          "infrastructure"
+          "infrastructure",
+          "progress"
         ]
       },
       {
@@ -143,6 +151,12 @@
       {
         "from": "pi-extension",
         "allow": []
+      },
+      {
+        "from": "progress",
+        "allow": [
+          "tui"
+        ]
       }
     ],
     "coverage": {

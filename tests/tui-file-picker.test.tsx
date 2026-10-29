@@ -27,8 +27,9 @@ test("export file names gain .json only when they have no extension, and unsafe 
 });
 
 test("the picker start directory follows startDirectory, then projectRoot, and is always absolute", () => {
-  assert.equal(pickerStartDirectory({ startDirectory: "/picked", projectRoot: "/project" }), "/picked");
-  assert.equal(pickerStartDirectory({ projectRoot: "/project" }), "/project");
+  // path.resolve gives the drive-qualified form on Windows and is the identity for these paths elsewhere.
+  assert.equal(pickerStartDirectory({ startDirectory: "/picked", projectRoot: "/project" }), path.resolve("/picked"));
+  assert.equal(pickerStartDirectory({ projectRoot: "/project" }), path.resolve("/project"));
   assert.ok(path.isAbsolute(pickerStartDirectory({ startDirectory: "relative" })));
   assert.equal(pickerStartDirectory({ startDirectory: "relative" }), path.resolve("relative"));
 });
@@ -141,10 +142,14 @@ test("a directory read error is shown in the picker and Esc leaves it", async t 
 });
 
 test("the picker stays inside a narrow terminal", async t => {
-  const root = await mkdtemp(path.join(tmpdir(), "picker-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(path.join(root, "a-very-long-directory-name-that-wraps-at-narrow-widths"));
-  const view = render(<FilePicker purpose="directory" startDirectory={root} listHeight={6} onCancel={() => {}} onChoose={() => {}} />);
+  // A stubbed listing under a short directory: `listHeight` is trusted as given, so a long real temp
+  // path (Windows) would wrap onto extra rows and have nothing to do with the narrow-width behavior.
+  const root = path.resolve("/picker");
+  const readDirectory = async () => ({
+    directory: root, parent: path.dirname(root),
+    entries: [{ name: "a-very-long-directory-name-that-wraps-at-narrow-widths", kind: "directory" as const }],
+  });
+  const view = render(<FilePicker purpose="directory" startDirectory={root} listHeight={6} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
   t.after(() => view.unmount());
   Object.defineProperty(view.stdout, "rows", { configurable: true, value: 12 });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: 30 });
@@ -160,6 +165,7 @@ test("pathExists reports ENOENT as absent, exists as present, and propagates per
   await writeFile(file, "{}");
   assert.equal(await pathExists(file), true);
   assert.equal(await pathExists(path.join(root, "missing.json")), false);
+  if (process.platform === "win32") return t.skip("chmod 000 does not deny directory access on Windows");
   if (process.getuid?.() === 0) return t.skip("permission errors cannot be triggered as root");
   const locked = path.join(root, "locked");
   await mkdir(locked);
@@ -248,7 +254,7 @@ test("the picker fits a wrapped long directory, many entries and its footer with
   view.stdin.write("p");
   const fullPath = await waitForFrame(view.lastFrame, /p hide path/);
   const visiblePath = fullPath.replace(/[│╭╮╰╯─\s]/gu, "");
-  for (const segment of ["/tmp", path.basename(root), ...Array.from({ length: 6 }, (_, index) => `very-long-directory-name-${index}`)]) {
+  for (const segment of [tmpdir(), path.basename(root), ...Array.from({ length: 6 }, (_, index) => `very-long-directory-name-${index}`)]) {
     assert.ok(visiblePath.includes(segment), `${segment} missing from ${fullPath}`);
   }
   assert.ok(fullPath.split("\n").length <= 16, fullPath);

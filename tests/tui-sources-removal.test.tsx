@@ -137,7 +137,7 @@ test("removal approval gates version checks before any uninstall or deletion", a
   const declaration = JSON.parse(await readFile(f.file, "utf8"));
   await writeFile(f.file, JSON.stringify({ ...declaration, homepage: "https://example.com" }));
   f.view.stdin.write("r");
-  await waitForFrame(f.view.lastFrame, /needs approval/);
+  await waitForFrame(f.view.lastFrame, /needs\s+approval/); // a long path wraps the status
   f.view.stdin.write("d");
   const preview = await waitForFrame(f.view.lastFrame, /Scroll to end before y/);
   assert.match(preview, /Host|version|argv/u);

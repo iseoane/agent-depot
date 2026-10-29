@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, readFile, readdir, readlink, lstat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { fakeAppFixture } from "./fake-app-fixture.js";
 
 export const profileSourceUrl = "https://example.test/profile/source.git";
@@ -11,9 +12,10 @@ export async function profileSandbox(root: string, sourceRepo: string) {
   const home = path.join(root, "home");
   await mkdir(home, { recursive: true });
   const gitConfig = path.join(root, "gitconfig");
-  await writeFile(gitConfig, `[url "file://${sourceRepo}"]\n\tinsteadOf = ${profileSourceUrl}\n[protocol "file"]\n\tallow = always\n`);
+  await writeFile(gitConfig, `[url "${pathToFileURL(sourceRepo).href}"]\n\tinsteadOf = ${profileSourceUrl}\n[protocol "file"]\n\tallow = always\n`);
   const env = {
     PATH: process.env.PATH, HOME: home, USERPROFILE: home,
+    APPDATA: path.join(home, "AppData", "Roaming"), LOCALAPPDATA: path.join(home, "AppData", "Local"),
     XDG_STATE_HOME: path.join(root, "state"), XDG_CONFIG_HOME: path.join(root, "config"),
     XDG_CACHE_HOME: path.join(root, "cache"), GIT_CONFIG_GLOBAL: gitConfig,
     GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: "file",

@@ -55,7 +55,7 @@ test("skill host add previews new locations and changes nothing without --yes", 
   await withSkill(["pi"], async ({ home, operations, lines, errors, cli }) => {
     assert.equal(await cli(["skill", "host", "add", "portable/one", "--host", "claude"]), 1);
     assert.match(lines.join("\n"), /add hosts claude to "portable\/one"/u);
-    assert.match(lines.join("\n"), /\.claude\/skills\/one/u);
+    assert.match(lines.join("\n"), /\.claude[/\\]skills[/\\]one/u);
     assert.match(errors.join("\n"), /not confirmed; rerun with --yes/u);
     assert.equal(await exists(claude(home)), false);
     assert.deepEqual(await hostsOf(operations), ["pi"]);

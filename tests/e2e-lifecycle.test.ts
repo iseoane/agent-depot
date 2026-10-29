@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { after, before, describe, test } from "node:test";
+import { defaultSourceStatePath } from "../src/source-state.js";
 
 /**
  * Characterization of the built CLI end to end. Everything lives in one temporary
@@ -67,6 +69,11 @@ async function makeProject(name: string): Promise<string> {
   return directory;
 }
 
+/** Where the spawned CLI keeps its Source state: XDG on POSIX, APPDATA on Windows. */
+function sourceStatePath(): string {
+  return defaultSourceStatePath(env, process.platform, home);
+}
+
 async function exists(target: string): Promise<boolean> {
   try {
     await lstat(target);
@@ -95,11 +102,15 @@ before(async () => {
   const gitConfig = path.join(sandbox, "gitconfig");
   await writeFile(
     gitConfig,
-    `[url "file://${sourceRepo}"]\n\tinsteadOf = ${sourceUrl}\n[protocol "file"]\n\tallow = always\n`,
+    `[url "${pathToFileURL(sourceRepo).href}"]\n\tinsteadOf = ${sourceUrl}\n[protocol "file"]\n\tallow = always\n`,
   );
   env = {
     PATH: process.env.PATH,
+    SystemRoot: process.env.SystemRoot,
     HOME: home,
+    USERPROFILE: home,
+    APPDATA: path.join(home, "AppData", "Roaming"),
+    LOCALAPPDATA: path.join(home, "AppData", "Local"),
     XDG_STATE_HOME: path.join(sandbox, "state"),
     XDG_CONFIG_HOME: path.join(sandbox, "config"),
     XDG_CACHE_HOME: path.join(sandbox, "cache"),
@@ -172,7 +183,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     ok(cli(project, ...args, "--yes"));
     assert.match(await readFile(path.join(project, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v1/);
     assert.equal(await readFile(path.join(project, ".agents/skills/alpha/refs/notes.md"), "utf8"), "support v1\n");
-    assert.equal(await readlink(path.join(project, ".claude/skills/alpha")), "../../.agents/skills/alpha");
+    assert.equal(await readlink(path.join(project, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
     const saved = await manifest(project);
     assert.equal(saved.skills.length, 1);
     assert.equal(saved.skills[0]?.installation.path, ".agents/skills/alpha");
@@ -190,7 +201,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     const args = installArgs("user-global", "alpha", "claude");
     ok(cli(project, ...args, "--yes"));
     assert.match(await readFile(path.join(home, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v1/);
-    assert.equal(await readlink(path.join(home, ".claude/skills/alpha")), "../../.agents/skills/alpha");
+    assert.equal(await readlink(path.join(home, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
     fails(cli(project, ...args, "--yes"), /already recorded in user-global state/);
 
     const check = ok(cli(project, "update", "check", "--scope", "user-global"));
@@ -217,7 +228,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     assert.match(ok(cli(project, "update", "apply", "--scope", "project", "--all", "--yes")), /Update summary: 2 updated, 0 failed/);
     assert.match(await readFile(path.join(project, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v2/);
     assert.equal(await readFile(path.join(project, ".agents/skills/alpha/refs/notes.md"), "utf8"), "support v2\n");
-    assert.equal(await readlink(path.join(project, ".claude/skills/alpha")), "../../.agents/skills/alpha");
+    assert.equal(await readlink(path.join(project, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
     assert.match(ok(cli(project, "update", "check", "--scope", "project")), /Updateable \(0\):\nCurrent \(2\):/);
 
     assert.match(ok(cli(project, "update", "apply", "--scope", "user-global", "--skill", "0", "--yes")), /1 updated, 0 failed/);
@@ -321,7 +332,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
 
     const check = ok(cli(project, "update", "check", "--scope", "user-global"));
     assert.match(check, /Current \(2\):/);
-    assert.match(check, new RegExp(`Unmanaged \\(1\\):\\n  ${path.join(home, ".agents/skills/stray").replaceAll(".", "\\.")}\\n`));
+    assert.match(check, new RegExp(`Unmanaged \\(1\\):\\n  ${path.join(home, ".agents/skills/stray").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n`));
     assert.doesNotMatch(check, /Skipped\/unsafe/);
 
     const stray = path.join(home, ".agents/skills/stray");
@@ -340,19 +351,19 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     assert.equal(await exists(path.join(home, ".agents/skills/gamma")), false);
     assert.equal(await exists(path.join(home, ".claude/skills/gamma")), false);
     assert.equal(await exists(path.join(home, ".agents/skills/alpha")), true);
-    assert.equal(await readlink(path.join(home, ".claude/skills/alpha")), "../../.agents/skills/alpha");
+    assert.equal(await readlink(path.join(home, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
 
     fails(cli(project, "uninstall", "--skills"), /Uninstall not confirmed/);
     assert.equal(await exists(path.join(home, ".agents/skills/alpha")), true);
     assert.match(ok(cli(project, "uninstall", "--skills", "--yes")), /Removed 1 managed user-global Skill/);
     assert.deepEqual(await readdir(path.join(home, ".agents/skills")), []);
     assert.deepEqual(await readdir(path.join(home, ".claude/skills")), []);
-    const state = JSON.parse(await readFile(path.join(sandbox, "state/agent-depot/sources.json"), "utf8"));
+    const state = JSON.parse(await readFile(sourceStatePath(), "utf8"));
     assert.deepEqual(state, { version: 1, gitSources: [], userGlobalInstallations: [] });
     fails(cli(project, "source", "remove", sourceId, "--yes"), /Source is not registered/);
 
     assert.match(ok(cli(project, "uninstall", "--data", "--yes")), /Removed user-global catalog\/configuration data/);
-    assert.equal(await exists(path.join(sandbox, "state/agent-depot/sources.json")), false);
+    assert.equal(await exists(sourceStatePath()), false);
     assert.match(ok(cli(project, "uninstall", "--cli")), /package-manager handoff only/);
   });
 });

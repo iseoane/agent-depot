@@ -398,7 +398,7 @@ test("u previews the selected batch and n cancels without running an update", as
   press(stdin, " ");
   await waitForFrame(lastFrame, /1 selected/);
   press(stdin, "u");
-  const preview = await waitForFrame(lastFrame, /Apply 1 update\?/);
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   assert.match(preview, /Update batch preview/);
   assert.deepEqual(f.methodCalls, [], "preview does not execute the installation method");
   press(stdin, "n");
@@ -547,7 +547,8 @@ test("previews the external command and runs it only after y", async (t) => {
   await waitForFrame(lastFrame, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
-  const preview = await waitForFrame(lastFrame, /external command/);
+  // A long preview (long Windows paths wrap) needs paging to the end before y is accepted.
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   assert.match(preview, /"--fake-update"/);
   assert.match(preview, /external cwd/);
   assert.deepEqual(f.methodCalls, []);
@@ -596,7 +597,7 @@ test("continues after one item fails and reports the reason per item", async (t)
   await waitForFrame(lastFrame, /portable\/bad/);
   press(stdin, "a");
   press(stdin, ENTER);
-  await waitForFrame(lastFrame, /y\/n/);
+  await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
   press(stdin, "y");
   const done = await waitForFrame(lastFrame, /1 updated, 1 failed/);
   assert.match(done, /Updated portable\/good/);
