@@ -151,3 +151,28 @@ test("on win32 output overflow terminates the whole process tree of a batch file
     await assertGrandchildGone(pidFile);
   });
 });
+
+test("on win32 the result is still returned within a bound when taskkill is unavailable and a grandchild survives", { skip: win32Only }, async () => {
+  await withBatchGrandchild(false, async ({ shim, pidFile }) => {
+    const timeoutMs = 5_000;
+    const started = Date.now();
+    const pending = runProcess(shim, [], { timeoutMs });
+    // The child has been spawned with the real environment; point the later kill at a missing taskkill.
+    const previous = { SystemRoot: process.env.SystemRoot, windir: process.env.windir };
+    process.env.SystemRoot = process.env.windir = path.join(tmpdir(), "agent-depot-no-such-system-root");
+    let result: Awaited<typeof pending>;
+    try {
+      result = await pending;
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+    const elapsed = Date.now() - started;
+    assert.equal(result.timedOut, true);
+    assert.ok(elapsed < timeoutMs + 10_000, `settled after ${elapsed}ms; the surviving grandchild kept the stdio pipes open`);
+    const pid = Number(await readFile(pidFile, "utf8").catch(() => ""));
+    assert.ok(isRunning(pid), "the grandchild should have survived, otherwise the taskkill fallback was not exercised");
+  });
+});
