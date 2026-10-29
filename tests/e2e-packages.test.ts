@@ -195,6 +195,11 @@ async function readPiPackages(home: string): Promise<readonly string[]> {
   return parsed.packages ?? [];
 }
 
+/** A slash-separated relative key, so tree comparisons read the same on every platform. */
+function relativeKey(directory: string, full: string): string {
+  return path.relative(directory, full).split(path.sep).join("/");
+}
+
 async function fileTree(directory: string): Promise<Map<string, string>> {
   const files = new Map<string, string>();
   async function walk(current: string): Promise<void> {
@@ -203,8 +208,8 @@ async function fileTree(directory: string): Promise<Map<string, string>> {
       if (entry.isDirectory()) await walk(full);
       else if (entry.isFile()) {
         const contents = (await readFile(full)).toString("base64");
-        files.set(path.relative(directory, full), `${contents}:${(await stat(full)).mtimeMs}`);
-      } else files.set(path.relative(directory, full), "link");
+        files.set(relativeKey(directory, full), `${contents}:${(await stat(full)).mtimeMs}`);
+      } else files.set(relativeKey(directory, full), "link");
     }
   }
   await walk(directory);

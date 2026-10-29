@@ -115,6 +115,10 @@ async function journey(t: { after(callback: () => void | Promise<void>): void })
     packages,
   };
   const view = render(<App operations={sources} environment={environment} onExit={() => undefined} />);
+  // The Package approval panel is not paged, and Ink squeezes it into the terminal height. A long
+  // temp path (Windows) wraps the working directory onto extra rows, so give the panel room.
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: 60 });
+  view.stdout.emit("resize");
   t.after(() => view.unmount());
   return { view, calls, packages, home };
 }
