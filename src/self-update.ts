@@ -25,6 +25,7 @@ export interface SelfUpdateOptions {
   readonly packageName: string;
   readonly packageVersion: string;
   readonly packageRoot: string;
+  readonly platform?: NodeJS.Platform;
   readonly resolveExecutable?: PortableExecutableResolver;
   readonly run?: (executable: string, args: readonly string[], options?: {
     readonly captureStdout?: boolean;
@@ -92,13 +93,18 @@ function successfulStdout(result: ProcessRunResult): string | undefined {
 
 export function createSelfUpdateOperations(options: SelfUpdateOptions): SelfUpdateOperations {
   const resolveExecutable = options.resolveExecutable ?? createPortableExecutableResolver();
+  const platform = options.platform ?? process.platform;
   const run = options.run ?? runProcess;
   const fetcher = options.fetch ?? globalThis.fetch;
 
   async function npmGlobalExecutable(): Promise<string | undefined> {
     const npm = await resolveExecutable("npm");
     if (npm.blocked || npm.executable === undefined) return undefined;
-    const target = await realpath(npm.executable).catch(() => undefined);
+    // On Windows npm resolves to an `npm.cmd` shim; verify the npm-cli.js that ships next to it instead.
+    const verifiedFile = platform === "win32" && path.basename(npm.executable).toLowerCase() === "npm.cmd"
+      ? path.join(path.dirname(npm.executable), "node_modules", "npm", "bin", "npm-cli.js")
+      : npm.executable;
+    const target = await realpath(verifiedFile).catch(() => undefined);
     if (target === undefined || path.basename(target) !== "npm-cli.js" || path.basename(path.dirname(target)) !== "bin" || path.basename(path.dirname(path.dirname(target))) !== "npm") return undefined;
     let rootResult: ProcessRunResult;
     try {

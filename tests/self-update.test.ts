@@ -175,6 +175,66 @@ test("does not trust an arbitrary npm PATH shim as installation provenance", asy
   assert.deepEqual(setup.fetchUrls, []);
 });
 
+async function windowsNpmFixture(setup: Fixture, options: { readonly shim?: string; readonly withCli?: boolean } = {}): Promise<string> {
+  const dir = path.join(setup.root, "nodejs");
+  const shim = path.join(dir, options.shim ?? "npm.cmd");
+  await mkdir(path.join(dir, "node_modules", "npm", "bin"), { recursive: true });
+  await writeFile(shim, "@echo off");
+  if (options.withCli !== false) await writeFile(path.join(dir, "node_modules", "npm", "bin", "npm-cli.js"), "fixture executable");
+  return shim;
+}
+
+function windowsOperations(setup: Fixture, shim: string, packageRoot?: string) {
+  return createSelfUpdateOperations({
+    packageName: "@iseoane/agent-depot",
+    packageVersion: "0.5.1",
+    packageRoot: packageRoot ?? setup.packageRoot,
+    platform: "win32",
+    resolveExecutable: async () => ({ executable: shim, blocked: false }),
+    run: async (executable, args) => {
+      setup.calls.push({ executable, args });
+      return { code: 0, signal: null, stdout: Buffer.from(setup.globalRoot), stderr: "", outputTooLarge: false };
+    },
+    fetch: async (input) => {
+      setup.fetchUrls.push(String(input));
+      return new Response(JSON.stringify({ version: "0.6.0" }), { status: 200 });
+    },
+  });
+}
+
+const UNSUPPORTED = { kind: "unsupported", reason: "this CLI is not verified in npm's global package directory" } as const;
+
+test("accepts a win32 npm.cmd shim with a sibling npm-cli.js (case-insensitive) and still checks the global root", async (t) => {
+  const setup = await fixture();
+  t.after(() => rm(setup.root, { recursive: true, force: true }));
+
+  for (const name of ["npm.cmd", "NPM.CMD"]) {
+    const shim = await windowsNpmFixture(setup, { shim: name });
+    setup.calls.length = 0;
+    assert.deepEqual(await windowsOperations(setup, shim).check(), { kind: "available", current: "0.5.1", latest: "0.6.0" });
+    assert.deepEqual(setup.calls.map(({ executable, args }) => [executable, args[0]]), [[shim, "root"]]);
+  }
+});
+
+test("refuses win32 npm.cmd shims without a sibling npm-cli.js, non-npm .cmd files, and foreign package roots", async (t) => {
+  const setup = await fixture();
+  t.after(() => rm(setup.root, { recursive: true, force: true }));
+
+  const noCli = await windowsNpmFixture(setup, { withCli: false });
+  assert.deepEqual(await windowsOperations(setup, noCli).check(), UNSUPPORTED);
+  assert.deepEqual(setup.calls, []);
+
+  const other = await windowsNpmFixture(setup, { shim: "yarn.cmd" });
+  await writeFile(path.join(path.dirname(other), "node_modules", "npm", "bin", "npm-cli.js"), "fixture executable");
+  assert.deepEqual(await windowsOperations(setup, other).check(), UNSUPPORTED);
+  assert.deepEqual(setup.calls, []);
+
+  const shim = path.join(setup.root, "nodejs", "npm.cmd");
+  assert.deepEqual(await windowsOperations(setup, shim, setup.root).check(), UNSUPPORTED);
+  assert.deepEqual(setup.calls.map(({ args }) => args[0]), ["root"]);
+  assert.deepEqual(setup.fetchUrls, []);
+});
+
 test("treats current, prerelease, and older registry versions without downgrading", async (t) => {
   const setup = await fixture();
   t.after(() => rm(setup.root, { recursive: true, force: true }));
