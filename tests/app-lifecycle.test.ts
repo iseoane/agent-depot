@@ -159,7 +159,7 @@ test("only launch errors offer manual fallback; unexpected runner errors propaga
   const f = await fixture(async () => { throw Object.assign(new Error("runner error"), { code }); });
   try {
     const plan = await f.apps.planLifecycle(f.entry, "install");
-    for (code of ["ENOENT", "EACCES", "ENOEXEC", "EPERM"]) {
+    for (code of ["ENOENT", "EACCES", "ENOEXEC", "EPERM", "EINVAL"]) {
       assert.equal((await f.apps.executeLifecycle(plan, true)).status, "manual required");
     }
     code = "EIO";

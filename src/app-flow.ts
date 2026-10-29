@@ -459,7 +459,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
       });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException | null)?.code;
-      if (!code || !["ENOENT", "EACCES", "ENOEXEC", "EPERM"].includes(code)) throw error;
+      if (!code || !["ENOENT", "EACCES", "ENOEXEC", "EPERM", "EINVAL"].includes(code)) throw error;
       const detail = error instanceof Error ? error.message : String(error);
       return manualFallback(plan, code === "ENOENT"
         ? `${missingExecutableReason(plan.argv[0], plan.action)} (${detail})`
