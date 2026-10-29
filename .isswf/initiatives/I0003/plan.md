@@ -27,3 +27,4 @@ Labels and evidence comments applied to #44-#48 and #50 (operator approved).
 - Operator 2026-10-29: #54 and #52 ready-for-agent (#52 = tail of last lines); #51 left pending in needs-triage. Queue: #46 + #47 (parallel) → #54 → #52.
 - Operator 2026-10-29: #52 also includes a global --verbose flag (full child output to stderr, no spinner).
 - 2026-10-29: #58 ready-for-agent (low priority), queued after #52.
+- 2026-10-29: #59 ready-for-agent, queued after #54. Queue: #54 → #59 → #52 → #58. #51 still pending by operator choice.
