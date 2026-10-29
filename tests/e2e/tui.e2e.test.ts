@@ -184,7 +184,11 @@ class TuiSession {
           else if (final === "G") this.cursorX = Math.min(Math.max(amount - 1, 0), this.columns - 1);
           else if (final === "d") this.cursorY = Math.min(Math.max(amount - 1, 0), this.rows - 1);
           else if (final === "K") clearLine(params[0] ?? 0);
-          else if (final === "J" && (params[0] === 2 || params[0] === 3)) {
+          else if (final === "J" && params[0] === 0) {
+            // Erase from the cursor to the end of the screen, as the CLI spinner does to clear its tail.
+            clearLine(0);
+            for (let line = this.cursorY + 1; line < this.rows; line += 1) this.cells[line] = [];
+          } else if (final === "J" && (params[0] === 2 || params[0] === 3)) {
             this.cells = Array.from({ length: this.rows }, () => []);
             this.cursorX = 0;
             this.cursorY = 0;
@@ -1246,4 +1250,100 @@ test("a slow CLI command shows a spinner with elapsed time on a terminal and era
     session.kill();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+/** An isolated HOME with the fixture App approved, plus the environment and argv that install it with child output. */
+async function chatterInstall(root: string, extra: readonly string[] = []) {
+  const home = path.join(root, "home");
+  await mkdir(home);
+  const fixture = await fakeAppFixture(root);
+  await writeFile(fixture.file, JSON.stringify({ ...fixture.recipe, install: { argv: ["depot-e2e-app", "install", "--chatter=5", "--sleep-ms=2500"] } }));
+  const apps = createAppOperations({ homeDirectory: home, recipesDirectory: path.join(fixture.stateDirectory, "apps") });
+  const [entry] = await apps.load();
+  assert.ok(entry, "fixture recipe exists before approval");
+  await apps.approve(entry);
+  return {
+    fixture,
+    argv: ["app", "install", "fixture-app", "--yes", ...extra],
+    env: {
+      AGENT_DEPOT_NO_ANIMATION: "0",
+      PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
+      HOME: home,
+      USERPROFILE: home,
+      XDG_STATE_HOME: path.join(root, "state"),
+      XDG_CONFIG_HOME: path.join(root, "config"),
+      XDG_CACHE_HOME: path.join(root, "cache"),
+      PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
+    },
+  };
+}
+
+test("a slow CLI command shows the last three child lines under the spinner and erases them with it", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "depot-cli-tail-"));
+  const { fixture, argv, env } = await chatterInstall(root);
+  const session = new TuiSession(env, 100, 24, argv);
+  const samples: string[][] = [];
+  const sampler = setInterval(() => samples.push(session.screen.split("\n")), 20);
+  try {
+    assert.equal(await session.exitCode(), 0, `the install failed:\n${session.screen}`);
+    clearInterval(sampler);
+
+    const spinnerRow = (rows: string[]) => rows.findIndex((row) => /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Installing App fixture-app…/u.test(row));
+    const stepRows = (rows: string[]) => rows.filter((row) => row.includes("build step"));
+    const withTail = samples.filter((rows) => spinnerRow(rows) >= 0 && stepRows(rows).length > 0);
+    assert.ok(withTail.length > 0, `no frame ever showed child output under the spinner; last frame:\n${samples.at(-1)?.join("\n")}`);
+    for (const rows of withTail) {
+      // The tail sits directly under the spinner row, never more than three lines, never overwriting the preview above.
+      const spinner = spinnerRow(rows);
+      assert.ok(stepRows(rows).length <= 3, `more than three tail lines:\n${rows.join("\n")}`);
+      assert.deepEqual(rows.slice(spinner + 1, spinner + 1 + stepRows(rows).length), stepRows(rows), `the tail is not directly under the spinner:\n${rows.join("\n")}`);
+      assert.ok(rows.some((row) => row.includes("App fixture-app install")), "the preview stayed on screen");
+    }
+    const latest = withTail.at(-1)!;
+    assert.deepEqual(stepRows(latest).map((row) => row.trim()), ["build step 3", "build step 4", "build step 5"], "the newest three lines, from both stdout and stderr");
+
+    // The tail left with the spinner: the final screen holds only the result.
+    assert.match(session.screen, /fixture-app: installed/u);
+    assert.doesNotMatch(session.screen, /build step|Installing App/u, `child output or the label is left on screen:\n${session.screen}`);
+    assert.doesNotMatch(session.screen, /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u);
+    assert.equal(await readFile(fixture.state, "utf8"), "1.0.0");
+  } finally {
+    clearInterval(sampler);
+    session.kill();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("without a terminal child output stays hidden, and --verbose streams it to stderr only", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const run = async (extra: readonly string[]) => {
+    const root = await mkdtemp(path.join(tmpdir(), "depot-cli-pipe-"));
+    try {
+      const { argv, env } = await chatterInstall(root, extra);
+      return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+        const child = spawnProcess(process.execPath, [CLI, ...argv], { cwd: projectRoot, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk: Buffer) => { stdout += chunk; });
+        child.stderr.on("data", (chunk: Buffer) => { stderr += chunk; });
+        child.on("error", reject);
+        child.on("close", (code) => resolve({ code, stdout: stdout.replaceAll(root, "<sandbox>"), stderr }));
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  };
+
+  const quiet = await run([]);
+  assert.equal(quiet.code, 0, quiet.stderr);
+  assert.equal(quiet.stderr, "Installing App fixture-app…\n", "one plain step line and no child output");
+  assert.match(quiet.stdout, /fixture-app: installed/u);
+  assert.doesNotMatch(quiet.stdout, /build step/u);
+
+  const verbose = await run(["--verbose"]);
+  assert.equal(verbose.code, 0, verbose.stderr);
+  assert.equal(verbose.stdout, quiet.stdout, "--verbose never changes stdout");
+  const lines = verbose.stderr.split("\n");
+  assert.equal(lines[0], "Installing App fixture-app…");
+  // stdout and stderr of the child are separate pipes, so only the set of lines is fixed, not their interleaving.
+  assert.deepEqual(lines.slice(1).sort(), ["", ...[1, 2, 3, 4, 5].map((step) => `build step ${step}`)]);
 });

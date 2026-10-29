@@ -455,7 +455,7 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     let result;
     try {
       result = await runner(plan.executable, plan.argv.slice(1), {
-        cwd: home, captureStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
+        cwd: home, captureStdout: true, streamStdout: true, maxOutputBytes: APP_OUTPUT_LIMIT, maxStderrBytes: APP_OUTPUT_LIMIT,
       });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException | null)?.code;

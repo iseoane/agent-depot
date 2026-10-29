@@ -17,6 +17,13 @@ const state = ${JSON.stringify(state)};
 const log = ${JSON.stringify(log)};
 const [action, host] = process.argv.slice(2);
 fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }) + '\\n');
+// \`--chatter=N\` prints N build lines, alternating stdout and stderr, before anything else, so a journey can see a command's output.
+const chatter = process.argv.slice(2).find(argument => argument.startsWith('--chatter='));
+if (chatter) for (let step = 1; step <= Number(chatter.slice('--chatter='.length)); step += 1) {
+  fs.writeSync(step % 2 ? 1 : 2, 'build step ' + step + '\\n');
+  // A pause per line keeps the order in which stdout and stderr reach the parent deterministic.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60);
+}
 // \`--sleep-ms=N\` holds any action for N ms, so a journey can observe a slow step.
 const sleep = process.argv.slice(2).find(argument => argument.startsWith('--sleep-ms='));
 if (sleep) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(sleep.slice('--sleep-ms='.length)));

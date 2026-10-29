@@ -27,6 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refresh` and confirmed installs from a Git Source), because git can ask for
   credentials on the terminal and a spinner must never redraw over a prompt.
   stdout is unchanged, so JSON output stays parseable.
+- On an interactive terminal the CLI spinner now shows the last three lines of
+  output of the step's child processes (npm, pi, git, App and Package commands)
+  under it, cut to the terminal width and erased with the spinner when the step
+  ends; a failure still prints its captured output. Steps that may prompt stay on
+  one static line, and with no terminal or `AGENT_DEPOT_NO_ANIMATION=1` nothing
+  changes. The TUI is not affected.
+- A global `--verbose` flag, accepted anywhere on the command line, streams the
+  full child output to stderr line by line as it runs, instead of the spinner and
+  tail; steps print one plain line each, so it is also safe next to a prompt.
+  stdout is unchanged. Terminal escape sequences in child output are stripped,
+  and a failing command's output still appears again in its error message.
 
 ### Fixed
 

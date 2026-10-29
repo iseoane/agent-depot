@@ -1,10 +1,32 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
+
+/** Receives a decoded chunk of a running child's output; chunks are not split on line boundaries. */
+export type ChildOutputSink = (text: string, stream: "stdout" | "stderr") => void;
+
+const childOutputSinks = new AsyncLocalStorage<ChildOutputSink>();
+
+/**
+ * Runs `work` so that every child started by `runProcess` inside it (however deep, whichever runner
+ * a caller injected) also reports its output to `sink`. This is a read-only tap: capture, caps,
+ * timeouts and results behave exactly as without a sink.
+ */
+export function withChildOutput<T>(sink: ChildOutputSink, work: () => Promise<T>): Promise<T> {
+  return childOutputSinks.run(sink, work);
+}
 
 export interface ProcessRunOptions {
   readonly cwd?: string;
   /** Collect stdout instead of discarding it. */
   readonly captureStdout?: boolean;
+  /**
+   * With captureStdout, also show the captured stdout to the user. Captured stdout is normally
+   * data for the caller (a version, a git object) and stays hidden; set this when it is the
+   * command's own log, such as an App or Package lifecycle command.
+   */
+  readonly streamStdout?: boolean;
   /** With captureStdout, kill the process once stdout exceeds this many bytes. */
   readonly maxOutputBytes?: number;
   /** Cap stderr and kill the process if it exceeds this many bytes; otherwise uncapped. */
@@ -120,11 +142,13 @@ export function runProcess(
 ): Promise<ProcessRunResult> {
   return new Promise((resolve, reject) => {
     const invocation = spawnInvocation(command, args);
+    const sink = childOutputSinks.getStore();
     const child = spawn(invocation.command, [...invocation.args], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       shell: false,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      stdio: ["ignore", options.captureStdout ? "pipe" : "ignore", "pipe"],
+      // Without a capture, stdout is piped only for a sink, and then discarded after it is shown.
+      stdio: ["ignore", options.captureStdout || sink !== undefined ? "pipe" : "ignore", "pipe"],
     });
     const stdout: Buffer[] = [];
     let stdoutBytes = 0;
@@ -172,17 +196,23 @@ export function runProcess(
       terminate();
     }, options.timeoutMs);
     timeout?.unref();
+    const stdoutDecoder = new StringDecoder("utf8");
+    const showStdout = sink !== undefined && (!options.captureStdout || options.streamStdout === true);
     child.stdout?.on("data", (chunk: Buffer) => {
-      stdoutBytes += chunk.length;
-      if (options.maxOutputBytes !== undefined && stdoutBytes > options.maxOutputBytes) {
-        outputTooLarge = true;
-        terminate();
-        return;
+      if (options.captureStdout) {
+        stdoutBytes += chunk.length;
+        if (options.maxOutputBytes !== undefined && stdoutBytes > options.maxOutputBytes) {
+          outputTooLarge = true;
+          terminate();
+          return;
+        }
+        stdout.push(chunk);
       }
-      stdout.push(chunk);
+      if (showStdout) sink(stdoutDecoder.write(chunk), "stdout");
     });
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
+      sink?.(chunk, "stderr");
       const bytes = Buffer.from(chunk);
       const remaining = options.maxStderrBytes === undefined
         ? bytes.length : Math.max(0, options.maxStderrBytes - stderrBytes);

@@ -136,6 +136,15 @@ agent-depot tui
 agent-depot --version
 ```
 
+While a command runs a long step, progress goes to stderr (stdout never changes). On
+a terminal a spinner shows the step and, under it, the last three lines the step's
+child processes (npm, pi, git, App commands) print; both are erased when the step
+ends, and a failure still prints its captured output. Steps that may prompt (for
+example `git` asking for credentials) stay on one static line. Add `--verbose`
+anywhere on the command line to stream the full child output to stderr line by line
+instead, with plain step lines and no spinner. Without a terminal, or with
+`AGENT_DEPOT_NO_ANIMATION=1`, only the plain step line is printed.
+
 GitHub directory URLs such as `https://github.com/cursor/plugins/tree/main/pstack`
 are also supported: Agent Depot clones the repository, reads the URL's ref, and
 only discovers Skills inside that directory. Skill paths stay repository-relative.

@@ -538,6 +538,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
           result = await runner(resolution.executable, command.args, {
             cwd: plan.cwd,
             captureStdout: true,
+            streamStdout: true,
             maxOutputBytes: PACKAGE_OUTPUT_LIMIT,
             maxStderrBytes: PACKAGE_OUTPUT_LIMIT,
           });
