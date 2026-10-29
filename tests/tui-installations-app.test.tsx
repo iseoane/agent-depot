@@ -138,9 +138,12 @@ async function appFixture(
   const view = await renderExpanded(<InstallationsView operations={operations} environment={{ homeDirectory: home, projectRoot: project, appEnvironment }} />);
   t.after(async () => {
     // Status checks and package-state reads started by the view lock files under these directories.
-    await waitForSettled(view.lastFrame);
-    view.unmount();
-    await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true })));
+    try {
+      await waitForSettled(view.lastFrame);
+    } finally {
+      view.unmount();
+      await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true })));
+    }
   });
   return { view, apps, commands, home, setVersion: version => { reportedVersion = version; } };
 }

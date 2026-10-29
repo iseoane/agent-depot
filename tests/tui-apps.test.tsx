@@ -49,9 +49,12 @@ async function fixture(t: TestContext, options: { readonly approved?: boolean; r
     />,
   );
   t.after(async () => {
-    await waitForSettled(view.lastFrame);
-    view.unmount();
-    await rm(home, { recursive: true, force: true });
+    try {
+      await waitForSettled(view.lastFrame);
+    } finally {
+      view.unmount();
+      await rm(home, { recursive: true, force: true });
+    }
   });
   return { view, apps, commands };
 }

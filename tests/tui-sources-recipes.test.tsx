@@ -30,9 +30,12 @@ async function fixture(t: TestContext) {
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") });
   t.after(async () => {
     // A view's reload after an action locks the state file; let it finish before the directory goes.
-    for (const view of views) await waitForSettled(view.lastFrame);
-    for (const view of views) view.unmount();
-    await rm(home, { recursive: true, force: true });
+    try {
+      for (const view of views) await waitForSettled(view.lastFrame);
+    } finally {
+      for (const view of views) view.unmount();
+      await rm(home, { recursive: true, force: true });
+    }
   });
   const track = <T extends { unmount: () => void; lastFrame: () => string | undefined }>(view: T): T => {
     views.push(view);

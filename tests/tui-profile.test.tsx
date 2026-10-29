@@ -52,9 +52,12 @@ async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = 
   const view = render(<App operations={operations} environment={environment} onExit={() => { exits++; }} />);
   t.after(async () => {
     // A test can end right after switching tabs; the mounted view then still reads state under `home`.
-    await waitForSettled(view.lastFrame);
-    view.unmount();
-    await rm(home, { recursive: true, force: true });
+    try {
+      await waitForSettled(view.lastFrame);
+    } finally {
+      view.unmount();
+      await rm(home, { recursive: true, force: true });
+    }
   });
   await waitForFrame(view.lastFrame, /builtin:agent-depot/);
   view.stdin.write("5");
