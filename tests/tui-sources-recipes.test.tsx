@@ -184,7 +184,8 @@ test("recipe guide captures global number and quit keys in the shell", async t =
   view.stdin.write("\u001b");
   await waitForFrame(view.lastFrame, frame => !frame.includes("agent-depot app schema"));
   view.stdin.write("2");
-  await waitForFrame(view.lastFrame, /▶ \[2\] Catalog/);
+  // Catalog starts source-state reads that take locks under the fixture's state directory; wait for them to finish so teardown cannot race them.
+  await waitForFrame(view.lastFrame, frame => frame.includes("▶ [2] Catalog") && !frame.includes("Loading catalog"));
 });
 
 test("core approval status is explicit and reads no executables, commands or latest", async t => {
