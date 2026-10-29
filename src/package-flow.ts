@@ -543,7 +543,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
           });
         } catch (error) {
           const code = (error as NodeJS.ErrnoException | null)?.code;
-          if (code === undefined || !["ENOENT", "EACCES", "ENOEXEC", "EPERM"].includes(code)) {
+          if (code === undefined || !["ENOENT", "EACCES", "ENOEXEC", "EPERM", "EINVAL"].includes(code)) {
             throw error;
           }
           const detail = error instanceof Error ? error.message : String(error);

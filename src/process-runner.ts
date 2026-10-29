@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 
 export interface ProcessRunOptions {
   readonly cwd?: string;
@@ -21,16 +22,78 @@ export interface ProcessRunResult {
   readonly timedOut?: boolean;
 }
 
-/** Runs a command with an argument vector and no shell; rejects only when spawning fails. */
+/** cmd.exe metacharacters, escaped with `^` (same set as cross-spawn). */
+const CMD_META_CHARACTERS = /([()\][%!^"`<>&|;, *?])/gu;
+
+/**
+ * Characters that could chain commands or split the line if an npm cmd-shim's
+ * `%*` re-parse flips quote parity; rejecting them prevents injection, though an
+ * argument with `"` can still reach the program altered.
+ */
+const CMD_UNSAFE_ARGUMENT = /[\r\n&|<>]/u;
+
+/** Quotes one argument for the MSVCRT parser: backslashes double only before a quote or the closing quote. */
+function quoteMsvcrtArgument(argument: string): string {
+  let encoded = "";
+  let backslashes = 0;
+  for (const character of argument) {
+    if (character === "\\") {
+      backslashes += 1;
+      continue;
+    }
+    encoded += character === '"'
+      ? `${"\\".repeat(backslashes * 2 + 1)}"`
+      : `${"\\".repeat(backslashes)}${character}`;
+    backslashes = 0;
+  }
+  return `"${encoded}${"\\".repeat(backslashes * 2)}"`;
+}
+
+function escapeCmdArgument(argument: string, index: number): string {
+  if (CMD_UNSAFE_ARGUMENT.test(argument)) {
+    throw Object.assign(
+      new Error(`Argument ${index} cannot be passed safely to a Windows batch file (line break or & | < > character)`),
+      { code: "EINVAL" },
+    );
+  }
+  return quoteMsvcrtArgument(argument).replace(CMD_META_CHARACTERS, "^$1");
+}
+
+/**
+ * Windows cannot spawn a `.cmd`/`.bat` file without a shell (Node rejects it
+ * since CVE-2024-27980), so it runs through `cmd.exe /d /s /c` with every
+ * argument quoted and escaped; any other command is spawned directly. An
+ * argument cmd.exe could misparse is rejected with `EINVAL`.
+ */
+export function spawnInvocation(
+  command: string,
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): { readonly command: string; readonly args: readonly string[]; readonly windowsVerbatimArguments: boolean } {
+  if (platform !== "win32" || !/\.(?:cmd|bat)$/iu.test(command)) {
+    return { command, args, windowsVerbatimArguments: false };
+  }
+  const line = [path.win32.normalize(command).replace(CMD_META_CHARACTERS, "^$1"), ...args.map(escapeCmdArgument)].join(" ");
+  return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], windowsVerbatimArguments: true };
+}
+
+/**
+ * Runs a command with an argument vector and no shell (except cmd.exe for
+ * Windows batch files); rejects only when spawning fails. On Windows, an
+ * argument to a `.cmd`/`.bat` file containing a line break or `& | < >` is
+ * rejected with `EINVAL` because cmd.exe cannot carry it safely.
+ */
 export function runProcess(
   command: string,
   args: readonly string[],
   options: ProcessRunOptions = {},
 ): Promise<ProcessRunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, [...args], {
+    const invocation = spawnInvocation(command, args);
+    const child = spawn(invocation.command, [...invocation.args], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       shell: false,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       stdio: ["ignore", options.captureStdout ? "pipe" : "ignore", "pipe"],
     });
     const stdout: Buffer[] = [];

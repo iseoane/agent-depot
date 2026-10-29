@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, installing a Package whose host CLI is an npm global such as `pi`
+  no longer fails with `spawn ... ENOENT`. Executable lookup now only accepts
+  `PATHEXT` candidates, so npm's extensionless shell shim is skipped in favor of
+  `pi.cmd`, and `.cmd`/`.bat` files run through `cmd.exe` with escaped arguments.
+
 ## [0.6.4] - 2026-10-23
 
 ### Fixed
