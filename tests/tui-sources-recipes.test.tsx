@@ -8,7 +8,7 @@ import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import { SourcesView, type SourcesViewProps } from "../src/tui/sources-view.js";
-import { squash, waitForFrame } from "./wait-for-frame.js";
+import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 
 const recipe = { name: "demo", install: { argv: ["demo", "install"] }, update: { manual: "update demo" },
   uninstall: { argv: ["demo", "remove"] }, version: { argv: ["demo", "version"], pattern: "(.*)" },
@@ -22,17 +22,22 @@ async function fixture(t: TestContext) {
   await writeFile(file, JSON.stringify(recipe));
   const commands: string[] = [];
   const fetches: string[] = [];
-  const views: { unmount: () => void }[] = [];
+  const views: { unmount: () => void; lastFrame: () => string | undefined }[] = [];
   const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory: directory, platform: "linux",
     resolveExecutable: async name => `/usr/bin/${name}`,
     runner: async (_exe, args) => { commands.push(args.join(" ")); throw new Error("No recipe command should run"); },
     fetch: async () => { fetches.push("latest"); throw new Error("No latest lookup should run"); } };
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") });
   t.after(async () => {
-    for (const view of views) view.unmount();
-    await rm(home, { recursive: true, force: true });
+    // A view's reload after an action locks the state file; let it finish before the directory goes.
+    try {
+      for (const view of views) await waitForSettled(view.lastFrame);
+    } finally {
+      for (const view of views) view.unmount();
+      await rm(home, { recursive: true, force: true });
+    }
   });
-  const track = <T extends { unmount: () => void }>(view: T): T => {
+  const track = <T extends { unmount: () => void; lastFrame: () => string | undefined }>(view: T): T => {
     views.push(view);
     return view;
   };

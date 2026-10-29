@@ -147,7 +147,7 @@ async function fixture(t: TestContext, overrides: Partial<PackageOperations> = {
   );
   t.after(async () => {
     view.unmount();
-    await rm(home, { recursive: true, force: true, maxRetries: 3 });
+    await rm(home, { recursive: true, force: true });
   });
   return { view, calls };
 }

@@ -19,7 +19,7 @@ import { App } from "../src/tui/app.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { renderExpanded } from "./render-expanded.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 
 const SKILL_MD = "---\nname: demo\ndescription: Demo skill\n---\n\nBody\n";
 const tree: readonly SkillTreeFile[] = [
@@ -137,8 +137,13 @@ async function appFixture(
   const operations = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
   const view = await renderExpanded(<InstallationsView operations={operations} environment={{ homeDirectory: home, projectRoot: project, appEnvironment }} />);
   t.after(async () => {
-    view.unmount();
-    await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true, maxRetries: 3 })));
+    // Status checks and package-state reads started by the view lock files under these directories.
+    try {
+      await waitForSettled(view.lastFrame);
+    } finally {
+      view.unmount();
+      await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true })));
+    }
   });
   return { view, apps, commands, home, setVersion: version => { reportedVersion = version; } };
 }
@@ -494,6 +499,8 @@ test("key 3 opens the Installations view, listed in the header and footer hints"
   assert.match(frame, /\[2\] Catalog/);
   stdin.write("1");
   await waitForFrame(lastFrame, /▶ \[1\] Sources/);
+  // Sources reads state under the fixture as it mounts; wait for it so teardown cannot race the read.
+  await waitForSettled(lastFrame);
   unmount();
 });
 

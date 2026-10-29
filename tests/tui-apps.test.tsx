@@ -8,7 +8,7 @@ import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { renderExpanded } from "./render-expanded.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 
 async function fixture(t: TestContext, options: { readonly approved?: boolean; readonly installed?: boolean; readonly unknown?: boolean } = {}) {
   const home = await mkdtemp(path.join(tmpdir(), "tui-apps-"));
@@ -48,7 +48,14 @@ async function fixture(t: TestContext, options: { readonly approved?: boolean; r
       listHeight={20}
     />,
   );
-  t.after(async () => { view.unmount(); await rm(home, { recursive: true, force: true, maxRetries: 3 }); });
+  t.after(async () => {
+    try {
+      await waitForSettled(view.lastFrame);
+    } finally {
+      view.unmount();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
   return { view, apps, commands };
 }
 
