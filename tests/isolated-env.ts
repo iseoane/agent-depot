@@ -27,4 +27,10 @@ delete process.env.XDG_CONFIG_HOME;
 delete process.env.PI_CODING_AGENT_DIR;
 
 const home = mkdtempSync(path.join(tmpdir(), "agent-depot-test-home-"));
+process.env.HOME = home;
+process.env.USERPROFILE = home;
+process.env.APPDATA = path.join(home, "AppData", "Roaming");
+process.env.LOCALAPPDATA = path.join(home, "AppData", "Local");
+process.env.GIT_CONFIG_GLOBAL = path.join(home, ".gitconfig");
+process.env.GIT_CONFIG_NOSYSTEM = "1";
 process.on("exit", () => rmSync(home, { recursive: true, force: true }));
