@@ -279,12 +279,15 @@ function capturedOutput(session: TuiSession): string {
   return session.terminalOutput.replace(ANSI, "").replaceAll("\r", "");
 }
 
-async function scrollPreviewToEnd(session: TuiSession, ready: RegExp): Promise<string> {
+/** Pages to `ready` and returns the screens visited joined; `frames`, when given, also receives each screen. */
+async function scrollPreviewToEnd(session: TuiSession, ready: RegExp, frames: string[] = []): Promise<string> {
   let visited = session.screen;
+  frames.push(session.screen);
   for (let move = 0; move < 200; move += 1) {
     if (ready.test(session.screen)) return `${visited}\n${session.screen}`;
     await session.send("\u001b[6~", new RegExp(`${ready.source}|arrows\\/Pg page`, ready.flags));
     visited += `\n${session.screen}`;
+    frames.push(session.screen);
   }
   assert.fail(`preview did not reach confirmation:\n${session.screen}`);
 }
@@ -335,7 +338,9 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     await session.send("n", /LOCATION \/ STATUS/u);
     assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "skills")), "Sources resource types use Xeo blue");
     assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "app")), "App recipe type uses Xeo blue");
-    assert.ok(session.terminalOutput.includes(ansiColor(224, 175, 104, "needs approval")), "unapproved recipe status uses the warning color");
+    // A long recipe path wraps the status onto its own rows, so each word may carry the color separately.
+    const warning = (text: string) => session.terminalOutput.includes(ansiColor(224, 175, 104, text));
+    assert.ok(warning("needs approval") || (warning("needs") && warning("approval")), "unapproved recipe status uses the warning color");
     assert.equal(execFileSync(process.execPath, [CLI, "source", "list"], { cwd: projectRoot, env: { ...process.env, ...environment }, encoding: "utf8" }).includes(url), true);
     await session.send("j", /fixture-app/u);
     await session.send("\r", /Recipe approval · does not install/u);
@@ -760,20 +765,15 @@ test("a long Package approval pages inside a short real terminal and never hides
     session.press("i");
     const first = await session.waitFor(/Review 1 of \d+/u);
     assertWholeFrame(first);
-    assert.match(first, /Scroll to end before y; n cancels\./u);
+    assert.match(first, /Approve this declaration and continue\? y\/n/u, "the question is on every page");
     assert.match(first, /arrows\/Pg page/u);
-
-    // y before the last row must not approve anything: the question is still the scrolling notice.
-    session.press("y");
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.match(session.screen, /Review 1 of \d+/u, `y moved past the first page:\n${session.screen}`);
 
     const visited: string[] = [];
     for (let page = 0; page < 60; page += 1) {
       const screen = session.screen;
       assertWholeFrame(screen);
       visited.push(screen);
-      if (/Approve this declaration and continue\? y\/n/u.test(screen)) break;
+      if (/Review (\d+) of \1\b/u.test(screen)) break;
       const position = Number(/Review (\d+) of \d+/u.exec(screen)?.[1]);
       await session.send("\u001b[6~", /Review \d+ of \d+/u);
       assert.notEqual(Number(/Review (\d+) of \d+/u.exec(session.screen)?.[1]), position, `PgDn did not move the review:\n${session.screen}`);
@@ -781,7 +781,7 @@ test("a long Package approval pages inside a short real terminal and never hides
     // Rows are rebuilt by each page's window, so a line wrapped across a page boundary reads back whole.
     const everything = pagedRows(visited).join("").replace(/\s/gu, "");
     assert.ok(visited.length > 1, `the declaration fit one page, so nothing was paged:\n${visited[0]}`);
-    assert.match(visited.at(-1)!, /Approve this declaration and continue\? y\/n/u, "paging never reached the question");
+    assert.match(visited.at(-1)!, /Review (\d+) of \1\b/u, "paging never reached the last row");
     for (const expected of [`Workingdirectory:${home}`, "Approval:needsapproval", "Step1(apply):"]) {
       assert.ok(everything.includes(expected), `paging never showed ${expected}:\n${pagedRows(visited).join("\n")}`);
     }
@@ -905,8 +905,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     assert.ok(nearEnd, `preview lost its position before consent:\n${session.screen}`);
     assert.ok(approvalQuestion(), `did not reach the final approval boundary:\n${session.screen}`);
     const beforeFinal = Number(nearEnd[1]) - 1;
-    session.press("k");
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await session.send("k", /Scroll to end before y/u);
     collectRows(narrowRows);
     assert.match(session.screen, /Scroll to end before y/u, `previous preview row did not close confirmation:\n${session.screen}`);
     assert.equal(Number(/Review (\d+) of (\d+)/u.exec(session.screen)?.[1]), beforeFinal, `preview cursor did not move back one physical row:\n${session.screen}`);
@@ -986,6 +985,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     session.resize(40, 17);
     await session.send("j", /Review 2 of \d+/u);
     installPreview += capturedOutput(session);
+    const installFrames = [session.screen];
     const installRows = Number(/Review 2 of (\d+)/u.exec(session.screen)?.[1]);
     assert.ok(installRows > 11, `long install preview should exceed the resized 40x17 viewport: ${installRows}\n${session.screen}`);
     for (let move = 0; move < 80; move += 1) {
@@ -994,6 +994,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
       if (Number(progress[1]) - 1 + 10 >= Number(progress[2])) break;
       await session.send("\u001b[6~", /arrows\/Pg page/u);
       installPreview += capturedOutput(session);
+      installFrames.push(session.screen);
     }
     const beforeInstall = session.screen;
     const nearEnd = /Review (\d+) of (\d+)/u.exec(beforeInstall);
@@ -1007,7 +1008,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "early y must not execute the install command");
     await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
     installPreview += capturedOutput(session);
-    installPreview += await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u);
+    installPreview += await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u, installFrames);
     const continuousInstallPreview = installPreview.replace(/\s/gu, "");
     assert.ok(continuousInstallPreview.includes("argv:["), `install preview omitted JSON argv:\n${installPreview}`);
     assert.ok(continuousInstallPreview.includes("Executable:"));
@@ -1015,8 +1016,9 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     assert.ok(!continuousInstallPreview.includes("Executable:…"), `install preview abbreviated the executable path:\n${installPreview}`);
     assert.ok(continuousInstallPreview.includes("Environment:linux"));
     assert.ok(continuousInstallPreview.includes("FINAL-IN") && continuousInstallPreview.includes("STALL-MANUAL-TERM"), `manual execution terms were not displayed before consent:\n${installPreview}`);
-    const finalInstallPreview = session.screen.replace(/[│╭╮╰╯]/gu, "").replace(/\s/gu, "");
-    assert.ok(finalInstallPreview.includes(previewHome.replace(/\s/gu, "")), `install preview omitted the full working directory:\n${session.screen}`);
+    // A long home wraps the working directory over several rows, so it is read back from the pages' row windows.
+    const installRowsSeen = pagedRows(installFrames).join("").replace(/\s/gu, "");
+    assert.ok(installRowsSeen.includes(previewHome.replace(/\s/gu, "")), `install preview omitted the full working directory:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= 17, `confirmation exceeded the 17-row PTY:\n${session.screen}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "preview must not execute the recipe");
     const installed = await session.send("y", /fixture-app: installed/u);
@@ -1038,7 +1040,8 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     session.resize(80, 24);
     await session.waitFor(/j\/k move/u, screen => screen.split("\n").length >= 24);
     const uninstallPreview = await session.send("u", /uninstall fixture-app\? y\/n/u);
-    const continuousUninstallPreview = uninstallPreview.replace(/\s/gu, "");
+    // Box borders are dropped too: a long path wraps across rows, and each wrapped row ends in a border.
+    const continuousUninstallPreview = uninstallPreview.replace(/[│╭╮╰╯─\s]/gu, "");
     assert.ok(continuousUninstallPreview.includes("Executable:"));
     assert.ok(continuousUninstallPreview.includes("depot-e2e-app"));
     assert.ok(continuousUninstallPreview.includes("Environment:linux"));
@@ -1173,7 +1176,9 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await exporting.send("profile.json", /Name: profile\.json_/u);
     const confirmation = await exporting.send("\r", /Save\/Export Profile\? \(y\/n\)/u);
     assert.ok(confirmation.split("\n").length <= 40, `Profile confirmation exceeded its PTY:\n${confirmation}`);
-    assert.ok(confirmation.includes(`Destination: ${file}`), "Destination text is unchanged");
+    // Borders and spaces are dropped: a long project path wraps the destination over several rows.
+    const borderless = (text: string) => text.replace(/[│╭╮╰╯─\s]/gu, "");
+    assert.ok(borderless(confirmation).includes(borderless(`Destination: ${file}`)), "Destination text is unchanged");
     assert.ok(confirmation.includes("Preview: export portable user-global profile"), "Preview text is unchanged");
     assert.ok(confirmation.includes("Skill skills/alpha [claude, pi] (latest)"), "Skill preview text is unchanged");
     assert.ok(exporting.terminalOutput.includes(ansiColor(122, 162, 247, "Destination:")), "Destination field is blue");
