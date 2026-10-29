@@ -83,7 +83,8 @@ const WINDOWS_KILL_GRACE_MS = 2_000;
 /**
  * Terminates a Windows child and everything it started. `child.kill()` ends
  * only the direct child, so for a batch file it would stop cmd.exe and leave
- * the real program running with the stdio pipes open. Falls back to
+ * the real program running with the stdio pipes open; a program that starts
+ * helpers has the same problem. Falls back to
  * `child.kill()` when taskkill cannot be started or fails (for example because
  * the child already exited). Never throws and does not wait for taskkill.
  */
@@ -105,10 +106,10 @@ function killWindowsProcessTree(child: ChildProcess): void {
 
 /**
  * Runs a command with an argument vector and no shell (except cmd.exe for
- * Windows batch files); rejects only when spawning fails. On Windows a timeout
- * or output overflow kills the whole process tree, and the result is returned
- * within a bounded time even if a descendant survives and holds the stdio pipes
- * open. Also on Windows, an argument to a `.cmd`/`.bat` file containing a line
+ * Windows batch files); rejects only when spawning fails. For every command on
+ * Windows, a timeout or output overflow kills the whole process tree and reports
+ * it as terminated by `SIGTERM`, and the result is returned within a bounded
+ * time even if a descendant survives and holds the stdio pipes open. Also on Windows, an argument to a `.cmd`/`.bat` file containing a line
  * break or `& | < >` is rejected with `EINVAL` because cmd.exe cannot carry it
  * safely.
  */
@@ -133,10 +134,16 @@ export function runProcess(
     let timedOut = false;
     let settled = false;
     let terminating = false;
+    let killedByRunner = false;
     let graceTimer: NodeJS.Timeout | undefined;
     const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (settled) return;
       settled = true;
+      // taskkill ends the process with exit code 1 and no signal; report it like child.kill() does, so callers see a terminated process.
+      if (killedByRunner && signal === null) {
+        code = null;
+        signal = "SIGTERM";
+      }
       if (timeout !== undefined) clearTimeout(timeout);
       if (graceTimer !== undefined) clearTimeout(graceTimer);
       resolve({ code, signal, stdout: Buffer.concat(stdout), stderr, outputTooLarge, ...(timedOut ? { timedOut: true } : {}) });
@@ -148,7 +155,11 @@ export function runProcess(
       }
       if (terminating) return;
       terminating = true;
-      killWindowsProcessTree(child);
+      // A child that already exited must not be killed: its pid may have been reused.
+      if (child.exitCode === null && child.signalCode === null) {
+        killedByRunner = true;
+        killWindowsProcessTree(child);
+      }
       // A surviving descendant keeps the pipes open, so `close` may never come: give up on them.
       graceTimer = setTimeout(() => {
         child.stdout?.destroy();
