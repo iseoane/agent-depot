@@ -5,7 +5,7 @@ import { render } from "ink-testing-library";
 
 import { Working } from "../src/tui/panel-parts.js";
 import { animationEnabled, busy, formatElapsed, isWorkingFrame, SPINNER_FRAMES } from "../src/tui/working-model.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { isBusy, waitForFrame } from "./wait-for-frame.js";
 
 test("formatElapsed hides the first second, then counts seconds and minutes", () => {
   assert.equal(formatElapsed(0), "");
@@ -30,6 +30,12 @@ test("isWorkingFrame tells a Working line from content", () => {
   assert.equal(isWorkingFrame("· Loading catalog…\n"), true);
   assert.equal(isWorkingFrame("Loading catalog..."), false);
   assert.equal(isWorkingFrame("▸ Skills\n  alpha"), false);
+});
+
+test("isBusy finds a Working line anywhere in a shell frame but not footer separators", () => {
+  assert.equal(isBusy("│ [1] Sources  ▶ [2] Catalog │\n│ · Loading catalog…         │\n│ q quit │"), true);
+  assert.equal(isBusy("│ j/k move · space mark · a all · Enter catalog · n add… │"), false);
+  assert.equal(isBusy("▸ Skills\n  alpha"), false);
 });
 
 test("Working advances the spinner frame while animating", async (t) => {

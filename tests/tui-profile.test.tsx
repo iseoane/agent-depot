@@ -11,7 +11,7 @@ import { createSourceOperations, type SourceOperationsOptions } from "../src/sou
 import { App } from "../src/tui/app.js";
 import { ProfileView } from "../src/tui/profile-view.js";
 import { fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
-import { squash, waitForFrame } from "./wait-for-frame.js";
+import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
@@ -50,7 +50,12 @@ async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = 
     runner: async () => { throw new Error("Recipes must not execute"); } } };
   let exits = 0;
   const view = render(<App operations={operations} environment={environment} onExit={() => { exits++; }} />);
-  t.after(() => { view.unmount(); return rm(home, { recursive: true, force: true }); });
+  t.after(async () => {
+    // A test can end right after switching tabs; the mounted view then still reads state under `home`.
+    await waitForSettled(view.lastFrame);
+    view.unmount();
+    await rm(home, { recursive: true, force: true });
+  });
   await waitForFrame(view.lastFrame, /builtin:agent-depot/);
   view.stdin.write("5");
   await waitForFrame(view.lastFrame, /e export.*i import/);

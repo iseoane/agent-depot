@@ -23,3 +23,18 @@ export async function waitForFrame(
 export function squash(frame: string): string {
   return frame.replace(/[│╭╮╰╯─\s]/gu, "");
 }
+
+/** Whether a line of the frame is a Working line (glyph, label, ellipsis), so some view still has work in flight. */
+export function isBusy(frame: string): boolean {
+  return /^[│\s]*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏·] \S[^\n]*…/mu.test(frame);
+}
+
+/**
+ * Waits until no view shows a Working line. A view reads and locks state files under the fixture
+ * until its Working line clears, so a test that ends before that lets teardown race those
+ * operations and `rm` fails with ENOTEMPTY. Call it last when the final frame can still be loading,
+ * for example right after switching views.
+ */
+export async function waitForSettled(lastFrame: () => string | undefined, timeoutMs = 5000): Promise<string> {
+  return waitForFrame(lastFrame, (frame) => !isBusy(frame), timeoutMs);
+}

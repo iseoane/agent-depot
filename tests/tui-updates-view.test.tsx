@@ -22,7 +22,7 @@ import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -677,6 +677,8 @@ test("key 4 opens the Updates view; q and number keys are ignored while confirmi
   await waitForFrame(lastFrame, /Update cancelled/);
   press(stdin, "1");
   await waitForFrame(lastFrame, /▶ \[1\] Sources/);
+  // Sources reads state under the fixture as it mounts; wait for it so teardown cannot race the read.
+  await waitForSettled(lastFrame);
   unmount();
 });
 
