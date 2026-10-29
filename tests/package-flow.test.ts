@@ -657,6 +657,30 @@ test("a blocked WSL Windows executable falls back to manual required", async () 
   });
 });
 
+test("only launch errors offer manual fallback; unexpected runner errors propagate", async () => {
+  await withHarness({}, async (harness) => {
+    let code = "ENOENT";
+    harness.setRunner(async () => {
+      throw Object.assign(new Error("runner error"), { code });
+    });
+    const selection = piSelection();
+    const plan = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+
+    for (code of ["ENOENT", "EACCES", "ENOEXEC", "EPERM", "EINVAL"]) {
+      const result = await harness.operations.executeLifecycle(plan, true);
+      assert.equal(result.status, "manual required", code);
+      assert.match(result.reason, new RegExp(`\\(${code}\\): runner error`, "u"));
+    }
+    assert.equal(harness.calls.length, 5);
+
+    code = "EIO";
+    await assert.rejects(harness.operations.executeLifecycle(plan, true), /runner error/u);
+    assert.equal(harness.calls.length, 6);
+    assert.equal((await harness.operations.list()).length, 0);
+  });
+});
+
 test("forget requires confirmation, drops the record, and runs no host command", async () => {
   await withHarness({}, async (harness) => {
     const selection = piSelection();
