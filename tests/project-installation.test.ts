@@ -86,8 +86,10 @@ test("installs a full project Skill tree at the canonical path and exposes Claud
     assert.equal(result.baseline.algorithm, "sha256");
     assert.match(result.baseline.digest, /^[0-9a-f]{64}$/u);
     assert.deepEqual(await readFile(path.join(canonicalPath, "assets", "data.bin")), Buffer.from([0x00, 0xff, 0x80]));
-    assert.equal((await lstat(path.join(canonicalPath, "SKILL.md"))).mode & 0o777, 0o644);
-    assert.equal((await lstat(path.join(canonicalPath, "scripts", "run.sh"))).mode & 0o111, 0o111);
+    if (process.platform !== "win32") { // Windows has no POSIX mode bits
+      assert.equal((await lstat(path.join(canonicalPath, "SKILL.md"))).mode & 0o777, 0o644);
+      assert.equal((await lstat(path.join(canonicalPath, "scripts", "run.sh"))).mode & 0o111, 0o111);
+    }
     assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
@@ -467,7 +469,9 @@ test("overwrites one untracked real directory with a retained exact backup", asy
     assert.ok(result.backupPath);
     assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "SKILL");
     assert.equal(await readFile(path.join(result.backupPath!, "SKILL.md"), "utf8"), "locally owned");
-    assert.equal((await lstat(path.join(result.backupPath!, "SKILL.md"))).mode & 0o111, 0o111);
+    if (process.platform !== "win32") { // Windows has no POSIX mode bits
+      assert.equal((await lstat(path.join(result.backupPath!, "SKILL.md"))).mode & 0o111, 0o111);
+    }
     assert.equal(await readFile(path.join(existing, "assets", "data.bin")).then((value) => value[1]), 0xff);
   } finally {
     await rm(projectRoot, { recursive: true, force: true });

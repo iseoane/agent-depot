@@ -8,7 +8,7 @@ import { fakeAppFixture } from "./fake-app-fixture.js";
 
 const cliPath = path.resolve("dist/src/cli.js");
 
-test("built CLI approves, installs, updates, wires and uninstalls Apps hermetically", { skip: process.platform === "win32" }, async () => {
+test("built CLI approves, installs, updates, wires and uninstalls Apps hermetically", { skip: process.platform === "win32" && "the fixture App is an extensionless shebang script, which Windows cannot execute" }, async () => {
   const sandbox = await mkdtemp(path.join(tmpdir(), "depot-app-e2e-"));
   try {
     const home = path.join(sandbox, "home");

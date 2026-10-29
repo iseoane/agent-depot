@@ -9,7 +9,7 @@ import { applyProfileImport, buildProfileImport } from "../src/profile-import.js
 import { createPackageSide, hostedSelection } from "./profile-package-fixture.js";
 import { profileFiles, profileSandbox, profileSourceUrl, seedProfileSandbox } from "./profile-e2e-fixture.js";
 
-test("built CLI transfers Profile choices without approvals, App installs or repeated writes", { skip: process.platform !== "linux" }, async () => {  const root = await mkdtemp(path.join(tmpdir(), "depot-profile-e2e-"));
+test("built CLI transfers Profile choices without approvals, App installs or repeated writes", { skip: process.platform !== "linux" && "the fixture App is an extensionless shebang script and the sandbox assumes POSIX symlinks" }, async () => {  const root = await mkdtemp(path.join(tmpdir(), "depot-profile-e2e-"));
   try {
     const repo = path.join(root, "repo");
     const a = await profileSandbox(path.join(root, "a"), repo);
@@ -60,7 +60,7 @@ test("built CLI transfers Profile choices without approvals, App installs or rep
  * The Source snapshot is a fixture and no network runs, while the state store,
  * its receipts, the profile file and the sandbox tree are all real.
  */
-test("Profile files carry a Package selection through the real state layout without a host command", { skip: process.platform !== "linux" }, async () => {
+test("Profile files carry a Package selection through the real state layout without a host command", { skip: process.platform !== "linux" && "the fixture App is an extensionless shebang script and the sandbox assumes POSIX symlinks" }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), "depot-profile-packages-e2e-"));
   try {
     const repo = path.join(root, "unused-repo");

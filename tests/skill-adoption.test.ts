@@ -43,7 +43,8 @@ test("reads an existing tree without following symlinks", async (t) => {
     await chmod(path.join(root, "bin", "run.sh"), 0o755);
     const tree = await readExistingSkillTree(root, "portable/demo", fileSystem);
     assert.deepEqual(tree.map((file) => file.path), ["portable/demo/bin/run.sh", "portable/demo/SKILL.md"]);
-    assert.equal(tree.find((file) => file.path.endsWith("bin/run.sh"))?.executable, true);
+    // Windows reports no execute bit, so only POSIX can observe `executable`.
+    if (process.platform !== "win32") assert.equal(tree.find((file) => file.path.endsWith("bin/run.sh"))?.executable, true);
 
     try {
       await symlink(path.join(root, "SKILL.md"), path.join(root, "link"));
