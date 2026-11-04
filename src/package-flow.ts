@@ -395,7 +395,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
         if (contradiction !== undefined) {
           return { status: "failed", reason: `${contradiction}; the selection record was left untouched` };
         }
-        const change = installedEvidenceChange(context.previous, observed);
+        const change = installedEvidenceChange(context.previous, observed, context.selection.host, context.available);
         if (change === "unknown") {
           return {
             status: "failed",
@@ -744,17 +744,25 @@ type InstalledEvidenceChange = "changed" | "unchanged" | "unknown";
 /**
  * Three outcomes, not two. `unknown` means the two observations carry no
  * comparable evidence, and an update must not report that as a success. A host
- * that had nothing installed and now reports an install has changed.
+ * that had nothing installed and now reports an install has changed. Versioned
+ * Claude plugins use literal cache versions, just as update eligibility does.
  */
 function installedEvidenceChange(
   previous: InstalledBundleEvidence | undefined,
   observed: InstalledBundleEvidence,
+  host: PackageSelection["host"],
+  available: PackageVersionEvidence | undefined,
 ): InstalledEvidenceChange {
   if (observed.kind !== "installed" || previous === undefined || previous.kind === "unknown") {
     return "unknown";
   }
   if (previous.kind === "absent") {
     return "changed";
+  }
+  if (host === "claude" && available?.kind === "manifest-version") {
+    if (previous.version === undefined || observed.version === undefined
+      || previous.reason !== undefined || observed.reason !== undefined) return "unknown";
+    return previous.version === observed.version ? "unchanged" : "changed";
   }
   const previousCommit = previous.commit === undefined ? undefined : gitCommitId(previous.commit);
   const observedCommit = observed.commit === undefined ? undefined : gitCommitId(observed.commit);
