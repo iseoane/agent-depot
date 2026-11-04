@@ -173,7 +173,7 @@ test("source remove shows inspection, file removal and Source removal", async ()
     await seedSkill(home, "kept");
     await seedSkill(home, "removed");
     assert.equal(await run(["source", "remove", sourceIdForUrl(SOURCE_URL), "--skill", "portable/removed", "--yes"]), 0);
-  }, ["Inspecting 1 Skill for removal", "Removing Skill files", `Removing Git Source ${sourceIdForUrl(SOURCE_URL)}`]);
+  }, ["Inspecting 1 Skill for removal", "Removing Skill files", "Revalidating Skill records before Source removal", `Removing Git Source ${sourceIdForUrl(SOURCE_URL)}`]);
 });
 
 test("skill remove shows its execution step", async () => {
