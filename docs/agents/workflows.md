@@ -9,7 +9,13 @@ the isSWF coordinator; they do not replace its implementation workflow.
 - Use `codebase-design` when designing or restructuring modules, interfaces, seams, boundaries, or abstractions.
 - Use `grilling` only when a genuine product or domain decision remains after the available evidence is exhausted.
 - Use `research` when external or primary-source investigation is required.
-- Use `code-review` when a meaningful specification or explicit requirements exist and the finished implementation needs a requirements check.
+
+## Change review
+
+When a finished implementation needs an independent review, use the isSWF
+reviewer (`isswf-reviewer`) with the canonical `isswf-review` procedure. Assess
+Standards and Spec separately against the exact candidate and accepted objective.
+The supporting `code-review` skill is not a prerequisite.
 
 ## Independent Matt Pocock workflows
 
