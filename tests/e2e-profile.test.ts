@@ -38,7 +38,8 @@ test("built CLI transfers Profile choices without approvals, App installs or rep
     assert.match(b.ok("source", "list"), /builtin:agent-depot/);
     for (const name of ["alpha", "agent-depot-apprecipe"]) {
       assert.match(await readFile(path.join(b.home, ".agents/skills", name, "SKILL.md"), "utf8"), new RegExp(`name: "?${name}"?`));
-      assert.equal(await readlink(path.join(b.home, ".claude/skills", name)), `../../.agents/skills/${name}`);
+      const linkPath = path.join(b.home, ".claude/skills", name);
+      assert.equal(path.resolve(path.dirname(linkPath), await readlink(linkPath)), path.join(b.home, ".agents/skills", name));
     }
     const exported = JSON.parse(b.cli("export").stdout);
     assert.deepEqual(exported.skills, profile.skills);

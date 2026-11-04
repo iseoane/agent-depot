@@ -23,7 +23,7 @@ export interface ProjectInstallationFileSystem {
   mkdir(candidate: string): Promise<void>;
   writeFile(candidate: string, content: Uint8Array): Promise<void>;
   chmod(candidate: string, mode: number): Promise<void>;
-  symlink(target: string, candidate: string, type: "dir"): Promise<void>;
+  symlink(target: string, candidate: string, type: "dir" | "junction"): Promise<void>;
   readlink(candidate: string): Promise<string>;
   rm(candidate: string): Promise<void>;
   rmdir(candidate: string): Promise<void>;
@@ -166,6 +166,8 @@ export interface ProjectSkillUpdateInspection {
 export interface ProjectSkillRemovalInspection {
   readonly skillName: string;
   readonly paths: readonly string[];
+  /** True only for explicit record-only recovery of a verified absent installation. */
+  readonly recordOnly?: true;
   /** Digest captured during preflight and required to match before deletion. */
   readonly digest: string;
   readonly adopted: boolean;
@@ -241,7 +243,7 @@ export async function inspectProjectSkillRemoval(
   const paths = [targetPath];
 
   // A Claude exposure created by Agent Depot is removable only when it is the
-  // exact relative symlink to this canonical installation. Never follow or
+  // exact managed directory link to this canonical installation. Never follow or
   // remove an unrelated path merely because the Skill selected Claude.
   const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
   const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
@@ -252,14 +254,14 @@ export async function inspectProjectSkillRemoval(
       if (!claudeInformation.isSymbolicLink()) {
         throw new ProjectInstallationError(
           "unsafe-target",
-          `Cannot remove the tracked Skill because its Claude location is not the managed symlink: ${claudePath}; no path was changed`,
+          `Cannot remove the tracked Skill because its Claude location is not the managed directory link: ${claudePath}; no path was changed`,
         );
       }
       const target = await fileSystem.readlink(claudePath);
       if (path.resolve(path.dirname(claudePath), target) !== canonicalPath) {
         throw new ProjectInstallationError(
           "unsafe-target",
-          `Cannot remove the tracked Skill because its Claude symlink does not point to the canonical installation: ${claudePath}; no path was changed`,
+          `Cannot remove the tracked Skill because its Claude directory link does not point to the canonical installation: ${claudePath}; no path was changed`,
         );
       }
       paths.push(claudePath);
@@ -279,6 +281,47 @@ export async function inspectProjectSkillRemoval(
 }
 
 /**
+ * Explicitly inspects a stale user-global record without making it valid for
+ * host exposure/update. Every relevant ancestor and both managed host locations
+ * are checked; only ENOENT is accepted as absence and no filesystem entry is removed.
+ */
+export async function inspectAbsentManagedSkillRecord(
+  selection: ProjectSkillSelection,
+  options: ProjectInstallationOptions,
+): Promise<ProjectSkillRemovalInspection> {
+  if (!selection.installation) throw new ProjectInstallationError("removal-unavailable", "Cannot forget a Skill without a recorded installation");
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  const root = path.resolve(options.projectRoot);
+  const target = resolveInstallationPath(root, selection.installation.path);
+  if (!isSafeRelativePath(selection.installation.path) || selection.installation.path.split("/").some((segment) => segment.toLowerCase() === ".git")) {
+    throw new ProjectInstallationError("unsafe-target", `Tracked Skill installation path is unsafe: ${JSON.stringify(selection.installation.path)}; no record was changed`);
+  }
+  await assertNoSymlinkComponents(root, fileSystem);
+  await assertDirectory(root, fileSystem, "user-global root");
+  await assertNoSymlinkAncestors(root, relativeSegments(root, target), fileSystem);
+  const skillName = skillNameFromSelection(selection);
+  const canonical = path.join(root, ".agents", "skills", skillName);
+  const claude = path.join(root, ".claude", "skills", skillName);
+  for (const otherPath of options.otherInstallationPaths ?? []) {
+    const other = resolveInstallationPath(root, otherPath);
+    if (pathsOverlap(target, other) || pathsOverlap(canonical, other) || pathsOverlap(claude, other)) {
+      throw new ProjectInstallationError("overlapping-targets", `Cannot forget ${JSON.stringify(selection.path)} because its recorded path overlaps another managed Skill record; no record was changed`);
+    }
+  }
+  await assertNoSymlinkAncestors(root, [".agents", "skills", skillName], fileSystem);
+  await assertNoSymlinkAncestors(root, [".claude", "skills", skillName], fileSystem);
+  for (const candidate of new Set([target, canonical, claude])) {
+    try {
+      await fileSystem.lstat(candidate);
+      throw new ProjectInstallationError("unsafe-target", `Cannot forget ${JSON.stringify(selection.path)} because a filesystem object exists at ${candidate}; no record was changed`);
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+  }
+  return Object.freeze({ skillName, paths: Object.freeze([]), digest: "absent-record-only", adopted: selection.installation.adopted, modified: false, recordOnly: true });
+}
+
+/**
  * Removes a previously inspected user-global Skill after rechecking ownership.
  * `deletePaths` narrows the deletion to a subset of the inspected paths (used
  * when only some Hosts are removed); the whole inspection is still rechecked.
@@ -295,6 +338,7 @@ export async function removeProjectSkill(
     current.paths.length !== inspection.paths.length ||
     current.paths.some((candidate, index) => candidate !== inspection.paths[index]) ||
     current.digest !== inspection.digest ||
+    current.recordOnly !== inspection.recordOnly ||
     current.adopted !== inspection.adopted ||
     current.modified !== inspection.modified ||
     current.nonCanonicalPath !== inspection.nonCanonicalPath) {
@@ -316,9 +360,9 @@ export async function removeProjectSkill(
 }
 
 /**
- * Deletes one managed symlink without ever following or recursing into it:
- * look at the path immediately before, require a symlink, then unlink it.
- * Partial Host removal only ever deletes the Claude symlink, so it uses this
+ * Deletes one managed directory link without ever following or recursing into it:
+ * look at the path immediately before, require a link, then unlink it.
+ * Partial Host removal only ever deletes the Claude link, so it uses this
  * instead of the recursive `rm` that full removal needs for the canonical directory.
  */
 async function unlinkManagedSymlink(candidate: string, fileSystem: ProjectInstallationFileSystem): Promise<void> {
@@ -346,7 +390,7 @@ export interface ProjectSkillHostAdditionInspection {
 /**
  * Inspects what exposing the installed Skill to `hosts` would change without
  * writing. Non-Claude Hosts share the canonical `.agents/skills` location, and
- * Claude is a symlink to it; anything else at a target location is a conflict.
+ * Claude uses a managed directory link to it; anything else at a target location is a conflict.
  */
 export async function inspectProjectSkillHostAddition(
   selection: ProjectSkillSelection,
@@ -379,7 +423,7 @@ export async function inspectProjectSkillHostAddition(
       if (target === undefined || path.resolve(path.dirname(claudePath), target) !== canonicalPath) {
         throw new ProjectInstallationError(
           "target-conflict",
-          `Cannot expose ${JSON.stringify(removal.skillName)} to Claude because ${JSON.stringify(claudePath)} already exists and is not the managed symlink to the installed Skill; no path was changed.`,
+          `Cannot expose ${JSON.stringify(removal.skillName)} to Claude because ${JSON.stringify(claudePath)} already exists and is not the managed directory link to the installed Skill; no path was changed.`,
         );
       }
     }
@@ -728,7 +772,7 @@ async function inspectSkillLocation(
     : collisionLocation(candidate, comparison.reason ?? "content-mismatch", evidence);
 }
 
-/** A Claude symlink is an exposure only when it points to the canonical Skill that was itself found identical. */
+/** A Claude directory link is an exposure only when it points to the canonical Skill that was itself found identical. */
 async function isClaudeExposureOfCanonical(candidate: string, context: SkillLocationContext): Promise<boolean> {
   if (candidate !== context.claudePath || !context.canonicalIdentical) return false;
   try {
@@ -821,7 +865,7 @@ export async function installProjectSkillTransaction(
     // prevents a later host check from following a pre-existing symlink after
     // the other host's directories have already been created.
     await assertNoSymlinkAncestors(projectRoot, [".agents", "skills", skillName], fileSystem);
-    // A Claude Skill path may be the managed symlink to the canonical tree;
+    // A Claude Skill path may be the managed directory link to the canonical tree;
     // adoption validates that final component before following it.
     await assertNoSymlinkAncestors(projectRoot, [".claude", "skills"], fileSystem);
 
@@ -963,16 +1007,15 @@ async function createClaudeSkillSymlink(
   uncertainCreates: Set<string>,
   fileSystem: ProjectInstallationFileSystem,
 ): Promise<void> {
-  const linkTarget = path.relative(path.dirname(claudePath), canonicalPath);
   uncertainCreates.add(claudePath);
   try {
-    await fileSystem.symlink(linkTarget, claudePath, "dir");
+    await createClaudeDirectoryLink(fileSystem, claudePath, canonicalPath);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new ProjectInstallationError(
       "claude-symlink-failed",
-      `Cannot create the Claude Skill symlink at ${JSON.stringify(claudePath)}: ${reason}. ` +
-      "Grant this process permission to create directory symlinks (on Windows, enable Developer Mode or the required symlink privilege) and retry. " +
+      `Cannot create the Claude Skill directory link at ${JSON.stringify(claudePath)}: ${reason}. ` +
+      (process.platform === "win32" ? "Windows junctions do not require symlink privileges; check the target path and filesystem instead. " : "Check that this process can create directory symlinks. ") +
       "No duplicate managed copy was created; the canonical installation was rolled back.",
     );
   }
@@ -987,7 +1030,7 @@ async function recordCreatedClaudeSymlink(
 ): Promise<void> {
   const information = await fileSystem.lstat(claudePath);
   if (!information.isSymbolicLink()) {
-    throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${claudePath}`);
+    throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a directory link: ${claudePath}`);
   }
   createdPaths.push({ path: claudePath, kind: "symlink", identity: pathIdentity(information) });
   uncertainCreates.delete(claudePath);
@@ -1025,7 +1068,7 @@ function assertOverwriteCollision(inspection: ProjectSkillInstallationInspection
   if (inspection.targetPath === inspection.canonicalPath && claudeLocation?.status === "identical" && claudeLocation.identity !== undefined) {
     throw new ProjectInstallationError(
       "ambiguous-target",
-      `Cannot overwrite ${JSON.stringify(inspection.targetPath)} because the Claude location is a separate real directory rather than the managed symlink; no path was changed`,
+      `Cannot overwrite ${JSON.stringify(inspection.targetPath)} because the Claude location is a separate real directory rather than the managed directory link; no path was changed`,
     );
   }
 }
@@ -1306,9 +1349,8 @@ async function overwriteProjectSkillTransaction(
     const claudeLocation = inspection.locations.find((location) => location.path === inspection.claudePath);
     if (targetPath === inspection.canonicalPath && hosts.includes("claude") && claudeLocation?.status === "missing") {
       await ensureDirectoryTree(projectRoot, [".claude", "skills"], exposureCreated, exposureUncertain, fileSystem);
-      const linkTarget = path.relative(path.dirname(inspection.claudePath), inspection.canonicalPath);
       exposureUncertain.add(inspection.claudePath);
-      await fileSystem.symlink(linkTarget, inspection.claudePath, "dir");
+      await createClaudeDirectoryLink(fileSystem, inspection.claudePath, inspection.canonicalPath);
       const linkInformation = await fileSystem.lstat(inspection.claudePath);
       if (!linkInformation.isSymbolicLink()) {
         throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${inspection.claudePath}`);
@@ -1400,6 +1442,19 @@ async function assertExistingSkillMatches(
   }
 }
 
+async function createClaudeDirectoryLink(
+  fileSystem: ProjectInstallationFileSystem,
+  claudePath: string,
+  canonicalPath: string,
+): Promise<void> {
+  const windows = process.platform === "win32";
+  await fileSystem.symlink(
+    windows ? path.resolve(canonicalPath) : path.relative(path.dirname(claudePath), canonicalPath),
+    claudePath,
+    windows ? "junction" : "dir",
+  );
+}
+
 async function createAdditionalClaudeExposure(
   projectRoot: string,
   canonicalPath: string,
@@ -1412,11 +1467,11 @@ async function createAdditionalClaudeExposure(
   await assertMissing(claudePath, fileSystem, claudePath);
   uncertainCreates.add(claudePath);
   try {
-    await fileSystem.symlink(path.relative(path.dirname(claudePath), canonicalPath), claudePath, "dir");
+    await createClaudeDirectoryLink(fileSystem, claudePath, canonicalPath);
   } catch (error) {
     throw new ProjectInstallationError(
       "claude-symlink-failed",
-      `Cannot create the additional Claude Skill symlink at ${JSON.stringify(claudePath)}: ${errorMessage(error)}. No existing path was changed.`,
+      `Cannot create the additional Claude Skill directory link at ${JSON.stringify(claudePath)}: ${errorMessage(error)}. No existing path was changed.`,
     );
   }
   await recordCreatedClaudeSymlink(claudePath, createdPaths, uncertainCreates, fileSystem);
@@ -1835,6 +1890,8 @@ async function rollbackCreatedPaths(
           continue;
         }
         await fileSystem.rmdir(created.path);
+      } else if (created.kind === "symlink") {
+        await unlinkManagedSymlink(created.path, fileSystem);
       } else {
         await fileSystem.rm(created.path);
       }

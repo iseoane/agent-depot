@@ -174,7 +174,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     );
   });
 
-  test("installs project Skills with a canonical directory, Claude symlink and manifest", async () => {
+  test("installs project Skills with a canonical directory, Claude directory link and manifest", async () => {
     const args = installArgs("project", "alpha", "claude", "pi");
     fails(cli(project, ...args), /Installation not confirmed; rerun with --yes/);
     assert.equal(await exists(path.join(project, ".agents")), false);
@@ -183,7 +183,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     ok(cli(project, ...args, "--yes"));
     assert.match(await readFile(path.join(project, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v1/);
     assert.equal(await readFile(path.join(project, ".agents/skills/alpha/refs/notes.md"), "utf8"), "support v1\n");
-    assert.equal(await readlink(path.join(project, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
+    assert.equal(path.resolve(path.dirname(path.join(project, ".claude/skills/alpha")), await readlink(path.join(project, ".claude/skills/alpha"))), path.join(project, ".agents/skills/alpha"));
     const saved = await manifest(project);
     assert.equal(saved.skills.length, 1);
     assert.equal(saved.skills[0]?.installation.path, ".agents/skills/alpha");
@@ -201,7 +201,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     const args = installArgs("user-global", "alpha", "claude");
     ok(cli(project, ...args, "--yes"));
     assert.match(await readFile(path.join(home, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v1/);
-    assert.equal(await readlink(path.join(home, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
+    assert.equal(path.resolve(path.dirname(path.join(home, ".claude/skills/alpha")), await readlink(path.join(home, ".claude/skills/alpha"))), path.join(home, ".agents/skills/alpha"));
     fails(cli(project, ...args, "--yes"), /already recorded in user-global state/);
 
     const check = ok(cli(project, "update", "check", "--scope", "user-global"));
@@ -228,7 +228,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     assert.match(ok(cli(project, "update", "apply", "--scope", "project", "--all", "--yes")), /Update summary: 2 updated, 0 failed/);
     assert.match(await readFile(path.join(project, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v2/);
     assert.equal(await readFile(path.join(project, ".agents/skills/alpha/refs/notes.md"), "utf8"), "support v2\n");
-    assert.equal(await readlink(path.join(project, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
+    assert.equal(path.resolve(path.dirname(path.join(project, ".claude/skills/alpha")), await readlink(path.join(project, ".claude/skills/alpha"))), path.join(project, ".agents/skills/alpha"));
     assert.match(ok(cli(project, "update", "check", "--scope", "project")), /Updateable \(0\):\nCurrent \(2\):/);
 
     assert.match(ok(cli(project, "update", "apply", "--scope", "user-global", "--skill", "0", "--yes")), /1 updated, 0 failed/);
@@ -351,7 +351,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
     assert.equal(await exists(path.join(home, ".agents/skills/gamma")), false);
     assert.equal(await exists(path.join(home, ".claude/skills/gamma")), false);
     assert.equal(await exists(path.join(home, ".agents/skills/alpha")), true);
-    assert.equal(await readlink(path.join(home, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
+    assert.equal(path.resolve(path.dirname(path.join(home, ".claude/skills/alpha")), await readlink(path.join(home, ".claude/skills/alpha"))), path.join(home, ".agents/skills/alpha"));
 
     fails(cli(project, "uninstall", "--skills"), /Uninstall not confirmed/);
     assert.equal(await exists(path.join(home, ".agents/skills/alpha")), true);

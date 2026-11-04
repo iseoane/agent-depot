@@ -19,6 +19,10 @@ interface Fixture {
 
 const canonical = (home: string) => path.join(home, ".agents", "skills", "one");
 const claude = (home: string) => path.join(home, ".claude", "skills", "one");
+const directoryLinkTarget = (link: string, target: string) => process.platform === "win32" ? path.resolve(target) : path.relative(path.dirname(link), target);
+async function createDirectoryLink(link: string, target: string): Promise<void> {
+  await symlink(directoryLinkTarget(link, target), link, process.platform === "win32" ? "junction" : "dir");
+}
 
 async function exists(candidate: string): Promise<boolean> {
   try {
@@ -45,7 +49,7 @@ async function withInstallation(
     await writeFile(path.join(directory, "SKILL.md"), "one", "utf8");
     if (setup.withClaudeLink ?? hosts.includes("claude")) {
       await mkdir(path.dirname(claude(home)), { recursive: true });
-      await symlink(path.relative(path.dirname(claude(home)), canonical(home)), claude(home), "dir");
+      await createDirectoryLink(claude(home), canonical(home));
     }
     const record: ProjectSkillSelection = {
       source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
@@ -69,7 +73,7 @@ test("adding claude creates only the managed symlink and records the host", asyn
     const plan = await planHostAddition(record, ["claude"], options);
     assert.match(plan.preview.join("\n"), /\.claude[/\\]skills[/\\]one/u);
     await executeHostAddition(plan, operations, options, await operations.listUserGlobalInstallations!(), true);
-    assert.equal(await readlink(claude(home)), path.join("..", "..", ".agents", "skills", "one"));
+    assert.equal(path.resolve(path.dirname(claude(home)), await readlink(claude(home))), canonical(home));
     assert.equal(await readFile(path.join(canonical(home), "SKILL.md"), "utf8"), "one");
     assert.deepEqual(await recordedHosts(operations), ["pi", "claude"]);
   });
@@ -233,9 +237,9 @@ test("adding claude reports both errors when the record update and the rollback 
   await withInstallation(["pi"], async ({ home, operations }) => {
     const options = userGlobalRemovalOptions(home, {
       fileSystem: realFileSystem({
-        rm: async (candidate) => {
-          if (candidate === claude(home)) throw new Error("rm denied");
-          await rm(candidate, { recursive: true, force: true });
+        unlink: async (candidate) => {
+          if (candidate === claude(home)) throw new Error("unlink denied");
+          await unlink(candidate);
         },
       }),
     });
@@ -247,7 +251,7 @@ test("adding claude reports both errors when the record update and the rollback 
       (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         assert.match(message, /record write failed/u);
-        assert.match(message, /rm denied/u);
+        assert.match(message, /unlink denied/u);
         return true;
       },
     );
@@ -257,18 +261,22 @@ test("adding claude reports both errors when the record update and the rollback 
 test("adding claude refuses a foreign symlink at the claude location and leaves it untouched", async () => {
   await withInstallation(["pi"], async ({ home, options, record }) => {
     await mkdir(path.dirname(claude(home)), { recursive: true });
-    await symlink("/somewhere/else", claude(home), "dir");
+    const foreign = path.join(home, "foreign");
+    await mkdir(foreign);
+    await createDirectoryLink(claude(home), foreign);
     await assert.rejects(planHostAddition(record, ["claude"], options), /already exists/u);
-    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
+    assert.equal(path.resolve(path.dirname(claude(home)), await readlink(claude(home))), foreign);
   });
 });
 
 test("removing claude refuses a foreign symlink at the claude location and leaves it untouched", async () => {
   await withInstallation(["pi", "claude"], async ({ home, options, record }) => {
     await rm(claude(home));
-    await symlink("/somewhere/else", claude(home), "dir");
+    const foreign = path.join(home, "foreign");
+    await mkdir(foreign);
+    await createDirectoryLink(claude(home), foreign);
     await assert.rejects(planHostRemoval(record, ["claude"], options), /does not point to the canonical/u);
-    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
+    assert.equal(path.resolve(path.dirname(claude(home)), await readlink(claude(home))), foreign);
   });
 });
 
@@ -276,9 +284,11 @@ test("removing claude replaced by a foreign symlink after the plan deletes nothi
   await withInstallation(["pi", "claude"], async ({ home, operations, options, record }) => {
     const plan = await planHostRemoval(record, ["claude"], options);
     await rm(claude(home));
-    await symlink("/somewhere/else", claude(home), "dir");
+    const foreign = path.join(home, "foreign");
+    await mkdir(foreign);
+    await createDirectoryLink(claude(home), foreign);
     await assert.rejects(executeHostRemoval(plan, operations, options, await operations.listUserGlobalInstallations!()));
-    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
+    assert.equal(path.resolve(path.dirname(claude(home)), await readlink(claude(home))), foreign);
     assert.deepEqual(await recordedHosts(operations), ["pi", "claude"]);
   });
 });

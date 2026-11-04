@@ -226,10 +226,15 @@ export async function prepareUninstall(
   if (matches.length === 0) {
     return { kind: recordsFor(installed.project, skill, installed.sources).length > 0 ? "project-only" : "not-installed" };
   }
-  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
   const record = matches[0]!;
+  const options = userGlobalRemovalOptions(homeOf(environment), {
+    ...environment.installationOptions,
+    otherInstallationPaths: installations.filter((candidate) => candidate !== record).flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
+  });
   const plan = await planSkillRemoval([record], options);
-  const scopeNote = `  removes the whole user-global installation, from hosts: ${record.hosts.join(", ")}`;
+  const scopeNote = plan.inspections[0]?.recordOnly
+    ? `  forgets the missing installation record, from hosts: ${record.hosts.join(", ")}; no files are removed`
+    : `  removes the whole user-global installation, from hosts: ${record.hosts.join(", ")}`;
   return { kind: "ready", plan: { ...plan, preview: [...plan.preview, scopeNote] }, installations };
 }
 
@@ -239,7 +244,11 @@ export async function runUninstall(
   operations: SourceOperations,
   environment: TuiEnvironment,
 ): Promise<void> {
-  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
+  const selected = new Set(prepared.plan.selections.map((selection) => JSON.stringify(selection)));
+  const options = userGlobalRemovalOptions(homeOf(environment), {
+    ...environment.installationOptions,
+    otherInstallationPaths: prepared.installations.filter((candidate) => !selected.has(JSON.stringify(candidate))).flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
+  });
   await executeSkillRemoval(prepared.plan, operations, options, prepared.installations);
 }
 
@@ -319,7 +328,10 @@ export async function prepareHostRemoval(
   hosts: readonly ProjectHost[],
 ): Promise<PreparedHostRemoval> {
   const { record, installations } = await currentGlobalRecord(operations, skill, installed);
-  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
+  const options = userGlobalRemovalOptions(homeOf(environment), {
+    ...environment.installationOptions,
+    otherInstallationPaths: installations.filter((candidate) => JSON.stringify(candidate) !== JSON.stringify(record)).flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
+  });
   const plan = await planHostRemoval(record, hosts, options).catch(asMessage);
   return { plan, installations, preview: plan.kind === "full" ? plan.plan.preview : plan.preview };
 }
@@ -331,10 +343,17 @@ export async function runHostRemoval(
   environment: TuiEnvironment,
   skill: SkillCandidate,
 ): Promise<string> {
-  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
+  const selection = prepared.plan.kind === "full" ? prepared.plan.plan.selections[0] : prepared.plan.selection;
+  const options = userGlobalRemovalOptions(homeOf(environment), {
+    ...environment.installationOptions,
+    otherInstallationPaths: prepared.installations.filter((candidate) => selection !== undefined && JSON.stringify(candidate) !== JSON.stringify(selection))
+      .flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
+  });
   await executeHostRemoval(prepared.plan, operations, options, prepared.installations);
   const { plan } = prepared;
-  return plan.kind === "full"
-    ? `Removed ${skill.name} (${skill.path})`
-    : `Removed hosts ${plan.removed.join(", ")} from ${plan.selection.path}`;
+  return plan.kind === "full" && plan.plan.inspections.every((inspection) => inspection.recordOnly)
+    ? `Forgot missing installation record for ${plan.plan.selections[0]?.path ?? skill.path}; no files were removed`
+    : plan.kind === "full"
+      ? `Removed ${skill.name} (${skill.path})`
+      : `Removed hosts ${plan.removed.join(", ")} from ${plan.selection.path}`;
 }

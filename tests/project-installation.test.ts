@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -7,8 +7,10 @@ import { test } from "node:test";
 import type { ProjectSkillSelection } from "../src/project-manifest.js";
 import {
   inspectProjectSkillInstallation,
+  inspectProjectSkillRemoval,
   inspectProjectSkillUpdate,
   installProjectSkill,
+  removeProjectSkill,
   installProjectSkillTransaction,
   type ProjectInstallationFileSystem,
   type ProjectSkillTreeAccess,
@@ -52,11 +54,11 @@ async function makeProject(): Promise<string> {
   });
 }
 
-test("installs a full project Skill tree at the canonical path and exposes Claude by symlink", async (t) => {
+test("installs a full project Skill tree at the canonical path and exposes Claude by managed directory link", async (t) => {
   const projectRoot = await makeProject();
   try {
     try {
-      await symlink(path.join(projectRoot, "missing-target"), path.join(projectRoot, "link-check"), "dir");
+      await symlink(path.join(projectRoot, "missing-target"), path.join(projectRoot, "link-check"), process.platform === "win32" ? "junction" : "dir");
       await rm(path.join(projectRoot, "link-check"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
@@ -90,7 +92,38 @@ test("installs a full project Skill tree at the canonical path and exposes Claud
       assert.equal((await lstat(path.join(canonicalPath, "SKILL.md"))).mode & 0o777, 0o644);
       assert.equal((await lstat(path.join(canonicalPath, "scripts", "run.sh"))).mode & 0o111, 0o111);
     }
-    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
+    const linkTarget = await readlink(claudePath);
+    assert.equal(path.resolve(path.dirname(claudePath), linkTarget), canonicalPath);
+    if (process.platform === "win32") assert.equal(path.isAbsolute(linkTarget), true);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("recognizes and unlinks a native Claude directory junction without touching canonical files", async () => {
+  const projectRoot = await makeProject();
+  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  const managedSelection: ProjectSkillSelection = { ...selection, installation: { path: ".agents/skills/demo", adopted: false } };
+  const options = { projectRoot, sourceAccess: accessFor() };
+  try {
+    await installProjectSkill({ selection: managedSelection, source, portableV1: true }, options);
+    const link = await lstat(claudePath);
+    assert.equal(link.isSymbolicLink(), true);
+    const target = await readlink(claudePath);
+    assert.equal(path.resolve(path.dirname(claudePath), target), canonicalPath);
+    if (process.platform === "win32") assert.equal(path.isAbsolute(target), true);
+
+    const repeated = await installProjectSkill({ selection: managedSelection, source, portableV1: true }, options);
+    assert.equal(repeated.adopted, true);
+
+    const sentinel = path.join(canonicalPath, "sentinel.txt");
+    await writeFile(sentinel, "canonical survives alias removal", "utf8");
+    const inspection = await inspectProjectSkillRemoval(managedSelection, options);
+    assert.deepEqual(inspection.paths, [canonicalPath, claudePath]);
+    await removeProjectSkill(managedSelection, inspection, options, [claudePath]);
+    await assert.rejects(lstat(claudePath), { code: "ENOENT" });
+    assert.equal(await readFile(sentinel, "utf8"), "canonical survives alias removal");
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -263,6 +296,32 @@ test("rejects a symlinked ancestor during update preview before reading the targ
       /symbolic-link ancestor/i,
     );
   } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("native Windows junction ancestor is refused without writing through it", { skip: process.platform !== "win32" }, async () => {
+  const projectRoot = await makeProject();
+  const outsideRoot = await makeProject();
+  const ancestor = path.join(projectRoot, ".agents");
+  const sentinel = path.join(outsideRoot, "sentinel.txt");
+  try {
+    await writeFile(sentinel, "outside remains unchanged", "utf8");
+    await symlink(outsideRoot, ancestor, "junction");
+
+    await assert.rejects(
+      installProjectSkill({ selection: { ...selection, hosts: ["pi", "claude"] }, source, portableV1: true }, {
+        projectRoot,
+        sourceAccess: accessFor(),
+      }),
+      /symbolic-link ancestor/i,
+    );
+    assert.equal(await readFile(sentinel, "utf8"), "outside remains unchanged");
+    assert.deepEqual(await readdir(outsideRoot), ["sentinel.txt"]);
+    await assert.rejects(lstat(path.join(outsideRoot, "skills")), { code: "ENOENT" });
+  } finally {
+    await unlink(ancestor).catch(() => {});
     await rm(projectRoot, { recursive: true, force: true });
     await rm(outsideRoot, { recursive: true, force: true });
   }
@@ -445,6 +504,46 @@ test("classifies a real target collision without writing or rereading the mutabl
     assert.equal(inspection.locations[0]?.status, "collision");
     assert.equal(inspection.locations[1]?.status, "missing");
     assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "locally owned");
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("native Windows overwrite exposes a junction and transaction rollback restores the original", { skip: process.platform !== "win32" }, async () => {
+  const projectRoot = await makeProject();
+  const existing = path.join(projectRoot, ".agents", "skills", "demo");
+  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
+  const request = {
+    selection: { ...selection, hosts: ["pi", "claude"] as const },
+    source,
+    previewTree: tree,
+    portableV1: true,
+    overwrite: true,
+  };
+  const options = { projectRoot, sourceAccess: accessFor() };
+  try {
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, "SKILL.md"), "locally owned", "utf8");
+    const inspection = await inspectProjectSkillInstallation(request, options);
+    assert.equal(inspection.locations.find((location) => location.path === claudePath)?.status, "missing");
+    assert.equal(inspection.collision?.reason, "content-mismatch");
+
+    const transaction = await installProjectSkillTransaction({ ...request, inspection }, options);
+    const backupPath = transaction.result.backupPath;
+    assert.ok(backupPath);
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "SKILL");
+    assert.deepEqual(await readFile(path.join(existing, "assets", "data.bin")), Buffer.from([0x00, 0xff, 0x80]));
+    assert.equal(await readFile(path.join(backupPath!, "SKILL.md"), "utf8"), "locally owned");
+    const aliasInfo = await lstat(claudePath);
+    assert.equal(aliasInfo.isSymbolicLink(), true);
+    const target = await readlink(claudePath);
+    assert.equal(path.isAbsolute(target), true);
+    assert.equal(path.resolve(path.dirname(claudePath), target), existing);
+
+    await transaction.rollback();
+    await assert.rejects(lstat(claudePath), { code: "ENOENT" });
+    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "locally owned");
+    await assert.rejects(lstat(backupPath!), { code: "ENOENT" });
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -754,7 +853,7 @@ test("rolls back the canonical target when Claude symlink creation fails", async
         sourceAccess: accessFor(),
         fileSystem: baseFileSystem,
       }),
-      /Claude Skill symlink.*operation not permitted.*no duplicate managed copy.*rolled back/i,
+      /Claude Skill directory link.*operation not permitted.*no duplicate managed copy.*rolled back/i,
     );
     await assert.rejects(lstat(path.join(projectRoot, ".agents", "skills", "demo")), { code: "ENOENT" });
     await assert.rejects(lstat(path.join(projectRoot, ".claude", "skills", "demo")), { code: "ENOENT" });
@@ -1026,7 +1125,7 @@ test("adopts a canonical Skill and its Claude symlink on a repeat installation",
     assert.equal(result.canonicalPath, canonicalPath);
     assert.equal(result.claudePath, claudePath);
     assert.deepEqual(result.adoptedPaths, [canonicalPath, claudePath]);
-    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
+    assert.equal(path.resolve(path.dirname(claudePath), await readlink(claudePath)), canonicalPath);
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -1091,7 +1190,7 @@ test("adds a missing Claude exposure only with separate explicit confirmation", 
 
     assert.equal(result.adopted, true);
     assert.deepEqual(result.adoptedPaths, [canonicalPath, claudePath]);
-    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
+    assert.equal(path.resolve(path.dirname(claudePath), await readlink(claudePath)), canonicalPath);
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -1221,5 +1320,5 @@ test("adoption reports a failing additional Claude symlink", async () => {
     confirm: true,
     fileSystem: adoptionFileSystem({ symlink: async () => { throw new Error("denied"); } }),
   });
-  assert.match(error?.message ?? "", /Cannot create the additional Claude Skill symlink at .*: denied\. No existing path was changed\.$/u);
+  assert.match(error?.message ?? "", /Cannot create the additional Claude Skill directory link at .*: denied\. No existing path was changed\.$/u);
 });

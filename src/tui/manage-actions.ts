@@ -209,7 +209,9 @@ function handleConfirmKey(context: ManageContext, mode: ModeOf<"confirm-host-add
       answerYesNo(input, key, () => {
         void execute(context, `Removing ${mode.skill.name}…`, async () => {
           await runUninstall(mode.prepared, operations, env);
-          return `Removed ${mode.skill.name} (${mode.skill.path})`;
+          return mode.prepared.plan.inspections.every((inspection) => inspection.recordOnly)
+            ? `Forgot missing installation record for ${mode.skill.path}; no files were removed`
+            : `Removed ${mode.skill.name} (${mode.skill.path})`;
         });
       }, cancelWith("Uninstall cancelled"));
       return;
