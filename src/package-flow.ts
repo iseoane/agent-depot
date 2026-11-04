@@ -8,6 +8,7 @@ import { sourceBundleScope } from "./package-content.js";
 import {
   affectedBy,
   classifyUpdate,
+  claudeVersionUpdateNotice,
   hostInstallId,
   packageApprovalDigest,
   planHostSteps,
@@ -315,7 +316,9 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
     const installedCommitIsAncestor = bundle?.resolvedCommit === undefined || installed.kind !== "installed" || installed.commit === undefined
       ? undefined
       : await contentAccess.isCommitAncestor?.(bundle.source, installed.commit, bundle.resolvedCommit).catch(() => undefined);
+    const updateReason = claudeVersionUpdateNotice(selection.host, installed, bundle?.available, bundle?.resolvedCommit);
     return Object.freeze({
+      ...(updateReason === undefined ? {} : { updateReason }),
       ...(bundle === undefined ? {} : { descriptor: bundle.descriptor }),
       installed,
       ...(bundle?.available === undefined ? {} : { available: bundle.available }),
@@ -334,13 +337,17 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
         inspection.available,
         inspection.availableCommit,
         inspection.installedCommitIsAncestor,
+        record.selection.host,
       );
       return Object.freeze({
         installed: record,
+        observed: inspection.installed,
         status,
         ...(inspection.available === undefined ? {} : { available: inspection.available }),
         ...(inspection.availableCommit === undefined ? {} : { availableCommit: inspection.availableCommit }),
-        ...(status === "unknown" ? { reason: inspection.drift ?? describeEvidence(inspection.installed) } : {}),
+        ...(status === "unknown"
+          ? { reason: inspection.drift ?? describeEvidence(inspection.installed) }
+          : inspection.updateReason === undefined ? {} : { reason: inspection.updateReason }),
       });
     } catch (error) {
       return Object.freeze({
@@ -388,7 +395,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
         if (contradiction !== undefined) {
           return { status: "failed", reason: `${contradiction}; the selection record was left untouched` };
         }
-        const change = installedEvidenceChange(context.previous, observed);
+        const change = installedEvidenceChange(context.previous, observed, context.selection.host, context.available);
         if (change === "unknown") {
           return {
             status: "failed",
@@ -396,9 +403,10 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
           };
         }
         if (change === "unchanged") {
+          const notice = claudeVersionUpdateNotice(context.selection.host, observed, context.available, context.origin.resolvedCommit);
           return {
             status: "failed",
-            reason: `The observed version did not change (${describeEvidence(observed)}); the selection record was left untouched`,
+            reason: `The observed version did not change (${describeEvidence(observed)}); the selection record was left untouched${notice === undefined ? "" : `. ${notice}`}`,
           };
         }
         await writeSelection(context, observed);
@@ -736,17 +744,25 @@ type InstalledEvidenceChange = "changed" | "unchanged" | "unknown";
 /**
  * Three outcomes, not two. `unknown` means the two observations carry no
  * comparable evidence, and an update must not report that as a success. A host
- * that had nothing installed and now reports an install has changed.
+ * that had nothing installed and now reports an install has changed. Versioned
+ * Claude plugins use literal cache versions, just as update eligibility does.
  */
 function installedEvidenceChange(
   previous: InstalledBundleEvidence | undefined,
   observed: InstalledBundleEvidence,
+  host: PackageSelection["host"],
+  available: PackageVersionEvidence | undefined,
 ): InstalledEvidenceChange {
   if (observed.kind !== "installed" || previous === undefined || previous.kind === "unknown") {
     return "unknown";
   }
   if (previous.kind === "absent") {
     return "changed";
+  }
+  if (host === "claude" && available?.kind === "manifest-version") {
+    if (previous.version === undefined || observed.version === undefined
+      || previous.reason !== undefined || observed.reason !== undefined) return "unknown";
+    return previous.version === observed.version ? "unchanged" : "changed";
   }
   const previousCommit = previous.commit === undefined ? undefined : gitCommitId(previous.commit);
   const observedCommit = observed.commit === undefined ? undefined : gitCommitId(observed.commit);

@@ -32,6 +32,9 @@ export function CheckStatus({ data, now }: { readonly data: UpdatesData; readonl
         <Text key={failure.source}><Text color={theme.warning}>[WARN] </Text><FieldLine label="Refresh failed for" value={`${failure.source}: ${failure.reason}`} /></Text>
       ))}
       {data.appError ? <Text><Text color={theme.error}>[FAIL] </Text><FieldLine label="Error (Apps):" value={data.appError} /></Text> : null}
+      {data.rows.filter(row => row.kind === "package" && row.check.status === "current" && row.check.reason !== undefined).map(row => (
+        <Text key={row.key} color={theme.warning}>{row.path}: {row.reason}</Text>
+      ))}
       {data.packageError ? <Text><Text color={theme.error}>[FAIL] </Text><FieldLine label="Error (Packages):" value={data.packageError} /></Text> : null}
       {errors.map((result) => <Text key={result.scope}><Text color={theme.error}>[FAIL] </Text><FieldLine label={`Error (${result.scope}):`} value={result.error ?? ""} /></Text>)}
     </BorderPanel>

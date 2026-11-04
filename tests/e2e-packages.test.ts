@@ -307,7 +307,7 @@ test("the Claude lifecycle registers the marketplace, installs, updates and unin
 
   const stale = await side.operations.checkUpdates([selection]);
   assert.equal(stale[0]?.status, "update available");
-  assert.deepEqual(stale[0]?.available, { kind: "manifest-version", version: AVAILABLE_VERSION, declaredBy: "marketplace-entry" });
+  assert.deepEqual(stale[0]?.available, { kind: "manifest-version", version: AVAILABLE_VERSION, declaredBy: "bundle" });
 
   const update = await side.operations.planLifecycle(selection, "update");
   assert.deepEqual(argvOf(update), [

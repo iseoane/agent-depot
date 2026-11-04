@@ -233,13 +233,19 @@ test("installability is a descriptor field, not parsed from warning text", async
   assert.equal(scopedRefused[0]?.installable, false);
 });
 
-test("the marketplace entry version overrides the plugin manifest version", () => {
+test("the plugin manifest version overrides the marketplace entry like Claude's computed cache version", () => {
   const pluginRaw = JSON.stringify({ name: "p", version: "0.9.0", agents: ["./a.md"] });
   const marketplaceRaw = JSON.stringify({ name: "m", plugins: [{ name: "p", source: "./p", version: "1.0.0" }] });
   const descriptor = parseClaudeMarketplace(marketplaceRaw, "", (root) => root === "p" ? pluginRaw : undefined)[0];
-  assert.deepEqual(descriptor.version, { kind: "manifest-version", version: "1.0.0", declaredBy: "marketplace-entry" });
+  assert.deepEqual(descriptor.version, { kind: "manifest-version", version: "0.9.0", declaredBy: "bundle" });
   assert.equal(descriptor.name, "p");
   assert.deepEqual(descriptor.coordinates, { host: "claude", marketplaceRoot: "", pluginName: "p" });
+});
+
+test("Claude uses the marketplace version only when the plugin declares no version", () => {
+  const marketplace = JSON.stringify({ name: "m", plugins: [{ name: "p", source: "./p", version: "1.0.0" }] });
+  const descriptor = parseClaudeMarketplace(marketplace, "", () => JSON.stringify({ name: "p" }))[0];
+  assert.deepEqual(descriptor.version, { kind: "manifest-version", version: "1.0.0", declaredBy: "marketplace-entry" });
 });
 
 test("the owned-skill matcher applies the lifecycle segment filter", async () => {

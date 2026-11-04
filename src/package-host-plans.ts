@@ -210,17 +210,23 @@ export function packageApprovalDigest(declaration: PackageDeclaration): string {
 
 /**
  * Compares installed evidence with available evidence. Manifest versions compare
- * through `sameAppVersion` and `compareAppVersions`; differing commits compare only
- * when cached Source history proves the installed commit is an ancestor.
+ * through `sameAppVersion` and `compareAppVersions` for Pi. Claude's explicit
+ * plugin version keys its cache: only a different version installs a new copy.
+ * Unversioned bundles compare commits only with proven Source ancestry.
  */
 export function classifyUpdate(
   installed: InstalledBundleEvidence,
   available: PackageVersionEvidence | undefined,
   availableCommit?: string,
   installedCommitIsAncestor?: boolean,
+  host: PackageHost = "pi",
 ): "unknown" | "current" | "update available" {
   if (installed.kind !== "installed" || installed.reason !== undefined || available === undefined) {
     return "unknown";
+  }
+  if (host === "claude" && available.kind === "manifest-version") {
+    if (installed.version === undefined) return "unknown";
+    return installed.version === available.version ? "current" : "update available";
   }
   if (installed.commit !== undefined) {
     const sourceCommit = availableCommit ?? (available.kind === "git-commit" ? available.commit : undefined);
@@ -239,6 +245,20 @@ export function classifyUpdate(
     return order < 0 ? "update available" : "current";
   }
   return "unknown";
+}
+
+/** A different Source commit is not a deliverable update to Claude's versioned cache. */
+export function claudeVersionUpdateNotice(
+  host: PackageHost,
+  installed: InstalledBundleEvidence,
+  available: PackageVersionEvidence | undefined,
+  availableCommit?: string,
+): string | undefined {
+  if (host !== "claude" || installed.kind !== "installed" || installed.reason !== undefined
+    || available?.kind !== "manifest-version" || installed.version !== available.version
+    || installed.commit === undefined || availableCommit === undefined
+    || normalizeCommit(installed.commit) === normalizeCommit(availableCommit)) return undefined;
+  return `The Source commit differs, but Claude caches plugin version ${available.version}; the publisher must change the declared plugin version to deliver those changes.`;
 }
 
 /** Validates one host argv with the shared portable-command rules. */

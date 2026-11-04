@@ -92,6 +92,7 @@ export interface PackageInspection {
   /** Proven from the Source's cached Git history, never inferred from different commit IDs. */
   readonly installedCommitIsAncestor?: boolean;
   readonly approval: "approved" | "needs approval";
+  readonly updateReason?: string;
   readonly drift?: string;
 }
 
@@ -139,6 +140,8 @@ export type PackageLifecycleResult =
 
 export interface PackageUpdateCheck {
   readonly installed: InstalledPackage;
+  /** Current host evidence, never the remembered selection receipt. */
+  readonly observed?: InstalledBundleEvidence;
   readonly status: "unknown" | "current" | "update available";
   readonly available?: PackageVersionEvidence;
   readonly availableCommit?: string;

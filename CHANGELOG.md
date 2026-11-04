@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-11-04
+
+### Fixed
+
+- Versioned Claude Packages now follow the Host's literal plugin cache version,
+  with the plugin manifest taking precedence over marketplace metadata. A newer
+  Source commit at the same version is explained instead of offered as an update
+  Claude cannot apply. Successful literal-version changes are recognized even
+  when the commit is unchanged or the version strings normalize identically.
+- Package comparisons and results in the CLI and TUI now show the observed Host
+  version and commit together. Remembered evidence is labelled as recorded;
+  Pi updates between different commits at the same manifest version remain
+  available when verified Source ancestry proves progress.
+
 ## [0.6.7] - 2026-11-04
 
 ### Fixed
