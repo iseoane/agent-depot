@@ -28,7 +28,8 @@ function PackageDetails({ row }: { readonly row: PackageRow }) {
     <Text><Text color={theme.legend}>  </Text><Text color={theme.value}>{row.selection.host}  </Text>
       {version === undefined ? <Text color={theme.warning}>{row.installed}</Text> : <><Text color={theme.value}>{installedPrefix}</Text><Text color={theme.version}>{version}</Text><Text color={theme.value}>{installedSuffix}</Text></>}
       <Text color={theme.value}>  available </Text><Text color={row.available === "unknown" ? theme.warning : theme.version}>{row.available}</Text>
-      <Text color={theme.warning}>  {status}</Text>{row.drift === undefined ? null : <Text color={theme.warning}>  drift: {row.drift}</Text>}
+      <Text color={theme.warning}>  {status}</Text>
+      {row.updateReason === undefined ? null : <Text color={theme.warning}>  {row.updateReason}</Text>}{row.drift === undefined ? null : <Text color={theme.warning}>  drift: {row.drift}</Text>}
     </Text>
   );
 }

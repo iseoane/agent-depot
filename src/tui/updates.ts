@@ -269,8 +269,10 @@ export async function loadUpdateRows(
       check,
       path: `Package: ${describeCoordinates(check.installed.selection)}`,
       policy: formatVersionPolicy(check.installed.selection.version),
-      installed: recordedVersionLabel(check.installed),
-      available: check.available === undefined ? "?" : packageVersionLabel(check.available),
+      installed: check.observed === undefined
+        ? `${recordedVersionLabel(check.installed)} (recorded)`
+        : installedEvidenceLabel(check.observed).replace(/^installed (?:at )?/, ""),
+      available: check.available === undefined ? "?" : packageVersionLabel(check.available, check.availableCommit),
       status: packageStatusLabel(check.status),
       reason: check.reason ?? "the host reports no usable version evidence",
     });

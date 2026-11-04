@@ -8,6 +8,7 @@ import { sourceBundleScope } from "./package-content.js";
 import {
   affectedBy,
   classifyUpdate,
+  claudeVersionUpdateNotice,
   hostInstallId,
   packageApprovalDigest,
   planHostSteps,
@@ -315,7 +316,9 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
     const installedCommitIsAncestor = bundle?.resolvedCommit === undefined || installed.kind !== "installed" || installed.commit === undefined
       ? undefined
       : await contentAccess.isCommitAncestor?.(bundle.source, installed.commit, bundle.resolvedCommit).catch(() => undefined);
+    const updateReason = claudeVersionUpdateNotice(selection.host, installed, bundle?.available, bundle?.resolvedCommit);
     return Object.freeze({
+      ...(updateReason === undefined ? {} : { updateReason }),
       ...(bundle === undefined ? {} : { descriptor: bundle.descriptor }),
       installed,
       ...(bundle?.available === undefined ? {} : { available: bundle.available }),
@@ -334,13 +337,17 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
         inspection.available,
         inspection.availableCommit,
         inspection.installedCommitIsAncestor,
+        record.selection.host,
       );
       return Object.freeze({
         installed: record,
+        observed: inspection.installed,
         status,
         ...(inspection.available === undefined ? {} : { available: inspection.available }),
         ...(inspection.availableCommit === undefined ? {} : { availableCommit: inspection.availableCommit }),
-        ...(status === "unknown" ? { reason: inspection.drift ?? describeEvidence(inspection.installed) } : {}),
+        ...(status === "unknown"
+          ? { reason: inspection.drift ?? describeEvidence(inspection.installed) }
+          : inspection.updateReason === undefined ? {} : { reason: inspection.updateReason }),
       });
     } catch (error) {
       return Object.freeze({
@@ -396,9 +403,10 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
           };
         }
         if (change === "unchanged") {
+          const notice = claudeVersionUpdateNotice(context.selection.host, observed, context.available, context.origin.resolvedCommit);
           return {
             status: "failed",
-            reason: `The observed version did not change (${describeEvidence(observed)}); the selection record was left untouched`,
+            reason: `The observed version did not change (${describeEvidence(observed)}); the selection record was left untouched${notice === undefined ? "" : `. ${notice}`}`,
           };
         }
         await writeSelection(context, observed);

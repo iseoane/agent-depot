@@ -12,9 +12,13 @@ import {
 import type { PackageApprovalStatus } from "../package-state.js";
 
 /** Version evidence as a short label; `unknown` when the host or the bundle states none. */
-export function packageVersionLabel(evidence: PackageVersionEvidence | undefined): string {
+export function packageVersionLabel(evidence: PackageVersionEvidence | undefined, commit?: string): string {
   if (evidence === undefined) return "unknown";
-  return evidence.kind === "manifest-version" ? evidence.version : evidence.commit.slice(0, 7);
+  return evidence.kind === "manifest-version" ? versionWithCommit(evidence.version, commit) : evidence.commit.slice(0, 7);
+}
+
+function versionWithCommit(version: string, commit?: string): string {
+  return `${version}${commit === undefined ? "" : ` (${commit.slice(0, 7)})`}`;
 }
 
 /** What the host reports about an install, as one phrase. Never a guess. */
@@ -23,7 +27,7 @@ export function installedEvidenceLabel(evidence: InstalledBundleEvidence): strin
     case "installed": {
       if (evidence.version !== undefined) {
         const qualifier = evidence.reason === undefined ? "" : " (HEAD; local changes)";
-        return `installed ${evidence.version}${qualifier}`;
+        return `installed ${versionWithCommit(evidence.version, evidence.commit)}${qualifier}`;
       }
       if (evidence.reason !== undefined) {
         const reason = evidence.reason.includes("local modifications") ? "local changes" : evidence.reason;
@@ -68,6 +72,7 @@ export interface PackageRow {
   readonly installed: string;
   readonly installedVersion?: string;
   readonly available: string;
+  readonly updateReason?: string;
   readonly status: PackageRowStatus;
   readonly drift?: string;
 }
@@ -78,22 +83,24 @@ export function packageRow(record: InstalledPackage, inspection: PackageInspecti
     name: inspection.descriptor?.name ?? describeCoordinates(record.selection),
     installed: installedEvidenceLabel(inspection.installed),
     ...(inspection.installed.kind === "installed" && inspection.installed.version !== undefined
-      ? { installedVersion: inspection.installed.version }
+      ? { installedVersion: versionWithCommit(inspection.installed.version, inspection.installed.commit) }
       : inspection.installed.kind === "installed" && inspection.installed.commit !== undefined
         ? { installedVersion: inspection.installed.commit.slice(0, 7) }
         : {}),
-    available: packageVersionLabel(inspection.available),
-    status: packageRowStatus(inspection),
+    available: packageVersionLabel(inspection.available, inspection.availableCommit),
+    status: packageRowStatus(record.selection, inspection),
+    ...(inspection.updateReason === undefined ? {} : { updateReason: inspection.updateReason }),
     ...(inspection.drift === undefined ? {} : { drift: inspection.drift }),
   };
 }
 
-function packageRowStatus(inspection: PackageInspection): PackageRowStatus {
+function packageRowStatus(selection: PackageSelection, inspection: PackageInspection): PackageRowStatus {
   const status = classifyUpdate(
     inspection.installed,
     inspection.available,
     inspection.availableCommit,
     inspection.installedCommitIsAncestor,
+    selection.host,
   );
   if (status === "unknown") {
     return {

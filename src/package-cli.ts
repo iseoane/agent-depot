@@ -135,7 +135,9 @@ export function packageSelectionMatches(selection: PackageSelection, value: stri
 export function describePackageUpdateCheck(check: PackageUpdateCheck): string {
   const available = check.available === undefined ? "unknown" : describeVersion(check.available);
   const reason = check.reason === undefined ? "" : `; ${check.reason}`;
-  return `Package ${formatPackageSelection(check.installed.selection)}: ${check.status}; available ${available}${reason}`;
+  const installed = check.observed === undefined ? "unknown (host evidence unavailable)" : describeEvidence(check.observed);
+  const commit = check.available?.kind === "manifest-version" && check.availableCommit !== undefined ? `; commit ${check.availableCommit}` : "";
+  return `Package ${formatPackageSelection(check.installed.selection)}: ${check.status}; installed ${installed}; available ${available}${commit}${reason}`;
 }
 
 export function describePackageResult(result: PackageLifecycleResult): string {
@@ -399,7 +401,8 @@ function describeInspection(
 ): void {
   output(`Package inspect: ${formatPackageSelection(selection)}`);
   output(`  installed: ${describeEvidence(inspection.installed)}`);
-  output(`  available: ${inspection.available === undefined ? "unknown" : describeVersion(inspection.available)}`);
+  output(`  available: ${inspection.available === undefined ? "unknown" : describeVersion(inspection.available)}${inspection.availableCommit === undefined || inspection.available?.kind === "git-commit" ? "" : `; commit ${inspection.availableCommit}`}`);
+  if (inspection.updateReason !== undefined) output(`  update: ${inspection.updateReason}`);
   output(`  approval: ${inspection.approval}`);
   if (inspection.drift !== undefined) {
     output(`  drift: ${inspection.drift}`);
@@ -484,7 +487,7 @@ function describeEvidence(evidence: InstalledBundleEvidence): string {
     case "installed": {
       if (evidence.version !== undefined) {
         const qualifier = evidence.reason === undefined ? "" : " (HEAD; local changes)";
-        return `installed ${evidence.version}${qualifier}`;
+        return `installed ${evidence.version}${evidence.commit === undefined ? "" : ` (commit ${evidence.commit})`}${qualifier}`;
       }
       if (evidence.commit !== undefined) {
         return `installed commit ${evidence.commit}`;
