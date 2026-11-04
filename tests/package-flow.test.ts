@@ -625,6 +625,43 @@ test("versioned Claude updates follow the host version, not repository ancestry"
   });
 });
 
+for (const { from, to, commit } of [
+  { from: "1.0.0", to: "1.1.0", commit: COMMIT },
+  { from: "v1.0.0", to: "1.0.0", commit: undefined },
+]) {
+  test(`Claude lifecycle records literal version progress ${from} -> ${to} with ${commit === undefined ? "no" : "unchanged"} commit`, async () => {
+    const files = (version: string) => claudeFiles().map(file => ({ ...file, content: file.content.replace('"1.0.0"', JSON.stringify(version)) }));
+    await withHarness({ files: files(from) }, async (harness) => {
+      const selection = claudeSelection();
+      const setInstalled = (version: string) => harness.setClaudePlugins({ plugins: { "demo@demo-market": [{
+        scope: "user", installPath: path.join(harness.home, "cache", "demo"), version,
+        ...(commit === undefined ? {} : { gitCommitSha: commit }),
+      }] } });
+      harness.setClaudeMarketplaces({ "demo-market": {
+        source: { source: "github", repo: "example/demo-bundle" }, installLocation: path.join(harness.home, "market"),
+      } });
+      setInstalled(from);
+      const install = await harness.operations.planLifecycle(selection, "install");
+      await harness.operations.approve(selection, "install");
+      assert.equal((await harness.operations.executeLifecycle(install, true)).status, "installed");
+      harness.setFiles(files(to));
+      harness.setCommit(NEXT_COMMIT);
+      assert.equal((await harness.operations.checkUpdates())[0]?.status, "update available");
+      harness.setRunner(async () => { setInstalled(to); return okResult(); });
+      const update = await harness.operations.planLifecycle(selection, "update");
+      await harness.operations.approve(selection, "update");
+      const result = await harness.operations.executeLifecycle(update, true);
+      assert.equal(result.status, "updated", "literal Claude cache version progress must survive outcome verification");
+      assert.deepEqual(result.verified, { kind: "installed", version: to, ...(commit === undefined ? {} : { commit }) });
+      const record = (await harness.operations.list())[0]!;
+      assert.equal(record.lastDelegatedCommit, NEXT_COMMIT);
+      assert.deepEqual(record.verified, commit === undefined
+        ? { kind: "manifest-version", version: to, declaredBy: "bundle" }
+        : { kind: "git-commit", commit });
+    });
+  });
+}
+
 test("one broken Package in a batch does not hide the other checks", async () => {
   await withHarness({ files: [...piFiles(), ...claudeFiles()] }, async (harness) => {
     const pi = piSelection();
