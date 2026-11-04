@@ -1034,6 +1034,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   const packages = fakePackageOperations({
     checkUpdates: async () => [{
       installed: packageRecord,
+      observed: { kind: "installed", version: "1.0.0" },
       status: "update available",
       available: { kind: "git-commit", commit: "abcdef1234567890" },
     }],
@@ -1085,6 +1086,23 @@ test("Package Updates shows observed host version and commit rather than the rem
   const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
   assert.match(listed, /1\.6\.1 \(aaaaaaa\) -> 1\.6\.1 \(bbbbbbb\)/);
   assert.doesNotMatch(listed, /1\.0\.0/);
+});
+
+test("an unchanged Claude cache version explains source changes without offering an update", async t => {
+  const f = await fixture(t);
+  const packages = fakePackageOperations({ checkUpdates: async () => [{
+    installed: { ...packageRecord, selection: { host: "claude", marketplaceRoot: "", pluginName: "demo",
+      source: packageSelection.source, version: { policy: "latest" } } },
+    observed: { kind: "installed", version: "1.6.1", commit: "a".repeat(40) },
+    status: "current", available: { kind: "manifest-version", version: "1.6.1", declaredBy: "bundle" },
+    availableCommit: "b".repeat(40),
+    reason: "The Source commit differs, but Claude caches plugin version 1.6.1; the publisher must change the declared plugin version to deliver those changes.",
+  }] });
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
+  t.after(() => { view.unmount(); view.cleanup(); });
+  const listed = await waitForFrame(view.lastFrame, /publisher must change/);
+  assert.match(listed, /Claude caches plugin version 1\.6\.1/);
+  assert.doesNotMatch(listed, /\[ \] Package:/);
 });
 
 test("an unknown Package is folded with its reason and is never offered as an update", async t => {

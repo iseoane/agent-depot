@@ -73,8 +73,8 @@ export function parseClaudePluginManifest(raw: string, root: string): BundleDesc
 /**
  * Reads one marketplace and returns a descriptor per `plugins` entry. The
  * `readPluginManifest` resolver supplies the raw plugin.json for an in-repo
- * entry, because the entry version overrides the plugin manifest version and
- * the plugin manifest owns the component inventory (agents, hooks, and so on).
+ * entry. The plugin manifest owns the component inventory and, when declared,
+ * its version takes precedence over marketplace entry metadata, as in Claude.
  * A `command` source and any source outside the repository yield a descriptor
  * with a warning rather than a throw.
  */
@@ -417,7 +417,7 @@ function buildMarketplaceDescriptor(
     warnings.push(`marketplace entry name ${JSON.stringify(entryName)} differs from plugin manifest name ${JSON.stringify(plugin.name)}`);
   }
   const entryVersion = manifestVersionEvidence(entry.version, "marketplace-entry");
-  const version = entryVersion ?? plugin.version;
+  const version = plugin.version ?? entryVersion;
   return Object.freeze({
     host: "claude",
     coordinates: Object.freeze({ host: "claude", marketplaceRoot, pluginName: entryName }),

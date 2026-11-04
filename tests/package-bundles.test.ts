@@ -242,6 +242,12 @@ test("the plugin manifest version overrides the marketplace entry like Claude's 
   assert.deepEqual(descriptor.coordinates, { host: "claude", marketplaceRoot: "", pluginName: "p" });
 });
 
+test("Claude uses the marketplace version only when the plugin declares no version", () => {
+  const marketplace = JSON.stringify({ name: "m", plugins: [{ name: "p", source: "./p", version: "1.0.0" }] });
+  const descriptor = parseClaudeMarketplace(marketplace, "", () => JSON.stringify({ name: "p" }))[0];
+  assert.deepEqual(descriptor.version, { kind: "manifest-version", version: "1.0.0", declaredBy: "marketplace-entry" });
+});
+
 test("the owned-skill matcher applies the lifecycle segment filter", async () => {
   const descriptors = discoverBundlesInSnapshot(await readFixtureFiles("pstack"), {});
   const owned = bundleOwnedSkillMatcher(descriptors);

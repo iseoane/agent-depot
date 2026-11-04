@@ -137,7 +137,7 @@ export function describePackageUpdateCheck(check: PackageUpdateCheck): string {
   const reason = check.reason === undefined ? "" : `; ${check.reason}`;
   const installed = check.observed === undefined ? "unknown (host evidence unavailable)" : describeEvidence(check.observed);
   const commit = check.available?.kind === "manifest-version" && check.availableCommit !== undefined ? `; commit ${check.availableCommit}` : "";
-  return `Package ${formatPackageSelection(check.installed.selection)}: ${check.status}; installed ${installed}; available ${available}${commit}${reason}`;
+  return `Package ${formatPackageSelection(check.installed.selection)}: ${check.status}; available ${available}${commit}${reason}; host ${installed}`;
 }
 
 export function describePackageResult(result: PackageLifecycleResult): string {
