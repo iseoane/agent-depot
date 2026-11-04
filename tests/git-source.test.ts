@@ -30,7 +30,7 @@ class FakeSnapshotRunner {
     }
     if (args.includes("ls-tree")) {
       return [
-        "100644 blob one\tgood/SKILL.md\0",
+        `100644 blob ${"1".repeat(40)}\tgood/SKILL.md\0`,
         "100644 blob four\tgood/notes.txt\0",
         "100644 blob five\tREADME.md\0",
         "120000 blob two\tlinked/SKILL.md\0",
@@ -48,6 +48,11 @@ class FakeSnapshotRunner {
   }
 
   async runBinary(command: string, args: readonly string[]): Promise<Uint8Array> {
+    if (args.includes("--batch")) {
+      this.calls.push({ command, args: [...args] });
+      const content = Buffer.from("---\nname: Good\ndescription: Good skill\n---\n");
+      return Buffer.concat([Buffer.from(`${"1".repeat(40)} blob ${content.length}\n`), content, Buffer.from("\n")]);
+    }
     return Buffer.from(await this.run(command, args), "utf8");
   }
 }
@@ -341,7 +346,7 @@ test("reads the cached bare mirror HEAD without refreshing and ignores Git symli
     assert.deepEqual(runner.calls.map((call) => call.args[call.args.length - 1]), [
       "HEAD^{commit}",
       "a".repeat(40),
-      `${"a".repeat(40)}:good/SKILL.md`,
+      "--batch",
     ]);
   });
 });
@@ -593,13 +598,16 @@ test("GitHub directory discovery uses the URL ref and excludes sibling directori
     const source = { id: sourceIdForUrl(url), kind: "git" as const, url };
     await mkdir(path.join(cachePath, source.id.slice(4)), { recursive: true });
     const runner = new FakeSelectedSnapshotRunner([
-      "100644 blob one\tpstack/skills/good/SKILL.md\0",
+      `100644 blob ${"1".repeat(40)}\tpstack/skills/good/SKILL.md\0`,
       "100644 blob two\tpstack-other/SKILL.md\0",
       "100644 blob three\tother/SKILL.md\0",
     ].join(""), new Map());
-    // Discovery reads manifests via show; selected tree reads still use cat-file.
-    const run = runner.run.bind(runner);
-    runner.run = async (command, args) => args.includes("show") ? "manifest" : run(command, args);
+    const runBinary = runner.runBinary.bind(runner);
+    runner.runBinary = async (command, args) => {
+      if (!args.includes("--batch")) return runBinary(command, args);
+      runner.calls.push({ command, args: [...args] });
+      return Buffer.from(`${"1".repeat(40)} blob 8\nmanifest\n`);
+    };
     const access = new GitSourceSnapshotAccess({ cachePath, runner });
     assert.deepEqual(await access.readSnapshot(source), [{ path: "pstack/skills/good/SKILL.md", content: "manifest" }]);
     assert.equal(runner.calls[0].args.at(-1), "release/stable^{commit}");
