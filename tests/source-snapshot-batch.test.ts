@@ -116,6 +116,9 @@ test("snapshot cache evicts failed work, isolates owners and bounds retained ent
   assert.equal(await reuseSourceSnapshot({}, "key", async () => other), other);
   for (let i = 0; i < 8; i++) await reuseSourceSnapshot(owner, String(i), async () => files);
   assert.equal(await reuseSourceSnapshot(owner, "key", async () => other), other);
+  const large = [{ path: "large/SKILL.md", content: "a".repeat(4 * 1024 * 1024 + 1) }];
+  assert.equal(await reuseSourceSnapshot(owner, "large", async () => large), large);
+  assert.equal(await reuseSourceSnapshot(owner, "large", async () => other), other, "large results are not retained");
 });
 
 test("process input is binary safe, bounded, and still closes stdin", async () => {
@@ -124,4 +127,7 @@ test("process input is binary safe, bounded, and still closes stdin", async () =
   assert.equal(result.code, 0);
   assert.deepEqual(result.stdout, input);
   await assert.rejects(runProcess(process.execPath, ["-e", "process.exit(99)"], { stdin: Buffer.alloc(1024 * 1024 + 1) }), /stdin exceeds/);
+  const blocked = await runProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdin: Buffer.alloc(1024 * 1024), timeoutMs: 300 });
+  assert.equal(blocked.timedOut, true);
+  assert.equal(blocked.signal, "SIGTERM");
 });
