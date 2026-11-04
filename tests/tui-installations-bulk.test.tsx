@@ -207,6 +207,35 @@ async function markedEverything(t: TestContext) {
   return { f, view, loose };
 }
 
+test("bulk TUI uninstall previews, cancels and confirms record-only recovery truthfully", async (t) => {
+  const f = await fixture(t);
+  await install(f, "alpha", ["pi"]);
+  await rm(agentsDir(f.home, "alpha"), { recursive: true, force: true });
+  const view = await mount(f);
+  await waitForFrame(view.lastFrame, /builtin:agent-depot \(1\)/);
+  await open(view, [/builtin:agent-depot \(1\)/]);
+  await mark(view, /portable\/alpha/);
+  view.stdin.write("u");
+  const preview = await waitForFrame(view.lastFrame, /Uninstall 1 item\? y\/n/);
+  assert.match(preview, /forget missing installation record/u);
+  assert.match(preview, /record only; no files removed/u);
+  assert.doesNotMatch(preview, /WARNING: this Skill was adopted|WARNING: this Skill is locally modified/u);
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, /Uninstall cancelled/);
+  assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
+  assert.equal(await exists(agentsDir(f.home, "alpha")), false);
+
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /Uninstall 1 item\? y\/n/);
+  view.stdin.write("y");
+  const done = await waitForFrame(view.lastFrame, /Forgot missing installation record for portable\/alpha; no files were removed/);
+
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  assert.equal(await exists(agentsDir(f.home, "alpha")), false);
+  assert.match(done, /Managed \(user-global\) \(0\)/);
+  view.unmount();
+});
+
 test("u with marks shows ONE combined preview with every path, warnings and the skipped project item", async (t) => {
   const { f, view, loose } = await markedEverything(t);
   view.stdin.write("u");

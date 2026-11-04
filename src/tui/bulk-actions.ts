@@ -207,7 +207,9 @@ export async function runBulkUninstall(plan: BulkUninstallPlan, operations: Sour
     await runUninstall({ ...item.prepared, installations: expected }, operations, env);
     // Only the record this item removed moves the baseline the next item is checked against.
     expected = expected.filter((record) => !item.prepared.plan.selections.some((removed) => sameRecord(removed, record)));
-    return `Removed ${item.label}`;
+    return item.prepared.plan.inspections.every((inspection) => inspection.recordOnly)
+      ? `Forgot missing installation record for ${item.label}; no files were removed`
+      : `Removed ${item.label}`;
   }, (item, error) => (item.kind === "unmanaged" ? errorText(error) : `Failed ${item.label}: ${errorText(error)}`));
   return resultOf(outcomes, plan.skipped);
 }

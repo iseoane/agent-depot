@@ -115,6 +115,55 @@ function mount(f: Fixture, onCapturingChange?: (capturing: boolean) => void) {
   return renderExpanded(<InstallationsView operations={f.operations} environment={f.environment} onCapturingChange={onCapturingChange} />);
 }
 
+test("u previews a missing record without deletion warnings, cancels, then forgets it and reloads", async (t) => {
+  const f = await fixture(t, ["pi"]);
+  await rm(path.join(f.home, ".agents"), { recursive: true, force: true });
+  await rm(path.join(f.home, ".claude"), { recursive: true, force: true });
+  const view = await mount(f);
+  await revealSkill(view);
+  view.stdin.write("u");
+  const preview = await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  assert.match(preview, /forget missing installation record.*record only; no files removed/u);
+  assert.doesNotMatch(preview, /WARNING: this Skill was adopted|WARNING: this Skill is locally modified/u);
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, /Uninstall cancelled/);
+  assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
+  assert.equal(await exists(canonical(f.home)), false);
+
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  view.stdin.write("y");
+  const done = await waitForFrame(view.lastFrame, /Forgot missing installation record for portable\/demo; no files were removed/);
+  assert.match(done, /Managed \(user-global\) \(0\)/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  assert.equal(await exists(canonical(f.home)), false);
+  view.unmount();
+});
+
+test("full TUI host-checklist removal reports record-only recovery truthfully", async (t) => {
+  const f = await fixture(t, ["pi"]);
+  const selection = (await f.operations.listUserGlobalInstallations!())[0]!;
+  await f.operations.updateUserGlobalInstallation!({ ...selection, hosts: ["pi", "claude"] });
+  await rm(path.join(f.home, ".agents"), { recursive: true, force: true });
+  const view = await mount(f);
+  await revealSkill(view);
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /1 all hosts.*2 choose hosts/s);
+  view.stdin.write("2");
+  await waitForFrame(view.lastFrame, /\[ \] 1 pi.*\[ \] 2 claude/s);
+  view.stdin.write("1");
+  await waitForFrame(view.lastFrame, /\[x\] 1 pi/);
+  view.stdin.write("2");
+  await waitForFrame(view.lastFrame, /\[x\] 1 pi.*\[x\] 2 claude/s);
+  view.stdin.write(ENTER);
+  const preview = await waitForFrame(view.lastFrame, /forget missing installation record.*record only; no files removed/u);
+  assert.doesNotMatch(preview, /WARNING: this Skill was adopted|WARNING: this Skill is locally modified/u);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Forgot missing installation record for portable\/demo; no files were removed/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  view.unmount();
+});
+
 test("u on a single-host installation previews, confirms and removes it without leaving the view", async (t) => {
   const f = await fixture(t, ["pi"]);
   const view = await mount(f);

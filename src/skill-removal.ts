@@ -1,6 +1,8 @@
 import {
   assertNoOverlappingProjectSkillRemovalTargets,
+  inspectAbsentManagedSkillRecord,
   inspectProjectSkillRemoval,
+  ProjectInstallationError,
   removeProjectSkill,
   type ProjectInstallationOptions,
   type ProjectSkillRemovalInspection,
@@ -67,11 +69,13 @@ export function describeSkillRemoval(
   inspection: ProjectSkillRemovalInspection,
   label: string,
 ): readonly string[] {
-  const lines = [`  remove ${label}${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`];
-  if (inspection.adopted) {
+  const lines = inspection.recordOnly
+    ? [`  forget missing installation record for ${label}${JSON.stringify(selection.path)} (record only; no files removed)`]
+    : [`  remove ${label}${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`];
+  if (!inspection.recordOnly && inspection.adopted) {
     lines.push("    WARNING: this Skill was adopted; removal deletes content that Agent Depot did not create");
   }
-  if (inspection.modified) {
+  if (!inspection.recordOnly && inspection.modified) {
     lines.push("    WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes");
   }
   return lines;
@@ -88,7 +92,18 @@ export async function inspectSkillRemovals(
 ): Promise<SkillRemovalPlan> {
   const inspections: ProjectSkillRemovalInspection[] = [];
   for (const selection of selections) {
-    const inspection = await inspectProjectSkillRemoval(selection, options);
+    const otherInstallationPaths = [
+      ...(options.otherInstallationPaths ?? []),
+      ...selections.filter((candidate) => candidate !== selection)
+        .flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
+    ];
+    let inspection: ProjectSkillRemovalInspection;
+    try {
+      inspection = await inspectProjectSkillRemoval(selection, { ...options, otherInstallationPaths });
+    } catch (error) {
+      if (!(error instanceof ProjectInstallationError) || error.code !== "missing-installation" || options.installationTrust !== "user-global-state") throw error;
+      inspection = await inspectAbsentManagedSkillRecord(selection, { ...options, otherInstallationPaths });
+    }
     inspections.push(inspection);
     onInspected?.(selection, inspection);
   }
@@ -120,9 +135,9 @@ export async function recheckSkillRemoval(
 }
 
 export function assertRemovalInspectionUnchanged(before: ProjectSkillRemovalInspection, after: ProjectSkillRemovalInspection): void {
-  const unchanged = before.digest === after.digest && before.adopted === after.adopted && before.modified === after.modified &&
-    before.skillName === after.skillName && before.paths.length === after.paths.length &&
-    before.paths.every((candidate, pathIndex) => candidate === after.paths[pathIndex]);
+  const unchanged = before.digest === after.digest && before.recordOnly === after.recordOnly && before.adopted === after.adopted && before.modified === after.modified &&
+    before.skillName === after.skillName && before.nonCanonicalPath === after.nonCanonicalPath &&
+    before.paths.length === after.paths.length && before.paths.every((candidate, pathIndex) => candidate === after.paths[pathIndex]);
   if (!unchanged) {
     throw new Error("The inspected Skill removal target changed before deletion; no path was removed");
   }
@@ -145,8 +160,10 @@ export async function removeSkillFiles(
   rechecked: SkillRemovalPlan,
   options: ProjectInstallationOptions,
 ): Promise<void> {
+  assertRemovalBatchUnchanged(plan, rechecked);
   for (const [index, selection] of plan.selections.entries()) {
     assertRemovalInspectionUnchanged(plan.inspections[index]!, rechecked.inspections[index]!);
+    if (rechecked.inspections[index]!.recordOnly) continue;
     await removeProjectSkill(selection, rechecked.inspections[index]!, options);
   }
 }
@@ -168,15 +185,33 @@ export async function removeSkillsAndRecords(
   if (!list || !reconcile) {
     throw new Error("Configured Source operations cannot reconcile removed user-global Skills");
   }
+  assertRemovalBatchUnchanged(plan, rechecked);
   let expected = initialManaged;
   for (const [index, selection] of plan.selections.entries()) {
     assertRemovalInspectionUnchanged(plan.inspections[index]!, rechecked.inspections[index]!);
     assertManagedInstallationRecordsUnchanged(expected, await list.call(operations));
-    await removeProjectSkill(selection, rechecked.inspections[index]!, options);
+    if (rechecked.inspections[index]!.recordOnly) {
+      const latest = await inspectAbsentManagedSkillRecord(selection, options);
+      assertRemovalInspectionUnchanged(rechecked.inspections[index]!, latest);
+    } else {
+      await removeProjectSkill(selection, rechecked.inspections[index]!, options);
+    }
     await reconcile.call(operations, [selection]);
     expected = await list.call(operations);
   }
   return expected;
+}
+
+/** Compare the complete confirmed batch before any entry can mutate files or records. */
+function assertRemovalBatchUnchanged(plan: SkillRemovalPlan, rechecked: SkillRemovalPlan): void {
+  if (plan.selections.length !== rechecked.selections.length || plan.inspections.length !== rechecked.inspections.length) {
+    throw new Error("The inspected Skill removal batch changed before deletion; no path was removed");
+  }
+  for (const [index, inspection] of plan.inspections.entries()) {
+    const current = rechecked.inspections[index];
+    if (!current) throw new Error("The inspected Skill removal batch changed before deletion; no path was removed");
+    assertRemovalInspectionUnchanged(inspection, current);
+  }
 }
 
 /** Execute step: recheck, then remove files and records. */

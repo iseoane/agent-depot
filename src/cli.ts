@@ -39,6 +39,7 @@ import {
   type VersionPolicy,
 } from "./project-manifest.js";
 import {
+  inspectAbsentManagedSkillRecord,
   inspectProjectSkillInstallation,
   assertNoOverlappingProjectSkillRemovalTargets,
   type ProjectInstallationOptions,
@@ -64,6 +65,8 @@ import {
   recheckSkillRemoval,
   removeSkillFiles,
   removeSkillsAndRecords,
+  assertManagedInstallationRecordsUnchanged,
+  assertRemovalInspectionUnchanged,
   selectUserGlobalSkills,
   SkillSelectionError,
   userGlobalRemovalOptions,
@@ -385,7 +388,10 @@ async function runSourceRemoval(
   const selected = options.all
     ? dependent
     : resolveRemovalSelections(dependent, options.requested);
-  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), dependencies.installationOptions);
+  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), {
+    ...dependencies.installationOptions,
+    otherInstallationPaths: installations.filter((record) => !selected.includes(record)).flatMap((record) => record.installation ? [record.installation.path] : []),
+  });
 
   output(`Preview: remove Git Source ${source.id} from ${source.url}`);
   output(`Dependent user-global Skills (${dependent.length}):`);
@@ -404,14 +410,30 @@ async function runSourceRemoval(
   requireConfirmation(options.confirmed, "Removal not confirmed; rerun with --yes after reviewing every Source and Skill preview");
   // Recheck every selected target before deleting the first one. A changed later
   // target must never result in a partially removed batch.
-  await progress.run("Removing Skill files", async () => {
-    const rechecked = await recheckSkillRemoval(plan, removalOptions);
-    await removeSkillFiles(plan, rechecked, removalOptions);
+  const rechecked = await progress.run("Removing Skill files", async () => {
+    const current = await recheckSkillRemoval(plan, removalOptions);
+    assertManagedInstallationRecordsUnchanged(installations, await operations.listUserGlobalInstallations!());
+    await removeSkillFiles(plan, current, removalOptions);
+    return current;
+  });
+  // Source removal persists records rather than reconciling them one by one.
+  // Revalidate every record-only target and the complete record snapshot just
+  // before that persistence boundary so a stale preview cannot forget a changed record.
+  await progress.run("Revalidating Skill records before Source removal", async () => {
+    for (const [index, inspection] of rechecked.inspections.entries()) {
+      if (!inspection.recordOnly) continue;
+      const latest = await inspectAbsentManagedSkillRecord(rechecked.selections[index]!, removalOptions);
+      assertRemovalInspectionUnchanged(inspection, latest);
+    }
+    assertManagedInstallationRecordsUnchanged(installations, await operations.listUserGlobalInstallations!());
   });
   await progress.run(`Removing Git Source ${source.id}`, () => operations.removeGitSource!(source.id, selected));
   output(`Removed Git Source: ${source.id}`);
   if (selected.length > 0) {
-    output(`Removed ${selected.length} dependent user-global Skill${selected.length === 1 ? "" : "s"}; other dependent Skills remain tracked`);
+    const forgotten = plan.inspections.filter((inspection) => inspection.recordOnly).length;
+    const removed = selected.length - forgotten;
+    if (removed > 0) output(`Removed ${removed} dependent user-global Skill${removed === 1 ? "" : "s"}; other dependent Skills remain tracked`);
+    if (forgotten > 0) output(`Forgot ${forgotten} missing dependent Skill installation record${forgotten === 1 ? "" : "s"}; no files were removed`);
   }
 }
 
@@ -634,7 +656,10 @@ async function runSkillRemoval(
 
   const installations = await operations.listUserGlobalInstallations();
   const selected = selectManagedSkills(installations, requested);
-  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), dependencies.installationOptions);
+  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), {
+    ...dependencies.installationOptions,
+    otherInstallationPaths: installations.filter((record) => !selected.includes(record)).flatMap((record) => record.installation ? [record.installation.path] : []),
+  });
   if (hosts.length > 0) {
     await runSkillHostRemoval(selected[0]!, hosts, installations, confirmed, operations, removalOptions, output, progress);
     return;
@@ -647,7 +672,10 @@ async function runSkillRemoval(
   requireConfirmation(confirmed, "Removal not confirmed; rerun with --yes after reviewing every Skill preview");
   await progress.run(`Removing ${selected.length} user-global Skill${selected.length === 1 ? "" : "s"}`,
     () => executeSkillRemoval(plan, operations, removalOptions, installations));
-  output(`Removed ${selected.length} user-global Skill${selected.length === 1 ? "" : "s"}`);
+  const forgotten = plan.inspections.filter((inspection) => inspection.recordOnly).length;
+  const removed = selected.length - forgotten;
+  if (removed > 0) output(`Removed ${removed} user-global Skill${removed === 1 ? "" : "s"}`);
+  if (forgotten > 0) output(`Forgot ${forgotten} missing user-global Skill installation record${forgotten === 1 ? "" : "s"}; no files were removed`);
 }
 
 /** Resolves `<id|path>` arguments to managed installations, reporting selection problems as usage errors. */
@@ -674,17 +702,24 @@ async function runSkillHostRemoval(
   progress: Progress,
 ): Promise<void> {
   const plan = await planHostRemoval(selection, hosts, options).catch(rethrowSelectionError);
+  const recordOnly = plan.kind === "full" && plan.plan.inspections.every((inspection) => inspection.recordOnly);
   output(plan.kind === "full"
-    ? "Preview: remove 1 user-global Skill (every recorded Host is removed)"
+    ? recordOnly
+      ? "Preview: forget 1 missing user-global Skill installation record (every recorded Host is removed)"
+      : "Preview: remove 1 user-global Skill (every recorded Host is removed)"
     : `Preview: remove ${hosts.length} Host${hosts.length === 1 ? "" : "s"} from 1 user-global Skill`);
   for (const line of plan.kind === "full" ? plan.plan.preview : plan.preview) output(line);
-  output("  The installation record is reconciled after the locations are removed");
+  output(recordOnly
+    ? "  Only the installation record will be forgotten; no files are removed"
+    : "  The installation record is reconciled after the locations are removed");
   requireConfirmation(confirmed, "Removal not confirmed; rerun with --yes after reviewing the preview");
   await progress.run(plan.kind === "full" ? "Removing 1 user-global Skill" : `Removing Hosts from ${selection.path}`,
     () => executeHostRemoval(plan, operations, options, installations));
-  output(plan.kind === "full"
-    ? "Removed 1 user-global Skill"
-    : `Removed hosts ${plan.removed.join(", ")} from ${JSON.stringify(selection.path)}`);
+  output(plan.kind === "full" && plan.plan.inspections.every((inspection) => inspection.recordOnly)
+    ? `Forgot missing installation record for ${JSON.stringify(selection.path)}; no files were removed`
+    : plan.kind === "full"
+      ? "Removed 1 user-global Skill"
+      : `Removed hosts ${plan.removed.join(", ")} from ${JSON.stringify(selection.path)}`);
 }
 
 async function runSkillHostAdd(
@@ -874,9 +909,17 @@ interface UninstallRemovalContext {
   readonly removalOptions: ProjectInstallationOptions;
 }
 
-function outputUninstallSummary(options: UninstallOptions, removedManagedCount: number, output: (line: string) => void): void {
-  if (options.skills) {
+function outputUninstallSummary(
+  options: UninstallOptions,
+  removedManagedCount: number,
+  forgottenManagedCount: number,
+  output: (line: string) => void,
+): void {
+  if (options.skills && removedManagedCount > 0) {
     output(`Removed ${removedManagedCount} managed user-global Skill${removedManagedCount === 1 ? "" : "s"}`);
+  }
+  if (options.skills && forgottenManagedCount > 0) {
+    output(`Forgot ${forgottenManagedCount} missing managed user-global Skill installation record${forgottenManagedCount === 1 ? "" : "s"}; no files were removed`);
   }
   if (options.unmanagedSkills.length > 0) {
     output(`Permanently deleted ${options.unmanagedSkills.length} unmanaged user-global Skill${options.unmanagedSkills.length === 1 ? "" : "s"}`);
@@ -955,7 +998,8 @@ async function runUninstall(
   if (options.data) {
     await progress.run("Removing catalog data", () => operations.removeCatalogData!());
   }
-  outputUninstallSummary(options, selectedInstallations.length, output);
+  const forgottenManagedCount = managedRechecked.inspections.filter((inspection) => inspection.recordOnly).length;
+  outputUninstallSummary(options, selectedInstallations.length - forgottenManagedCount, forgottenManagedCount, output);
 }
 
 interface UpdateOptions {

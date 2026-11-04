@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,6 +19,7 @@ import { NodeSourceContentAccess, skillTreeBaseline, type SkillTreeFile } from "
 import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "../src/project-manifest.js";
 import type { ProjectInstallationFileSystem } from "../src/project-installation.js";
 import { runCli } from "../src/cli.js";
+import { isInstalled, loadInstalledSkills } from "../src/tui/catalog-installs.js";
 
 const external = {
   id: "git:1234567890abcdef12345678",
@@ -195,6 +196,84 @@ test("previews dependent user-global Skills, keeps them by default, and removes 
     assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "kept", "SKILL.md"), "utf8"), "kept");
     await assert.rejects(readFile(path.join(homeDirectory, ".agents", "skills", "removed", "SKILL.md")), { code: "ENOENT" });
     assert.deepEqual(await operations.listUserGlobalInstallations!(), [kept]);
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("source removal refuses a same-identity record changed at the persistence boundary", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-source-stale-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-source-stale-state-"));
+  const lines: string[] = [];
+  const errors: string[] = [];
+  try {
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const source = await operations.addGitSource(external.url);
+    const selection: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url }, path: "portable/demo", version: { policy: "latest" }, hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    };
+    const changed = { ...selection, installation: { path: ".agents/skills/present", adopted: false } };
+    await operations.addUserGlobalInstallation!(selection);
+    const present = path.join(homeDirectory, ".agents", "skills", "present");
+    await mkdir(present, { recursive: true });
+    await writeFile(path.join(present, "SKILL.md"), "preserve me", "utf8");
+    let reads = 0;
+    const changedOperations: SourceOperations = {
+      ...operations,
+      listUserGlobalInstallations: async () => {
+        reads += 1;
+        if (reads === 3) await operations.updateUserGlobalInstallation!(changed);
+        return operations.listUserGlobalInstallations!();
+      },
+    };
+    const code = await runCli(["source", "remove", source.id, "--all", "--yes"], {
+      operations: changedOperations, homeDirectory, stdout: (line) => lines.push(line), stderr: (line) => errors.push(line),
+    });
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /Managed Skill installation records changed before deletion/u);
+    assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), true);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), [changed]);
+    assert.equal(await readFile(path.join(present, "SKILL.md"), "utf8"), "preserve me");
+  } finally {
+    await rm(homeDirectory, { recursive: true, force: true });
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("source removal refuses an overlapping managed record added after missing-path preview", async () => {
+  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-source-alias-home-"));
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-source-alias-state-"));
+  const errors: string[] = [];
+  try {
+    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
+    const source = await operations.addGitSource(external.url);
+    const selection: ProjectSkillSelection = {
+      source: { kind: "external", url: source.url }, path: "portable/demo", version: { policy: "latest" }, hosts: ["pi"],
+      installation: { path: ".agents/skills/demo", adopted: false },
+    };
+    const alias: ProjectSkillSelection = {
+      source: { kind: "external", url: "https://example.com/another.git" }, path: "portable/alias",
+      version: { policy: "latest" }, hosts: ["pi"], installation: { path: ".agents/skills/demo", adopted: false },
+    };
+    await operations.addUserGlobalInstallation!(selection);
+    let reads = 0;
+    const changedOperations: SourceOperations = {
+      ...operations,
+      listUserGlobalInstallations: async () => {
+        reads += 1;
+        if (reads === 2) await operations.addUserGlobalInstallation!(alias);
+        return operations.listUserGlobalInstallations!();
+      },
+    };
+    const code = await runCli(["source", "remove", source.id, "--all", "--yes"], {
+      operations: changedOperations, homeDirectory, stderr: (line) => errors.push(line), stdout: () => {},
+    });
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /Managed Skill installation records changed before deletion/u);
+    assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), true);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), [selection, alias]);
   } finally {
     await rm(homeDirectory, { recursive: true, force: true });
     await rm(stateDirectory, { recursive: true, force: true });
@@ -1293,10 +1372,7 @@ test("previews and installs a user-global Skill in the injected home while shari
 
     assert.equal(await runCli([...args, "--yes"], dependencies), 0);
     assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
-    assert.equal(await readlink(path.join(homeDirectory, ".claude", "skills", "demo")), path.relative(
-      path.join(homeDirectory, ".claude", "skills"),
-      path.join(homeDirectory, ".agents", "skills", "demo"),
-    ));
+    assert.equal(path.resolve(path.dirname(path.join(homeDirectory, ".claude", "skills", "demo")), await readlink(path.join(homeDirectory, ".claude", "skills", "demo"))), path.join(homeDirectory, ".agents", "skills", "demo"));
     await assert.rejects(readFile(path.join(homeDirectory, "agent-depot.json")), { code: "ENOENT" });
     const state = JSON.parse(await readFile(path.join(stateDirectory, "sources.json"), "utf8")) as {
       userGlobalInstallations: Array<{ path: string; installation?: { path: string; adopted: boolean } }>;
@@ -2039,10 +2115,7 @@ test("executes a reviewed structured method only after the complete preview and 
     assert.equal(await runCli([...args, "--yes"], { operations, projectRoot, sourceAccess: cliSourceAccess(), stdout: (line) => output.push(line) }), 0);
     assert.deepEqual(calls, [{ argv: ["node", "--version"], cwd: projectRoot }]);
     assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
-    assert.equal(await readlink(path.join(projectRoot, ".claude", "skills", "demo")), path.relative(
-      path.join(projectRoot, ".claude", "skills"),
-      path.join(projectRoot, ".agents", "skills", "demo"),
-    ));
+    assert.equal(path.resolve(path.dirname(path.join(projectRoot, ".claude", "skills", "demo")), await readlink(path.join(projectRoot, ".claude", "skills", "demo"))), path.join(projectRoot, ".agents", "skills", "demo"));
   } finally {
     await rm(projectRoot, { recursive: true, force: true });
   }
@@ -2979,6 +3052,199 @@ test("skill remove does not delete a Skill whose directory changed after the pre
     assert.equal(code, 1);
     assert.match(errors.join("\n"), /changed before deletion; no path was removed/u);
     assert.equal(await readFile(path.join(skillDirectory(homeDirectory, "one"), "SKILL.md"), "utf8"), "changed after preview");
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+  });
+});
+
+test("skill remove explicitly forgets a verified missing managed installation without touching files", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, lines, errors, cli }) => {
+    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
+    assert.equal(await cli(["skill", "remove", "portable/one"]), 1);
+    assert.match(lines.join("\n"), /forget missing installation record.*record only; no files removed/u);
+    assert.match(errors.join("\n"), /Removal not confirmed/u);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+
+    assert.equal(await cli(["skill", "remove", "portable/one", "--yes"]), 0);
+    assert.match(lines.join("\n"), /Forgot 1 missing user-global Skill installation record; no files were removed/u);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+    await assert.rejects(lstat(skillDirectory(homeDirectory, "one")), { code: "ENOENT" });
+    const loaded = await loadInstalledSkills(operations, { homeDirectory });
+    assert.equal(loaded.global.length, 0);
+    assert.equal(isInstalled(
+      { sourceId: BUILT_IN_SOURCE.id, path: "portable/one", name: "one", description: "test" }, loaded,
+    ), false);
+    const sourceAccess = { readSkillTree: async () => [{
+      path: "portable/one/SKILL.md",
+      content: Buffer.from("---\nname: one\ndescription: Reinstalled skill\n---\n\nBody\n"),
+      executable: false,
+    }] };
+    assert.equal(await runCli([
+      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/one",
+      "--host", "pi", "--version", "latest", "--portable-v1", "--yes",
+    ], { operations, homeDirectory, sourceAccess, stdout: () => {}, stderr: (line) => errors.push(line) }), 0);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
+  });
+});
+
+test("skill remove rechecks all absent records before mutating when a later item reappears", async () => {
+  await withUserGlobalSkills(["portable/a", "portable/b"], async ({ operations, homeDirectory, errors }) => {
+    await rm(skillDirectory(homeDirectory, "a"), { recursive: true });
+    await rm(skillDirectory(homeDirectory, "b"), { recursive: true });
+    let deleteCalls = 0;
+    const fileSystem: ProjectInstallationFileSystem = {
+      lstat, readdir, readFile, chmod, symlink, readlink, rmdir, rename,
+      mkdir: async (candidate) => { await mkdir(candidate); },
+      writeFile: async (candidate, content) => { await writeFile(candidate, content, { flag: "wx" }); },
+      rm: async (candidate) => { deleteCalls += 1; await rm(candidate, { recursive: true, force: true }); },
+    };
+    const code = await runCli(["skill", "remove", "portable/a", "portable/b", "--yes"], {
+      operations, homeDirectory, installationOptions: { fileSystem }, stderr: (line) => errors.push(line),
+      stdout: (line) => {
+        if (line.includes("forget missing installation record") && line.includes("portable/b")) {
+          mkdirSync(skillDirectory(homeDirectory, "b"), { recursive: true });
+          writeFileSync(path.join(skillDirectory(homeDirectory, "b"), "SKILL.md"), "reappeared", "utf8");
+        }
+      },
+    });
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /inspected Skill removal target changed before deletion/u);
+    assert.equal(deleteCalls, 0);
+    assert.deepEqual((await operations.listUserGlobalInstallations!()).map((record) => record.path), ["portable/a", "portable/b"]);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "b")));
+  });
+});
+
+test("skill remove does not delete an earlier present Skill when a later missing record reappears", async () => {
+  await withUserGlobalSkills(["portable/a", "portable/b"], async ({ operations, homeDirectory, errors }) => {
+    await rm(skillDirectory(homeDirectory, "b"), { recursive: true });
+    let deleteCalls = 0;
+    const fileSystem: ProjectInstallationFileSystem = {
+      lstat, readdir, readFile, chmod, symlink, readlink, rmdir, rename,
+      mkdir: async (candidate) => { await mkdir(candidate); },
+      writeFile: async (candidate, content) => { await writeFile(candidate, content, { flag: "wx" }); },
+      rm: async (candidate) => { deleteCalls += 1; await rm(candidate, { recursive: true, force: true }); },
+    };
+    const code = await runCli(["skill", "remove", "portable/a", "portable/b", "--yes"], {
+      operations, homeDirectory, installationOptions: { fileSystem }, stderr: (line) => errors.push(line),
+      stdout: (line) => {
+        if (line.includes("forget missing installation record") && line.includes("portable/b")) {
+          mkdirSync(skillDirectory(homeDirectory, "b"), { recursive: true });
+          writeFileSync(path.join(skillDirectory(homeDirectory, "b"), "SKILL.md"), "reappeared", "utf8");
+        }
+      },
+    });
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /inspected Skill removal target changed before deletion/u);
+    assert.equal(deleteCalls, 0);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "a")));
+    assert.deepEqual((await operations.listUserGlobalInstallations!()).map((record) => record.path), ["portable/a", "portable/b"]);
+  });
+});
+
+test("uninstall summary distinguishes record-only managed recovery", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, lines, errors }) => {
+    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
+    assert.equal(await runCli(["uninstall", "--skills", "--yes"], {
+      operations, homeDirectory, stdout: (line) => lines.push(line), stderr: (line) => errors.push(line),
+    }), 0);
+    assert.match(lines.join("\n"), /Forgot 1 missing managed user-global Skill installation record; no files were removed/u);
+    assert.doesNotMatch(lines.join("\n"), /Removed 1 managed user-global Skill/u);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+  });
+});
+
+test("skill remove skips adopted-content deletion warnings for record-only recovery", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, lines, errors }) => {
+    const selection = (await operations.listUserGlobalInstallations!())[0]!;
+    await operations.updateUserGlobalInstallation!({ ...selection, installation: { ...selection.installation!, adopted: true } });
+    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
+    assert.equal(await runCli(["skill", "remove", "portable/one"], {
+      operations, homeDirectory, stdout: (line) => lines.push(line), stderr: (line) => errors.push(line),
+    }), 1);
+    assert.match(lines.join("\n"), /record only; no files removed/u);
+    assert.doesNotMatch(lines.join("\n"), /WARNING: this Skill was adopted|WARNING: this Skill is locally modified/u);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+  });
+});
+
+test("all-host CLI removal reports record-only recovery truthfully", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, lines, cli }) => {
+    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
+    assert.equal(await cli(["skill", "remove", "portable/one", "--host", "pi", "--yes"]), 0);
+    assert.match(lines.join("\n"), /Preview: forget 1 missing user-global Skill installation record/u);
+    assert.match(lines.join("\n"), /Forgot missing installation record.*no files were removed/u);
+    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
+  });
+});
+
+test("skill remove refuses missing-record recovery when a Claude location remains", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors, cli }) => {
+    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
+    const claudePath = path.join(homeDirectory, ".claude", "skills", "one");
+    await mkdir(claudePath, { recursive: true });
+    assert.equal(await cli(["skill", "remove", "portable/one", "--yes"]), 1);
+    assert.match(errors.join("\n"), /filesystem object exists/u);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+    assert.ok(await lstat(claudePath));
+  });
+});
+
+test("skill remove refuses record-only recovery when an unselected record aliases its target", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors }) => {
+    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
+    await operations.addUserGlobalInstallation!({
+      source: { kind: "external", url: "https://example.com/skills.git" },
+      path: "portable/alias",
+      version: { policy: "latest" },
+      hosts: ["pi"],
+      installation: { path: ".agents/skills/one", adopted: false },
+    });
+    assert.equal(await runCli(["skill", "remove", "portable/one", "--yes"], {
+      operations, homeDirectory, stderr: (line) => errors.push(line),
+    }), 1);
+    assert.match(errors.join("\n"), /overlaps another managed Skill record/u);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 2);
+  });
+});
+
+test("skill remove refuses a record-only apply when the managed record snapshot changes", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors }) => {
+    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
+    let calls = 0;
+    const altered: SourceOperations = {
+      ...operations,
+      listUserGlobalInstallations: async () => {
+        const current = await operations.listUserGlobalInstallations!();
+        calls += 1;
+        return calls === 1 ? current : current.map((selection) => ({ ...selection, hosts: ["codex"] }));
+      },
+    };
+    assert.equal(await runCli(["skill", "remove", "portable/one", "--yes"], {
+      operations: altered, homeDirectory, stderr: (line) => errors.push(line),
+    }), 1);
+    assert.match(errors.join("\n"), /Managed Skill installation records changed before deletion/u);
+    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
+    await assert.rejects(lstat(skillDirectory(homeDirectory, "one")), { code: "ENOENT" });
+  });
+});
+
+test("skill remove refuses missing-record recovery if the path reappears after preview", async () => {
+  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors }) => {
+    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
+    const code = await runCli(["skill", "remove", "portable/one", "--yes"], {
+      operations,
+      homeDirectory,
+      stderr: (line) => errors.push(line),
+      stdout: (line) => {
+        if (line.includes("record only; no files removed")) {
+          mkdirSync(skillDirectory(homeDirectory, "one"), { recursive: true });
+        }
+      },
+    });
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /inspected Skill removal target changed before deletion/u);
+    assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
     assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
   });
 });

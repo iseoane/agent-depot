@@ -74,7 +74,9 @@ test("skill host add needs --confirm-additional-host even with --yes", async () 
 test("skill host add exposes the installed Skill and records the host", async () => {
   await withSkill(["pi"], async ({ home, operations, lines, cli }) => {
     assert.equal(await cli(["skill", "host", "add", "one", "--host", "claude", "--yes", "--confirm-additional-host"]), 0);
-    assert.equal(await readlink(claude(home)), path.join("..", "..", ".agents", "skills", "one"));
+    const target = await readlink(claude(home));
+    assert.equal(path.isAbsolute(target), process.platform === "win32");
+    assert.equal(path.resolve(path.dirname(claude(home)), target), canonical(home));
     assert.deepEqual(await hostsOf(operations), ["pi", "claude"]);
     assert.match(lines.join("\n"), /Added hosts claude to "portable\/one"/u);
   });

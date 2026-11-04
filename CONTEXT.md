@@ -74,7 +74,7 @@ Making an installed skill available to a Host, or withdrawing it, without changi
 _Avoid_: Reinstall (exposure never copies or re-resolves content)
 
 **Canonical location**:
-The one directory that holds an installed skill's files for user-global use: `~/.agents/skills/<skill>`, shared by the Pi, Codex, and OpenCode Hosts. Claude Code is exposed through a managed symlink to it. Removal keeps the canonical location while any Host still uses it.
+The one directory that holds an installed skill's files for user-global use: `~/.agents/skills/<skill>`, shared by the Pi, Codex, and OpenCode Hosts. Claude Code is exposed through a managed directory link to it (a relative directory symlink on POSIX and an absolute-target junction on Windows). Removal keeps the canonical location while any Host still uses it.
 _Avoid_: Primary copy, master copy
 
 **Built-in source**:

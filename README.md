@@ -184,21 +184,28 @@ segment when that is unique; unknown or ambiguous selections fail before anythin
 changes. It previews every deletion (with adopted/modified warnings), requires
 `--yes`, rechecks the targets, then deletes the files and their installation
 records. It is user-global only: project installations and manifests are never
-read or changed, and the Git cache is retained.
+read or changed, and the Git cache is retained. If a managed Skill's recorded
+installation is verified absent, the preview instead offers an explicit
+`forget missing installation record` action. Confirming removes only that stale
+record; it never removes files. Existing files, including any Claude location,
+unsafe ancestors, ambiguous overlapping records, or filesystem errors fail
+closed. After the record is forgotten, the Skill can be selected and installed
+again through the normal flow.
 
 `skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]`
 exposes an already installed user-global Skill to more Hosts without changing its
 content or version, then records the new Hosts. Non-Claude Hosts share the
-canonical `~/.agents/skills/<skill>` location and Claude is a symlink to it, so
-only a missing Claude symlink is ever created. The preview lists the new
-locations; because it exposes the Skill to more Hosts it needs both `--yes` and
+canonical `~/.agents/skills/<skill>` location and Claude uses a managed directory
+link to it (relative symlink on POSIX; absolute-target junction on Windows), so
+only a missing Claude link is ever created. The preview lists the new locations;
+because it exposes the Skill to more Hosts it needs both `--yes` and
 `--confirm-additional-host`. It refuses a Claude location that already holds
-anything other than the managed symlink, and a Skill that is not installed at the
+anything other than the managed link, and a Skill that is not installed at the
 canonical location (exposing it would require copying it).
 
 `skill remove <id|path> --host <host>... [--yes]` removes only those Hosts. Only
-the managed Claude symlink can be deleted this way; the canonical directory backs
-every remaining Host (including the Claude symlink) and stays until the last Host
+the managed Claude directory link can be deleted this way; the canonical directory
+backs every remaining Host (including the Claude link) and stays until the last Host
 is removed. Removing every recorded Host is a full removal with the usual
 adopted/modified warnings. The targets are rechecked before deleting and the
 record is updated afterwards. Project installations are not affected.
@@ -310,8 +317,9 @@ select candidates, or install anything automatically.
 ## User-global installation
 
 User-global installations use the same canonical Host locations under the user
-home directory (`.agents/skills/<skill>` and, when requested, a Claude symlink
-at `.claude/skills/<skill>`). They are independent from project manifests and
+home directory (`.agents/skills/<skill>` and, when requested, a Claude directory
+link at `.claude/skills/<skill>`: relative symlink on POSIX, absolute-target
+junction on Windows). They are independent from project manifests and
 are recorded in the shared per-user Source state, so separate CLI invocations
 reuse the same installation records. The selected Source, Skill, Hosts, and
 actual adopted or installed location are previewed before `--yes` confirmation.
@@ -403,8 +411,9 @@ process crash after the original is moved can leave the retained
 inspect the backup and target, and manually rename the retained backup back to the intended installation path when recovery is needed;
 then rerun the install. External installation methods run only after the filesystem
 and selected-scope state transaction succeeds.
-Claude is exposed through a symlink to the canonical `.agents/skills/<skill>`
-installation.
+Claude is exposed through a managed directory link to the canonical
+`.agents/skills/<skill>` installation (relative symlink on POSIX, absolute-target
+junction on Windows).
 
 ## User-provided installation methods
 
