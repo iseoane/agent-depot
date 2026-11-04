@@ -19,6 +19,8 @@ export function withChildOutput<T>(sink: ChildOutputSink, work: () => Promise<T>
 
 export interface ProcessRunOptions {
   readonly cwd?: string;
+  /** Optional bounded input; all other commands retain stdin EOF. */
+  readonly stdin?: Uint8Array;
   /** Collect stdout instead of discarding it. */
   readonly captureStdout?: boolean;
   /**
@@ -197,6 +199,10 @@ export function runProcess(
   options: ProcessRunOptions = {},
 ): Promise<ProcessRunResult> {
   return new Promise((resolve, reject) => {
+    if (options.stdin !== undefined && options.stdin.byteLength > 1024 * 1024) {
+      reject(new Error("Process stdin exceeds the safe size limit"));
+      return;
+    }
     const invocation = spawnInvocation(command, args);
     const sink = childOutputSinks.getStore();
     const child = spawn(invocation.command, [...invocation.args], {
@@ -204,7 +210,7 @@ export function runProcess(
       shell: false,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       // Without a capture, stdout is piped only for a sink, and then discarded after it is shown.
-      stdio: ["ignore", options.captureStdout || sink !== undefined ? "pipe" : "ignore", "pipe"],
+      stdio: [options.stdin === undefined ? "ignore" : "pipe", options.captureStdout || sink !== undefined ? "pipe" : "ignore", "pipe"],
     });
     const stdout: Buffer[] = [];
     let stdoutBytes = 0;
@@ -232,6 +238,7 @@ export function runProcess(
     };
     // A surviving descendant keeps the pipes open, so `close` may never come: give up on them.
     const giveUp = (): void => {
+      child.stdin?.destroy();
       child.stdout?.destroy();
       child.stderr?.destroy();
       settle(child.exitCode, child.signalCode);
@@ -301,5 +308,10 @@ export function runProcess(
     });
     child.on("error", reject);
     child.on("close", settle);
+    child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
+      // Windows reports EOF when a child exits with input still pending.
+      if (error.code !== "EPIPE" && error.code !== "EOF") reject(error);
+    });
+    child.stdin?.end(options.stdin);
   });
 }

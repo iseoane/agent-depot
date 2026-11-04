@@ -5,6 +5,7 @@ import path from "node:path";
 import { isLockContention } from "./atomic-file.js";
 import { assertNoSymlinkPath } from "./path-safety.js";
 import { runProcess, type ProcessRunResult } from "./process-runner.js";
+import { decodeSnapshotBatch, reuseSourceSnapshot, SOURCE_SNAPSHOT_LIMITS } from "./source-snapshot.js";
 
 export interface GitSource {
   readonly id: string;
@@ -29,6 +30,7 @@ export interface GitCommandRunner {
 
 export interface GitSnapshotCommandRunnerOptions {
   readonly maxOutputBytes?: number;
+  readonly stdin?: Uint8Array;
 }
 
 export interface GitSnapshotCommandRunner {
@@ -119,11 +121,13 @@ class NodeGitSnapshotCommandRunner implements GitSnapshotCommandRunner {
   async runBinary(command: string, args: readonly string[], options: GitSnapshotCommandRunnerOptions = {}): Promise<Uint8Array> {
     const result = await runProcess(command, args, {
       captureStdout: true,
+      ...(options.stdin === undefined ? {} : { stdin: options.stdin, timeoutMs: 30_000, maxStderrBytes: 64 * 1024 }),
       ...(options.maxOutputBytes === undefined ? {} : { maxOutputBytes: options.maxOutputBytes }),
     });
     if (result.outputTooLarge) {
       throw new Error("git command output exceeds the safe size limit");
     }
+    if (result.timedOut) throw new Error("git command timed out");
     if (result.code !== 0) {
       throw new Error(`git command failed: ${gitFailureDetail(result)}`);
     }
@@ -244,13 +248,15 @@ function parseSkillTreeRecord(record: string, relativeSkillPath: string): SkillT
   return { relativePath, objectId, executable: mode === "100755" };
 }
 
+const defaultSnapshotRunner = new NodeGitSnapshotCommandRunner();
+
 export class GitSourceSnapshotAccess {
   private readonly cachePath: string;
   private readonly runner: GitSnapshotCommandRunner;
 
   constructor(options: { readonly cachePath?: string; readonly runner?: GitSnapshotCommandRunner } = {}) {
     this.cachePath = options.cachePath ?? defaultGitSourceCachePath();
-    this.runner = options.runner ?? new NodeGitSnapshotCommandRunner();
+    this.runner = options.runner ?? defaultSnapshotRunner;
   }
 
   private async requireMirror(source: GitSource): Promise<string> {
@@ -364,40 +370,39 @@ export class GitSourceSnapshotAccess {
 
   async readSnapshot(source: GitSource): Promise<readonly GitSourceSnapshotFile[]> {
     const destination = await this.requireMirror(source);
-
+    // Resolve on every read, even on a cache hit: refs can change outside Agent Depot.
     const commit = await this.readResolvedCommit(source);
     const directory = gitSourceLocation(source.url).directory;
-    const tree = await this.runner.run("git", [
-      "--git-dir", destination, "ls-tree", "-r", "-z", commit,
-      ...(directory === undefined ? [] : ["--", directory]),
-    ]);
-    const files: GitSourceSnapshotFile[] = [];
-    for (const record of tree.split("\0")) {
-      if (!record) {
-        continue;
+    const key = JSON.stringify([path.resolve(destination), commit, directory]);
+    return reuseSourceSnapshot(this.runner, key, async () => {
+      const tree = await this.runner.run("git", [
+        "--no-replace-objects", "--git-dir", destination, "ls-tree", "-r", "-z", commit,
+        ...(directory === undefined ? [] : ["--", directory]),
+      ], { maxOutputBytes: SKILL_TREE_LIMITS.maxListingBytes });
+      if (tree !== "" && !tree.endsWith("\0")) throw new Error("Truncated Git snapshot listing");
+      const entries: { path: string; objectId: string }[] = [];
+      for (const record of tree.split("\0")) {
+        if (!record) continue;
+        const separator = record.indexOf("\t");
+        if (separator < 0) throw new Error("Malformed Git snapshot listing");
+        const [mode, type, objectId] = record.slice(0, separator).split(" ");
+        const relativePath = record.slice(separator + 1);
+        if (mode === "120000" || type !== "blob" || !relativePath
+          || (directory !== undefined && !relativePath.startsWith(`${directory}/`))
+          || !isSourceSnapshotFile(relativePath, directory)
+          || relativePath.split("/").slice(0, -1).some(segment => EXCLUDED_LIFECYCLE_SEGMENTS.has(segment))) continue;
+        if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(objectId)
+          || !["100644", "100755"].includes(mode)) throw new Error("Unsafe Git snapshot entry");
+        entries.push({ path: relativePath, objectId });
+        if (entries.length > SOURCE_SNAPSHOT_LIMITS.maxFiles) throw new Error("Git snapshot exceeds file count limit");
       }
-      const separator = record.indexOf("\t");
-      if (separator < 0) {
-        continue;
-      }
-      const metadata = record.slice(0, separator).split(" ");
-      const relativePath = record.slice(separator + 1);
-      if (
-        metadata[0] === "120000"
-        || metadata[1] !== "blob"
-        || !relativePath
-        || (directory !== undefined && !relativePath.startsWith(`${directory}/`))
-        || !isSourceSnapshotFile(relativePath, directory)
-        || relativePath.split("/").slice(0, -1).some((segment) => EXCLUDED_LIFECYCLE_SEGMENTS.has(segment))
-      ) {
-        continue;
-      }
-      files.push({
-        path: relativePath,
-        content: await this.runner.run("git", ["--git-dir", destination, "show", `${commit}:${relativePath}`]),
+      if (entries.length === 0) return Object.freeze([]);
+      const output = await this.runner.runBinary("git", ["--no-replace-objects", "--git-dir", destination, "cat-file", "--batch"], {
+        stdin: Buffer.from(entries.map(entry => `${entry.objectId}\n`).join("")),
+        maxOutputBytes: SOURCE_SNAPSHOT_LIMITS.maxTotalBytes + entries.length * 130,
       });
-    }
-    return Object.freeze(files);
+      return decodeSnapshotBatch(output, entries);
+    });
   }
 
   /** File paths at or under `root`, from the same immutable commit as the other reads. */

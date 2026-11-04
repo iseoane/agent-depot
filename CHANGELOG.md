@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Catalog and Installations now read cached Git Source manifests in a bounded
+  batch instead of starting a Git process per file. Readers share small immutable
+  snapshots for the same repository, directory scope and commit, while resolving
+  the current ref again on every read. Host state and operation safety checks
+  remain fresh; opening a view does not refresh its Sources.
+
 ## [0.6.8] - 2026-11-04
 
 ### Fixed
