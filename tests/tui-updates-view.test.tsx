@@ -1071,6 +1071,22 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   assert.deepEqual(calls, ["plan:update", "approval:update", "approve:update", "execute:update"]);
 });
 
+test("Package Updates shows observed host version and commit rather than the remembered receipt", async t => {
+  const f = await fixture(t);
+  const packages = fakePackageOperations({ checkUpdates: async () => [{
+    installed: packageRecord,
+    observed: { kind: "installed", version: "1.6.1", commit: "a".repeat(40) },
+    status: "update available",
+    available: { kind: "manifest-version", version: "1.6.1", declaredBy: "bundle" },
+    availableCommit: "b".repeat(40),
+  }] });
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
+  t.after(() => { view.unmount(); view.cleanup(); });
+  const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
+  assert.match(listed, /1\.6\.1 \(aaaaaaa\) -> 1\.6\.1 \(bbbbbbb\)/);
+  assert.doesNotMatch(listed, /1\.0\.0/);
+});
+
 test("an unknown Package is folded with its reason and is never offered as an update", async t => {
   const f = await fixture(t);
   const calls: string[] = [];

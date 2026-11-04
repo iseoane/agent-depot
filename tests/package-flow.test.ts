@@ -585,6 +585,46 @@ test("reports a native Git update only when cached Source history proves ancestr
   });
 });
 
+test("versioned Claude updates follow the host version, not repository ancestry", async () => {
+  await withHarness({ files: claudeFiles() }, async (harness) => {
+    const selection = claudeSelection();
+    harness.setClaudePlugins({ plugins: { "demo@demo-market": [{
+      scope: "user", installPath: path.join(harness.home, "cache", "demo"),
+      version: "1.0.0", gitCommitSha: COMMIT,
+    }] } });
+    harness.setClaudeMarketplaces({ "demo-market": {
+      source: { source: "github", repo: "example/demo-bundle" }, installLocation: path.join(harness.home, "market"),
+    } });
+    const install = await harness.operations.planLifecycle(selection, "install");
+    await harness.operations.approve(selection, "install");
+    assert.equal((await harness.operations.executeLifecycle(install, true)).status, "installed");
+    const before = (await harness.operations.list())[0];
+
+    harness.setCommit(NEXT_COMMIT);
+    const [check] = await harness.operations.checkUpdates();
+    assert.equal(check?.status, "current", "same-version Claude cache cannot install the newer commit");
+    assert.match(check.reason ?? "", /publisher.*version/i);
+    assert.ok("observed" in check);
+    assert.deepEqual(check.observed, { kind: "installed", version: "1.0.0", commit: COMMIT });
+    assert.deepEqual((await harness.operations.list())[0], before);
+    assert.equal(harness.calls.length, 0);
+
+    harness.setFiles(claudeFiles().map(file => ({ ...file, content: file.content.replace('"1.0.0"', '"1.1.0"') })));
+    harness.setCommit(COMMIT);
+    assert.equal((await harness.operations.checkUpdates())[0]?.status, "update available",
+      "a new plugin version must not be masked by matching commit evidence");
+
+    harness.setFiles(claudeFiles());
+    harness.setCommit(NEXT_COMMIT);
+    const update = await harness.operations.planLifecycle(selection, "update");
+    await harness.operations.approve(selection, "update");
+    const result = await harness.operations.executeLifecycle(update, true);
+    assert.equal(result.status, "failed");
+    assert.match(result.reason, /publisher.*version/i);
+    assert.deepEqual((await harness.operations.list())[0], before, "unchanged host evidence must never advance the receipt");
+  });
+});
+
 test("one broken Package in a batch does not hide the other checks", async () => {
   await withHarness({ files: [...piFiles(), ...claudeFiles()] }, async (harness) => {
     const pi = piSelection();
