@@ -309,7 +309,8 @@ export function runProcess(
     child.on("error", reject);
     child.on("close", settle);
     child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code !== "EPIPE") reject(error);
+      // Windows reports EOF when a child exits with input still pending.
+      if (error.code !== "EPIPE" && error.code !== "EOF") reject(error);
     });
     child.stdin?.end(options.stdin);
   });
