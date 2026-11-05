@@ -29,6 +29,24 @@ export const EXCLUDED_LIFECYCLE_SEGMENTS = Object.freeze([
 
 const excludedLifecycleSegments = new Set(EXCLUDED_LIFECYCLE_SEGMENTS);
 
+/**
+ * Directories where other coding agents keep generated copies of a Source's
+ * Skills. Agent Depot manages Claude, Codex, Pi and OpenCode only, so a Skill
+ * found below one of these is a mirror of the real one, never a candidate.
+ * `.claude`, `.agents`, `.codex`, `.pi` and `.opencode` are deliberately absent.
+ */
+export const UNMANAGED_HOST_MIRROR_SEGMENTS = Object.freeze([
+  ".cursor", "cursor-plugin", ".windsurf", ".gemini", ".github", ".kiro", ".trae", ".trae-cn", ".devin", ".dsh",
+  ".hermes", ".veto", ".cline", ".roo", ".continue", ".augment", ".goose", ".amazonq", ".junie", ".kilocode",
+  ".qwen", ".agent", ".factory", ".crush", ".openhands", ".codebuddy", ".qoder", ".zed",
+]);
+
+/** Test and fixture trees hold sample Skills; only ancestors count, so a Skill directory may be named `test`. */
+export const TEST_TREE_SEGMENTS = Object.freeze(["tests", "test", "__tests__", "fixtures", "__fixtures__"]);
+
+const unmanagedMirrorSegments = new Set(UNMANAGED_HOST_MIRROR_SEGMENTS);
+const testTreeSegments = new Set(TEST_TREE_SEGMENTS);
+
 export interface SkillCandidate {
   readonly sourceId: string;
   /** POSIX path to the directory containing SKILL.md, relative to the Source root. */
@@ -200,6 +218,7 @@ export async function discoverSkillsFromSources(
 ): Promise<readonly SkillCandidate[]> {
   const candidates: SkillCandidate[] = [];
   for (const source of sources) {
+    const found: { readonly candidate: SkillCandidate; readonly digest: string }[] = [];
     const files = [...await contentAccess.readSnapshot(source)].sort((left, right) => left.path.localeCompare(right.path));
     for (const file of files) {
       const normalizedPath = normalizeSourcePath(file.path);
@@ -209,7 +228,8 @@ export async function discoverSkillsFromSources(
 
       const directoryPath = path.posix.dirname(normalizedPath);
       const segments = directoryPath === "." ? [] : directoryPath.split("/");
-      if (segments.some((segment) => excludedLifecycleSegments.has(segment))) {
+      if (segments.some((segment) => excludedLifecycleSegments.has(segment) || unmanagedMirrorSegments.has(segment))
+        || segments.slice(0, -1).some((segment) => testTreeSegments.has(segment))) {
         continue;
       }
 
@@ -217,15 +237,48 @@ export async function discoverSkillsFromSources(
       if (!metadata) {
         continue;
       }
-      candidates.push({
-        sourceId: source.id,
-        path: directoryPath,
-        name: metadata.name,
-        description: metadata.description,
+      found.push({
+        candidate: { sourceId: source.id, path: directoryPath, name: metadata.name, description: metadata.description },
+        digest: createHash("sha256").update(file.content, "utf8").digest("hex"),
       });
     }
+    candidates.push(...collapseIdenticalSkills(found));
   }
   return Object.freeze(candidates);
+}
+
+/**
+ * One candidate per Skill name and SKILL.md digest within a Source, because a
+ * repository often repeats the same Skill under several directories. The
+ * canonical copy is the one outside dot-directories, then the shallowest, then
+ * the first by path, so the choice never depends on snapshot order. Same-named
+ * Skills with different content all stay. Survivors keep their path order.
+ */
+function collapseIdenticalSkills(
+  found: readonly { readonly candidate: SkillCandidate; readonly digest: string }[],
+): readonly SkillCandidate[] {
+  const best = new Map<string, SkillCandidate>();
+  for (const { candidate, digest } of found) {
+    const key = `${candidate.name} ${digest}`;
+    const current = best.get(key);
+    if (current === undefined || compareCanonical(candidate.path, current.path) < 0) {
+      best.set(key, candidate);
+    }
+  }
+  const survivors = new Set(best.values());
+  return found.filter(({ candidate }) => survivors.has(candidate)).map(({ candidate }) => candidate);
+}
+
+function compareCanonical(left: string, right: string): number {
+  const rank = (candidate: string): readonly [number, number] => {
+    const segments = candidate.split("/");
+    return [segments.some((segment) => segment.startsWith(".")) ? 1 : 0, segments.length];
+  };
+  const [leftHidden, leftDepth] = rank(left);
+  const [rightHidden, rightDepth] = rank(right);
+  if (leftHidden !== rightHidden) return leftHidden - rightHidden;
+  if (leftDepth !== rightDepth) return leftDepth - rightDepth;
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /** Collects scalar frontmatter values up to the closing delimiter; undefined when malformed or unclosed. */

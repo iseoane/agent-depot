@@ -2,7 +2,7 @@ import type { SkillCandidate } from "../skill-discovery.js";
 import type { CatalogAppRow } from "./catalog-state.js";
 import type { Source } from "../sources.js";
 import { githubTreeLocation } from "../git-source.js";
-import { bundleRoot, type BundleDescriptor, type PackageSelection } from "../package-model.js";
+import { selectionKey, type BundleDescriptor, type PackageSelection } from "../package-model.js";
 import { packageOwnedSkillMatcher } from "../package-owned-skills.js";
 import { packageVersionLabel } from "./package-rows.js";
 import { defaultExpanded, type Expanded, type TreeNode, type VisibleRow } from "./tree.js";
@@ -22,7 +22,7 @@ export type NodeData =
   | { readonly kind: "source"; readonly sourceId: string; readonly label: string; readonly count: number }
   | { readonly kind: "group"; readonly label: string }
   | { readonly kind: "bundle"; readonly entry: BundleEntry }
-  | { readonly kind: "skill"; readonly skill: SkillCandidate; readonly ownedBy?: BundleDescriptor }
+  | { readonly kind: "skill"; readonly skill: SkillCandidate; readonly ownedBy?: BundleDescriptor; /** Another Skill of the Source has the same name, so the row names its path. */ readonly sharesName?: boolean }
   | { readonly kind: "app"; readonly row: CatalogAppRow };
 
 export type CatalogNode = TreeNode<NodeData>;
@@ -31,8 +31,8 @@ export const UNMANAGED_MARKER = "on disk, unmanaged · adopt it from Installatio
 
 export const skillKey = (skill: SkillCandidate): string => `skill:${skill.sourceId}:${skill.path}`;
 
-export const bundleKey = (entry: BundleEntry): string =>
-  `bundle:${entry.sourceId}:${entry.descriptor.host}:${bundleRoot(entry.descriptor.coordinates)}`;
+/** Keyed on the full selection, so two plugins of one marketplace root stay distinct nodes. */
+export const bundleKey = (entry: BundleEntry): string => `bundle:${entry.sourceId}:${selectionKey(entry.selection)}`;
 
 export function truncateDescription(text: string): string {
   return text.length > DESCRIPTION_LIMIT ? `${text.slice(0, DESCRIPTION_LIMIT - 3)}...` : text;
@@ -63,10 +63,18 @@ export function buildTree(
   const bySource = new Map<string, SkillCandidate[]>();
   for (const skill of skills) bySource.set(skill.sourceId, [...(bySource.get(skill.sourceId) ?? []), skill]);
   const bundlesBySource = new Map<string, BundleEntry[]>();
-  for (const bundle of bundles) bundlesBySource.set(bundle.sourceId, [...(bundlesBySource.get(bundle.sourceId) ?? []), bundle]);
+  const seenBundles = new Set<string>();
+  for (const bundle of bundles) {
+    // Descriptors with identical coordinates are one Package; a duplicate node id would corrupt the rows.
+    if (seenBundles.has(bundleKey(bundle))) continue;
+    seenBundles.add(bundleKey(bundle));
+    bundlesBySource.set(bundle.sourceId, [...(bundlesBySource.get(bundle.sourceId) ?? []), bundle]);
+  }
   const sourcesTree = [...new Set([...bySource.keys(), ...bundlesBySource.keys()])].map((sourceId): CatalogNode => {
     const members = bySource.get(sourceId) ?? [];
     const sourceBundles = bundlesBySource.get(sourceId) ?? [];
+    const nameCounts = new Map<string, number>();
+    for (const skill of members) nameCounts.set(skill.name, (nameCounts.get(skill.name) ?? 0) + 1);
     const owned = packageOwnedSkillMatcher(sourceBundles.map((entry) => entry.descriptor).filter((descriptor) => active.has(descriptor)));
     return {
       id: `source:${sourceId}`,
@@ -79,7 +87,10 @@ export function buildTree(
         }]),
         ...members.map((skill): CatalogNode => {
           const ownedBy = owned(skill.path);
-          return { id: skillKey(skill), data: { kind: "skill", skill, ...(ownedBy === undefined ? {} : { ownedBy }) } };
+          return {
+            id: skillKey(skill),
+            data: { kind: "skill", skill, ...(ownedBy === undefined ? {} : { ownedBy }), ...((nameCounts.get(skill.name) ?? 0) > 1 ? { sharesName: true } : {}) },
+          };
         }),
       ],
     };
@@ -117,7 +128,7 @@ export function describeRow(row: VisibleRow<NodeData>): string {
     return `Package ${data.entry.descriptor.name} (${data.entry.descriptor.host})  ${packageVersionLabel(data.entry.descriptor.version)}`;
   }
   if (data.kind === "app") return `App ${data.row.entry.recipe?.name ?? data.row.entry.file}  ${data.row.inspection.status}`;
-  return `${data.skill.name}  ${truncateDescription(data.skill.description)}`;
+  return `${data.skill.name}  ${truncateDescription(data.skill.description)}${data.sharesName === true ? `  (${data.skill.path})` : ""}`;
 }
 
 /** The Skills under the tree's Sources, in display order. */

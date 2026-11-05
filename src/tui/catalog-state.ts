@@ -76,6 +76,8 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
           try {
             const projectSource = projectSourceOf(source);
             for (const descriptor of await packages.discover([id])) {
+              // A Package Agent Depot cannot install is not a choice; its warning stays in `package inspect`.
+              if (!descriptor.installable) continue;
               bundles.push({ sourceId: id, selection: packageSelectionFor(descriptor, projectSource), descriptor });
               discovered.push({ source: projectSource, descriptor });
             }
