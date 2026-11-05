@@ -52,7 +52,7 @@ async function fixture(t: TestContext) {
   return { mount, track, directory, file, commands, fetches, apps: createAppOperations(appEnvironment), operations, home };
 }
 
-test("Sources lists every recipe status and path without running commands or fetching latest", async t => {
+test("Sources lists every recipe status by name, without paths, running commands or fetching latest", async t => {
   const f = await fixture(t);
   await writeFile(f.file, JSON.stringify({ ...recipe, latest: { npm: "demo" } }));
   const [entry] = await f.apps.load();
@@ -61,11 +61,12 @@ test("Sources lists every recipe status and path without running commands or fet
   await writeFile(path.join(f.directory, "windows.json"), JSON.stringify({ ...recipe, platform: "windows" }));
   await writeFile(path.join(f.directory, "invalid.json"), "{}");
   const view = f.mount();
-  const frame = await waitForFrame(view.lastFrame, /not\s+applicable\s+here/);
-  assert.match(frame, /demo\.json\s+·\s+approved/);
-  assert.match(frame, /new\.json\s+·\s+needs\s+approval/);
-  assert.match(frame, /invalid\.json\s+·\s+invalid\s+recipe:/);
-  assert.ok(squash(frame).includes(squash(f.directory)), frame); // a long path wraps
+  const frame = await waitForFrame(view.lastFrame, /other platform/);
+  assert.match(squash(frame), /demoappapproved/);
+  assert.match(squash(frame), /newappneedsapproval/);
+  assert.match(frame, /invalid\.json\s+app\s+invalid\s+recipe:/);
+  assert.match(squash(frame), /demoappapproved.*windows\(otherplatform\)/);
+  assert.ok(!squash(frame).includes(squash(f.directory)), frame);
   assert.match(frame, /builtin:agent-depot/);
   assert.deepEqual(f.commands, []);
   assert.deepEqual(f.fetches, []);
@@ -221,7 +222,7 @@ test("Git Sources and recipes share one bounded list and cursor without Tab", as
   }
   const view = f.mount(6);
   let frame = await waitForFrame(view.lastFrame, /1–6 of 40/);
-  const listed = (frame: string) => frame.split("\n").filter(line => /skills-\d+\.git|app-\d+\.json/.test(line));
+  const listed = (frame: string) => frame.split("\n").filter(line => /skills-\d+\.git|app-\d+\s+app/.test(line));
   assert.equal(listed(frame).length, 6, frame);
   view.stdin.write("j".repeat(39));
   frame = await waitForFrame(view.lastFrame, /> .*app-19.*app/);

@@ -24,6 +24,33 @@ export interface RecipeRow {
   readonly status: string;
 }
 
+/** The recipes of one App name; `primary` is the one that applies on this machine, shown first. */
+export interface RecipeGroup {
+  readonly primary: RecipeRow;
+  readonly members: readonly RecipeRow[];
+}
+
+/**
+ * One group per App name. Invalid recipes, and recipes whose name clashes among those that apply here
+ * (they carry an error), stay single rows so nothing is guessed.
+ */
+export function groupRecipeRows(rows: readonly RecipeRow[]): readonly RecipeGroup[] {
+  const groups = new Map<string, RecipeRow[]>();
+  for (const row of rows) {
+    const key = row.entry.recipe !== undefined && row.entry.error === undefined ? `name:${row.entry.recipe.name}` : `file:${row.entry.file}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  return [...groups.values()].map(found => {
+    const members = [...found.filter(row => row.entry.applicable), ...found.filter(row => !row.entry.applicable)];
+    return { primary: members[0]!, members };
+  });
+}
+
+/** `windows · approved · <file> (used here)`, one line per recipe of a grouped App. */
+export function recipeMemberLine(row: RecipeRow): string {
+  return `${row.entry.recipe?.platform ?? "all platforms"} · ${row.status} · ${row.entry.file}${row.entry.applicable ? " (used here)" : ""}`;
+}
+
 function recipeApprovalChrome(entry: AppEntry): PreviewChrome {
   return {
     title: "Recipe approval · does not install",
@@ -47,6 +74,7 @@ type RecipeMode =
   | { readonly kind: "guide" | "manual" | "prompt" }
   | { readonly kind: "install"; readonly action: ActionMode }
   | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number; readonly removeAfterApproval?: boolean }
+  | { readonly kind: "pick"; readonly members: readonly RecipeRow[] }
   | { readonly kind: "uninstall-question" | "remove"; readonly removal: AppRecipeRemovalPlan }
   | { readonly kind: "uninstall-confirm" | "uninstall-manual"; readonly removal: AppRecipeRemovalPlan; readonly plan: AppLifecyclePlan; readonly cursor: number };
 
@@ -97,7 +125,7 @@ export function useSourcesRecipes({
     await reload();
     if (mounted.current) setMode({ kind: "browse" });
   };
-  const preview = async (entry: AppEntry, status: string, removeAfterApproval = false) => {
+  const preview = async (entry: AppEntry, status: string, removeAfterApproval = false, members: readonly RecipeRow[] = []) => {
     setError(undefined);
     setBusy("Preparing App recipe preview…");
     try {
@@ -106,7 +134,10 @@ export function useSourcesRecipes({
         setMode({
           kind: "approve",
           entry, removeAfterApproval, cursor: 0,
-          lines: appRecipePreviewLines(entry, status, steps),
+          lines: [
+            ...(members.length > 1 ? [`Recipes named ${appName(entry)}:`, ...members.map(row => `  ${recipeMemberLine(row)}`), ""] : []),
+            ...appRecipePreviewLines(entry, status, steps),
+          ],
         });
       }
     } catch (error) {
@@ -215,6 +246,12 @@ export function useSourcesRecipes({
       return true;
     }
     const cancel = () => setMode({ kind: "browse" });
+    if (current.kind === "pick") {
+      const chosen = /^[1-9]$/u.test(input) ? current.members[Number(input) - 1] : undefined;
+      if (chosen) void startRemoval(chosen.entry);
+      else if (input === "n" || key.escape) cancel();
+      return true;
+    }
     if (current.kind === "approve") {
       const viewport = previewViewport(current.lines, current.cursor, terminalRows, terminalColumns, recipeApprovalChrome(current.entry));
       const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
@@ -263,12 +300,17 @@ export function useSourcesRecipes({
       }, cancel);
       return true;
     }
-    const row = rows.find(row => row.entry.file === highlightedFile());
-    if (!row) return false;
+    const group = groupRecipeRows(rows).find(candidate => candidate.primary.entry.file === highlightedFile());
+    if (!group) return false;
+    const row = group.primary;
     if (input === "n") startAdd();
     else if (input === "r") void reload();
-    else if (key.return) void preview(row.entry, row.status);
-    else if (input === "d") void startRemoval(row.entry);
+    else if (key.return) void preview(row.entry, row.status, false, group.members);
+    // A grouped App names several files; the chosen one is the only file the removal flow may touch.
+    else if (input === "d") {
+      if (group.members.length > 1) setMode({ kind: "pick", members: group.members });
+      else void startRemoval(row.entry);
+    }
     else return false;
     return true;
   };
@@ -327,6 +369,12 @@ export function useSourcesRecipes({
         return <PreviewConfirm title={chrome.title} lines={mode.lines} cursor={mode.cursor}
           question={viewport.reachedEnd ? chrome.questions[0]! : chrome.questions[1]!} chrome={chrome} />;
       })() : null}
+      {mode.kind === "pick" ? (
+        <BorderPanel title="Remove which recipe?">
+          {mode.members.map((row, index) => <Text key={row.entry.file}>{index + 1} {recipeMemberLine(row)}</Text>)}
+          <Text color={theme.legend}>Press a number to review that one file for removal · n or Esc cancels</Text>
+        </BorderPanel>
+      ) : null}
       {mode.kind === "uninstall-question" ? (
         <BorderPanel title="Uninstall before recipe removal">
           <Text>App {appName(mode.removal.entry)} is installed or tracked{mode.removal.installedVersion ? ` (${mode.removal.installedVersion})` : ""}.</Text>
