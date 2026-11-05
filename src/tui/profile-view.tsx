@@ -26,7 +26,7 @@ import { useKeys } from "./keys.js";
 import { previewViewport, type PreviewChrome } from "./preview-window.js";
 import { answerYesNo, moveCursor, movePreviewCursor, toggleChoice } from "./mode-keys.js";
 import { BorderPanel, PreviewConfirm, PreviewLines, Working } from "./panel-parts.js";
-import { elideMiddle, fitLines, wrapText } from "./text-wrap.js";
+import { clipText, elideMiddle, fitLines, wrapText } from "./text-wrap.js";
 import { theme } from "./theme.js";
 import { useMirrored, useMounted } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
@@ -559,8 +559,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const listing = mode === "export-list" || mode === "import-list";
   const displayRows: readonly DisplayRow[] = listRows(mode, rows, expandedGroups);
   const rowHeights = displayRows.map(row => {
-    const prefixWidth = "kind" in row ? stringWidth(`> ${" ".repeat(row.depth * 2)}▸ `) : row.block === "excluded" ? 2
-      : stringWidth(`> [ ] ${row.ordinal ?? row.index + 1} `);
+    // A group header is one row, so the sticky header the window repeats costs exactly the row it reserves.
+    if ("kind" in row) return 1;
+    const prefixWidth = row.block === "excluded" ? 2 : stringWidth(`> [ ] ${row.ordinal ?? row.index + 1} `);
     return wrapText(row.label, Math.max(panelWidth - prefixWidth, 1)).length;
   });
   const listWindow = physicalListWindow(displayRows, rowHeights, cursor, height);
@@ -578,10 +579,8 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       const open = expandedGroups.has(row.id);
       const prefix = `${marker}${" ".repeat(row.depth * 2)}${open ? "▾" : "▸"} `;
       const width = Math.max(panelWidth - stringWidth(prefix), 1);
-      const label = fitLines(wrapText(row.label, width), remainingRows, width)
-        .join(`\n${" ".repeat(stringWidth(prefix))}`);
-      remainingRows -= label.split("\n").length;
-      return <Text key={row.id} color={theme.group} bold>{prefix}{label}</Text>;
+      remainingRows -= 1;
+      return <Text key={row.id} color={theme.group} bold>{prefix}{clipText(row.label, width)}</Text>;
     }
     if (row.block === "excluded") {
       const width = Math.max(panelWidth - stringWidth(marker), 1);
