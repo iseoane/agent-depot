@@ -50,7 +50,7 @@ export function CatalogRowLine({ row, selected, marked, installed }: {
     <Text {...rowStyle(selected)} color={isGroup ? theme.group : undefined} wrap="truncate-end">
       {selected ? "> " : "  "}{"  ".repeat(row.depth)}{data.kind === "skill" ? marked ? "[x] " : "[ ] " : ""}
       {data.kind === "skill" && ownedBy !== undefined
-        ? <>{data.skill.name}<Text color={theme.marker}>{"  "}[{packageOwnerBadge(ownedBy)}]</Text>{"  "}{truncateDescription(data.skill.description)}</>
+        ? <>{data.skill.name}<Text color={theme.marker}>{"  "}[{packageOwnerBadge(ownedBy)}]</Text>{"  "}{truncateDescription(data.skill.description)}{data.variant === true ? `  (${data.skill.path})` : ""}</>
         : data.kind === "app" ? `App ${data.row.entry.recipe?.name ?? data.row.entry.file}` : describeRow(row)}
       {data.kind === "app" ? (
         <><Text color={theme.legend}>{"  "}</Text><Text color={data.row.inspection.status === "not installed" ? theme.warning : theme.value}>{data.row.inspection.status}</Text></>

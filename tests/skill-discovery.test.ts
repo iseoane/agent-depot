@@ -351,3 +351,102 @@ for (const totalMiB of [18, 32]) {
     }
   });
 }
+
+const skillMd = (name: string, body = "") => `---\nname: ${name}\ndescription: ${name} skill\n---\n${body}`;
+const discoverPaths = async (files: readonly { path: string; content: string }[], source: Source = external) =>
+  (await discoverSkillsFromSources([source], new FakeContentAccess(new Map([[source.id, files]])))).map((candidate) => candidate.path);
+
+test("discovery ignores mirror directories of Hosts Agent Depot does not manage", async () => {
+  const paths = await discoverPaths([
+    { path: ".cursor/skills/a/SKILL.md", content: skillMd("a") },
+    { path: ".gemini/skills/b/SKILL.md", content: skillMd("b") },
+    { path: ".github/skills/c/SKILL.md", content: skillMd("c") },
+    { path: ".trae-cn/skills/d/SKILL.md", content: skillMd("d") },
+    { path: "cursor-plugin/skills/e/SKILL.md", content: skillMd("e") },
+    { path: ".agents/skills/f/SKILL.md", content: skillMd("f") },
+    { path: ".claude/skills/g/SKILL.md", content: skillMd("g") },
+    { path: ".codex/skills/h/SKILL.md", content: skillMd("h") },
+    { path: ".opencode/skills/i/SKILL.md", content: skillMd("i") },
+    { path: ".pi/skills/j/SKILL.md", content: skillMd("j") },
+    { path: "skills/.curated/k/SKILL.md", content: skillMd("k") },
+  ]);
+  assert.deepEqual(paths, [
+    ".agents/skills/f",
+    ".claude/skills/g",
+    ".codex/skills/h",
+    ".opencode/skills/i",
+    ".pi/skills/j",
+    "skills/.curated/k",
+  ]);
+});
+
+test("discovery ignores test and fixture trees but keeps a Skill whose own directory is named test", async () => {
+  const paths = await discoverPaths([
+    { path: "tests/oracle/ctx-pin/.claude/skills/a/SKILL.md", content: skillMd("a") },
+    { path: "test/b/SKILL.md", content: skillMd("b") },
+    { path: "fixtures/c/SKILL.md", content: skillMd("c") },
+    { path: "pkg/__tests__/d/SKILL.md", content: skillMd("d") },
+    { path: "skills/test/SKILL.md", content: skillMd("test") },
+    { path: "skills/e/SKILL.md", content: skillMd("e") },
+  ]);
+  assert.deepEqual(paths, ["skills/e", "skills/test"]);
+});
+
+test("discovery collapses identical Skills to one candidate with a deterministic canonical path", async () => {
+  const same = skillMd("impeccable", "same body\n");
+  const files = [
+    { path: ".agents/skills/impeccable/SKILL.md", content: same },
+    { path: ".claude/skills/impeccable/SKILL.md", content: same },
+    { path: "plugin/skills/impeccable/SKILL.md", content: same },
+    { path: "skills/other/SKILL.md", content: skillMd("other") },
+  ];
+  assert.deepEqual(await discoverPaths(files), ["plugin/skills/impeccable", "skills/other"]);
+  assert.deepEqual(await discoverPaths([...files].reverse()), ["plugin/skills/impeccable", "skills/other"]);
+  assert.deepEqual(await discoverPaths([
+    { path: ".claude/skills/x/SKILL.md", content: same },
+    { path: ".agents/skills/x/SKILL.md", content: same },
+  ]), [".agents/skills/x"]);
+});
+
+test("discovery keeps same-named Skills whose content differs, and never collapses across Sources", async () => {
+  assert.deepEqual(await discoverPaths([
+    { path: "a/impeccable/SKILL.md", content: skillMd("impeccable", "one\n") },
+    { path: "b/impeccable/SKILL.md", content: skillMd("impeccable", "two\n") },
+  ]), ["a/impeccable", "b/impeccable"]);
+
+  const other: Source = { id: "git:abcdef1234567890abcdef12", kind: "git", url: "https://github.com/example/other.git" };
+  const access = new FakeContentAccess(new Map([
+    [external.id, [{ path: "x/SKILL.md", content: skillMd("x") }]],
+    [other.id, [{ path: "x/SKILL.md", content: skillMd("x") }]],
+  ]));
+  assert.equal((await discoverSkillsFromSources([external, other], access)).length, 2);
+});
+
+test("discovery keeps same-named Skills with identical SKILL.md but different supporting files in the snapshot", async () => {
+  const same = skillMd("tool", "same\n");
+  assert.deepEqual(await discoverPaths([
+    { path: "a/tool/SKILL.md", content: same },
+    { path: "a/tool/scripts/x", content: "one" },
+    { path: "b/tool/SKILL.md", content: same },
+    { path: "b/tool/scripts/x", content: "two" },
+  ]), ["a/tool", "b/tool"]);
+  assert.deepEqual(await discoverPaths([
+    { path: ".claude/skills/tool/SKILL.md", content: same },
+    { path: ".claude/skills/tool/scripts/x", content: "one" },
+    { path: "plugin/skills/tool/SKILL.md", content: same },
+    { path: "plugin/skills/tool/scripts/x", content: "one" },
+  ]), ["plugin/skills/tool"]);
+});
+
+test("discovery compares whole Skill trees read from the Source when the snapshot carries only SKILL.md", async () => {
+  const same = skillMd("tool", "same\n");
+  const trees = new Map<string, string>([["a/tool", "one"], ["b/tool", "two"], ["c/tool", "one"]]);
+  class TreeAccess extends FakeContentAccess {
+    readSkillTree = async (_source: Source, skillPath: string) => [
+      { path: `${skillPath}/SKILL.md`, content: new TextEncoder().encode(same), executable: false },
+      { path: `${skillPath}/scripts/x`, content: new TextEncoder().encode(trees.get(skillPath)!), executable: false },
+    ];
+  }
+  const access = new TreeAccess(new Map([[external.id, ["a", "b", "c"].map((dir) => ({ path: `${dir}/tool/SKILL.md`, content: same }))]]));
+  assert.deepEqual((await discoverSkillsFromSources([external], access)).map((candidate) => candidate.path), ["a/tool", "b/tool"]);
+});

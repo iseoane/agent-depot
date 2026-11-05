@@ -29,6 +29,24 @@ export const EXCLUDED_LIFECYCLE_SEGMENTS = Object.freeze([
 
 const excludedLifecycleSegments = new Set(EXCLUDED_LIFECYCLE_SEGMENTS);
 
+/**
+ * Directories where other coding agents keep generated copies of a Source's
+ * Skills. Agent Depot manages Claude, Codex, Pi and OpenCode only, so a Skill
+ * found below one of these is a mirror of the real one, never a candidate.
+ * `.claude`, `.agents`, `.codex`, `.pi` and `.opencode` are deliberately absent.
+ */
+const UNMANAGED_HOST_MIRROR_SEGMENTS = Object.freeze([
+  ".cursor", "cursor-plugin", ".windsurf", ".gemini", ".github", ".kiro", ".trae", ".trae-cn", ".devin", ".dsh",
+  ".hermes", ".veto", ".cline", ".roo", ".continue", ".augment", ".goose", ".amazonq", ".junie", ".kilocode",
+  ".qwen", ".agent", ".factory", ".crush", ".openhands", ".codebuddy", ".qoder", ".zed",
+]);
+
+/** Test and fixture trees hold sample Skills; only ancestors count, so a Skill directory may be named `test`. */
+const TEST_TREE_SEGMENTS = Object.freeze(["tests", "test", "__tests__", "fixtures", "__fixtures__"]);
+
+const unmanagedMirrorSegments = new Set(UNMANAGED_HOST_MIRROR_SEGMENTS);
+const testTreeSegments = new Set(TEST_TREE_SEGMENTS);
+
 export interface SkillCandidate {
   readonly sourceId: string;
   /** POSIX path to the directory containing SKILL.md, relative to the Source root. */
@@ -200,6 +218,7 @@ export async function discoverSkillsFromSources(
 ): Promise<readonly SkillCandidate[]> {
   const candidates: SkillCandidate[] = [];
   for (const source of sources) {
+    const found: { readonly candidate: SkillCandidate; readonly digest: string }[] = [];
     const files = [...await contentAccess.readSnapshot(source)].sort((left, right) => left.path.localeCompare(right.path));
     for (const file of files) {
       const normalizedPath = normalizeSourcePath(file.path);
@@ -209,7 +228,8 @@ export async function discoverSkillsFromSources(
 
       const directoryPath = path.posix.dirname(normalizedPath);
       const segments = directoryPath === "." ? [] : directoryPath.split("/");
-      if (segments.some((segment) => excludedLifecycleSegments.has(segment))) {
+      if (segments.some((segment) => excludedLifecycleSegments.has(segment) || unmanagedMirrorSegments.has(segment))
+        || segments.slice(0, -1).some((segment) => testTreeSegments.has(segment))) {
         continue;
       }
 
@@ -217,15 +237,88 @@ export async function discoverSkillsFromSources(
       if (!metadata) {
         continue;
       }
-      candidates.push({
-        sourceId: source.id,
-        path: directoryPath,
-        name: metadata.name,
-        description: metadata.description,
+      found.push({
+        candidate: { sourceId: source.id, path: directoryPath, name: metadata.name, description: metadata.description },
+        digest: createHash("sha256").update(file.content, "utf8").digest("hex"),
       });
     }
+    candidates.push(...await collapseIdenticalSkills(source, found, files, contentAccess));
   }
   return Object.freeze(candidates);
+}
+
+/**
+ * One candidate per Skill name and whole-directory digest within a Source,
+ * because a repository often repeats the same Skill under several directories.
+ * Only candidates already sharing a name and SKILL.md digest are compared by
+ * their full tree. The canonical copy is the one outside dot-directories, then
+ * the shallowest, then the first by path, so the choice never depends on
+ * snapshot order. Same-named Skills with different content all stay. Survivors
+ * keep their path order.
+ */
+async function collapseIdenticalSkills(
+  source: Source,
+  found: readonly { readonly candidate: SkillCandidate; readonly digest: string }[],
+  snapshot: readonly SourceContentFile[],
+  contentAccess: SourceContentAccess,
+): Promise<readonly SkillCandidate[]> {
+  const sameManifest = new Map<string, number>();
+  for (const { candidate, digest } of found) {
+    const key = `${candidate.name}|${digest}`;
+    sameManifest.set(key, (sameManifest.get(key) ?? 0) + 1);
+  }
+  const best = new Map<string, SkillCandidate>();
+  for (const { candidate, digest } of found) {
+    const manifestKey = `${candidate.name}|${digest}`;
+    const key = sameManifest.get(manifestKey)! > 1
+      ? `${manifestKey}|${await skillDirectoryDigest(source, candidate.path, snapshot, contentAccess)}`
+      : manifestKey;
+    const current = best.get(key);
+    if (current === undefined || compareCanonical(candidate.path, current.path) < 0) {
+      best.set(key, candidate);
+    }
+  }
+  const survivors = new Set(best.values());
+  return found.filter(({ candidate }) => survivors.has(candidate)).map(({ candidate }) => candidate);
+}
+
+/**
+ * Digest of every file of a Skill directory, by relative path and bytes. Reads
+ * the whole tree from the Source when the access supports it, otherwise uses the
+ * snapshot files. A tree that cannot be read digests to its own path, so it is
+ * never collapsed into another.
+ */
+async function skillDirectoryDigest(
+  source: Source,
+  directory: string,
+  snapshot: readonly SourceContentFile[],
+  contentAccess: SourceContentAccess,
+): Promise<string> {
+  const prefix = `${directory}/`;
+  try {
+    const files: SkillTreeFile[] = contentAccess.readSkillTree
+      ? [...await contentAccess.readSkillTree(source, directory)]
+      : snapshot.filter((file) => file.path.startsWith(prefix)).map((file) => ({
+        path: file.path,
+        content: Buffer.from(file.content, "utf8"),
+        executable: false,
+      }));
+    return skillTreeBaseline(files.map((file) => ({ ...file, path: file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.path }))).digest;
+  } catch {
+    return `unreadable:${directory}`;
+  }
+}
+
+function compareCanonical(left: string, right: string): number {
+  const rank = (candidate: string): readonly [number, number] => {
+    const segments = candidate.split("/");
+    return [segments.some((segment) => segment.startsWith(".")) ? 1 : 0, segments.length];
+  };
+  const [leftHidden, leftDepth] = rank(left);
+  const [rightHidden, rightDepth] = rank(right);
+  if (leftHidden !== rightHidden) return leftHidden - rightHidden;
+  if (leftDepth !== rightDepth) return leftDepth - rightDepth;
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /** Collects scalar frontmatter values up to the closing delimiter; undefined when malformed or unclosed. */

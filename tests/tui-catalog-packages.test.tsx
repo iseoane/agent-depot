@@ -103,6 +103,7 @@ interface Options {
   readonly execute?: (plan: PackageLifecyclePlan) => PackageLifecycleResult;
   readonly planError?: boolean;
   readonly discoverSkills?: readonly SkillCandidate[];
+  readonly bundles?: readonly BundleDescriptor[];
   /** While a promise is set, running the plan or discovering waits for it. */
   readonly executeGate?: { promise?: Promise<void> };
   readonly discoverGate?: { promise?: Promise<void> };
@@ -112,7 +113,7 @@ async function fixture(t: { after(callback: () => void | Promise<void>): void },
   const calls: string[] = [];
   const selections: PackageSelection[] = [];
   const packages: PackageOperations = fakePackageOperations({
-    discover: async () => [pi],
+    discover: async () => options.bundles ?? [pi],
     planLifecycle: async (selection, action) => {
       if (options.planError) throw new Error("the Source could not be refreshed");
       calls.push(`plan:${action}`);
@@ -282,4 +283,19 @@ test("pressing i on a bundle installs the Package even when loose skills are mar
   f.view.stdin.write("i");
   await waitForFrame(f.view.lastFrame, /Approve this declaration and continue\? y\/n/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install"]);
+});
+
+test("the Catalog lists only installable Packages and a not installable twin never adds a row", async (t) => {
+  const unbound: BundleDescriptor = { ...pi, warnings: ["no in-repo marketplace binding; it is not installable"], installable: false };
+  const f = await fixture(t, { bundles: [unbound, pi] });
+  await waitForFrame(f.view.lastFrame, /Packages \(1\)/);
+  for (let round = 0; round < 3; round += 1) {
+    await moveDownTo(f.view.lastFrame, f.view.stdin, /> .*Packages \(1\)/);
+    f.view.stdin.write(ENTER);
+    const open = await waitForFrame(f.view.lastFrame, /Package pstack \(pi\)/);
+    assert.equal(open.split("\n").filter((line) => line.includes("Package pstack (pi)")).length, 1);
+    f.view.stdin.write(ENTER);
+    await waitForFrame(f.view.lastFrame, (frame) => !frame.includes("Package pstack (pi)"));
+  }
+  assert.doesNotMatch(f.view.lastFrame() ?? "", /Packages \(2\)/);
 });
