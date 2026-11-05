@@ -179,7 +179,7 @@ test("import plan classifies identical choices and shows conflicts without writi
   await writeFile(path.join(apps.directory, "existing.json"), JSON.stringify(recipe));
   const plan = await buildProfileImport(profile, operations, apps);
   assert.deepEqual(plan.items.map(item => item.status), ["same", "conflict", "same"]);
-  assert.match(plan.preview.join("\n"), /hosts.*claude.*pi/);
+  assert.match(plan.preview.join("\n"), /conflict: Skill doctor-md-agents; hosts: would add pi; profile lacks claude/);
   assert.match(plan.preview.join("\n"), /WARNING.*newer/);
   assert.equal((await operations.listUserGlobalInstallations!())[0]!.hosts[0], "claude");
   assert.equal(await readFile(path.join(home, "apps", "existing.json"), "utf8"), JSON.stringify(recipe));
@@ -425,7 +425,7 @@ test("later blocks recheck destination recipes created by a confirmed Skill meth
   assert.deepEqual(plan.items.map(item => item.status), ["add", "add"]);
   const result = await applyProfileImport(plan, operations, apps, true, () => {}, { homeDirectory: home });
   assert.deepEqual(result.map(item => item.status), ["added", "skipped"]);
-  assert.match(result[1]!.detail!, /late\.json.*Created during Skill method/);
+  assert.match(result[1]!.detail!, /existing recipe late\.json differs in install/);
   assert.equal((await apps.load()).length, 1);
   assert.equal(await readFile(path.join(apps.directory, "late.json"), "utf8"), JSON.stringify(created));
 });
