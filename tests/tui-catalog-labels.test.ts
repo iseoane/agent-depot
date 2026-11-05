@@ -24,7 +24,8 @@ test("Catalog repository labels keep stable tree and Skill identities", () => {
   const [root] = buildTree([skill], [source]);
   assert.equal(root.id, `source:${source.id}`);
   assert.equal(describeRow({ node: root, depth: 0, expanded: false, expandable: true, parentId: undefined }), "▸ cursor/plugins · pstack @ main (1)");
-  assert.equal(root.children?.[0].id, `skill:${source.id}:${skill.path}`);
+  assert.equal(root.children?.[0].id, `skills:${source.id}`);
+  assert.equal(root.children?.[0].children?.[0].id, `skill:${source.id}:${skill.path}`);
   const [unknown] = buildTree([skill]);
   assert.equal(describeRow({ node: unknown, depth: 0, expanded: false, expandable: true, parentId: undefined }), `▸ ${source.id} (1)`);
 });
@@ -44,17 +45,17 @@ test("a Catalog Skill carries its owner only when the Package is active", () => 
   const entry: BundleEntry = { sourceId: source.id, selection: packageSelectionFor(descriptor, projectSourceOf(source)), descriptor };
 
   const unselected = buildTree([skill], [source], [entry], []);
-  const unselectedSkill = unselected[0]?.children?.find((node) => node.data.kind === "skill");
+  const unselectedSkill = unselected[0]?.children?.find((node) => node.id.startsWith("skills:"))?.children?.find((node) => node.data.kind === "skill");
   assert.equal(unselectedSkill?.data.kind === "skill" ? unselectedSkill.data.ownedBy : undefined, undefined);
 
   const otherSource = gitSource("https://github.com/other/skills");
   const otherSkill = { ...skill, sourceId: otherSource.id };
   const mixed = buildTree([skill, otherSkill], [source, otherSource], [entry], [descriptor]);
-  const unrelated = mixed.find((node) => node.id === `source:${otherSource.id}`)?.children?.find((node) => node.data.kind === "skill");
+  const unrelated = mixed.find((node) => node.id === `source:${otherSource.id}`)?.children?.find((node) => node.id.startsWith("skills:"))?.children?.find((node) => node.data.kind === "skill");
   assert.equal(unrelated?.data.kind === "skill" ? unrelated.data.ownedBy : undefined, undefined);
 
   const active = buildTree([skill], [source], [entry], [descriptor]);
-  const activeSkill = active[0]?.children?.find((node) => node.data.kind === "skill");
+  const activeSkill = active[0]?.children?.find((node) => node.id.startsWith("skills:"))?.children?.find((node) => node.data.kind === "skill");
   assert.equal(activeSkill?.data.kind === "skill" ? activeSkill.data.ownedBy?.name : undefined, "mattpocock-skills");
 });
 
@@ -100,16 +101,18 @@ test("same-named Skills of a Source group into one expandable row whose children
   const skills = [mk("a/impeccable"), mk("b/impeccable"), mk("c/solo", "solo")];
   const tree = buildTree(skills, [source]);
   const sourceId = `source:${source.id}`;
+  const skillsGroup = `skills:${source.id}`;
   const group = `variants:${source.id}:impeccable`;
-  const collapsed = flattenVisible(tree, new Set([sourceId])).slice(1).map(describeRow);
+  assert.deepEqual(flattenVisible(tree, new Set([sourceId])).slice(1).map(describeRow), ["▸ Skills (3)"]);
+  const collapsed = flattenVisible(tree, new Set([sourceId, skillsGroup])).slice(2).map(describeRow);
   assert.deepEqual(collapsed, ["▸ impeccable (2 variants)", "solo  d"]);
-  const open = flattenVisible(tree, new Set([sourceId, group])).slice(1).map(describeRow);
+  const open = flattenVisible(tree, new Set([sourceId, skillsGroup, group])).slice(2).map(describeRow);
   assert.deepEqual(open, ["▾ impeccable (2 variants)", "impeccable  d  (a/impeccable)", "impeccable  d  (b/impeccable)", "solo  d"]);
   assert.deepEqual(leavesOf(tree).map((skill) => skill.path), ["a/impeccable", "b/impeccable", "c/solo"]);
   assert.deepEqual(looseLeavesOf(tree).map((skill) => skill.path), ["a/impeccable", "b/impeccable", "c/solo"]);
-  const ids = flattenVisible(tree, new Set([sourceId, group])).map((row) => row.node.id);
+  const ids = flattenVisible(tree, new Set([sourceId, skillsGroup, group])).map((row) => row.node.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.equal((tree[0]!.data as { count: number }).count, 3);
-  const single = flattenVisible(buildTree([mk("a/impeccable")], [source]), new Set([sourceId])).slice(1).map(describeRow);
+  const single = flattenVisible(buildTree([mk("a/impeccable")], [source]), new Set([sourceId, skillsGroup])).slice(2).map(describeRow);
   assert.deepEqual(single, ["impeccable  d"]);
 });

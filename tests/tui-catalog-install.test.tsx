@@ -145,6 +145,7 @@ type Stdin = { write(data: string): void };
 async function showDemo(lastFrame: () => string | undefined, stdin: Stdin) {
   await waitForFrame(lastFrame, /Demo skill/);
   await key(stdin, "j");
+  await key(stdin, "j");
   await waitForFrame(lastFrame, (frame) => /> .*demo/.test(frame));
 }
 

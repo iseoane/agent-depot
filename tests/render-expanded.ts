@@ -20,6 +20,19 @@ export async function renderExpanded(element: ReactElement): Promise<ReturnType<
   const before = view.lastFrame();
   view.stdin.write("\u001b[C");
   await waitForFrame(view.lastFrame, (text) => text !== before);
+  // A Catalog Source lists its Skills in a collapsible group; the first Skills group opens too.
+  const skillsGroup = (view.lastFrame() ?? "").split("\n").map((line) => line.replace(/^>\s*/u, "").trim()).find((line) => /^▸ Skills \(\d+\)$/u.test(line));
+  if (skillsGroup !== undefined) {
+    while (selected() !== skillsGroup) {
+      if (moves++ > 40) throw new Error(`Cannot highlight ${skillsGroup}: ${view.lastFrame()}`);
+      const before = view.lastFrame();
+      view.stdin.write("j");
+      await waitForFrame(view.lastFrame, (text) => text !== before);
+    }
+    const beforeOpen = view.lastFrame();
+    view.stdin.write("\u001b[C");
+    await waitForFrame(view.lastFrame, (text) => text !== beforeOpen);
+  }
   while (moves-- > 0) {
     const before = view.lastFrame();
     view.stdin.write("k");

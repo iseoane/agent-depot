@@ -579,6 +579,8 @@ test("the TUI walks every view in a real terminal and quits cleanly", { timeout:
     assert.match(catalog, /Scope: all sources/u);
     assert.match(catalog, /a repo/u);
     await session.send("a", /3 selected/u);
+    await session.send("\r", /▸ Skills \(3\)/u);
+    await session.send("j", /> .*▸ Skills \(3\)/u);
     const marked = await session.send("\r", /doctor-md-skill/u);
     assert.match(marked, /\[x\] doctor-md-skill/u);
     const cleared = await session.send("a", /Scope: all sources/u);

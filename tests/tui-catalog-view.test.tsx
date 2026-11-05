@@ -325,6 +325,8 @@ test("CatalogView navigates the tree with j/k and arrows, clamped, and expands o
   // Up at the top is clamped: if it moved the selection, "j" would land back on the source instead of alpha.
   stdin.write(UP);
   stdin.write("j");
+  await selects(/Skills \(2\)/);
+  stdin.write("j");
   await selects(/alpha/);
   stdin.write(DOWN);
   await selects(/beta/);
@@ -332,15 +334,25 @@ test("CatalogView navigates the tree with j/k and arrows, clamped, and expands o
   await selects(/x\/y/);
   assert.ok(!(lastFrame() ?? "").includes("gamma"), "the second source starts collapsed");
   stdin.write(RIGHT);
+  await waitForFrame(lastFrame, /▸ Skills \(1\)/);
+  stdin.write("j");
+  await selects(/Skills \(1\)/);
+  stdin.write(RIGHT);
   await waitForFrame(lastFrame, /gamma/);
   stdin.write("j");
   await selects(/gamma/);
+  stdin.write(LEFT);
+  await selects(/Skills \(1\)/);
+  stdin.write(LEFT);
+  await waitForFrame(lastFrame, (frame) => !frame.includes("gamma"));
   stdin.write(LEFT);
   await selects(/x\/y/);
   stdin.write(LEFT);
   await waitForFrame(lastFrame, (frame) => !frame.includes("gamma"));
   stdin.write("\r");
-  await waitForFrame(lastFrame, /gamma/);
+  // The Source reopens on its Skills group, which this walk collapsed earlier.
+  await waitForFrame(lastFrame, /▸ Skills \(1\)/);
+  assert.ok(!(lastFrame() ?? "").includes("gamma"));
   unmount();
 });
 
@@ -416,7 +428,7 @@ test("CatalogView a toggles only the highlighted repository and preserves marks 
     await moveToSelected(lastFrame, stdin, /x\/y/);
     stdin.write("a");
     await waitForFrame(lastFrame, /3 selected/);
-    stdin.write("kkk");
+    stdin.write("kkkk");
     await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("builtin:agent-depot") === true);
     const firstRepository = lastFrame() ?? "";
     assert.match(firstRepository, /alpha/);
@@ -435,6 +447,8 @@ test("CatalogView a leaves filtered-out marks alone", async () => {
     await waitForFrame(lastFrame, /2 of 2/);
     await waitForFrame(lastFrame, /alpha/);
     stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Skills (2)") === true);
+    stdin.write("j");
     await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("alpha") === true);
     stdin.write("j");
     await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("beta") === true);
@@ -451,6 +465,10 @@ test("CatalogView a leaves filtered-out marks alone", async () => {
     await waitForFrame(lastFrame, /1 selected/);
     stdin.write(ESC);
     await waitForFrame(lastFrame, /2 of 2/);
+    stdin.write(ENTER);
+    await waitForFrame(lastFrame, /▸ Skills \(2\)/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Skills (2)") === true);
     stdin.write(ENTER);
     const unfiltered = await waitForFrame(lastFrame, (frame) => frame.includes("alpha") && frame.includes("beta"));
     assert.match(unfiltered.split("\n").find((line) => line.includes("alpha")) ?? "", /\[x\] alpha/);
@@ -484,6 +502,8 @@ test("CatalogView a resolves the repository from Source, group, Package, and Ski
     await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Package pstack") === true);
     stdin.write("a");
     await waitForFrame(lastFrame, (frame) => !frame.includes("1 selected"));
+    stdin.write("j");
+    await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("Skills (1)") === true);
     stdin.write("j");
     await waitForFrame(lastFrame, (frame) => selectedLine(frame)?.includes("loose") === true);
     stdin.write("a");
@@ -600,12 +620,12 @@ test("CatalogView windows a long tree around the highlight and pages with PgUp/P
   const { lastFrame, stdin, unmount } = await renderExpanded(
     <CatalogView environment={NO_MANIFEST} operations={operationsFor(async () => many)} sourceId="builtin:agent-depot" listHeight={6} />,
   );
-  const top = await waitForFrame(lastFrame, /1–6 of 41/);
+  const top = await waitForFrame(lastFrame, /1–6 of 42/);
   assert.match(selectedLine(top) ?? "", /builtin:agent-depot/);
   assert.ok(!top.includes("skill06"));
   stdin.write("\u001B[6~");
-  const paged = await waitForFrame(lastFrame, (frame) => /skill05/.test(selectedLine(frame) ?? ""));
-  assert.match(paged, /\d+–\d+ of 41/);
+  const paged = await waitForFrame(lastFrame, (frame) => /skill04/.test(selectedLine(frame) ?? ""));
+  assert.match(paged, /\d+–\d+ of 42/);
   stdin.write("\u001B[5~");
   await waitForFrame(lastFrame, (frame) => /builtin:agent-depot/.test(selectedLine(frame) ?? ""));
   unmount();
@@ -629,6 +649,8 @@ test("CatalogView keeps healthy Sources browsable when a Git mirror is unavailab
     assert.match(frame, /refresh it with r/);
     assert.match(frame, /alpha/);
     assert.match(frame, /beta/);
+    stdin.write("j");
+    await waitForFrame(lastFrame, (value) => /Skills \(2\)/.test(selectedLine(value) ?? ""));
     stdin.write("j");
     await waitForFrame(lastFrame, (value) => /alpha/.test(selectedLine(value) ?? ""));
     assert.equal(refreshes, 0);
@@ -752,7 +774,7 @@ test("CatalogView keeps Package rows reachable and explains owned Skills without
   const view = await renderExpanded(tree);
   const { lastFrame, stdin, stdout, unmount } = view;
   Object.defineProperty(stdout, "columns", { configurable: true, value: 40 });
-  Object.defineProperty(stdout, "rows", { configurable: true, value: 16 });
+  Object.defineProperty(stdout, "rows", { configurable: true, value: 17 });
   view.rerender(tree);
   try {
     await moveToSelected(lastFrame, stdin, /Packages \(2\)/);
@@ -762,7 +784,7 @@ test("CatalogView keeps Package rows reachable and explains owned Skills without
     await moveToSelected(lastFrame, stdin, /Package pstack-claude \(claude\)/);
     await moveToSelected(lastFrame, stdin, /create-verification-skill/);
     const owned = await waitForFrame(lastFrame, /provided by the pi\s+Package pstack-pi/);
-    assert.ok(owned.split("\n").length + 4 <= 15, `selection help exceeded the 16-row terminal with shell chrome:\n${owned}`);
+    assert.ok(owned.split("\n").length + 4 <= 16, `selection help exceeded the 17-row terminal with shell chrome:\n${owned}`);
     assert.match(selectedLine(owned) ?? "", /create-verification-skill/);
     assert.doesNotMatch(selectedLine(owned) ?? "", /provided by the pi Package/);
     assert.match(owned, /Install or update the\s+Package from its Package row/);
@@ -786,6 +808,11 @@ test("CatalogView starts collapsed, expands on demand, and opens filter matches"
     assert.match(frame, /▸ builtin:agent-depot \(2\)/);
     assert.match(frame, /▸ x\/y \(1\)/);
     assert.doesNotMatch(frame, /alpha|beta|gamma/);
+    stdin.write("\r");
+    const sourceOpen = await waitForFrame(lastFrame, /▸ Skills \(2\)/);
+    assert.doesNotMatch(sourceOpen, /alpha|beta/, "a Source opens to its collapsed Skills group");
+    stdin.write("j");
+    await waitForFrame(lastFrame, (text) => selectedLine(text)?.includes("Skills (2)") === true);
     stdin.write("\r");
     await waitForFrame(lastFrame, /alpha/);
     stdin.write("\r");
