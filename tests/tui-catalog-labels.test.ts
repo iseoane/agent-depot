@@ -5,6 +5,7 @@ import { sourceIdForUrl } from "../src/git-source.js";
 import { packageSelectionFor, type BundleDescriptor } from "../src/package-model.js";
 import { BUILT_IN_SOURCE, projectSourceOf } from "../src/sources.js";
 import { buildTree, describeRow, sourceLabel, type BundleEntry } from "../src/tui/catalog-tree.js";
+import { flattenVisible, toggleNode, type Expanded } from "../src/tui/tree.js";
 
 const gitSource = (url: string) => ({ id: sourceIdForUrl(url), kind: "git" as const, url });
 
@@ -55,4 +56,48 @@ test("a Catalog Skill carries its owner only when the Package is active", () => 
   const active = buildTree([skill], [source], [entry], [descriptor]);
   const activeSkill = active[0]?.children?.find((node) => node.data.kind === "skill");
   assert.equal(activeSkill?.data.kind === "skill" ? activeSkill.data.ownedBy?.name : undefined, "mattpocock-skills");
+});
+
+test("Catalog bundle ids stay unique when two descriptors share coordinates, and the row count survives expand and collapse", () => {
+  const source = gitSource("https://github.com/pbakaus/impeccable");
+  const descriptor = (): BundleDescriptor => ({
+    host: "claude",
+    coordinates: { host: "claude", marketplaceRoot: "", pluginName: "impeccable" },
+    name: "impeccable",
+    components: [],
+    warnings: [],
+    installable: true,
+    manifestDigest: "a".repeat(64),
+  });
+  const entries: BundleEntry[] = [descriptor(), descriptor()].map((d) => ({
+    sourceId: source.id,
+    selection: packageSelectionFor(d, projectSourceOf(source)),
+    descriptor: d,
+  }));
+  const tree = buildTree([], [source], entries, []);
+  const ids = new Set<string>();
+  const visit = (nodes: readonly (typeof tree)[number][]): number => nodes.reduce((count, node) => {
+    assert.ok(!ids.has(node.id), `duplicate node id ${node.id}`);
+    ids.add(node.id);
+    return count + 1 + visit(node.children ?? []);
+  }, 0);
+  visit(tree);
+  const bundleRows = (expanded: Expanded) => flattenVisible(tree, expanded).filter((row) => row.node.data.kind === "bundle").length;
+  const open = new Set([`source:${source.id}`, `packages:${source.id}`]);
+  const counts: number[] = [];
+  let expanded: Expanded = open;
+  for (let round = 0; round < 4; round += 1) {
+    const group = flattenVisible(tree, expanded).find((row) => row.node.id === `packages:${source.id}`)!;
+    expanded = toggleNode(expanded, group);
+    counts.push(bundleRows(expanded));
+  }
+  assert.deepEqual(counts, [0, 1, 0, 1]);
+});
+
+test("a Catalog Skill row names its path when another Skill of the Source shares its name", () => {
+  const source = gitSource("https://github.com/example/skills");
+  const mk = (path: string, name = "impeccable") => ({ sourceId: source.id, path, name, description: "d" });
+  const tree = buildTree([mk("a/impeccable"), mk("b/impeccable"), mk("c/solo", "solo")], [source]);
+  const rows = flattenVisible(tree, new Set([`source:${source.id}`])).filter((row) => row.node.data.kind === "skill").map(describeRow);
+  assert.deepEqual(rows, ["impeccable  d  (a/impeccable)", "impeccable  d  (b/impeccable)", "solo  d"]);
 });
