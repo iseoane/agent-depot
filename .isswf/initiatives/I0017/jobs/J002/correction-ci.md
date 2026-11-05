@@ -1,0 +1,11 @@
+# CI correction and patch delivery authorization
+
+Operator explicitly answered si to one scoped E2E correction, independent review, new CI, then integration and patch publication if all gates pass. Additional budget: coordinator sole writer, one independent reviewer; no automatic reviewer retry or further correction cycle. Historical four reviews and original correction remain consumed. Production behavior unchanged unless new authorization.
+
+Base36aa236e515863912f12e7c1ac9a2c88a9f8d22f, PR75. CI41816410415 Linux1184pass/1fail/6skip, Windows1176pass/1fail/14skip; pack/typecheck/lint pass. Both failures exactly stale declaredBy marketplace-entry instead of bundle at tests/e2e-packages.test.ts Claude lifecycle assertion. Local unchanged compiled candidate confirms4pass1fail at identical assertion; log .scratch/pr75-e2e-before.log. No TDD behavior addition: expectation maintenance to previously accepted host contract, not retroactive invented RED.
+
+Scope: preserve assertion deep equality and complete lifecycle calls/progress/state assertions; change expected evidence provenance to bundle, matching fixture's plugin manifest. Prepare package.json0.6.8 and CHANGELOG0.6.8 release notes for already authorized patch. Preserve unrelated lockfiles/untrackedstate. No production behavior, fixture, skip, timeout or CI requirement changes. Existing fake host boundary remains disclosed; real Git/source/core/state, injected Host CLI, no actual user installations.
+
+Acceptance: unchanged before failure retained; affected suite5/5pass after fix; typecheck/lint/build; release-notes/artifact tests; independent Standards/Spec review of delta plus inherited R4 for unchanged feature; exact-head Linux/Windows/packCIgreen before integrate; publish via existing workflow conditional on its own full verification and registry/tag evidence. On any new material blocker stop and reconcile instead of skipping gates. Integration and release now explicitly granted, not inferred from original feature-to-PR.
+
+Next: inspect actual nested fixture; narrow expectation plus release metadata; verify and commit stopped writer candidate; preflight fresh independent review with exact bindings and all required content/methodology readable. No second worker or concurrent writer.

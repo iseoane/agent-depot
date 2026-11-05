@@ -1,0 +1,1616 @@
+diff --git a/CONTEXT.md b/CONTEXT.md
+index 2c59928..f2fcb3e 100644
+--- a/CONTEXT.md
++++ b/CONTEXT.md
+@@ -74,7 +74,7 @@ Making an installed skill available to a Host, or withdrawing it, without changi
+ _Avoid_: Reinstall (exposure never copies or re-resolves content)
+ 
+ **Canonical location**:
+-The one directory that holds an installed skill's files for user-global use: `~/.agents/skills/<skill>`, shared by the Pi, Codex, and OpenCode Hosts. Claude Code is exposed through a managed symlink to it. Removal keeps the canonical location while any Host still uses it.
++The one directory that holds an installed skill's files for user-global use: `~/.agents/skills/<skill>`, shared by the Pi, Codex, and OpenCode Hosts. Claude Code is exposed through a managed directory link to it (a relative directory symlink on POSIX and an absolute-target junction on Windows). Removal keeps the canonical location while any Host still uses it.
+ _Avoid_: Primary copy, master copy
+ 
+ **Built-in source**:
+diff --git a/README.md b/README.md
+index 62813e9..a21c3cf 100644
+--- a/README.md
++++ b/README.md
+@@ -184,21 +184,28 @@ segment when that is unique; unknown or ambiguous selections fail before anythin
+ changes. It previews every deletion (with adopted/modified warnings), requires
+ `--yes`, rechecks the targets, then deletes the files and their installation
+ records. It is user-global only: project installations and manifests are never
+-read or changed, and the Git cache is retained.
++read or changed, and the Git cache is retained. If a managed Skill's recorded
++installation is verified absent, the preview instead offers an explicit
++`forget missing installation record` action. Confirming removes only that stale
++record; it never removes files. Existing files, including any Claude location,
++unsafe ancestors, ambiguous overlapping records, or filesystem errors fail
++closed. After the record is forgotten, the Skill can be selected and installed
++again through the normal flow.
+ 
+ `skill host add <id|path> --host <host>... [--yes] [--confirm-additional-host]`
+ exposes an already installed user-global Skill to more Hosts without changing its
+ content or version, then records the new Hosts. Non-Claude Hosts share the
+-canonical `~/.agents/skills/<skill>` location and Claude is a symlink to it, so
+-only a missing Claude symlink is ever created. The preview lists the new
+-locations; because it exposes the Skill to more Hosts it needs both `--yes` and
++canonical `~/.agents/skills/<skill>` location and Claude uses a managed directory
++link to it (relative symlink on POSIX; absolute-target junction on Windows), so
++only a missing Claude link is ever created. The preview lists the new locations;
++because it exposes the Skill to more Hosts it needs both `--yes` and
+ `--confirm-additional-host`. It refuses a Claude location that already holds
+-anything other than the managed symlink, and a Skill that is not installed at the
++anything other than the managed link, and a Skill that is not installed at the
+ canonical location (exposing it would require copying it).
+ 
+ `skill remove <id|path> --host <host>... [--yes]` removes only those Hosts. Only
+-the managed Claude symlink can be deleted this way; the canonical directory backs
+-every remaining Host (including the Claude symlink) and stays until the last Host
++the managed Claude directory link can be deleted this way; the canonical directory
++backs every remaining Host (including the Claude link) and stays until the last Host
+ is removed. Removing every recorded Host is a full removal with the usual
+ adopted/modified warnings. The targets are rechecked before deleting and the
+ record is updated afterwards. Project installations are not affected.
+@@ -310,8 +317,9 @@ select candidates, or install anything automatically.
+ ## User-global installation
+ 
+ User-global installations use the same canonical Host locations under the user
+-home directory (`.agents/skills/<skill>` and, when requested, a Claude symlink
+-at `.claude/skills/<skill>`). They are independent from project manifests and
++home directory (`.agents/skills/<skill>` and, when requested, a Claude directory
++link at `.claude/skills/<skill>`: relative symlink on POSIX, absolute-target
++junction on Windows). They are independent from project manifests and
+ are recorded in the shared per-user Source state, so separate CLI invocations
+ reuse the same installation records. The selected Source, Skill, Hosts, and
+ actual adopted or installed location are previewed before `--yes` confirmation.
+@@ -403,8 +411,9 @@ process crash after the original is moved can leave the retained
+ inspect the backup and target, and manually rename the retained backup back to the intended installation path when recovery is needed;
+ then rerun the install. External installation methods run only after the filesystem
+ and selected-scope state transaction succeeds.
+-Claude is exposed through a symlink to the canonical `.agents/skills/<skill>`
+-installation.
++Claude is exposed through a managed directory link to the canonical
++`.agents/skills/<skill>` installation (relative symlink on POSIX, absolute-target
++junction on Windows).
+ 
+ ## User-provided installation methods
+ 
+diff --git a/docs/adr/0005-removal-keeps-shared-locations-and-unlinks-symlinks.md b/docs/adr/0005-removal-keeps-shared-locations-and-unlinks-symlinks.md
+index 9c8d134..280e695 100644
+--- a/docs/adr/0005-removal-keeps-shared-locations-and-unlinks-symlinks.md
++++ b/docs/adr/0005-removal-keeps-shared-locations-and-unlinks-symlinks.md
+@@ -4,14 +4,14 @@ Status: Accepted (2026-09-30)
+ 
+ ## Context
+ 
+-Non-Claude Hosts share the [canonical location](../../CONTEXT.md) and Claude Code is a symlink to it. A recursive delete of a symlink or of a shared directory could destroy content still in use or a link target.
++Non-Claude Hosts share the [canonical location](../../CONTEXT.md) and Claude Code is a managed directory link to it: a relative directory symlink on POSIX or an absolute-target junction on Windows. A recursive delete of a link or of a shared directory could destroy content still in use or a link target.
+ 
+ ## Decision
+ 
+-Removing some Hosts never deletes the canonical directory while another Host uses it; only the managed Claude symlink is removed. Symlinks are removed with `lstat` identity checks and `unlink` only, never a recursive delete, and their target is never read or modified. A full removal deletes the canonical directory. Targets and records are rechecked just before deleting, and the Claude link of an unmanaged canonical directory is removed first so it never dangles.
++Removing some Hosts never deletes the canonical directory while another Host uses it; only the managed Claude directory link is removed. Links are removed with `lstat` identity checks and `unlink` only, never a recursive delete, and their target is never read or modified. A full removal deletes the canonical directory. Targets and records are rechecked just before deleting, and the Claude link of an unmanaged canonical directory is removed first so it never dangles.
+ 
+ ## Consequences
+ 
+-- A foreign symlink at a Claude path is refused rather than replaced.
++- A foreign symlink or junction at a Claude path is refused rather than replaced.
+ - If recording the change fails after removing a link, the error says so and rollback errors are reported together with the original.
+ - A failing location does not stop the others in a batch.
+diff --git a/src/cli.ts b/src/cli.ts
+index 4305e8c..e1bc4a9 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -39,6 +39,7 @@ import {
+   type VersionPolicy,
+ } from "./project-manifest.js";
+ import {
++  inspectAbsentManagedSkillRecord,
+   inspectProjectSkillInstallation,
+   assertNoOverlappingProjectSkillRemovalTargets,
+   type ProjectInstallationOptions,
+@@ -64,6 +65,8 @@ import {
+   recheckSkillRemoval,
+   removeSkillFiles,
+   removeSkillsAndRecords,
++  assertManagedInstallationRecordsUnchanged,
++  assertRemovalInspectionUnchanged,
+   selectUserGlobalSkills,
+   SkillSelectionError,
+   userGlobalRemovalOptions,
+@@ -385,7 +388,10 @@ async function runSourceRemoval(
+   const selected = options.all
+     ? dependent
+     : resolveRemovalSelections(dependent, options.requested);
+-  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), dependencies.installationOptions);
++  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), {
++    ...dependencies.installationOptions,
++    otherInstallationPaths: installations.filter((record) => !selected.includes(record)).flatMap((record) => record.installation ? [record.installation.path] : []),
++  });
+ 
+   output(`Preview: remove Git Source ${source.id} from ${source.url}`);
+   output(`Dependent user-global Skills (${dependent.length}):`);
+@@ -404,14 +410,30 @@ async function runSourceRemoval(
+   requireConfirmation(options.confirmed, "Removal not confirmed; rerun with --yes after reviewing every Source and Skill preview");
+   // Recheck every selected target before deleting the first one. A changed later
+   // target must never result in a partially removed batch.
+-  await progress.run("Removing Skill files", async () => {
+-    const rechecked = await recheckSkillRemoval(plan, removalOptions);
+-    await removeSkillFiles(plan, rechecked, removalOptions);
++  const rechecked = await progress.run("Removing Skill files", async () => {
++    const current = await recheckSkillRemoval(plan, removalOptions);
++    assertManagedInstallationRecordsUnchanged(installations, await operations.listUserGlobalInstallations!());
++    await removeSkillFiles(plan, current, removalOptions);
++    return current;
++  });
++  // Source removal persists records rather than reconciling them one by one.
++  // Revalidate every record-only target and the complete record snapshot just
++  // before that persistence boundary so a stale preview cannot forget a changed record.
++  await progress.run("Revalidating Skill records before Source removal", async () => {
++    for (const [index, inspection] of rechecked.inspections.entries()) {
++      if (!inspection.recordOnly) continue;
++      const latest = await inspectAbsentManagedSkillRecord(rechecked.selections[index]!, removalOptions);
++      assertRemovalInspectionUnchanged(inspection, latest);
++    }
++    assertManagedInstallationRecordsUnchanged(installations, await operations.listUserGlobalInstallations!());
+   });
+   await progress.run(`Removing Git Source ${source.id}`, () => operations.removeGitSource!(source.id, selected));
+   output(`Removed Git Source: ${source.id}`);
+   if (selected.length > 0) {
+-    output(`Removed ${selected.length} dependent user-global Skill${selected.length === 1 ? "" : "s"}; other dependent Skills remain tracked`);
++    const forgotten = plan.inspections.filter((inspection) => inspection.recordOnly).length;
++    const removed = selected.length - forgotten;
++    if (removed > 0) output(`Removed ${removed} dependent user-global Skill${removed === 1 ? "" : "s"}; other dependent Skills remain tracked`);
++    if (forgotten > 0) output(`Forgot ${forgotten} missing dependent Skill installation record${forgotten === 1 ? "" : "s"}; no files were removed`);
+   }
+ }
+ 
+@@ -634,7 +656,10 @@ async function runSkillRemoval(
+ 
+   const installations = await operations.listUserGlobalInstallations();
+   const selected = selectManagedSkills(installations, requested);
+-  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), dependencies.installationOptions);
++  const removalOptions = userGlobalRemovalOptions(path.resolve(dependencies.homeDirectory ?? homedir()), {
++    ...dependencies.installationOptions,
++    otherInstallationPaths: installations.filter((record) => !selected.includes(record)).flatMap((record) => record.installation ? [record.installation.path] : []),
++  });
+   if (hosts.length > 0) {
+     await runSkillHostRemoval(selected[0]!, hosts, installations, confirmed, operations, removalOptions, output, progress);
+     return;
+@@ -647,7 +672,10 @@ async function runSkillRemoval(
+   requireConfirmation(confirmed, "Removal not confirmed; rerun with --yes after reviewing every Skill preview");
+   await progress.run(`Removing ${selected.length} user-global Skill${selected.length === 1 ? "" : "s"}`,
+     () => executeSkillRemoval(plan, operations, removalOptions, installations));
+-  output(`Removed ${selected.length} user-global Skill${selected.length === 1 ? "" : "s"}`);
++  const forgotten = plan.inspections.filter((inspection) => inspection.recordOnly).length;
++  const removed = selected.length - forgotten;
++  if (removed > 0) output(`Removed ${removed} user-global Skill${removed === 1 ? "" : "s"}`);
++  if (forgotten > 0) output(`Forgot ${forgotten} missing user-global Skill installation record${forgotten === 1 ? "" : "s"}; no files were removed`);
+ }
+ 
+ /** Resolves `<id|path>` arguments to managed installations, reporting selection problems as usage errors. */
+@@ -674,17 +702,24 @@ async function runSkillHostRemoval(
+   progress: Progress,
+ ): Promise<void> {
+   const plan = await planHostRemoval(selection, hosts, options).catch(rethrowSelectionError);
++  const recordOnly = plan.kind === "full" && plan.plan.inspections.every((inspection) => inspection.recordOnly);
+   output(plan.kind === "full"
+-    ? "Preview: remove 1 user-global Skill (every recorded Host is removed)"
++    ? recordOnly
++      ? "Preview: forget 1 missing user-global Skill installation record (every recorded Host is removed)"
++      : "Preview: remove 1 user-global Skill (every recorded Host is removed)"
+     : `Preview: remove ${hosts.length} Host${hosts.length === 1 ? "" : "s"} from 1 user-global Skill`);
+   for (const line of plan.kind === "full" ? plan.plan.preview : plan.preview) output(line);
+-  output("  The installation record is reconciled after the locations are removed");
++  output(recordOnly
++    ? "  Only the installation record will be forgotten; no files are removed"
++    : "  The installation record is reconciled after the locations are removed");
+   requireConfirmation(confirmed, "Removal not confirmed; rerun with --yes after reviewing the preview");
+   await progress.run(plan.kind === "full" ? "Removing 1 user-global Skill" : `Removing Hosts from ${selection.path}`,
+     () => executeHostRemoval(plan, operations, options, installations));
+-  output(plan.kind === "full"
+-    ? "Removed 1 user-global Skill"
+-    : `Removed hosts ${plan.removed.join(", ")} from ${JSON.stringify(selection.path)}`);
++  output(plan.kind === "full" && plan.plan.inspections.every((inspection) => inspection.recordOnly)
++    ? `Forgot missing installation record for ${JSON.stringify(selection.path)}; no files were removed`
++    : plan.kind === "full"
++      ? "Removed 1 user-global Skill"
++      : `Removed hosts ${plan.removed.join(", ")} from ${JSON.stringify(selection.path)}`);
+ }
+ 
+ async function runSkillHostAdd(
+@@ -874,10 +909,18 @@ interface UninstallRemovalContext {
+   readonly removalOptions: ProjectInstallationOptions;
+ }
+ 
+-function outputUninstallSummary(options: UninstallOptions, removedManagedCount: number, output: (line: string) => void): void {
+-  if (options.skills) {
++function outputUninstallSummary(
++  options: UninstallOptions,
++  removedManagedCount: number,
++  forgottenManagedCount: number,
++  output: (line: string) => void,
++): void {
++  if (options.skills && removedManagedCount > 0) {
+     output(`Removed ${removedManagedCount} managed user-global Skill${removedManagedCount === 1 ? "" : "s"}`);
+   }
++  if (options.skills && forgottenManagedCount > 0) {
++    output(`Forgot ${forgottenManagedCount} missing managed user-global Skill installation record${forgottenManagedCount === 1 ? "" : "s"}; no files were removed`);
++  }
+   if (options.unmanagedSkills.length > 0) {
+     output(`Permanently deleted ${options.unmanagedSkills.length} unmanaged user-global Skill${options.unmanagedSkills.length === 1 ? "" : "s"}`);
+   }
+@@ -955,7 +998,8 @@ async function runUninstall(
+   if (options.data) {
+     await progress.run("Removing catalog data", () => operations.removeCatalogData!());
+   }
+-  outputUninstallSummary(options, selectedInstallations.length, output);
++  const forgottenManagedCount = managedRechecked.inspections.filter((inspection) => inspection.recordOnly).length;
++  outputUninstallSummary(options, selectedInstallations.length - forgottenManagedCount, forgottenManagedCount, output);
+ }
+ 
+ interface UpdateOptions {
+diff --git a/src/project-installation.ts b/src/project-installation.ts
+index 7c36271..4db822f 100644
+--- a/src/project-installation.ts
++++ b/src/project-installation.ts
+@@ -23,7 +23,7 @@ export interface ProjectInstallationFileSystem {
+   mkdir(candidate: string): Promise<void>;
+   writeFile(candidate: string, content: Uint8Array): Promise<void>;
+   chmod(candidate: string, mode: number): Promise<void>;
+-  symlink(target: string, candidate: string, type: "dir"): Promise<void>;
++  symlink(target: string, candidate: string, type: "dir" | "junction"): Promise<void>;
+   readlink(candidate: string): Promise<string>;
+   rm(candidate: string): Promise<void>;
+   rmdir(candidate: string): Promise<void>;
+@@ -166,6 +166,8 @@ export interface ProjectSkillUpdateInspection {
+ export interface ProjectSkillRemovalInspection {
+   readonly skillName: string;
+   readonly paths: readonly string[];
++  /** True only for explicit record-only recovery of a verified absent installation. */
++  readonly recordOnly?: true;
+   /** Digest captured during preflight and required to match before deletion. */
+   readonly digest: string;
+   readonly adopted: boolean;
+@@ -241,7 +243,7 @@ export async function inspectProjectSkillRemoval(
+   const paths = [targetPath];
+ 
+   // A Claude exposure created by Agent Depot is removable only when it is the
+-  // exact relative symlink to this canonical installation. Never follow or
++  // exact managed directory link to this canonical installation. Never follow or
+   // remove an unrelated path merely because the Skill selected Claude.
+   const canonicalPath = path.join(projectRoot, ".agents", "skills", skillName);
+   const claudePath = path.join(projectRoot, ".claude", "skills", skillName);
+@@ -252,14 +254,14 @@ export async function inspectProjectSkillRemoval(
+       if (!claudeInformation.isSymbolicLink()) {
+         throw new ProjectInstallationError(
+           "unsafe-target",
+-          `Cannot remove the tracked Skill because its Claude location is not the managed symlink: ${claudePath}; no path was changed`,
++          `Cannot remove the tracked Skill because its Claude location is not the managed directory link: ${claudePath}; no path was changed`,
+         );
+       }
+       const target = await fileSystem.readlink(claudePath);
+       if (path.resolve(path.dirname(claudePath), target) !== canonicalPath) {
+         throw new ProjectInstallationError(
+           "unsafe-target",
+-          `Cannot remove the tracked Skill because its Claude symlink does not point to the canonical installation: ${claudePath}; no path was changed`,
++          `Cannot remove the tracked Skill because its Claude directory link does not point to the canonical installation: ${claudePath}; no path was changed`,
+         );
+       }
+       paths.push(claudePath);
+@@ -278,6 +280,47 @@ export async function inspectProjectSkillRemoval(
+   });
+ }
+ 
++/**
++ * Explicitly inspects a stale user-global record without making it valid for
++ * host exposure/update. Every relevant ancestor and both managed host locations
++ * are checked; only ENOENT is accepted as absence and no filesystem entry is removed.
++ */
++export async function inspectAbsentManagedSkillRecord(
++  selection: ProjectSkillSelection,
++  options: ProjectInstallationOptions,
++): Promise<ProjectSkillRemovalInspection> {
++  if (!selection.installation) throw new ProjectInstallationError("removal-unavailable", "Cannot forget a Skill without a recorded installation");
++  const fileSystem = options.fileSystem ?? nodeFileSystem;
++  const root = path.resolve(options.projectRoot);
++  const target = resolveInstallationPath(root, selection.installation.path);
++  if (!isSafeRelativePath(selection.installation.path) || selection.installation.path.split("/").some((segment) => segment.toLowerCase() === ".git")) {
++    throw new ProjectInstallationError("unsafe-target", `Tracked Skill installation path is unsafe: ${JSON.stringify(selection.installation.path)}; no record was changed`);
++  }
++  await assertNoSymlinkComponents(root, fileSystem);
++  await assertDirectory(root, fileSystem, "user-global root");
++  await assertNoSymlinkAncestors(root, relativeSegments(root, target), fileSystem);
++  const skillName = skillNameFromSelection(selection);
++  const canonical = path.join(root, ".agents", "skills", skillName);
++  const claude = path.join(root, ".claude", "skills", skillName);
++  for (const otherPath of options.otherInstallationPaths ?? []) {
++    const other = resolveInstallationPath(root, otherPath);
++    if (pathsOverlap(target, other) || pathsOverlap(canonical, other) || pathsOverlap(claude, other)) {
++      throw new ProjectInstallationError("overlapping-targets", `Cannot forget ${JSON.stringify(selection.path)} because its recorded path overlaps another managed Skill record; no record was changed`);
++    }
++  }
++  await assertNoSymlinkAncestors(root, [".agents", "skills", skillName], fileSystem);
++  await assertNoSymlinkAncestors(root, [".claude", "skills", skillName], fileSystem);
++  for (const candidate of new Set([target, canonical, claude])) {
++    try {
++      await fileSystem.lstat(candidate);
++      throw new ProjectInstallationError("unsafe-target", `Cannot forget ${JSON.stringify(selection.path)} because a filesystem object exists at ${candidate}; no record was changed`);
++    } catch (error) {
++      if (!isMissing(error)) throw error;
++    }
++  }
++  return Object.freeze({ skillName, paths: Object.freeze([]), digest: "absent-record-only", adopted: selection.installation.adopted, modified: false, recordOnly: true });
++}
++
+ /**
+  * Removes a previously inspected user-global Skill after rechecking ownership.
+  * `deletePaths` narrows the deletion to a subset of the inspected paths (used
+@@ -295,6 +338,7 @@ export async function removeProjectSkill(
+     current.paths.length !== inspection.paths.length ||
+     current.paths.some((candidate, index) => candidate !== inspection.paths[index]) ||
+     current.digest !== inspection.digest ||
++    current.recordOnly !== inspection.recordOnly ||
+     current.adopted !== inspection.adopted ||
+     current.modified !== inspection.modified ||
+     current.nonCanonicalPath !== inspection.nonCanonicalPath) {
+@@ -316,9 +360,9 @@ export async function removeProjectSkill(
+ }
+ 
+ /**
+- * Deletes one managed symlink without ever following or recursing into it:
+- * look at the path immediately before, require a symlink, then unlink it.
+- * Partial Host removal only ever deletes the Claude symlink, so it uses this
++ * Deletes one managed directory link without ever following or recursing into it:
++ * look at the path immediately before, require a link, then unlink it.
++ * Partial Host removal only ever deletes the Claude link, so it uses this
+  * instead of the recursive `rm` that full removal needs for the canonical directory.
+  */
+ async function unlinkManagedSymlink(candidate: string, fileSystem: ProjectInstallationFileSystem): Promise<void> {
+@@ -346,7 +390,7 @@ export interface ProjectSkillHostAdditionInspection {
+ /**
+  * Inspects what exposing the installed Skill to `hosts` would change without
+  * writing. Non-Claude Hosts share the canonical `.agents/skills` location, and
+- * Claude is a symlink to it; anything else at a target location is a conflict.
++ * Claude uses a managed directory link to it; anything else at a target location is a conflict.
+  */
+ export async function inspectProjectSkillHostAddition(
+   selection: ProjectSkillSelection,
+@@ -379,7 +423,7 @@ export async function inspectProjectSkillHostAddition(
+       if (target === undefined || path.resolve(path.dirname(claudePath), target) !== canonicalPath) {
+         throw new ProjectInstallationError(
+           "target-conflict",
+-          `Cannot expose ${JSON.stringify(removal.skillName)} to Claude because ${JSON.stringify(claudePath)} already exists and is not the managed symlink to the installed Skill; no path was changed.`,
++          `Cannot expose ${JSON.stringify(removal.skillName)} to Claude because ${JSON.stringify(claudePath)} already exists and is not the managed directory link to the installed Skill; no path was changed.`,
+         );
+       }
+     }
+@@ -728,7 +772,7 @@ async function inspectSkillLocation(
+     : collisionLocation(candidate, comparison.reason ?? "content-mismatch", evidence);
+ }
+ 
+-/** A Claude symlink is an exposure only when it points to the canonical Skill that was itself found identical. */
++/** A Claude directory link is an exposure only when it points to the canonical Skill that was itself found identical. */
+ async function isClaudeExposureOfCanonical(candidate: string, context: SkillLocationContext): Promise<boolean> {
+   if (candidate !== context.claudePath || !context.canonicalIdentical) return false;
+   try {
+@@ -821,7 +865,7 @@ export async function installProjectSkillTransaction(
+     // prevents a later host check from following a pre-existing symlink after
+     // the other host's directories have already been created.
+     await assertNoSymlinkAncestors(projectRoot, [".agents", "skills", skillName], fileSystem);
+-    // A Claude Skill path may be the managed symlink to the canonical tree;
++    // A Claude Skill path may be the managed directory link to the canonical tree;
+     // adoption validates that final component before following it.
+     await assertNoSymlinkAncestors(projectRoot, [".claude", "skills"], fileSystem);
+ 
+@@ -963,16 +1007,15 @@ async function createClaudeSkillSymlink(
+   uncertainCreates: Set<string>,
+   fileSystem: ProjectInstallationFileSystem,
+ ): Promise<void> {
+-  const linkTarget = path.relative(path.dirname(claudePath), canonicalPath);
+   uncertainCreates.add(claudePath);
+   try {
+-    await fileSystem.symlink(linkTarget, claudePath, "dir");
++    await createClaudeDirectoryLink(fileSystem, claudePath, canonicalPath);
+   } catch (error) {
+     const reason = error instanceof Error ? error.message : String(error);
+     throw new ProjectInstallationError(
+       "claude-symlink-failed",
+-      `Cannot create the Claude Skill symlink at ${JSON.stringify(claudePath)}: ${reason}. ` +
+-      "Grant this process permission to create directory symlinks (on Windows, enable Developer Mode or the required symlink privilege) and retry. " +
++      `Cannot create the Claude Skill directory link at ${JSON.stringify(claudePath)}: ${reason}. ` +
++      (process.platform === "win32" ? "Windows junctions do not require symlink privileges; check the target path and filesystem instead. " : "Check that this process can create directory symlinks. ") +
+       "No duplicate managed copy was created; the canonical installation was rolled back.",
+     );
+   }
+@@ -987,7 +1030,7 @@ async function recordCreatedClaudeSymlink(
+ ): Promise<void> {
+   const information = await fileSystem.lstat(claudePath);
+   if (!information.isSymbolicLink()) {
+-    throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${claudePath}`);
++    throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a directory link: ${claudePath}`);
+   }
+   createdPaths.push({ path: claudePath, kind: "symlink", identity: pathIdentity(information) });
+   uncertainCreates.delete(claudePath);
+@@ -1025,7 +1068,7 @@ function assertOverwriteCollision(inspection: ProjectSkillInstallationInspection
+   if (inspection.targetPath === inspection.canonicalPath && claudeLocation?.status === "identical" && claudeLocation.identity !== undefined) {
+     throw new ProjectInstallationError(
+       "ambiguous-target",
+-      `Cannot overwrite ${JSON.stringify(inspection.targetPath)} because the Claude location is a separate real directory rather than the managed symlink; no path was changed`,
++      `Cannot overwrite ${JSON.stringify(inspection.targetPath)} because the Claude location is a separate real directory rather than the managed directory link; no path was changed`,
+     );
+   }
+ }
+@@ -1306,9 +1349,8 @@ async function overwriteProjectSkillTransaction(
+     const claudeLocation = inspection.locations.find((location) => location.path === inspection.claudePath);
+     if (targetPath === inspection.canonicalPath && hosts.includes("claude") && claudeLocation?.status === "missing") {
+       await ensureDirectoryTree(projectRoot, [".claude", "skills"], exposureCreated, exposureUncertain, fileSystem);
+-      const linkTarget = path.relative(path.dirname(inspection.claudePath), inspection.canonicalPath);
+       exposureUncertain.add(inspection.claudePath);
+-      await fileSystem.symlink(linkTarget, inspection.claudePath, "dir");
++      await createClaudeDirectoryLink(fileSystem, inspection.claudePath, inspection.canonicalPath);
+       const linkInformation = await fileSystem.lstat(inspection.claudePath);
+       if (!linkInformation.isSymbolicLink()) {
+         throw new ProjectInstallationError("unsafe-target", `Claude installation path is not a symbolic link: ${inspection.claudePath}`);
+@@ -1400,6 +1442,19 @@ async function assertExistingSkillMatches(
+   }
+ }
+ 
++async function createClaudeDirectoryLink(
++  fileSystem: ProjectInstallationFileSystem,
++  claudePath: string,
++  canonicalPath: string,
++): Promise<void> {
++  const windows = process.platform === "win32";
++  await fileSystem.symlink(
++    windows ? path.resolve(canonicalPath) : path.relative(path.dirname(claudePath), canonicalPath),
++    claudePath,
++    windows ? "junction" : "dir",
++  );
++}
++
+ async function createAdditionalClaudeExposure(
+   projectRoot: string,
+   canonicalPath: string,
+@@ -1412,11 +1467,11 @@ async function createAdditionalClaudeExposure(
+   await assertMissing(claudePath, fileSystem, claudePath);
+   uncertainCreates.add(claudePath);
+   try {
+-    await fileSystem.symlink(path.relative(path.dirname(claudePath), canonicalPath), claudePath, "dir");
++    await createClaudeDirectoryLink(fileSystem, claudePath, canonicalPath);
+   } catch (error) {
+     throw new ProjectInstallationError(
+       "claude-symlink-failed",
+-      `Cannot create the additional Claude Skill symlink at ${JSON.stringify(claudePath)}: ${errorMessage(error)}. No existing path was changed.`,
++      `Cannot create the additional Claude Skill directory link at ${JSON.stringify(claudePath)}: ${errorMessage(error)}. No existing path was changed.`,
+     );
+   }
+   await recordCreatedClaudeSymlink(claudePath, createdPaths, uncertainCreates, fileSystem);
+@@ -1835,6 +1890,8 @@ async function rollbackCreatedPaths(
+           continue;
+         }
+         await fileSystem.rmdir(created.path);
++      } else if (created.kind === "symlink") {
++        await unlinkManagedSymlink(created.path, fileSystem);
+       } else {
+         await fileSystem.rm(created.path);
+       }
+diff --git a/src/skill-removal.ts b/src/skill-removal.ts
+index 06f038c..339f7d6 100644
+--- a/src/skill-removal.ts
++++ b/src/skill-removal.ts
+@@ -1,6 +1,8 @@
+ import {
+   assertNoOverlappingProjectSkillRemovalTargets,
++  inspectAbsentManagedSkillRecord,
+   inspectProjectSkillRemoval,
++  ProjectInstallationError,
+   removeProjectSkill,
+   type ProjectInstallationOptions,
+   type ProjectSkillRemovalInspection,
+@@ -67,11 +69,13 @@ export function describeSkillRemoval(
+   inspection: ProjectSkillRemovalInspection,
+   label: string,
+ ): readonly string[] {
+-  const lines = [`  remove ${label}${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`];
+-  if (inspection.adopted) {
++  const lines = inspection.recordOnly
++    ? [`  forget missing installation record for ${label}${JSON.stringify(selection.path)} (record only; no files removed)`]
++    : [`  remove ${label}${JSON.stringify(selection.path)} at ${inspection.paths.join(", ")}`];
++  if (!inspection.recordOnly && inspection.adopted) {
+     lines.push("    WARNING: this Skill was adopted; removal deletes content that Agent Depot did not create");
+   }
+-  if (inspection.modified) {
++  if (!inspection.recordOnly && inspection.modified) {
+     lines.push("    WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes");
+   }
+   return lines;
+@@ -88,7 +92,18 @@ export async function inspectSkillRemovals(
+ ): Promise<SkillRemovalPlan> {
+   const inspections: ProjectSkillRemovalInspection[] = [];
+   for (const selection of selections) {
+-    const inspection = await inspectProjectSkillRemoval(selection, options);
++    const otherInstallationPaths = [
++      ...(options.otherInstallationPaths ?? []),
++      ...selections.filter((candidate) => candidate !== selection)
++        .flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
++    ];
++    let inspection: ProjectSkillRemovalInspection;
++    try {
++      inspection = await inspectProjectSkillRemoval(selection, { ...options, otherInstallationPaths });
++    } catch (error) {
++      if (!(error instanceof ProjectInstallationError) || error.code !== "missing-installation" || options.installationTrust !== "user-global-state") throw error;
++      inspection = await inspectAbsentManagedSkillRecord(selection, { ...options, otherInstallationPaths });
++    }
+     inspections.push(inspection);
+     onInspected?.(selection, inspection);
+   }
+@@ -120,9 +135,9 @@ export async function recheckSkillRemoval(
+ }
+ 
+ export function assertRemovalInspectionUnchanged(before: ProjectSkillRemovalInspection, after: ProjectSkillRemovalInspection): void {
+-  const unchanged = before.digest === after.digest && before.adopted === after.adopted && before.modified === after.modified &&
+-    before.skillName === after.skillName && before.paths.length === after.paths.length &&
+-    before.paths.every((candidate, pathIndex) => candidate === after.paths[pathIndex]);
++  const unchanged = before.digest === after.digest && before.recordOnly === after.recordOnly && before.adopted === after.adopted && before.modified === after.modified &&
++    before.skillName === after.skillName && before.nonCanonicalPath === after.nonCanonicalPath &&
++    before.paths.length === after.paths.length && before.paths.every((candidate, pathIndex) => candidate === after.paths[pathIndex]);
+   if (!unchanged) {
+     throw new Error("The inspected Skill removal target changed before deletion; no path was removed");
+   }
+@@ -145,8 +160,10 @@ export async function removeSkillFiles(
+   rechecked: SkillRemovalPlan,
+   options: ProjectInstallationOptions,
+ ): Promise<void> {
++  assertRemovalBatchUnchanged(plan, rechecked);
+   for (const [index, selection] of plan.selections.entries()) {
+     assertRemovalInspectionUnchanged(plan.inspections[index]!, rechecked.inspections[index]!);
++    if (rechecked.inspections[index]!.recordOnly) continue;
+     await removeProjectSkill(selection, rechecked.inspections[index]!, options);
+   }
+ }
+@@ -168,17 +185,35 @@ export async function removeSkillsAndRecords(
+   if (!list || !reconcile) {
+     throw new Error("Configured Source operations cannot reconcile removed user-global Skills");
+   }
++  assertRemovalBatchUnchanged(plan, rechecked);
+   let expected = initialManaged;
+   for (const [index, selection] of plan.selections.entries()) {
+     assertRemovalInspectionUnchanged(plan.inspections[index]!, rechecked.inspections[index]!);
+     assertManagedInstallationRecordsUnchanged(expected, await list.call(operations));
+-    await removeProjectSkill(selection, rechecked.inspections[index]!, options);
++    if (rechecked.inspections[index]!.recordOnly) {
++      const latest = await inspectAbsentManagedSkillRecord(selection, options);
++      assertRemovalInspectionUnchanged(rechecked.inspections[index]!, latest);
++    } else {
++      await removeProjectSkill(selection, rechecked.inspections[index]!, options);
++    }
+     await reconcile.call(operations, [selection]);
+     expected = await list.call(operations);
+   }
+   return expected;
+ }
+ 
++/** Compare the complete confirmed batch before any entry can mutate files or records. */
++function assertRemovalBatchUnchanged(plan: SkillRemovalPlan, rechecked: SkillRemovalPlan): void {
++  if (plan.selections.length !== rechecked.selections.length || plan.inspections.length !== rechecked.inspections.length) {
++    throw new Error("The inspected Skill removal batch changed before deletion; no path was removed");
++  }
++  for (const [index, inspection] of plan.inspections.entries()) {
++    const current = rechecked.inspections[index];
++    if (!current) throw new Error("The inspected Skill removal batch changed before deletion; no path was removed");
++    assertRemovalInspectionUnchanged(inspection, current);
++  }
++}
++
+ /** Execute step: recheck, then remove files and records. */
+ export async function executeSkillRemoval(
+   plan: SkillRemovalPlan,
+diff --git a/src/tui/bulk-actions.ts b/src/tui/bulk-actions.ts
+index 29ede90..74c85c4 100644
+--- a/src/tui/bulk-actions.ts
++++ b/src/tui/bulk-actions.ts
+@@ -207,7 +207,9 @@ export async function runBulkUninstall(plan: BulkUninstallPlan, operations: Sour
+     await runUninstall({ ...item.prepared, installations: expected }, operations, env);
+     // Only the record this item removed moves the baseline the next item is checked against.
+     expected = expected.filter((record) => !item.prepared.plan.selections.some((removed) => sameRecord(removed, record)));
+-    return `Removed ${item.label}`;
++    return item.prepared.plan.inspections.every((inspection) => inspection.recordOnly)
++      ? `Forgot missing installation record for ${item.label}; no files were removed`
++      : `Removed ${item.label}`;
+   }, (item, error) => (item.kind === "unmanaged" ? errorText(error) : `Failed ${item.label}: ${errorText(error)}`));
+   return resultOf(outcomes, plan.skipped);
+ }
+diff --git a/src/tui/catalog-installs.ts b/src/tui/catalog-installs.ts
+index b4cb6f8..ca5cbc9 100644
+--- a/src/tui/catalog-installs.ts
++++ b/src/tui/catalog-installs.ts
+@@ -226,10 +226,15 @@ export async function prepareUninstall(
+   if (matches.length === 0) {
+     return { kind: recordsFor(installed.project, skill, installed.sources).length > 0 ? "project-only" : "not-installed" };
+   }
+-  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
+   const record = matches[0]!;
++  const options = userGlobalRemovalOptions(homeOf(environment), {
++    ...environment.installationOptions,
++    otherInstallationPaths: installations.filter((candidate) => candidate !== record).flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
++  });
+   const plan = await planSkillRemoval([record], options);
+-  const scopeNote = `  removes the whole user-global installation, from hosts: ${record.hosts.join(", ")}`;
++  const scopeNote = plan.inspections[0]?.recordOnly
++    ? `  forgets the missing installation record, from hosts: ${record.hosts.join(", ")}; no files are removed`
++    : `  removes the whole user-global installation, from hosts: ${record.hosts.join(", ")}`;
+   return { kind: "ready", plan: { ...plan, preview: [...plan.preview, scopeNote] }, installations };
+ }
+ 
+@@ -239,7 +244,11 @@ export async function runUninstall(
+   operations: SourceOperations,
+   environment: TuiEnvironment,
+ ): Promise<void> {
+-  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
++  const selected = new Set(prepared.plan.selections.map((selection) => JSON.stringify(selection)));
++  const options = userGlobalRemovalOptions(homeOf(environment), {
++    ...environment.installationOptions,
++    otherInstallationPaths: prepared.installations.filter((candidate) => !selected.has(JSON.stringify(candidate))).flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
++  });
+   await executeSkillRemoval(prepared.plan, operations, options, prepared.installations);
+ }
+ 
+@@ -319,7 +328,10 @@ export async function prepareHostRemoval(
+   hosts: readonly ProjectHost[],
+ ): Promise<PreparedHostRemoval> {
+   const { record, installations } = await currentGlobalRecord(operations, skill, installed);
+-  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
++  const options = userGlobalRemovalOptions(homeOf(environment), {
++    ...environment.installationOptions,
++    otherInstallationPaths: installations.filter((candidate) => JSON.stringify(candidate) !== JSON.stringify(record)).flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
++  });
+   const plan = await planHostRemoval(record, hosts, options).catch(asMessage);
+   return { plan, installations, preview: plan.kind === "full" ? plan.plan.preview : plan.preview };
+ }
+@@ -331,10 +343,17 @@ export async function runHostRemoval(
+   environment: TuiEnvironment,
+   skill: SkillCandidate,
+ ): Promise<string> {
+-  const options = userGlobalRemovalOptions(homeOf(environment), environment.installationOptions);
++  const selection = prepared.plan.kind === "full" ? prepared.plan.plan.selections[0] : prepared.plan.selection;
++  const options = userGlobalRemovalOptions(homeOf(environment), {
++    ...environment.installationOptions,
++    otherInstallationPaths: prepared.installations.filter((candidate) => selection !== undefined && JSON.stringify(candidate) !== JSON.stringify(selection))
++      .flatMap((candidate) => candidate.installation ? [candidate.installation.path] : []),
++  });
+   await executeHostRemoval(prepared.plan, operations, options, prepared.installations);
+   const { plan } = prepared;
+-  return plan.kind === "full"
+-    ? `Removed ${skill.name} (${skill.path})`
+-    : `Removed hosts ${plan.removed.join(", ")} from ${plan.selection.path}`;
++  return plan.kind === "full" && plan.plan.inspections.every((inspection) => inspection.recordOnly)
++    ? `Forgot missing installation record for ${plan.plan.selections[0]?.path ?? skill.path}; no files were removed`
++    : plan.kind === "full"
++      ? `Removed ${skill.name} (${skill.path})`
++      : `Removed hosts ${plan.removed.join(", ")} from ${plan.selection.path}`;
+ }
+diff --git a/src/tui/manage-actions.ts b/src/tui/manage-actions.ts
+index bbddd2d..2a54b13 100644
+--- a/src/tui/manage-actions.ts
++++ b/src/tui/manage-actions.ts
+@@ -209,7 +209,9 @@ function handleConfirmKey(context: ManageContext, mode: ModeOf<"confirm-host-add
+       answerYesNo(input, key, () => {
+         void execute(context, `Removing ${mode.skill.name}…`, async () => {
+           await runUninstall(mode.prepared, operations, env);
+-          return `Removed ${mode.skill.name} (${mode.skill.path})`;
++          return mode.prepared.plan.inspections.every((inspection) => inspection.recordOnly)
++            ? `Forgot missing installation record for ${mode.skill.path}; no files were removed`
++            : `Removed ${mode.skill.name} (${mode.skill.path})`;
+         });
+       }, cancelWith("Uninstall cancelled"));
+       return;
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index f4865c1..5771fe2 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -1,6 +1,6 @@
+ import assert from "node:assert/strict";
+ import { spawnSync } from "node:child_process";
+-import { writeFileSync } from "node:fs";
++import { mkdirSync, writeFileSync } from "node:fs";
+ import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+ import path from "node:path";
+@@ -19,6 +19,7 @@ import { NodeSourceContentAccess, skillTreeBaseline, type SkillTreeFile } from "
+ import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "../src/project-manifest.js";
+ import type { ProjectInstallationFileSystem } from "../src/project-installation.js";
+ import { runCli } from "../src/cli.js";
++import { isInstalled, loadInstalledSkills } from "../src/tui/catalog-installs.js";
+ 
+ const external = {
+   id: "git:1234567890abcdef12345678",
+@@ -201,6 +202,84 @@ test("previews dependent user-global Skills, keeps them by default, and removes
+   }
+ });
+ 
++test("source removal refuses a same-identity record changed at the persistence boundary", async () => {
++  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-source-stale-home-"));
++  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-source-stale-state-"));
++  const lines: string[] = [];
++  const errors: string[] = [];
++  try {
++    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
++    const source = await operations.addGitSource(external.url);
++    const selection: ProjectSkillSelection = {
++      source: { kind: "external", url: source.url }, path: "portable/demo", version: { policy: "latest" }, hosts: ["pi"],
++      installation: { path: ".agents/skills/demo", adopted: false },
++    };
++    const changed = { ...selection, installation: { path: ".agents/skills/present", adopted: false } };
++    await operations.addUserGlobalInstallation!(selection);
++    const present = path.join(homeDirectory, ".agents", "skills", "present");
++    await mkdir(present, { recursive: true });
++    await writeFile(path.join(present, "SKILL.md"), "preserve me", "utf8");
++    let reads = 0;
++    const changedOperations: SourceOperations = {
++      ...operations,
++      listUserGlobalInstallations: async () => {
++        reads += 1;
++        if (reads === 3) await operations.updateUserGlobalInstallation!(changed);
++        return operations.listUserGlobalInstallations!();
++      },
++    };
++    const code = await runCli(["source", "remove", source.id, "--all", "--yes"], {
++      operations: changedOperations, homeDirectory, stdout: (line) => lines.push(line), stderr: (line) => errors.push(line),
++    });
++    assert.equal(code, 1);
++    assert.match(errors.join("\n"), /Managed Skill installation records changed before deletion/u);
++    assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), true);
++    assert.deepEqual(await operations.listUserGlobalInstallations!(), [changed]);
++    assert.equal(await readFile(path.join(present, "SKILL.md"), "utf8"), "preserve me");
++  } finally {
++    await rm(homeDirectory, { recursive: true, force: true });
++    await rm(stateDirectory, { recursive: true, force: true });
++  }
++});
++
++test("source removal refuses an overlapping managed record added after missing-path preview", async () => {
++  const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-source-alias-home-"));
++  const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-source-alias-state-"));
++  const errors: string[] = [];
++  try {
++    const operations = createSourceOperations({ statePath: path.join(stateDirectory, "sources.json") });
++    const source = await operations.addGitSource(external.url);
++    const selection: ProjectSkillSelection = {
++      source: { kind: "external", url: source.url }, path: "portable/demo", version: { policy: "latest" }, hosts: ["pi"],
++      installation: { path: ".agents/skills/demo", adopted: false },
++    };
++    const alias: ProjectSkillSelection = {
++      source: { kind: "external", url: "https://example.com/another.git" }, path: "portable/alias",
++      version: { policy: "latest" }, hosts: ["pi"], installation: { path: ".agents/skills/demo", adopted: false },
++    };
++    await operations.addUserGlobalInstallation!(selection);
++    let reads = 0;
++    const changedOperations: SourceOperations = {
++      ...operations,
++      listUserGlobalInstallations: async () => {
++        reads += 1;
++        if (reads === 2) await operations.addUserGlobalInstallation!(alias);
++        return operations.listUserGlobalInstallations!();
++      },
++    };
++    const code = await runCli(["source", "remove", source.id, "--all", "--yes"], {
++      operations: changedOperations, homeDirectory, stderr: (line) => errors.push(line), stdout: () => {},
++    });
++    assert.equal(code, 1);
++    assert.match(errors.join("\n"), /Managed Skill installation records changed before deletion/u);
++    assert.equal((await operations.listSources()).some((candidate) => candidate.id === source.id), true);
++    assert.deepEqual(await operations.listUserGlobalInstallations!(), [selection, alias]);
++  } finally {
++    await rm(homeDirectory, { recursive: true, force: true });
++    await rm(stateDirectory, { recursive: true, force: true });
++  }
++});
++
+ test("uninstalls independent user-global choices with conservative defaults", async () => {
+   const homeDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-home-"));
+   const stateDirectory = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-uninstall-state-"));
+@@ -1293,10 +1372,7 @@ test("previews and installs a user-global Skill in the injected home while shari
+ 
+     assert.equal(await runCli([...args, "--yes"], dependencies), 0);
+     assert.equal(await readFile(path.join(homeDirectory, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
+-    assert.equal(await readlink(path.join(homeDirectory, ".claude", "skills", "demo")), path.relative(
+-      path.join(homeDirectory, ".claude", "skills"),
+-      path.join(homeDirectory, ".agents", "skills", "demo"),
+-    ));
++    assert.equal(path.resolve(path.dirname(path.join(homeDirectory, ".claude", "skills", "demo")), await readlink(path.join(homeDirectory, ".claude", "skills", "demo"))), path.join(homeDirectory, ".agents", "skills", "demo"));
+     await assert.rejects(readFile(path.join(homeDirectory, "agent-depot.json")), { code: "ENOENT" });
+     const state = JSON.parse(await readFile(path.join(stateDirectory, "sources.json"), "utf8")) as {
+       userGlobalInstallations: Array<{ path: string; installation?: { path: string; adopted: boolean } }>;
+@@ -2039,10 +2115,7 @@ test("executes a reviewed structured method only after the complete preview and
+     assert.equal(await runCli([...args, "--yes"], { operations, projectRoot, sourceAccess: cliSourceAccess(), stdout: (line) => output.push(line) }), 0);
+     assert.deepEqual(calls, [{ argv: ["node", "--version"], cwd: projectRoot }]);
+     assert.equal(await readFile(path.join(projectRoot, ".agents", "skills", "demo", "SKILL.md"), "utf8"), "## D");
+-    assert.equal(await readlink(path.join(projectRoot, ".claude", "skills", "demo")), path.relative(
+-      path.join(projectRoot, ".claude", "skills"),
+-      path.join(projectRoot, ".agents", "skills", "demo"),
+-    ));
++    assert.equal(path.resolve(path.dirname(path.join(projectRoot, ".claude", "skills", "demo")), await readlink(path.join(projectRoot, ".claude", "skills", "demo"))), path.join(projectRoot, ".agents", "skills", "demo"));
+   } finally {
+     await rm(projectRoot, { recursive: true, force: true });
+   }
+@@ -2983,6 +3056,199 @@ test("skill remove does not delete a Skill whose directory changed after the pre
+   });
+ });
+ 
++test("skill remove explicitly forgets a verified missing managed installation without touching files", async () => {
++  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, lines, errors, cli }) => {
++    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
++    assert.equal(await cli(["skill", "remove", "portable/one"]), 1);
++    assert.match(lines.join("\n"), /forget missing installation record.*record only; no files removed/u);
++    assert.match(errors.join("\n"), /Removal not confirmed/u);
++    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
++
++    assert.equal(await cli(["skill", "remove", "portable/one", "--yes"]), 0);
++    assert.match(lines.join("\n"), /Forgot 1 missing user-global Skill installation record; no files were removed/u);
++    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
++    await assert.rejects(lstat(skillDirectory(homeDirectory, "one")), { code: "ENOENT" });
++    const loaded = await loadInstalledSkills(operations, { homeDirectory });
++    assert.equal(loaded.global.length, 0);
++    assert.equal(isInstalled(
++      { sourceId: BUILT_IN_SOURCE.id, path: "portable/one", name: "one", description: "test" }, loaded,
++    ), false);
++    const sourceAccess = { readSkillTree: async () => [{
++      path: "portable/one/SKILL.md",
++      content: Buffer.from("---\nname: one\ndescription: Reinstalled skill\n---\n\nBody\n"),
++      executable: false,
++    }] };
++    assert.equal(await runCli([
++      "install", "--scope", "user-global", "--source", BUILT_IN_SOURCE.id, "--skill", "portable/one",
++      "--host", "pi", "--version", "latest", "--portable-v1", "--yes",
++    ], { operations, homeDirectory, sourceAccess, stdout: () => {}, stderr: (line) => errors.push(line) }), 0);
++    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
++    assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
++  });
++});
++
++test("skill remove rechecks all absent records before mutating when a later item reappears", async () => {
++  await withUserGlobalSkills(["portable/a", "portable/b"], async ({ operations, homeDirectory, errors }) => {
++    await rm(skillDirectory(homeDirectory, "a"), { recursive: true });
++    await rm(skillDirectory(homeDirectory, "b"), { recursive: true });
++    let deleteCalls = 0;
++    const fileSystem: ProjectInstallationFileSystem = {
++      lstat, readdir, readFile, chmod, symlink, readlink, rmdir, rename,
++      mkdir: async (candidate) => { await mkdir(candidate); },
++      writeFile: async (candidate, content) => { await writeFile(candidate, content, { flag: "wx" }); },
++      rm: async (candidate) => { deleteCalls += 1; await rm(candidate, { recursive: true, force: true }); },
++    };
++    const code = await runCli(["skill", "remove", "portable/a", "portable/b", "--yes"], {
++      operations, homeDirectory, installationOptions: { fileSystem }, stderr: (line) => errors.push(line),
++      stdout: (line) => {
++        if (line.includes("forget missing installation record") && line.includes("portable/b")) {
++          mkdirSync(skillDirectory(homeDirectory, "b"), { recursive: true });
++          writeFileSync(path.join(skillDirectory(homeDirectory, "b"), "SKILL.md"), "reappeared", "utf8");
++        }
++      },
++    });
++    assert.equal(code, 1);
++    assert.match(errors.join("\n"), /inspected Skill removal target changed before deletion/u);
++    assert.equal(deleteCalls, 0);
++    assert.deepEqual((await operations.listUserGlobalInstallations!()).map((record) => record.path), ["portable/a", "portable/b"]);
++    assert.ok(await lstat(skillDirectory(homeDirectory, "b")));
++  });
++});
++
++test("skill remove does not delete an earlier present Skill when a later missing record reappears", async () => {
++  await withUserGlobalSkills(["portable/a", "portable/b"], async ({ operations, homeDirectory, errors }) => {
++    await rm(skillDirectory(homeDirectory, "b"), { recursive: true });
++    let deleteCalls = 0;
++    const fileSystem: ProjectInstallationFileSystem = {
++      lstat, readdir, readFile, chmod, symlink, readlink, rmdir, rename,
++      mkdir: async (candidate) => { await mkdir(candidate); },
++      writeFile: async (candidate, content) => { await writeFile(candidate, content, { flag: "wx" }); },
++      rm: async (candidate) => { deleteCalls += 1; await rm(candidate, { recursive: true, force: true }); },
++    };
++    const code = await runCli(["skill", "remove", "portable/a", "portable/b", "--yes"], {
++      operations, homeDirectory, installationOptions: { fileSystem }, stderr: (line) => errors.push(line),
++      stdout: (line) => {
++        if (line.includes("forget missing installation record") && line.includes("portable/b")) {
++          mkdirSync(skillDirectory(homeDirectory, "b"), { recursive: true });
++          writeFileSync(path.join(skillDirectory(homeDirectory, "b"), "SKILL.md"), "reappeared", "utf8");
++        }
++      },
++    });
++    assert.equal(code, 1);
++    assert.match(errors.join("\n"), /inspected Skill removal target changed before deletion/u);
++    assert.equal(deleteCalls, 0);
++    assert.ok(await lstat(skillDirectory(homeDirectory, "a")));
++    assert.deepEqual((await operations.listUserGlobalInstallations!()).map((record) => record.path), ["portable/a", "portable/b"]);
++  });
++});
++
++test("uninstall summary distinguishes record-only managed recovery", async () => {
++  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, lines, errors }) => {
++    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
++    assert.equal(await runCli(["uninstall", "--skills", "--yes"], {
++      operations, homeDirectory, stdout: (line) => lines.push(line), stderr: (line) => errors.push(line),
++    }), 0);
++    assert.match(lines.join("\n"), /Forgot 1 missing managed user-global Skill installation record; no files were removed/u);
++    assert.doesNotMatch(lines.join("\n"), /Removed 1 managed user-global Skill/u);
++    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
++  });
++});
++
++test("skill remove skips adopted-content deletion warnings for record-only recovery", async () => {
++  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, lines, errors }) => {
++    const selection = (await operations.listUserGlobalInstallations!())[0]!;
++    await operations.updateUserGlobalInstallation!({ ...selection, installation: { ...selection.installation!, adopted: true } });
++    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
++    assert.equal(await runCli(["skill", "remove", "portable/one"], {
++      operations, homeDirectory, stdout: (line) => lines.push(line), stderr: (line) => errors.push(line),
++    }), 1);
++    assert.match(lines.join("\n"), /record only; no files removed/u);
++    assert.doesNotMatch(lines.join("\n"), /WARNING: this Skill was adopted|WARNING: this Skill is locally modified/u);
++    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
++  });
++});
++
++test("all-host CLI removal reports record-only recovery truthfully", async () => {
++  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, lines, cli }) => {
++    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
++    assert.equal(await cli(["skill", "remove", "portable/one", "--host", "pi", "--yes"]), 0);
++    assert.match(lines.join("\n"), /Preview: forget 1 missing user-global Skill installation record/u);
++    assert.match(lines.join("\n"), /Forgot missing installation record.*no files were removed/u);
++    assert.deepEqual(await operations.listUserGlobalInstallations!(), []);
++  });
++});
++
++test("skill remove refuses missing-record recovery when a Claude location remains", async () => {
++  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors, cli }) => {
++    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
++    const claudePath = path.join(homeDirectory, ".claude", "skills", "one");
++    await mkdir(claudePath, { recursive: true });
++    assert.equal(await cli(["skill", "remove", "portable/one", "--yes"]), 1);
++    assert.match(errors.join("\n"), /filesystem object exists/u);
++    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
++    assert.ok(await lstat(claudePath));
++  });
++});
++
++test("skill remove refuses record-only recovery when an unselected record aliases its target", async () => {
++  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors }) => {
++    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
++    await operations.addUserGlobalInstallation!({
++      source: { kind: "external", url: "https://example.com/skills.git" },
++      path: "portable/alias",
++      version: { policy: "latest" },
++      hosts: ["pi"],
++      installation: { path: ".agents/skills/one", adopted: false },
++    });
++    assert.equal(await runCli(["skill", "remove", "portable/one", "--yes"], {
++      operations, homeDirectory, stderr: (line) => errors.push(line),
++    }), 1);
++    assert.match(errors.join("\n"), /overlaps another managed Skill record/u);
++    assert.equal((await operations.listUserGlobalInstallations!()).length, 2);
++  });
++});
++
++test("skill remove refuses a record-only apply when the managed record snapshot changes", async () => {
++  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors }) => {
++    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
++    let calls = 0;
++    const altered: SourceOperations = {
++      ...operations,
++      listUserGlobalInstallations: async () => {
++        const current = await operations.listUserGlobalInstallations!();
++        calls += 1;
++        return calls === 1 ? current : current.map((selection) => ({ ...selection, hosts: ["codex"] }));
++      },
++    };
++    assert.equal(await runCli(["skill", "remove", "portable/one", "--yes"], {
++      operations: altered, homeDirectory, stderr: (line) => errors.push(line),
++    }), 1);
++    assert.match(errors.join("\n"), /Managed Skill installation records changed before deletion/u);
++    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
++    await assert.rejects(lstat(skillDirectory(homeDirectory, "one")), { code: "ENOENT" });
++  });
++});
++
++test("skill remove refuses missing-record recovery if the path reappears after preview", async () => {
++  await withUserGlobalSkills(["portable/one"], async ({ operations, homeDirectory, errors }) => {
++    await rm(skillDirectory(homeDirectory, "one"), { recursive: true });
++    const code = await runCli(["skill", "remove", "portable/one", "--yes"], {
++      operations,
++      homeDirectory,
++      stderr: (line) => errors.push(line),
++      stdout: (line) => {
++        if (line.includes("record only; no files removed")) {
++          mkdirSync(skillDirectory(homeDirectory, "one"), { recursive: true });
++        }
++      },
++    });
++    assert.equal(code, 1);
++    assert.match(errors.join("\n"), /inspected Skill removal target changed before deletion/u);
++    assert.ok(await lstat(skillDirectory(homeDirectory, "one")));
++    assert.equal((await operations.listUserGlobalInstallations!()).length, 1);
++  });
++});
++
+ test("skill remove aborts without deleting when installation records changed after the preview", async () => {
+   await withUserGlobalSkills(["portable/one", "portable/two"], async ({ operations, homeDirectory, errors }) => {
+     let listCalls = 0;
+diff --git a/tests/e2e-lifecycle.test.ts b/tests/e2e-lifecycle.test.ts
+index d5d0e9f..564ed83 100644
+--- a/tests/e2e-lifecycle.test.ts
++++ b/tests/e2e-lifecycle.test.ts
+@@ -174,7 +174,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
+     );
+   });
+ 
+-  test("installs project Skills with a canonical directory, Claude symlink and manifest", async () => {
++  test("installs project Skills with a canonical directory, Claude directory link and manifest", async () => {
+     const args = installArgs("project", "alpha", "claude", "pi");
+     fails(cli(project, ...args), /Installation not confirmed; rerun with --yes/);
+     assert.equal(await exists(path.join(project, ".agents")), false);
+@@ -183,7 +183,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
+     ok(cli(project, ...args, "--yes"));
+     assert.match(await readFile(path.join(project, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v1/);
+     assert.equal(await readFile(path.join(project, ".agents/skills/alpha/refs/notes.md"), "utf8"), "support v1\n");
+-    assert.equal(await readlink(path.join(project, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
++    assert.equal(path.resolve(path.dirname(path.join(project, ".claude/skills/alpha")), await readlink(path.join(project, ".claude/skills/alpha"))), path.join(project, ".agents/skills/alpha"));
+     const saved = await manifest(project);
+     assert.equal(saved.skills.length, 1);
+     assert.equal(saved.skills[0]?.installation.path, ".agents/skills/alpha");
+@@ -201,7 +201,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
+     const args = installArgs("user-global", "alpha", "claude");
+     ok(cli(project, ...args, "--yes"));
+     assert.match(await readFile(path.join(home, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v1/);
+-    assert.equal(await readlink(path.join(home, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
++    assert.equal(path.resolve(path.dirname(path.join(home, ".claude/skills/alpha")), await readlink(path.join(home, ".claude/skills/alpha"))), path.join(home, ".agents/skills/alpha"));
+     fails(cli(project, ...args, "--yes"), /already recorded in user-global state/);
+ 
+     const check = ok(cli(project, "update", "check", "--scope", "user-global"));
+@@ -228,7 +228,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
+     assert.match(ok(cli(project, "update", "apply", "--scope", "project", "--all", "--yes")), /Update summary: 2 updated, 0 failed/);
+     assert.match(await readFile(path.join(project, ".agents/skills/alpha/SKILL.md"), "utf8"), /Alpha v2/);
+     assert.equal(await readFile(path.join(project, ".agents/skills/alpha/refs/notes.md"), "utf8"), "support v2\n");
+-    assert.equal(await readlink(path.join(project, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
++    assert.equal(path.resolve(path.dirname(path.join(project, ".claude/skills/alpha")), await readlink(path.join(project, ".claude/skills/alpha"))), path.join(project, ".agents/skills/alpha"));
+     assert.match(ok(cli(project, "update", "check", "--scope", "project")), /Updateable \(0\):\nCurrent \(2\):/);
+ 
+     assert.match(ok(cli(project, "update", "apply", "--scope", "user-global", "--skill", "0", "--yes")), /1 updated, 0 failed/);
+@@ -351,7 +351,7 @@ describe("agent-depot end to end lifecycle (hermetic)", () => {
+     assert.equal(await exists(path.join(home, ".agents/skills/gamma")), false);
+     assert.equal(await exists(path.join(home, ".claude/skills/gamma")), false);
+     assert.equal(await exists(path.join(home, ".agents/skills/alpha")), true);
+-    assert.equal(await readlink(path.join(home, ".claude/skills/alpha")), path.join("..", "..", ".agents", "skills", "alpha"));
++    assert.equal(path.resolve(path.dirname(path.join(home, ".claude/skills/alpha")), await readlink(path.join(home, ".claude/skills/alpha"))), path.join(home, ".agents/skills/alpha"));
+ 
+     fails(cli(project, "uninstall", "--skills"), /Uninstall not confirmed/);
+     assert.equal(await exists(path.join(home, ".agents/skills/alpha")), true);
+diff --git a/tests/e2e-profile.test.ts b/tests/e2e-profile.test.ts
+index 8697d84..656b888 100644
+--- a/tests/e2e-profile.test.ts
++++ b/tests/e2e-profile.test.ts
+@@ -38,7 +38,8 @@ test("built CLI transfers Profile choices without approvals, App installs or rep
+     assert.match(b.ok("source", "list"), /builtin:agent-depot/);
+     for (const name of ["alpha", "agent-depot-apprecipe"]) {
+       assert.match(await readFile(path.join(b.home, ".agents/skills", name, "SKILL.md"), "utf8"), new RegExp(`name: "?${name}"?`));
+-      assert.equal(await readlink(path.join(b.home, ".claude/skills", name)), `../../.agents/skills/${name}`);
++      const linkPath = path.join(b.home, ".claude/skills", name);
++      assert.equal(path.resolve(path.dirname(linkPath), await readlink(linkPath)), path.join(b.home, ".agents/skills", name));
+     }
+     const exported = JSON.parse(b.cli("export").stdout);
+     assert.deepEqual(exported.skills, profile.skills);
+diff --git a/tests/project-installation.test.ts b/tests/project-installation.test.ts
+index 703ead6..5f977a2 100644
+--- a/tests/project-installation.test.ts
++++ b/tests/project-installation.test.ts
+@@ -1,5 +1,5 @@
+ import assert from "node:assert/strict";
+-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
++import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+ import path from "node:path";
+ import { test } from "node:test";
+@@ -7,8 +7,10 @@ import { test } from "node:test";
+ import type { ProjectSkillSelection } from "../src/project-manifest.js";
+ import {
+   inspectProjectSkillInstallation,
++  inspectProjectSkillRemoval,
+   inspectProjectSkillUpdate,
+   installProjectSkill,
++  removeProjectSkill,
+   installProjectSkillTransaction,
+   type ProjectInstallationFileSystem,
+   type ProjectSkillTreeAccess,
+@@ -52,11 +54,11 @@ async function makeProject(): Promise<string> {
+   });
+ }
+ 
+-test("installs a full project Skill tree at the canonical path and exposes Claude by symlink", async (t) => {
++test("installs a full project Skill tree at the canonical path and exposes Claude by managed directory link", async (t) => {
+   const projectRoot = await makeProject();
+   try {
+     try {
+-      await symlink(path.join(projectRoot, "missing-target"), path.join(projectRoot, "link-check"), "dir");
++      await symlink(path.join(projectRoot, "missing-target"), path.join(projectRoot, "link-check"), process.platform === "win32" ? "junction" : "dir");
+       await rm(path.join(projectRoot, "link-check"));
+     } catch (error) {
+       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
+@@ -90,7 +92,38 @@ test("installs a full project Skill tree at the canonical path and exposes Claud
+       assert.equal((await lstat(path.join(canonicalPath, "SKILL.md"))).mode & 0o777, 0o644);
+       assert.equal((await lstat(path.join(canonicalPath, "scripts", "run.sh"))).mode & 0o111, 0o111);
+     }
+-    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
++    const linkTarget = await readlink(claudePath);
++    assert.equal(path.resolve(path.dirname(claudePath), linkTarget), canonicalPath);
++    if (process.platform === "win32") assert.equal(path.isAbsolute(linkTarget), true);
++  } finally {
++    await rm(projectRoot, { recursive: true, force: true });
++  }
++});
++
++test("recognizes and unlinks a native Claude directory junction without touching canonical files", async () => {
++  const projectRoot = await makeProject();
++  const canonicalPath = path.join(projectRoot, ".agents", "skills", "demo");
++  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
++  const managedSelection: ProjectSkillSelection = { ...selection, installation: { path: ".agents/skills/demo", adopted: false } };
++  const options = { projectRoot, sourceAccess: accessFor() };
++  try {
++    await installProjectSkill({ selection: managedSelection, source, portableV1: true }, options);
++    const link = await lstat(claudePath);
++    assert.equal(link.isSymbolicLink(), true);
++    const target = await readlink(claudePath);
++    assert.equal(path.resolve(path.dirname(claudePath), target), canonicalPath);
++    if (process.platform === "win32") assert.equal(path.isAbsolute(target), true);
++
++    const repeated = await installProjectSkill({ selection: managedSelection, source, portableV1: true }, options);
++    assert.equal(repeated.adopted, true);
++
++    const sentinel = path.join(canonicalPath, "sentinel.txt");
++    await writeFile(sentinel, "canonical survives alias removal", "utf8");
++    const inspection = await inspectProjectSkillRemoval(managedSelection, options);
++    assert.deepEqual(inspection.paths, [canonicalPath, claudePath]);
++    await removeProjectSkill(managedSelection, inspection, options, [claudePath]);
++    await assert.rejects(lstat(claudePath), { code: "ENOENT" });
++    assert.equal(await readFile(sentinel, "utf8"), "canonical survives alias removal");
+   } finally {
+     await rm(projectRoot, { recursive: true, force: true });
+   }
+@@ -268,6 +301,32 @@ test("rejects a symlinked ancestor during update preview before reading the targ
+   }
+ });
+ 
++test("native Windows junction ancestor is refused without writing through it", { skip: process.platform !== "win32" }, async () => {
++  const projectRoot = await makeProject();
++  const outsideRoot = await makeProject();
++  const ancestor = path.join(projectRoot, ".agents");
++  const sentinel = path.join(outsideRoot, "sentinel.txt");
++  try {
++    await writeFile(sentinel, "outside remains unchanged", "utf8");
++    await symlink(outsideRoot, ancestor, "junction");
++
++    await assert.rejects(
++      installProjectSkill({ selection: { ...selection, hosts: ["pi", "claude"] }, source, portableV1: true }, {
++        projectRoot,
++        sourceAccess: accessFor(),
++      }),
++      /symbolic-link ancestor/i,
++    );
++    assert.equal(await readFile(sentinel, "utf8"), "outside remains unchanged");
++    assert.deepEqual(await readdir(outsideRoot), ["sentinel.txt"]);
++    await assert.rejects(lstat(path.join(outsideRoot, "skills")), { code: "ENOENT" });
++  } finally {
++    await unlink(ancestor).catch(() => {});
++    await rm(projectRoot, { recursive: true, force: true });
++    await rm(outsideRoot, { recursive: true, force: true });
++  }
++});
++
+ test("rejects a symlinked project subpath ancestor before writing outside the project", async (t) => {
+   const projectRoot = await makeProject();
+   const outsideRoot = await makeProject();
+@@ -450,6 +509,46 @@ test("classifies a real target collision without writing or rereading the mutabl
+   }
+ });
+ 
++test("native Windows overwrite exposes a junction and transaction rollback restores the original", { skip: process.platform !== "win32" }, async () => {
++  const projectRoot = await makeProject();
++  const existing = path.join(projectRoot, ".agents", "skills", "demo");
++  const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
++  const request = {
++    selection: { ...selection, hosts: ["pi", "claude"] as const },
++    source,
++    previewTree: tree,
++    portableV1: true,
++    overwrite: true,
++  };
++  const options = { projectRoot, sourceAccess: accessFor() };
++  try {
++    await mkdir(existing, { recursive: true });
++    await writeFile(path.join(existing, "SKILL.md"), "locally owned", "utf8");
++    const inspection = await inspectProjectSkillInstallation(request, options);
++    assert.equal(inspection.locations.find((location) => location.path === claudePath)?.status, "missing");
++    assert.equal(inspection.collision?.reason, "content-mismatch");
++
++    const transaction = await installProjectSkillTransaction({ ...request, inspection }, options);
++    const backupPath = transaction.result.backupPath;
++    assert.ok(backupPath);
++    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "SKILL");
++    assert.deepEqual(await readFile(path.join(existing, "assets", "data.bin")), Buffer.from([0x00, 0xff, 0x80]));
++    assert.equal(await readFile(path.join(backupPath!, "SKILL.md"), "utf8"), "locally owned");
++    const aliasInfo = await lstat(claudePath);
++    assert.equal(aliasInfo.isSymbolicLink(), true);
++    const target = await readlink(claudePath);
++    assert.equal(path.isAbsolute(target), true);
++    assert.equal(path.resolve(path.dirname(claudePath), target), existing);
++
++    await transaction.rollback();
++    await assert.rejects(lstat(claudePath), { code: "ENOENT" });
++    assert.equal(await readFile(path.join(existing, "SKILL.md"), "utf8"), "locally owned");
++    await assert.rejects(lstat(backupPath!), { code: "ENOENT" });
++  } finally {
++    await rm(projectRoot, { recursive: true, force: true });
++  }
++});
++
+ test("overwrites one untracked real directory with a retained exact backup", async () => {
+   const projectRoot = await makeProject();
+   const existing = path.join(projectRoot, ".agents", "skills", "demo");
+@@ -754,7 +853,7 @@ test("rolls back the canonical target when Claude symlink creation fails", async
+         sourceAccess: accessFor(),
+         fileSystem: baseFileSystem,
+       }),
+-      /Claude Skill symlink.*operation not permitted.*no duplicate managed copy.*rolled back/i,
++      /Claude Skill directory link.*operation not permitted.*no duplicate managed copy.*rolled back/i,
+     );
+     await assert.rejects(lstat(path.join(projectRoot, ".agents", "skills", "demo")), { code: "ENOENT" });
+     await assert.rejects(lstat(path.join(projectRoot, ".claude", "skills", "demo")), { code: "ENOENT" });
+@@ -1026,7 +1125,7 @@ test("adopts a canonical Skill and its Claude symlink on a repeat installation",
+     assert.equal(result.canonicalPath, canonicalPath);
+     assert.equal(result.claudePath, claudePath);
+     assert.deepEqual(result.adoptedPaths, [canonicalPath, claudePath]);
+-    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
++    assert.equal(path.resolve(path.dirname(claudePath), await readlink(claudePath)), canonicalPath);
+   } finally {
+     await rm(projectRoot, { recursive: true, force: true });
+   }
+@@ -1091,7 +1190,7 @@ test("adds a missing Claude exposure only with separate explicit confirmation",
+ 
+     assert.equal(result.adopted, true);
+     assert.deepEqual(result.adoptedPaths, [canonicalPath, claudePath]);
+-    assert.equal(await readlink(claudePath), path.relative(path.dirname(claudePath), canonicalPath));
++    assert.equal(path.resolve(path.dirname(claudePath), await readlink(claudePath)), canonicalPath);
+   } finally {
+     await rm(projectRoot, { recursive: true, force: true });
+   }
+@@ -1221,5 +1320,5 @@ test("adoption reports a failing additional Claude symlink", async () => {
+     confirm: true,
+     fileSystem: adoptionFileSystem({ symlink: async () => { throw new Error("denied"); } }),
+   });
+-  assert.match(error?.message ?? "", /Cannot create the additional Claude Skill symlink at .*: denied\. No existing path was changed\.$/u);
++  assert.match(error?.message ?? "", /Cannot create the additional Claude Skill directory link at .*: denied\. No existing path was changed\.$/u);
+ });
+diff --git a/tests/skill-hosts.test.ts b/tests/skill-hosts.test.ts
+index 4dbfd8f..065f2fa 100644
+--- a/tests/skill-hosts.test.ts
++++ b/tests/skill-hosts.test.ts
+@@ -19,6 +19,10 @@ interface Fixture {
+ 
+ const canonical = (home: string) => path.join(home, ".agents", "skills", "one");
+ const claude = (home: string) => path.join(home, ".claude", "skills", "one");
++const directoryLinkTarget = (link: string, target: string) => process.platform === "win32" ? path.resolve(target) : path.relative(path.dirname(link), target);
++async function createDirectoryLink(link: string, target: string): Promise<void> {
++  await symlink(directoryLinkTarget(link, target), link, process.platform === "win32" ? "junction" : "dir");
++}
+ 
+ async function exists(candidate: string): Promise<boolean> {
+   try {
+@@ -45,7 +49,7 @@ async function withInstallation(
+     await writeFile(path.join(directory, "SKILL.md"), "one", "utf8");
+     if (setup.withClaudeLink ?? hosts.includes("claude")) {
+       await mkdir(path.dirname(claude(home)), { recursive: true });
+-      await symlink(path.relative(path.dirname(claude(home)), canonical(home)), claude(home), "dir");
++      await createDirectoryLink(claude(home), canonical(home));
+     }
+     const record: ProjectSkillSelection = {
+       source: { kind: "builtin", id: BUILT_IN_SOURCE.id },
+@@ -69,7 +73,7 @@ test("adding claude creates only the managed symlink and records the host", asyn
+     const plan = await planHostAddition(record, ["claude"], options);
+     assert.match(plan.preview.join("\n"), /\.claude[/\\]skills[/\\]one/u);
+     await executeHostAddition(plan, operations, options, await operations.listUserGlobalInstallations!(), true);
+-    assert.equal(await readlink(claude(home)), path.join("..", "..", ".agents", "skills", "one"));
++    assert.equal(path.resolve(path.dirname(claude(home)), await readlink(claude(home))), canonical(home));
+     assert.equal(await readFile(path.join(canonical(home), "SKILL.md"), "utf8"), "one");
+     assert.deepEqual(await recordedHosts(operations), ["pi", "claude"]);
+   });
+@@ -233,9 +237,9 @@ test("adding claude reports both errors when the record update and the rollback
+   await withInstallation(["pi"], async ({ home, operations }) => {
+     const options = userGlobalRemovalOptions(home, {
+       fileSystem: realFileSystem({
+-        rm: async (candidate) => {
+-          if (candidate === claude(home)) throw new Error("rm denied");
+-          await rm(candidate, { recursive: true, force: true });
++        unlink: async (candidate) => {
++          if (candidate === claude(home)) throw new Error("unlink denied");
++          await unlink(candidate);
+         },
+       }),
+     });
+@@ -247,7 +251,7 @@ test("adding claude reports both errors when the record update and the rollback
+       (error: unknown) => {
+         const message = error instanceof Error ? error.message : String(error);
+         assert.match(message, /record write failed/u);
+-        assert.match(message, /rm denied/u);
++        assert.match(message, /unlink denied/u);
+         return true;
+       },
+     );
+@@ -257,18 +261,22 @@ test("adding claude reports both errors when the record update and the rollback
+ test("adding claude refuses a foreign symlink at the claude location and leaves it untouched", async () => {
+   await withInstallation(["pi"], async ({ home, options, record }) => {
+     await mkdir(path.dirname(claude(home)), { recursive: true });
+-    await symlink("/somewhere/else", claude(home), "dir");
++    const foreign = path.join(home, "foreign");
++    await mkdir(foreign);
++    await createDirectoryLink(claude(home), foreign);
+     await assert.rejects(planHostAddition(record, ["claude"], options), /already exists/u);
+-    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
++    assert.equal(path.resolve(path.dirname(claude(home)), await readlink(claude(home))), foreign);
+   });
+ });
+ 
+ test("removing claude refuses a foreign symlink at the claude location and leaves it untouched", async () => {
+   await withInstallation(["pi", "claude"], async ({ home, options, record }) => {
+     await rm(claude(home));
+-    await symlink("/somewhere/else", claude(home), "dir");
++    const foreign = path.join(home, "foreign");
++    await mkdir(foreign);
++    await createDirectoryLink(claude(home), foreign);
+     await assert.rejects(planHostRemoval(record, ["claude"], options), /does not point to the canonical/u);
+-    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
++    assert.equal(path.resolve(path.dirname(claude(home)), await readlink(claude(home))), foreign);
+   });
+ });
+ 
+@@ -276,9 +284,11 @@ test("removing claude replaced by a foreign symlink after the plan deletes nothi
+   await withInstallation(["pi", "claude"], async ({ home, operations, options, record }) => {
+     const plan = await planHostRemoval(record, ["claude"], options);
+     await rm(claude(home));
+-    await symlink("/somewhere/else", claude(home), "dir");
++    const foreign = path.join(home, "foreign");
++    await mkdir(foreign);
++    await createDirectoryLink(claude(home), foreign);
+     await assert.rejects(executeHostRemoval(plan, operations, options, await operations.listUserGlobalInstallations!()));
+-    assert.equal(await readlink(claude(home)), path.resolve("/somewhere/else")); // Windows reports a drive-qualified target
++    assert.equal(path.resolve(path.dirname(claude(home)), await readlink(claude(home))), foreign);
+     assert.deepEqual(await recordedHosts(operations), ["pi", "claude"]);
+   });
+ });
+diff --git a/tests/skill-removal.test.ts b/tests/skill-removal.test.ts
+index 632da44..3c84c97 100644
+--- a/tests/skill-removal.test.ts
++++ b/tests/skill-removal.test.ts
+@@ -1,19 +1,46 @@
+ import assert from "node:assert/strict";
++import type { Stats } from "node:fs";
++import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import path from "node:path";
+ import test from "node:test";
+ 
+ import type { ProjectSkillSelection } from "../src/project-manifest.js";
+-import { SkillSelectionError, selectUserGlobalSkills } from "../src/skill-removal.js";
++import { ProjectInstallationError, type ProjectInstallationFileSystem } from "../src/project-installation.js";
++import { planSkillRemoval, SkillSelectionError, selectUserGlobalSkills, userGlobalRemovalOptions } from "../src/skill-removal.js";
+ 
+-const record = (sourceId: string, skillPath: string): ProjectSkillSelection => ({
++const record = (sourceId: string, skillPath: string, installationPath = ".agents/skills/demo"): ProjectSkillSelection => ({
+   source: sourceId === "builtin" ? { kind: "builtin", id: "builtin:agent-depot" } : { kind: "external", url: sourceId },
+   path: skillPath,
+   version: { policy: "latest" },
+   hosts: ["pi"],
++  installation: { path: installationPath, adopted: false },
+ });
+ 
++async function withRoot(action: (root: string) => Promise<void>): Promise<void> {
++  const root = await mkdtemp(path.join(tmpdir(), "agent-depot-missing-removal-"));
++  try { await action(root); } finally { await rm(root, { recursive: true, force: true }); }
++}
++
++function testFileSystem(lstatPath: (candidate: string) => Promise<Stats>): ProjectInstallationFileSystem {
++  return {
++    lstat: lstatPath,
++    readdir: async (candidate) => readdir(candidate),
++    readFile: async (candidate) => readFile(candidate),
++    mkdir: async (candidate) => { await mkdir(candidate); },
++    writeFile: async (candidate, content) => { await writeFile(candidate, content); },
++    chmod,
++    symlink: async (target, candidate) => { await symlink(target, candidate, "dir"); },
++    readlink,
++    rm: async (candidate) => { await rm(candidate, { recursive: true, force: true }); },
++    rmdir,
++    unlink,
++    rename,
++  };
++}
++
+ test("selectUserGlobalSkills treats duplicate exact paths as ambiguous", () => {
+   const installations = [record("builtin", "portable/demo"), record("https://example.com/skills.git", "portable/demo")];
+-
+   assert.throws(
+     () => selectUserGlobalSkills(installations, ["portable/demo"]),
+     (error: unknown) => error instanceof SkillSelectionError && /Ambiguous user-global Skill "portable\/demo"/u.test(error.message),
+@@ -22,6 +49,75 @@ test("selectUserGlobalSkills treats duplicate exact paths as ambiguous", () => {
+ 
+ test("selectUserGlobalSkills resolves a unique exact path over same-named paths", () => {
+   const installations = [record("builtin", "a/demo"), record("builtin", "demo")];
+-
+   assert.deepEqual(selectUserGlobalSkills(installations, ["demo"]), [installations[1]]);
+ });
++
++test("missing-record inspection accepts absent intermediate skill-root directories", async () => {
++  await withRoot(async (root) => {
++    const plan = await planSkillRemoval([record("builtin", "portable/demo")], userGlobalRemovalOptions(root));
++    assert.equal(plan.inspections[0]?.recordOnly, true);
++    assert.match(plan.preview.join("\n"), /record only; no files removed/u);
++  });
++});
++
++test("missing-record inspection rejects an unsafe recorded path", async () => {
++  await withRoot(async (root) => {
++    for (const installationPath of ["../../outside", ".git/config/demo"]) {
++      await assert.rejects(
++        planSkillRemoval([record("builtin", "portable/demo", installationPath)], userGlobalRemovalOptions(root)),
++        (error: unknown) => error instanceof ProjectInstallationError && error.code === "unsafe-target",
++      );
++    }
++  });
++});
++
++test("missing-record inspection propagates non-ENOENT filesystem errors", async () => {
++  await withRoot(async (root) => {
++    const target = path.join(root, ".agents", "skills", "demo");
++    const fileSystem = testFileSystem(async (candidate) => {
++      if (candidate === target) throw Object.assign(new Error("denied"), { code: "EACCES" });
++      return lstat(candidate);
++    });
++    await assert.rejects(
++      planSkillRemoval([record("builtin", "portable/demo")], userGlobalRemovalOptions(root, { fileSystem })),
++      (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "EACCES",
++    );
++  });
++});
++
++test("missing-record inspection rejects a synthetic symlink ancestor", async () => {
++  await withRoot(async (root) => {
++    const symlinkDirectory = path.join(root, ".agents");
++    const symbolic = await lstat(root);
++    symbolic.isSymbolicLink = () => true;
++    const fileSystem = testFileSystem(async (candidate) => candidate === symlinkDirectory ? symbolic : lstat(candidate));
++    await assert.rejects(
++      planSkillRemoval([record("builtin", "portable/demo")], userGlobalRemovalOptions(root, { fileSystem })),
++      (error: unknown) => error instanceof ProjectInstallationError && error.code === "unsafe-target",
++    );
++  });
++});
++
++test("missing-record inspection refuses a potential dangling Claude link even when unrecorded", async () => {
++  await withRoot(async (root) => {
++    const claudeLocation = path.join(root, ".claude", "skills", "demo");
++    const danglingLink = await lstat(root);
++    danglingLink.isSymbolicLink = () => true;
++    const fileSystem = testFileSystem(async (candidate) => candidate === claudeLocation ? danglingLink : lstat(candidate));
++    await assert.rejects(
++      planSkillRemoval([record("builtin", "portable/demo")], userGlobalRemovalOptions(root, { fileSystem })),
++      (error: unknown) => error instanceof ProjectInstallationError && error.code === "unsafe-target" && /filesystem object exists/u.test(error.message),
++    );
++  });
++});
++
++test("missing-record inspection refuses selected alias records with overlapping install paths", async () => {
++  await withRoot(async (root) => {
++    const first = record("builtin", "portable/demo");
++    const alias = record("https://example.com/skills.git", "portable/alias", ".agents/skills/demo");
++    await assert.rejects(
++      planSkillRemoval([first, alias], userGlobalRemovalOptions(root)),
++      (error: unknown) => error instanceof ProjectInstallationError && error.code === "overlapping-targets",
++    );
++  });
++});
+diff --git a/tests/tui-installations-bulk.test.tsx b/tests/tui-installations-bulk.test.tsx
+index 6285c0f..9923e2d 100644
+--- a/tests/tui-installations-bulk.test.tsx
++++ b/tests/tui-installations-bulk.test.tsx
+@@ -207,6 +207,35 @@ async function markedEverything(t: TestContext) {
+   return { f, view, loose };
+ }
+ 
++test("bulk TUI uninstall previews, cancels and confirms record-only recovery truthfully", async (t) => {
++  const f = await fixture(t);
++  await install(f, "alpha", ["pi"]);
++  await rm(agentsDir(f.home, "alpha"), { recursive: true, force: true });
++  const view = await mount(f);
++  await waitForFrame(view.lastFrame, /builtin:agent-depot \(1\)/);
++  await open(view, [/builtin:agent-depot \(1\)/]);
++  await mark(view, /portable\/alpha/);
++  view.stdin.write("u");
++  const preview = await waitForFrame(view.lastFrame, /Uninstall 1 item\? y\/n/);
++  assert.match(preview, /forget missing installation record/u);
++  assert.match(preview, /record only; no files removed/u);
++  assert.doesNotMatch(preview, /WARNING: this Skill was adopted|WARNING: this Skill is locally modified/u);
++  view.stdin.write("n");
++  await waitForFrame(view.lastFrame, /Uninstall cancelled/);
++  assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
++  assert.equal(await exists(agentsDir(f.home, "alpha")), false);
++
++  view.stdin.write("u");
++  await waitForFrame(view.lastFrame, /Uninstall 1 item\? y\/n/);
++  view.stdin.write("y");
++  const done = await waitForFrame(view.lastFrame, /Forgot missing installation record for portable\/alpha; no files were removed/);
++
++  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
++  assert.equal(await exists(agentsDir(f.home, "alpha")), false);
++  assert.match(done, /Managed \(user-global\) \(0\)/);
++  view.unmount();
++});
++
+ test("u with marks shows ONE combined preview with every path, warnings and the skipped project item", async (t) => {
+   const { f, view, loose } = await markedEverything(t);
+   view.stdin.write("u");
+diff --git a/tests/tui-installations-manage.test.tsx b/tests/tui-installations-manage.test.tsx
+index e3b1c5c..732400b 100644
+--- a/tests/tui-installations-manage.test.tsx
++++ b/tests/tui-installations-manage.test.tsx
+@@ -115,6 +115,55 @@ function mount(f: Fixture, onCapturingChange?: (capturing: boolean) => void) {
+   return renderExpanded(<InstallationsView operations={f.operations} environment={f.environment} onCapturingChange={onCapturingChange} />);
+ }
+ 
++test("u previews a missing record without deletion warnings, cancels, then forgets it and reloads", async (t) => {
++  const f = await fixture(t, ["pi"]);
++  await rm(path.join(f.home, ".agents"), { recursive: true, force: true });
++  await rm(path.join(f.home, ".claude"), { recursive: true, force: true });
++  const view = await mount(f);
++  await revealSkill(view);
++  view.stdin.write("u");
++  const preview = await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
++  assert.match(preview, /forget missing installation record.*record only; no files removed/u);
++  assert.doesNotMatch(preview, /WARNING: this Skill was adopted|WARNING: this Skill is locally modified/u);
++  view.stdin.write("n");
++  await waitForFrame(view.lastFrame, /Uninstall cancelled/);
++  assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
++  assert.equal(await exists(canonical(f.home)), false);
++
++  view.stdin.write("u");
++  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
++  view.stdin.write("y");
++  const done = await waitForFrame(view.lastFrame, /Forgot missing installation record for portable\/demo; no files were removed/);
++  assert.match(done, /Managed \(user-global\) \(0\)/);
++  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
++  assert.equal(await exists(canonical(f.home)), false);
++  view.unmount();
++});
++
++test("full TUI host-checklist removal reports record-only recovery truthfully", async (t) => {
++  const f = await fixture(t, ["pi"]);
++  const selection = (await f.operations.listUserGlobalInstallations!())[0]!;
++  await f.operations.updateUserGlobalInstallation!({ ...selection, hosts: ["pi", "claude"] });
++  await rm(path.join(f.home, ".agents"), { recursive: true, force: true });
++  const view = await mount(f);
++  await revealSkill(view);
++  view.stdin.write("u");
++  await waitForFrame(view.lastFrame, /1 all hosts.*2 choose hosts/s);
++  view.stdin.write("2");
++  await waitForFrame(view.lastFrame, /\[ \] 1 pi.*\[ \] 2 claude/s);
++  view.stdin.write("1");
++  await waitForFrame(view.lastFrame, /\[x\] 1 pi/);
++  view.stdin.write("2");
++  await waitForFrame(view.lastFrame, /\[x\] 1 pi.*\[x\] 2 claude/s);
++  view.stdin.write(ENTER);
++  const preview = await waitForFrame(view.lastFrame, /forget missing installation record.*record only; no files removed/u);
++  assert.doesNotMatch(preview, /WARNING: this Skill was adopted|WARNING: this Skill is locally modified/u);
++  view.stdin.write("y");
++  await waitForFrame(view.lastFrame, /Forgot missing installation record for portable\/demo; no files were removed/);
++  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
++  view.unmount();
++});
++
+ test("u on a single-host installation previews, confirms and removes it without leaving the view", async (t) => {
+   const f = await fixture(t, ["pi"]);
+   const view = await mount(f);

@@ -1,0 +1,1752 @@
+﻿2026-11-04T04:41:29.8271758Z Current runner version: '2.338.2'
+2026-11-04T04:41:29.8310317Z ##[group]Runner Image Provisioner
+2026-11-04T04:41:29.8311626Z Hosted Compute Agent
+2026-11-04T04:41:29.8312746Z Version: 20261028.624
+2026-11-04T04:41:29.8314234Z Commit: 54898b74c23fde5556c9b3c3a2290865feef0dfe
+2026-11-04T04:41:29.8315539Z Build Date: 2026-10-28T21:51:42Z
+2026-11-04T04:41:29.8316749Z Worker ID: {15e1e332-6f98-426f-89f2-fcd3ffb46628}
+2026-11-04T04:41:29.8317974Z Region: eastus2
+2026-11-04T04:41:29.8319074Z Cloud: Azure
+2026-11-04T04:41:29.8319978Z ##[endgroup]
+2026-11-04T04:41:29.8322473Z ##[group]Operating System
+2026-11-04T04:41:29.8323771Z Ubuntu
+2026-11-04T04:41:29.8324639Z 26.04.1
+2026-11-04T04:41:29.8325679Z LTS
+2026-11-04T04:41:29.8326543Z ##[endgroup]
+2026-11-04T04:41:29.8327633Z ##[group]Runner Image
+2026-11-04T04:41:29.8328726Z Image: ubuntu-26.04
+2026-11-04T04:41:29.8329939Z Version: 20261101.186.1
+2026-11-04T04:41:29.8332100Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261101.186/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-04T04:41:29.8335243Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261101.186
+2026-11-04T04:41:29.8337101Z ##[endgroup]
+2026-11-04T04:41:29.8339080Z ##[group]GITHUB_TOKEN Permissions
+2026-11-04T04:41:29.8341806Z Contents: read
+2026-11-04T04:41:29.8342783Z Metadata: read
+2026-11-04T04:41:29.8344085Z ##[endgroup]
+2026-11-04T04:41:29.8347229Z Secret source: Actions
+2026-11-04T04:41:29.8349029Z Cache mode: write
+2026-11-04T04:41:29.8350203Z Prepare workflow directory
+2026-11-04T04:41:29.8867695Z Prepare all required actions
+2026-11-04T04:41:29.8944364Z Getting action download info
+2026-11-04T04:41:30.0976232Z Download action repository 'actions/checkout@v7' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-11-04T04:41:30.2299400Z Download action repository 'pnpm/action-setup@v6' (SHA:73e46992e05b19abd31f2f3c20e0e7370d762115)
+2026-11-04T04:41:30.3949929Z Download action repository 'actions/setup-node@v7' (SHA:949feb2413d6458794dcd2491c4babbbce0c15c1)
+2026-11-04T04:41:30.5568482Z Complete job name: check
+2026-11-04T04:41:30.6489230Z ##[group]Run actions/checkout@v7
+2026-11-04T04:41:30.6490127Z with:
+2026-11-04T04:41:30.6490588Z   repository: iseoane/agent-depot
+2026-11-04T04:41:30.6494679Z   token: ***
+2026-11-04T04:41:30.6495118Z   ssh-strict: true
+2026-11-04T04:41:30.6495566Z   ssh-user: git
+2026-11-04T04:41:30.6496020Z   persist-credentials: true
+2026-11-04T04:41:30.6496507Z   clean: true
+2026-11-04T04:41:30.6496950Z   sparse-checkout-cone-mode: true
+2026-11-04T04:41:30.6497486Z   fetch-depth: 1
+2026-11-04T04:41:30.6497922Z   fetch-tags: false
+2026-11-04T04:41:30.6498374Z   show-progress: true
+2026-11-04T04:41:30.6498817Z   lfs: false
+2026-11-04T04:41:30.6499234Z   submodules: false
+2026-11-04T04:41:30.6499676Z   set-safe-directory: true
+2026-11-04T04:41:30.6500175Z   allow-unsafe-pr-checkout: false
+2026-11-04T04:41:30.6500971Z ##[endgroup]
+2026-11-04T04:41:30.9362359Z Syncing repository: iseoane/agent-depot
+2026-11-04T04:41:30.9365226Z ##[group]Getting Git version info
+2026-11-04T04:41:30.9366136Z Working directory is '/home/runner/work/agent-depot/agent-depot'
+2026-11-04T04:41:30.9367235Z [command]/usr/bin/git version
+2026-11-04T04:41:30.9415314Z git version 2.56.0
+2026-11-04T04:41:30.9440873Z ##[endgroup]
+2026-11-04T04:41:30.9454814Z Temporarily overriding HOME='/home/runner/work/_temp/ea107e36-1302-4be0-9fb1-a91847b52846' before making global git config changes
+2026-11-04T04:41:30.9458132Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-04T04:41:30.9460497Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/agent-depot/agent-depot
+2026-11-04T04:41:30.9536430Z Deleting the contents of '/home/runner/work/agent-depot/agent-depot'
+2026-11-04T04:41:30.9539720Z ##[group]Determining repository object format
+2026-11-04T04:41:30.9541206Z ##[endgroup]
+2026-11-04T04:41:30.9542362Z ##[group]Initializing the repository
+2026-11-04T04:41:30.9546378Z [command]/usr/bin/git init /home/runner/work/agent-depot/agent-depot
+2026-11-04T04:41:30.9659477Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-04T04:41:30.9661012Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-04T04:41:30.9662044Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-04T04:41:30.9662896Z hint: call:
+2026-11-04T04:41:30.9663717Z hint:
+2026-11-04T04:41:30.9664484Z hint: 	git config --global init.defaultBranch <name>
+2026-11-04T04:41:30.9665204Z hint:
+2026-11-04T04:41:30.9665863Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-04T04:41:30.9666885Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-04T04:41:30.9667732Z hint:
+2026-11-04T04:41:30.9668236Z hint: 	git branch -m <name>
+2026-11-04T04:41:30.9668821Z hint:
+2026-11-04T04:41:30.9669530Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-04T04:41:30.9684790Z Initialized empty Git repository in /home/runner/work/agent-depot/agent-depot/.git/
+2026-11-04T04:41:30.9699274Z [command]/usr/bin/git remote add origin https://github.com/iseoane/agent-depot
+2026-11-04T04:41:30.9760316Z ##[endgroup]
+2026-11-04T04:41:30.9761202Z ##[group]Disabling automatic garbage collection
+2026-11-04T04:41:30.9765055Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-04T04:41:30.9804442Z ##[endgroup]
+2026-11-04T04:41:30.9805753Z ##[group]Setting up auth
+2026-11-04T04:41:30.9806402Z Removing SSH command configuration
+2026-11-04T04:41:30.9811300Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-04T04:41:30.9853820Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-04T04:41:31.0352984Z Removing HTTP extra header
+2026-11-04T04:41:31.0359842Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-04T04:41:31.0397466Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-04T04:41:31.0685452Z Removing includeIf entries pointing to credentials config files
+2026-11-04T04:41:31.0690105Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-04T04:41:31.0727191Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-04T04:41:31.1019445Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-04T04:41:31.1059791Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/agent-depot/agent-depot/.git.path /home/runner/work/_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config
+2026-11-04T04:41:31.1092623Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/agent-depot/agent-depot/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config
+2026-11-04T04:41:31.1129910Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config
+2026-11-04T04:41:31.1162175Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config
+2026-11-04T04:41:31.1193237Z ##[endgroup]
+2026-11-04T04:41:31.1194693Z ##[group]Fetching the repository
+2026-11-04T04:41:31.1199455Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +21f21b2e8b8253c59411ed36f262209b57828cf3:refs/remotes/pull/74/merge
+2026-11-04T04:41:31.5690861Z From https://github.com/iseoane/agent-depot
+2026-11-04T04:41:31.5693713Z  * [new ref]         21f21b2e8b8253c59411ed36f262209b57828cf3 -> pull/74/merge
+2026-11-04T04:41:31.5698059Z ##[endgroup]
+2026-11-04T04:41:31.5779062Z ##[group]Determining the checkout info
+2026-11-04T04:41:31.5782112Z ##[endgroup]
+2026-11-04T04:41:31.5783750Z [command]/usr/bin/git sparse-checkout disable
+2026-11-04T04:41:31.5786131Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-04T04:41:31.5800527Z ##[group]Checking out the ref
+2026-11-04T04:41:31.5804777Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/74/merge
+2026-11-04T04:41:31.6285412Z Note: switching to 'refs/remotes/pull/74/merge'.
+2026-11-04T04:41:31.6286981Z 
+2026-11-04T04:41:31.6288159Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-04T04:41:31.6290875Z changes and commit them, and you can discard any commits you make in this
+2026-11-04T04:41:31.6294241Z state without impacting any branches by switching back to a branch.
+2026-11-04T04:41:31.6295518Z 
+2026-11-04T04:41:31.6296395Z If you want to create a new branch to retain commits you create, you may
+2026-11-04T04:41:31.6298289Z do so (now or later) by using -c with the switch command. Example:
+2026-11-04T04:41:31.6299782Z 
+2026-11-04T04:41:31.6300331Z   git switch -c <new-branch-name>
+2026-11-04T04:41:31.6301024Z 
+2026-11-04T04:41:31.6301662Z Or undo this operation with:
+2026-11-04T04:41:31.6302520Z 
+2026-11-04T04:41:31.6303241Z   git switch -
+2026-11-04T04:41:31.6304325Z 
+2026-11-04T04:41:31.6305365Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-04T04:41:31.6306829Z 
+2026-11-04T04:41:31.6308410Z HEAD is now at 21f21b2 Merge 6b3bfaded238e909ccc792bd88f018383c5a07f2 into 4f535c8274a36bd7f2c3315db6e102f10b1c995b
+2026-11-04T04:41:31.6313138Z ##[endgroup]
+2026-11-04T04:41:31.6356186Z [command]/usr/bin/git log -1 --format=%H
+2026-11-04T04:41:31.6385998Z 21f21b2e8b8253c59411ed36f262209b57828cf3
+2026-11-04T04:41:31.6741993Z ##[group]Run pnpm/action-setup@v6
+2026-11-04T04:41:31.6743175Z with:
+2026-11-04T04:41:31.6744132Z   version: 11
+2026-11-04T04:41:31.6744991Z   dest: ~/setup-pnpm
+2026-11-04T04:41:31.6745957Z   run_install: null
+2026-11-04T04:41:31.6746864Z   cache: false
+2026-11-04T04:41:31.6747811Z   cache_dependency_path: pnpm-lock.yaml
+2026-11-04T04:41:31.6749082Z   package_json_file: package.json
+2026-11-04T04:41:31.6750203Z   standalone: false
+2026-11-04T04:41:31.6751081Z ##[endgroup]
+2026-11-04T04:41:31.8400037Z ##[group]Running self-installer...
+2026-11-04T04:41:34.9002466Z 
+2026-11-04T04:41:34.9003641Z added 1 package, and audited 2 packages in 2s
+2026-11-04T04:41:34.9005642Z 
+2026-11-04T04:41:34.9009458Z 1 package is looking for funding
+2026-11-04T04:41:34.9010579Z   run `npm fund` for details
+2026-11-04T04:41:34.9014104Z 
+2026-11-04T04:41:34.9014478Z found 0 vulnerabilities
+2026-11-04T04:41:35.6824128Z Checking for updates...
+2026-11-04T04:41:35.8661348Z Switching pnpm from v11.28.10 to v11.28.10...
+2026-11-04T04:41:36.3796087Z .../v11/98f-1a1a4dcccda-6b84893ac6b2a5e0 | Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-11-04T04:41:36.3821627Z .../v11/98f-1a1a4dcccda-6b84893ac6b2a5e0 |   +1 +
+2026-11-04T04:41:36.6366477Z .../v11/98f-1a1a4dcccda-6b84893ac6b2a5e0 | Progress: resolved 1, reused 0, downloaded 1, added 1, done
+2026-11-04T04:41:37.5865592Z [WARN] Detected a pnpm v10 installation layout at PNPM_HOME. The pnpm shims at PNPM_HOME have been refreshed so the new version is active, but pnpm v11 expects bins in PNPM_HOME/bin. Run "pnpm setup" to migrate your PATH to the v11 layout.
+2026-11-04T04:41:37.5918946Z Successfully updated pnpm to v11.28.10
+2026-11-04T04:41:37.6284336Z ##[endgroup]
+2026-11-04T04:41:37.6404027Z Installation Completed!
+2026-11-04T04:41:37.6541142Z ##[group]Run actions/setup-node@v7
+2026-11-04T04:41:37.6541466Z with:
+2026-11-04T04:41:37.6541670Z   node-version: 24
+2026-11-04T04:41:37.6541889Z   cache: pnpm
+2026-11-04T04:41:37.6542094Z   check-latest: false
+2026-11-04T04:41:37.6545422Z   token: ***
+2026-11-04T04:41:37.6545711Z   package-manager-cache: true
+2026-11-04T04:41:37.6546003Z env:
+2026-11-04T04:41:37.6546294Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-04T04:41:37.6546639Z ##[endgroup]
+2026-11-04T04:41:37.7931091Z Found in cache @ /opt/hostedtoolcache/node/24.22.2/x64
+2026-11-04T04:41:37.8682639Z ##[group]Environment details
+2026-11-04T04:41:38.2333721Z node: v24.22.2
+2026-11-04T04:41:38.2334084Z npm: 11.19.1
+2026-11-04T04:41:38.2334595Z yarn: 1.22.22
+2026-11-04T04:41:38.2335523Z ##[endgroup]
+2026-11-04T04:41:38.2360856Z [command]/home/runner/setup-pnpm/node_modules/.bin/bin/pnpm store path --silent
+2026-11-04T04:41:38.7799934Z /home/runner/setup-pnpm/node_modules/.bin/store/v11
+2026-11-04T04:41:38.8767888Z Cache hit for: node-cache-Linux-x64-pnpm-579388e8f12de4ebd736bdfaf36cf11850ca4e635266fa4005ca1bbe72a3956d
+2026-11-04T04:41:39.2032099Z Received 22199992 of 22199992 (100.0%), 82.1 MBs/sec
+2026-11-04T04:41:39.2032910Z Cache Size: ~21 MB (22199992 B)
+2026-11-04T04:41:39.2138493Z [command]/usr/bin/tar -xf /home/runner/work/_temp/1224c370-b7ad-4a71-8b6c-9d8c8110d7be/cache.tzst -P -C /home/runner/work/agent-depot/agent-depot --use-compress-program unzstd
+2026-11-04T04:41:39.6609873Z Cache restored successfully
+2026-11-04T04:41:39.6624642Z Cache restored from key: node-cache-Linux-x64-pnpm-579388e8f12de4ebd736bdfaf36cf11850ca4e635266fa4005ca1bbe72a3956d
+2026-11-04T04:41:39.6825560Z ##[group]Run pnpm install --frozen-lockfile
+2026-11-04T04:41:39.6825982Z [36;1mpnpm install --frozen-lockfile[0m
+2026-11-04T04:41:39.6888324Z shell: /usr/bin/bash -e {0}
+2026-11-04T04:41:39.6888604Z env:
+2026-11-04T04:41:39.6888870Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-04T04:41:39.6889196Z ##[endgroup]
+2026-11-04T04:41:40.2804193Z ? Verifying lockfile against supply-chain policies (192 entries)...
+2026-11-04T04:41:40.3054287Z Lockfile is up to date, resolution step is skipped
+2026-11-04T04:41:40.4015765Z Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-11-04T04:41:40.4264749Z Packages: +192
+2026-11-04T04:41:40.4266015Z ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+2026-11-04T04:41:41.1448340Z Packages are hard linked from the content-addressable store to the virtual store.
+2026-11-04T04:41:41.1465085Z   Content-addressable store is at: /home/runner/setup-pnpm/node_modules/.bin/store/v11
+2026-11-04T04:41:41.1466478Z   Virtual store is at:             node_modules/.pnpm
+2026-11-04T04:41:41.4250880Z Progress: resolved 192, reused 192, downloaded 0, added 93
+2026-11-04T04:41:41.5477916Z Progress: resolved 192, reused 192, downloaded 0, added 192, done
+2026-11-04T04:41:42.5632806Z ✓ Lockfile passes supply-chain policies (192 entries in 2.2s)
+2026-11-04T04:41:42.6044149Z 
+2026-11-04T04:41:42.6064450Z dependencies:
+2026-11-04T04:41:42.6064983Z + ink 7.1.1
+2026-11-04T04:41:42.6065352Z + react 19.3.0
+2026-11-04T04:41:42.6065754Z + string-width 8.3.0
+2026-11-04T04:41:42.6066013Z 
+2026-11-04T04:41:42.6066179Z devDependencies:
+2026-11-04T04:41:42.6066723Z + @earendil-works/pi-tui 1.0.3
+2026-11-04T04:41:42.6067193Z + @eslint/js 9.39.5
+2026-11-04T04:41:42.6067763Z + @homebridge/node-pty-prebuilt-multiarch 0.14.1
+2026-11-04T04:41:42.6068351Z + @types/node 24.19.0
+2026-11-04T04:41:42.6068758Z + @types/react 19.3.0
+2026-11-04T04:41:42.6069164Z + eslint 9.39.5
+2026-11-04T04:41:42.6069574Z + ink-testing-library 4.0.0
+2026-11-04T04:41:42.6070028Z + typebox 1.3.27
+2026-11-04T04:41:42.6070421Z + typescript 5.9.3
+2026-11-04T04:41:42.6070856Z + typescript-eslint 8.70.1
+2026-11-04T04:41:42.6071144Z 
+2026-11-04T04:41:42.6371990Z Done in 2.9s using pnpm v11.28.10
+2026-11-04T04:41:42.6984899Z ##[group]Run pnpm typecheck
+2026-11-04T04:41:42.6985219Z [36;1mpnpm typecheck[0m
+2026-11-04T04:41:42.7036909Z shell: /usr/bin/bash -e {0}
+2026-11-04T04:41:42.7037165Z env:
+2026-11-04T04:41:42.7037425Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-04T04:41:42.7037737Z ##[endgroup]
+2026-11-04T04:41:43.2510531Z $ tsc --noEmit
+2026-11-04T04:41:49.6147094Z ##[group]Run pnpm lint
+2026-11-04T04:41:49.6147393Z [36;1mpnpm lint[0m
+2026-11-04T04:41:49.6220356Z shell: /usr/bin/bash -e {0}
+2026-11-04T04:41:49.6220637Z env:
+2026-11-04T04:41:49.6220911Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-04T04:41:49.6221240Z ##[endgroup]
+2026-11-04T04:41:50.1664969Z $ eslint "src/**/*.{ts,tsx}" "resources/pi/**/*.{ts,tsx}" "tests/**/*.{ts,tsx}"
+2026-11-04T04:41:56.1871790Z ##[group]Run pnpm test
+2026-11-04T04:41:56.1872081Z [36;1mpnpm test[0m
+2026-11-04T04:41:56.1925132Z shell: /usr/bin/bash -e {0}
+2026-11-04T04:41:56.1925425Z env:
+2026-11-04T04:41:56.1925709Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-11-04T04:41:56.1926037Z ##[endgroup]
+2026-11-04T04:41:56.7338928Z $ pnpm build && node --test --import ./dist/tests/isolated-env.js "dist/tests/*.test.js"
+2026-11-04T04:41:57.2530386Z $ node -e "require('node:fs').rmSync('dist',{recursive:true,force:true})" && tsc
+2026-11-04T04:42:04.3125410Z ✔ CLI schema, validation approval and listing use the shared core (40.433231ms)
+2026-11-04T04:42:04.3155736Z ✔ validate reports invalid and other-platform files without running commands (4.8512ms)
+2026-11-04T04:42:04.3205023Z ✔ approval of an unknown name is a normal failure, and CLI rejects extra arguments (3.595751ms)
+2026-11-04T04:42:04.3225348Z Checking App updates…
+2026-11-04T04:42:04.3244401Z Checking App updates…
+2026-11-04T04:42:04.3294150Z ✔ list is empty for a missing directory and shows invalid recipes with reasons (9.955343ms)
+2026-11-04T04:42:04.3340810Z ✔ CLI preview explicitly flags Windows executables on WSL (4.641855ms)
+2026-11-04T04:42:04.3826239Z ✔ CLI install previews before confirmation and manual completion checks without rerunning (48.151676ms)
+2026-11-04T04:42:04.4028470Z ✔ forget tolerates corrupt records and argv-only recipes reject manual completion (19.694446ms)
+2026-11-04T04:42:04.4124770Z Installing App example $HOME 'quoted'…
+2026-11-04T04:42:04.4174377Z ✔ manual rerun hints quote shell metacharacters in App names (13.157464ms)
+2026-11-04T04:42:04.4526232Z ✔ Host CLI previews all selections, continues after failure and rejects undeclared Hosts (34.428176ms)
+2026-11-04T04:42:04.4645533Z ✔ validate and list report invalid owned-skill patterns without running commands (12.94804ms)
+2026-11-04T04:42:04.4970647Z ✔ App lifecycle steps show progress and stdout is unchanged (33.732398ms)
+2026-11-04T04:42:04.5122110Z ✔ approval permits version checks, but changed content never runs (33.471824ms)
+2026-11-04T04:42:04.5124430Z ✔ a recorded App remains installed after recipe approval expires, but actions still require approval (9.974764ms)
+2026-11-04T04:42:04.5125615Z ✔ a live version probe reconciles only the tracked record for the same recipe file (22.909491ms)
+2026-11-04T04:42:04.5127323Z ✔ platform selection rejects applicable duplicates and isolates WSL executables (8.623352ms)
+2026-11-04T04:42:04.5128145Z ✔ a duplicate added after approval blocks even a previously loaded entry (5.922818ms)
+2026-11-04T04:42:04.5128927Z ✔ a missing version executable proves absence; failed checks remain unknown (28.886966ms)
+2026-11-04T04:42:04.5129750Z ✔ WSL skips Windows PATH hits and spawns the Linux shim rather than its realpath (12.002801ms)
+2026-11-04T04:42:04.5130476Z ✔ external validation is independent of apps-directory duplicates (7.470981ms)
+2026-11-04T04:42:04.5131208Z ✔ approval receipts use canonical file identity and private atomic storage (12.855254ms)
+2026-11-04T04:42:04.5131937Z ✔ WSL mount boundaries and previews distinguish Windows drive mounts (18.087718ms)
+2026-11-04T04:42:04.5132704Z ✔ approval survives rereads and byte restoration, but no changed recipe command runs (20.973753ms)
+2026-11-04T04:42:04.5133721Z ✔ platform-free and matching recipes apply on Windows and Darwin (10.001397ms)
+2026-11-04T04:42:04.5134502Z ✔ approval preview includes exactly all argv and only the version reaches the runner (15.672076ms)
+2026-11-04T04:42:04.5135230Z ✔ approval repairs permissions on an existing approval directory (7.153877ms)
+2026-11-04T04:42:04.5155878Z ✔ confirmed install runs from home and persists only a verified version (41.987195ms)
+2026-11-04T04:42:04.5157776Z ✔ spawn failure guides manual completion; non-zero exit never falls back (17.277421ms)
+2026-11-04T04:42:04.5162934Z ✔ manual uninstall retains tracking until version fails or explicit forget (29.516527ms)
+2026-11-04T04:42:04.5165762Z ✔ changed approval or executable blocks previously previewed lifecycle and manual completion (22.568496ms)
+2026-11-04T04:42:04.5168077Z ✔ WSL blocked lifecycle executable never runs and offers declared manual guidance (10.011486ms)
+2026-11-04T04:42:04.5169792Z ✔ manual installation can make a previously missing executable available (18.689965ms)
+2026-11-04T04:42:04.5171894Z ✔ automated uninstall untracks only after version fails; missing command without manual fails (16.421816ms)
+2026-11-04T04:42:04.5174846Z ✔ only launch errors offer manual fallback; unexpected runner errors propagate (22.333007ms)
+2026-11-04T04:42:04.5176692Z ✔ oversized output and signals fail with bounded diagnostics and no tracking (15.90518ms)
+2026-11-04T04:42:04.5178607Z ✔ App records repair directory permissions and hash traversal-like identities (15.420838ms)
+2026-11-04T04:42:04.5180364Z ✔ corrupt records are skipped with warnings and do not block explicit forget (17.217444ms)
+2026-11-04T04:42:04.5182285Z ✔ Host lifecycle accepts only declared steps and leaves App tracking unchanged (15.970205ms)
+2026-11-04T04:42:04.5184658Z ✔ Host manual completion checks version and approval without claiming wiring or changing tracking (25.833672ms)
+2026-11-04T04:42:04.5186816Z ✔ missing Homebrew identifies the installation prerequisite without running or tracking (7.449785ms)
+2026-11-04T04:42:04.5188713Z ✔ manual-only steps explain manual completion rather than a missing executable (8.646874ms)
+2026-11-04T04:42:04.7100288Z ✔ CLI excludes App-owned skills from listing, adoption and explicit removal without running commands (96.450318ms)
+2026-11-04T04:42:04.7222735Z ✔ App-owned dangling symlinks are neither inspected nor removable (11.962044ms)
+2026-11-04T04:42:04.7559906Z ✔ a recipe added after removal preview protects the selected path at execution (35.099948ms)
+2026-11-04T04:42:04.7695960Z ✔ removing an uninstalled recipe requires confirmation and deletes only its file (35.94857ms)
+2026-11-04T04:42:04.7697792Z ✔ an installed App must be uninstalled before deleting its recipe (27.392994ms)
+2026-11-04T04:42:04.7699542Z ✔ changed recipes and unapproved commands cannot be removed or executed (12.306577ms)
+2026-11-04T04:42:04.7700999Z ✔ a recipe whose version command cannot run is not removable (8.783573ms)
+2026-11-04T04:42:04.7702262Z ✔ removing a symlink recipe leaves its target intact (13.85639ms)
+2026-11-04T04:42:04.7704239Z ✔ recipes accept command, manual and combined steps and reject unsafe argv (7.398301ms)
+2026-11-04T04:42:04.7706034Z ✔ version patterns require exactly one valid capture and host maps are explicit (1.324244ms)
+2026-11-04T04:42:04.7707792Z ✔ capture counting handles noncapturing, named, lookbehind, escaped and class parentheses (1.288534ms)
+2026-11-04T04:42:04.7709355Z ✔ validation errors identify the failing recipe field (0.775234ms)
+2026-11-04T04:42:04.7710785Z ✔ schema and parser agree on hosts, required fields, steps and latest variants (4.840548ms)
+2026-11-04T04:42:04.7712591Z ✔ latest npm accepts registry package names but rejects credentials, paths and invalid names (2.04784ms)
+2026-11-04T04:42:04.7714465Z ✔ latest GitHub rejects dot-prefixed owner and repository segments (1.682295ms)
+2026-11-04T04:42:04.7716080Z ✔ owned-skill names reject separators, NUL and empty text in parser and schema (1.086097ms)
+2026-11-04T04:42:04.7717669Z ✔ star-only ownership patterns cannot hide the entire unmanaged inventory (2.120386ms)
+2026-11-04T04:42:04.8219279Z ✔ approved GitHub latest check offers an update and execution records verified version (85.930266ms)
+2026-11-04T04:42:04.8316448Z ✔ an update check reconciles a tracked version that moved outside Agent Depot (9.829575ms)
+2026-11-04T04:42:04.8566762Z ✔ npm lookup distinguishes current from unknown without real network (24.805443ms)
+2026-11-04T04:42:04.8668293Z ✔ latest argv requires unchanged approval and uses bounded home execution (10.067892ms)
+2026-11-04T04:42:04.9973076Z ✔ CLI existing update batch selects Apps and continues after an App failure (130.412328ms)
+2026-11-04T04:42:05.0267768Z ✔ app update CLI previews, confirms and checks manual completion (29.254973ms)
+2026-11-04T04:42:05.0497659Z ✔ batch all applies approved Apps, subset excludes others and project rejects Apps (22.808056ms)
+2026-11-04T04:42:10.0594988Z ✔ HTTP timeout and truncated bodies are unknown, never update candidates (5009.124487ms)
+2026-11-04T04:42:10.1776861Z ✔ one existing batch selects a real built-in Skill and an App together (118.604752ms)
+2026-11-04T04:42:10.1896689Z ✔ manual batch completion guidance safely quotes shell-active App names (12.031204ms)
+2026-11-04T04:42:10.1960476Z ✔ a failed latest executable lookup remains unknown rather than aborting the check (6.39969ms)
+2026-11-04T04:42:10.2041908Z ✔ unchanged update versions fail without recording success (8.165874ms)
+2026-11-04T04:42:10.2363982Z ✔ manual update verifies its saved baseline across CLI invocations and reports a different new version (31.87508ms)
+2026-11-04T04:42:10.2641709Z ✔ semver availability excludes downgrades and orders prereleases while retaining opaque fallback (27.660678ms)
+2026-11-04T04:42:10.2706223Z ✔ unscoped npm metadata lookup uses dist-tags.latest and npm's metadata media type (5.30033ms)
+2026-11-04T04:42:10.3303687Z ✔ HTTP latest failures retain actionable reasons in core and CLI output (59.257374ms)
+2026-11-04T04:42:10.4010307Z ✔ a malformed App and a throwing App check do not hide Skill updates (71.580597ms)
+2026-11-04T04:42:10.4130435Z ✔ app list starts independent latest lookups concurrently and keeps recipe order (12.257812ms)
+2026-11-04T04:42:10.4627605Z ✔ equivalent normalized versions fail automated and manual updates (49.434511ms)
+2026-11-04T04:42:10.4840449Z ✔ batch planning reuses the loaded latest check instead of fetching twice (20.673062ms)
+2026-11-04T04:42:10.4944659Z ✔ CLI Skill listing failure still reports App update checks (11.214624ms)
+2026-11-04T04:42:10.6335592Z ✔ CLI App inventory failure reports its error without hiding or blocking Skill updates (138.026121ms)
+2026-11-04T04:42:10.6490701Z ✔ discovers the built-in App recipe skill with valid frontmatter and installs it through the CLI (58.35222ms)
+2026-11-04T04:42:10.6492702Z ✔ every JSON recipe example bundled with the App recipe skill passes the real parser (8.171956ms)
+2026-11-04T04:42:10.6494849Z ✔ an interactive stderr shows the last three child lines under the spinner and erases them with it (368.814346ms)
+2026-11-04T04:42:10.6496474Z ✔ a tail line is cut to the terminal width so a redraw never wraps (331.217852ms)
+2026-11-04T04:42:10.6497915Z ✔ a step that may prompt stays static and never draws child output (332.727512ms)
+2026-11-04T04:42:10.6499427Z ✔ without an interactive animated stderr there is no tail, exactly as before (664.814029ms)
+2026-11-04T04:42:10.6501195Z ✔ verbose streams every child line live to stderr after one plain step line, with no spinner (667.586899ms)
+2026-11-04T04:42:10.6503099Z ✔ verbose also streams a step that may prompt, and strips terminal escapes and carriage-return progress (32.779324ms)
+2026-11-04T04:42:10.6505230Z ✔ child stdout that a caller captures as data is not shown unless it opts in; stderr always is (85.919585ms)
+2026-11-04T04:42:10.6506903Z ✔ showing child output leaves the run result, caps and timeout shapes unchanged (645.213745ms)
+2026-11-04T04:42:10.6508525Z ✔ install option parsing reports precise usage errors (3.963693ms)
+2026-11-04T04:42:10.6509943Z ✔ command dispatch rejects unknown commands and subcommands with the full usage (0.513073ms)
+2026-11-04T04:42:10.6511356Z ✔ source refresh validates its arguments before touching Sources (0.368972ms)
+2026-11-04T04:42:10.6512580Z ✔ update option parsing handles --confirm-path (0.939052ms)
+2026-11-04T04:42:10.6514293Z ✔ usage text documents update apply --confirm-path (0.320762ms)
+2026-11-04T04:42:10.6515414Z ✔ package subcommand parsing reports precise usage errors (3.530571ms)
+2026-11-04T04:42:10.6516660Z ✔ help explains App batch execution order and project-scope exclusion (0.569979ms)
+2026-11-04T04:42:10.6518667Z ✔ the global --verbose flag is accepted anywhere and changes neither stdout nor the exit code (1.094322ms)
+2026-11-04T04:42:10.6520001Z ✔ the help text documents --verbose (0.343284ms)
+2026-11-04T04:42:10.6521384Z ✔ source add only registers a Source, so it shows no progress and keeps stdout identical (18.470167ms)
+2026-11-04T04:42:10.6523102Z ✔ source refresh never animates, because git may ask for credentials on the terminal (10.882156ms)
+2026-11-04T04:42:10.6525204Z ✔ a confirmed install of a non-built-in Source marks resolving as possibly prompting, and installing as not (18.488825ms)
+2026-11-04T04:42:10.6526799Z ✖ source remove shows inspection, file removal and Source removal (68.257744ms)
+2026-11-04T04:42:10.6527903Z ✔ skill remove shows its execution step (26.65465ms)
+2026-11-04T04:42:10.6528965Z ✔ uninstall shows recheck, managed, unmanaged and catalog steps (102.34417ms)
+2026-11-04T04:42:10.6530183Z ✔ uninstall shows nothing for a plain CLI handoff (6.006174ms)
+2026-11-04T04:42:10.6531360Z ✔ self update shows the registry check and the install (6.911983ms)
+2026-11-04T04:42:10.6532620Z ✔ install --scope user-global shows resolving and installing (42.538439ms)
+2026-11-04T04:42:10.6534113Z ✔ install --scope project shows resolving and installing (31.400675ms)
+2026-11-04T04:42:10.6535350Z ✔ manifest install shows resolving and per-Skill installing (20.049639ms)
+2026-11-04T04:42:10.6536508Z ✔ update check shows the App, Package and Skill checks (25.916916ms)
+2026-11-04T04:42:10.6537708Z ✔ update apply shows the checks, the preview and the application (33.13333ms)
+2026-11-04T04:42:10.6539138Z ✔ export keeps stdout parseable JSON while it builds, with and without a spinner (15.612981ms)
+2026-11-04T04:42:10.6540432Z ✔ import shows the preview build and the apply step (24.691273ms)
+2026-11-04T04:42:10.6542127Z ✔ an unconfirmed command waits on no spinner: nothing runs after the preview, and the line is erased before the error (14.670583ms)
+2026-11-04T04:42:10.6544330Z ✔ import --yes of a Git Source Skill never animates the apply step, because git may ask for credentials (31.85906ms)
+2026-11-04T04:42:10.6546034Z ✔ skill host add previews new locations and changes nothing without --yes (18.141113ms)
+2026-11-04T04:42:10.6547377Z ✔ skill host add needs --confirm-additional-host even with --yes (6.994478ms)
+2026-11-04T04:42:10.6548685Z ✔ skill host add exposes the installed Skill and records the host (11.980589ms)
+2026-11-04T04:42:10.6549764Z ✔ skill host add validates its arguments (5.015175ms)
+2026-11-04T04:42:10.6550963Z ✔ skill remove --host previews, then removes only the named host locations (17.255557ms)
+2026-11-04T04:42:10.6552292Z ✔ skill remove --host for every recorded host is a full removal (12.674881ms)
+2026-11-04T04:42:10.6556031Z ✔ skill remove --host rejects unrecorded hosts and multiple Skills (5.447626ms)
+2026-11-04T04:42:10.6557399Z ✔ host changes show their execution step on the progress reporter (19.63289ms)
+2026-11-04T04:42:10.6558594Z ✔ runs through direct and symlinked package entrypoints (243.272303ms)
+2026-11-04T04:42:10.6559829Z ✔ lists Sources and marks the built-in Source read-only (1.380078ms)
+2026-11-04T04:42:10.6561106Z ✔ adds a Source and requires explicit refresh confirmation before network access (0.798299ms)
+2026-11-04T04:42:10.6562361Z ✔ does not expose discovery selection or refresh the built-in Source (0.356909ms)
+2026-11-04T04:42:10.6564077Z ✔ previews dependent user-global Skills, keeps them by default, and removes only confirmed selections (27.584566ms)
+2026-11-04T04:42:10.6565594Z ✔ source removal refuses a same-identity record changed at the persistence boundary (13.98558ms)
+2026-11-04T04:42:10.6567094Z ✔ source removal refuses an overlapping managed record added after missing-path preview (11.602028ms)
+2026-11-04T04:42:10.6568889Z ✔ uninstalls independent user-global choices with conservative defaults (14.625129ms)
+2026-11-04T04:42:10.6570262Z ✔ previews and permanently deletes explicitly selected unmanaged user-global Skills (58.299267ms)
+2026-11-04T04:42:10.6571066Z Uninstall preview (scope: user-global only)
+2026-11-04T04:42:10.6571856Z Managed Skills: preserve (not selected)
+2026-11-04T04:42:10.6572353Z Unmanaged Skills (1):
+2026-11-04T04:42:10.6572843Z Uninstall preview (scope: user-global only)
+2026-11-04T04:42:10.6573754Z Managed Skills: preserve (not selected)
+2026-11-04T04:42:10.6574253Z Unmanaged Skills (1):
+2026-11-04T04:42:10.6574755Z Uninstall preview (scope: user-global only)
+2026-11-04T04:42:10.6575321Z Managed Skills: preserve (not selected)
+2026-11-04T04:42:10.6575833Z Unmanaged Skills (1):
+2026-11-04T04:42:10.6576893Z ✔ rejects duplicate, traversing, symlink, and managed unmanaged-skill selections (12.215991ms)
+2026-11-04T04:42:10.6577983Z Uninstall preview (scope: user-global only)
+2026-11-04T04:42:10.6578742Z Managed Skills: preserve (not selected)
+2026-11-04T04:42:10.6579318Z Unmanaged Skills (1):
+2026-11-04T04:42:10.6580204Z   remove exact path "/tmp/agent-depot-cli-unmanaged-race-home-PHpFrJ/.agents/skills/candidate"
+2026-11-04T04:42:10.6581390Z     WARNING: this is a permanent deletion; Agent Depot will not retain a backup
+2026-11-04T04:42:10.6582533Z     WARNING: recovery through Agent Depot requires a resolvable Source and is not guaranteed
+2026-11-04T04:42:10.6585472Z   Unmanaged Skills are never inferred from a Source and no project scope is used
+2026-11-04T04:42:10.6586446Z Catalog/configuration data: preserve (not selected)
+2026-11-04T04:42:10.6587134Z Persistent CLI: preserve (not selected)
+2026-11-04T04:42:10.6588192Z ✔ fails closed when managed records change before unmanaged deletion (10.629014ms)
+2026-11-04T04:42:10.6589063Z Uninstall preview (scope: user-global only)
+2026-11-04T04:42:10.6589563Z Managed Skills (1):
+2026-11-04T04:42:10.6590476Z   remove "portable/managed" at /tmp/agent-depot-cli-managed-uninstall-home-YrsAv2/.agents/skills/managed
+2026-11-04T04:42:10.6591814Z     WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes
+2026-11-04T04:42:10.6592895Z   Installation records are reconciled after each successful Skill removal
+2026-11-04T04:42:10.6594247Z Catalog/configuration data: preserve (not selected)
+2026-11-04T04:42:10.6595203Z Persistent CLI: preserve (not selected)
+2026-11-04T04:42:10.6595864Z Rechecking Skills before removal…
+2026-11-04T04:42:10.6596358Z Removing 1 managed Skill…
+2026-11-04T04:42:10.6596816Z Removed 1 managed user-global Skill
+2026-11-04T04:42:10.6597602Z ✔ preserves the existing all-managed uninstall flow (10.357976ms)
+2026-11-04T04:42:10.6598318Z Uninstall preview (scope: user-global only)
+2026-11-04T04:42:10.6598843Z Managed Skills (2):
+2026-11-04T04:42:10.6599826Z   remove "portable/first" at /tmp/agent-depot-cli-managed-uninstall-multiple-home-YF1cv5/.agents/skills/first
+2026-11-04T04:42:10.6601279Z     WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes
+2026-11-04T04:42:10.6602670Z   remove "portable/second" at /tmp/agent-depot-cli-managed-uninstall-multiple-home-YF1cv5/.agents/skills/second
+2026-11-04T04:42:10.6604648Z     WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes
+2026-11-04T04:42:10.6605817Z   Installation records are reconciled after each successful Skill removal
+2026-11-04T04:42:10.6606711Z Catalog/configuration data: preserve (not selected)
+2026-11-04T04:42:10.6607338Z Persistent CLI: preserve (not selected)
+2026-11-04T04:42:10.6608015Z Rechecking Skills before removal…
+2026-11-04T04:42:10.6608545Z Removing 2 managed Skills…
+2026-11-04T04:42:10.6609060Z Removed 2 managed user-global Skills
+2026-11-04T04:42:10.6610236Z ✔ removes every managed user-global Skill and reconciles records in selection order (15.463541ms)
+2026-11-04T04:42:10.6611774Z ✔ removes catalog data without deleting retained Skills and only prints CLI handoff (6.550856ms)
+2026-11-04T04:42:10.6616791Z ✔ reconciles removed Skills before a later combined catalog purge failure (7.992569ms)
+2026-11-04T04:42:10.6618214Z ✔ rejects conflicting Source removal selection flags in either order (0.40476ms)
+2026-11-04T04:42:10.6619069Z Inspecting 2 Skills for removal…
+2026-11-04T04:42:10.6628208Z Removing Skill files…
+2026-11-04T04:42:10.6628963Z Revalidating Skill records before Source removal…
+2026-11-04T04:42:10.6629777Z Removing Git Source git:9869076237a6673972879324…
+2026-11-04T04:42:10.6630959Z ✔ resolves digit-only Source removal Skill paths before numeric indexes (18.096719ms)
+2026-11-04T04:42:10.6632361Z Preview: remove Git Source git:9869076237a6673972879324 from https://github.com/example/skills.git
+2026-11-04T04:42:10.6633575Z Dependent user-global Skills (1):
+2026-11-04T04:42:10.6634382Z   [0] portable/unsafe -> .agents/skills/unsafe (selected for removal)
+2026-11-04T04:42:10.6635369Z   Default: keep all dependent Skills tracked by default after Source removal
+2026-11-04T04:42:10.6636839Z ✔ refuses Source removal when a dependent Skill path is unsafe without mutating state (5.5243ms)
+2026-11-04T04:42:10.6638235Z Preview: remove Git Source git:9869076237a6673972879324 from https://github.com/example/skills.git
+2026-11-04T04:42:10.6639145Z Dependent user-global Skills (2):
+2026-11-04T04:42:10.6639822Z   [0] portable/one -> .agents/skills/shared (selected for removal)
+2026-11-04T04:42:10.6640693Z   [1] portable/two -> .agents/skills/shared/nested (selected for removal)
+2026-11-04T04:42:10.6641649Z   Default: keep all dependent Skills tracked by default after Source removal
+2026-11-04T04:42:10.6642839Z   remove Skill "portable/one" at /tmp/agent-depot-cli-remove-overlap-home-NjsDic/.agents/skills/shared
+2026-11-04T04:42:10.6644318Z     WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes
+2026-11-04T04:42:10.6645699Z   remove Skill "portable/two" at /tmp/agent-depot-cli-remove-overlap-home-NjsDic/.agents/skills/shared/nested
+2026-11-04T04:42:10.6647087Z     WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes
+2026-11-04T04:42:10.6648515Z ✔ refuses overlapping selected removal targets before deleting any Skill (10.129116ms)
+2026-11-04T04:42:10.6649781Z ✔ discovers candidates from the explicitly supplied Source IDs (0.449703ms)
+2026-11-04T04:42:10.6651063Z ✔ discovers built-in candidates through the CLI using real Source operations (5.177601ms)
+2026-11-04T04:42:10.6652605Z ✔ discovers boolean-frontmatter candidates without reading metadata or executing commands (3.623115ms)
+2026-11-04T04:42:10.6669875Z ✔ requires at least one explicit Source ID for discovery (0.302457ms)
+2026-11-04T04:42:10.6671195Z ✔ reports how to recover when a selected Source is not registered (0.386465ms)
+2026-11-04T04:42:10.6672876Z ✔ previews and explicitly migrates user-global identities without moving files or writing manifests (22.712396ms)
+2026-11-04T04:42:10.6675240Z ✔ previews project selection before confirmation, then installs and persists identity (21.900845ms)
+2026-11-04T04:42:10.6676893Z ✔ classifies project collisions before confirmation and never overwrites without the future flag (28.194858ms)
+2026-11-04T04:42:10.6678467Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6679585Z   scope: project; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6680507Z   target: /tmp/agent-depot-cli-managed-overlap-project-omdgwO/.agents/skills/demo
+2026-11-04T04:42:10.6681827Z   COLLISION: /tmp/agent-depot-cli-managed-overlap-project-omdgwO/.agents/skills/demo (content-mismatch)
+2026-11-04T04:42:10.6683160Z   collision handling: target will be replaced because --overwrite --yes was supplied
+2026-11-04T04:42:10.6686640Z   overwrite backup: old Skill will be moved to a retained backup at /tmp/agent-depot-cli-managed-overlap-project-omdgwO/.agents/skills/.agent-depot-backup-<generated-suffix> (generated at transaction time; never pruned automatically)
+2026-11-04T04:42:10.6689877Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6690788Z   intended filesystem changes:
+2026-11-04T04:42:10.6694297Z     replace the colliding target at /tmp/agent-depot-cli-managed-overlap-project-omdgwO/.agents/skills/demo, retain a backup of the existing Skill at /tmp/agent-depot-cli-managed-overlap-project-omdgwO/.agents/skills/.agent-depot-backup-<generated-suffix>, and install the selected source files
+2026-11-04T04:42:10.6696965Z   selected source files:
+2026-11-04T04:42:10.6697793Z     portable/demo/SKILL.md (4 bytes; install into the replacement target)
+2026-11-04T04:42:10.6699132Z     portable/demo/scripts/run.sh (4 bytes, executable; install into the replacement target)
+2026-11-04T04:42:10.6700074Z   possible project locations:
+2026-11-04T04:42:10.6701688Z     /tmp/agent-depot-cli-managed-overlap-project-omdgwO/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6704034Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6705342Z   scope: user-global; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6706509Z   target: /tmp/agent-depot-cli-managed-overlap-home-HA1LGS/.agents/skills/demo
+2026-11-04T04:42:10.6708523Z   COLLISION: /tmp/agent-depot-cli-managed-overlap-home-HA1LGS/.agents/skills/demo (content-mismatch)
+2026-11-04T04:42:10.6710166Z   collision handling: target will be replaced because --overwrite --yes was supplied
+2026-11-04T04:42:10.6712938Z   overwrite backup: old Skill will be moved to a retained backup at /tmp/agent-depot-cli-managed-overlap-home-HA1LGS/.agents/skills/.agent-depot-backup-<generated-suffix> (generated at transaction time; never pruned automatically)
+2026-11-04T04:42:10.6715790Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6716733Z   intended filesystem changes:
+2026-11-04T04:42:10.6719616Z     replace the colliding target at /tmp/agent-depot-cli-managed-overlap-home-HA1LGS/.agents/skills/demo, retain a backup of the existing Skill at /tmp/agent-depot-cli-managed-overlap-home-HA1LGS/.agents/skills/.agent-depot-backup-<generated-suffix>, and install the selected source files
+2026-11-04T04:42:10.6722308Z   selected source files:
+2026-11-04T04:42:10.6723120Z     portable/demo/SKILL.md (4 bytes; install into the replacement target)
+2026-11-04T04:42:10.6724538Z     portable/demo/scripts/run.sh (4 bytes, executable; install into the replacement target)
+2026-11-04T04:42:10.6725376Z   possible user-global locations:
+2026-11-04T04:42:10.6726857Z     /tmp/agent-depot-cli-managed-overlap-home-HA1LGS/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6728922Z ✔ refuses overwrite of a path managed by another selection in both scopes (20.31496ms)
+2026-11-04T04:42:10.6730303Z ✔ rejects an incompatible Git Skill tree before asking for confirmation (1.576176ms)
+2026-11-04T04:42:10.6731755Z ✔ previews and installs skill-relative agents support files as portable content (13.514516ms)
+2026-11-04T04:42:10.6733702Z ✔ previews and installs a user-global Skill in the injected home while sharing Source state (16.293688ms)
+2026-11-04T04:42:10.6735463Z ✔ classifies user-global collisions at the injected home before confirmation and retains the backup (27.301543ms)
+2026-11-04T04:42:10.6736511Z Resolving portable/demo…
+2026-11-04T04:42:10.6737002Z Installing portable/demo…
+2026-11-04T04:42:10.6737984Z ✔ adopts an identical existing user-global Skill without replacing it (12.095054ms)
+2026-11-04T04:42:10.6739629Z ✔ requires separate adoption confirmation and persists the actual adopted location (19.615769ms)
+2026-11-04T04:42:10.6741320Z ✔ previews selected source files and known locations before adopting a Claude-only Skill in place (13.122976ms)
+2026-11-04T04:42:10.6742326Z Resolving portable/demo…
+2026-11-04T04:42:10.6743759Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6744814Z   scope: project; hosts: pi; version policy: fixed:0.6.7
+2026-11-04T04:42:10.6745701Z   target: /tmp/agent-depot-cli-package-version-61MxWI/.agents/skills/demo
+2026-11-04T04:42:10.6746594Z   collision status: target is absent and will be created
+2026-11-04T04:42:10.6748018Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6748850Z   intended filesystem changes:
+2026-11-04T04:42:10.6749870Z     reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts
+2026-11-04T04:42:10.6750810Z   selected source files:
+2026-11-04T04:42:10.6751495Z     portable/demo/SKILL.md (4 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6752811Z     portable/demo/scripts/run.sh (4 bytes, executable; adopt if identical, create if missing)
+2026-11-04T04:42:10.6753791Z   possible project locations:
+2026-11-04T04:42:10.6755087Z     /tmp/agent-depot-cli-package-version-61MxWI/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6756470Z Installing portable/demo…
+2026-11-04T04:42:10.6757052Z Installed Skill "demo" at .agents/skills/demo
+2026-11-04T04:42:10.6758076Z Saved project manifest: /tmp/agent-depot-cli-package-version-61MxWI/agent-depot.json
+2026-11-04T04:42:10.6759813Z ✔ accepts the installed package version for built-in fixed policy and rejects unavailable versions (12.727901ms)
+2026-11-04T04:42:10.6761329Z ✔ rejects --ref for the built-in Source instead of silently ignoring it (1.078973ms)
+2026-11-04T04:42:10.6762828Z ✔ manifest install skips a built-in Skill pinned to another Agent Depot and installs the rest (6.980091ms)
+2026-11-04T04:42:10.6766403Z ✔ manifest install fails when every Skill is pinned to another Agent Depot (1.448006ms)
+2026-11-04T04:42:10.6767976Z ✔ rejects manifest selections with the same physical basename before confirmation (2.564871ms)
+2026-11-04T04:42:10.6769375Z ✔ previews collisions for each manifest selection before confirmation (3.782334ms)
+2026-11-04T04:42:10.6770800Z Preview: reconcile Skill "demo" from git:1234567890abcdef12345678 (destination determined by safe inspection)
+2026-11-04T04:42:10.6771868Z   scope: project; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6772679Z   target: /tmp/agent-depot-cli-fresh-lPjJqI/.agents/skills/demo
+2026-11-04T04:42:10.6773686Z   collision status: target is absent and will be created
+2026-11-04T04:42:10.6774621Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6775398Z   intended filesystem changes:
+2026-11-04T04:42:10.6776409Z     reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts
+2026-11-04T04:42:10.6777358Z   selected source files:
+2026-11-04T04:42:10.6778073Z     portable/demo/SKILL.md (4 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6779444Z     portable/demo/scripts/run.sh (4 bytes, executable; adopt if identical, create if missing)
+2026-11-04T04:42:10.6780262Z   possible project locations:
+2026-11-04T04:42:10.6781415Z     /tmp/agent-depot-cli-fresh-lPjJqI/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6782620Z Installed Skill "demo" at .agents/skills/demo
+2026-11-04T04:42:10.6783897Z ✔ resolves a project manifest on a fresh machine without global Source lookup (5.749594ms)
+2026-11-04T04:42:10.6785592Z ✔ prefers a configured install method, previews it without execution, and persists install/update methods (9.766386ms)
+2026-11-04T04:42:10.6786738Z Resolving 2 manifest Skills…
+2026-11-04T04:42:10.6787704Z Preview: reconcile Skill "one" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6788761Z   scope: project; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6789613Z   target: /tmp/agent-depot-cli-method-batch-8p91DP/.agents/skills/one
+2026-11-04T04:42:10.6791165Z   collision status: target is absent and will be created
+2026-11-04T04:42:10.6792024Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6792733Z   intended filesystem changes:
+2026-11-04T04:42:10.6794073Z     reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts
+2026-11-04T04:42:10.6794953Z   selected source files:
+2026-11-04T04:42:10.6795609Z     portable/one/SKILL.md (6 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6796321Z   possible project locations:
+2026-11-04T04:42:10.6797508Z     /tmp/agent-depot-cli-method-batch-8p91DP/.agents/skills/one (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6799186Z Preview: reconcile Skill "two" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6800209Z   scope: project; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6801046Z   target: /tmp/agent-depot-cli-method-batch-8p91DP/.agents/skills/two
+2026-11-04T04:42:10.6801906Z   collision status: target is absent and will be created
+2026-11-04T04:42:10.6802810Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6803800Z   intended filesystem changes:
+2026-11-04T04:42:10.6804817Z     reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts
+2026-11-04T04:42:10.6805781Z   selected source files:
+2026-11-04T04:42:10.6806471Z     portable/two/SKILL.md (6 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6807207Z   possible project locations:
+2026-11-04T04:42:10.6808497Z     /tmp/agent-depot-cli-method-batch-8p91DP/.agents/skills/two (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6809834Z Installing portable/one…
+2026-11-04T04:42:10.6810321Z Installing portable/two…
+2026-11-04T04:42:10.6810874Z Installed Skill "one" at .agents/skills/one
+2026-11-04T04:42:10.6811552Z Installed Skill "two" at .agents/skills/two
+2026-11-04T04:42:10.6812643Z ✔ preserves configured methods when a project manifest install is a batch (8.907095ms)
+2026-11-04T04:42:10.6814167Z ✔ previews and executes a source method for user-global installation (11.954199ms)
+2026-11-04T04:42:10.6815778Z ✔ configures a user-global install method from direct CLI JSON and persists it only after confirmation (14.154411ms)
+2026-11-04T04:42:10.6817374Z ✔ rejects direct CLI methods containing credentials or OS-specific executables (1.124208ms)
+2026-11-04T04:42:10.6818266Z Resolving portable/demo…
+2026-11-04T04:42:10.6818976Z Error: Installation not confirmed; rerun with --yes to continue
+2026-11-04T04:42:10.6819683Z Resolving portable/demo…
+2026-11-04T04:42:10.6820165Z Installing portable/demo…
+2026-11-04T04:42:10.6821307Z ✔ executes a reviewed structured method only after the complete preview and confirmation (14.351916ms)
+2026-11-04T04:42:10.6822765Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6823974Z   scope: project; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6824850Z   target: /tmp/agent-depot-cli-manifest-rollback-6WxQL3/.agents/skills/demo
+2026-11-04T04:42:10.6825733Z   collision status: target is absent and will be created
+2026-11-04T04:42:10.6826635Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6827404Z   intended filesystem changes:
+2026-11-04T04:42:10.6828407Z     reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts
+2026-11-04T04:42:10.6829366Z   selected source files:
+2026-11-04T04:42:10.6830057Z     portable/demo/SKILL.md (4 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6831595Z     portable/demo/scripts/run.sh (4 bytes, executable; adopt if identical, create if missing)
+2026-11-04T04:42:10.6832447Z   possible project locations:
+2026-11-04T04:42:10.6834178Z     /tmp/agent-depot-cli-manifest-rollback-6WxQL3/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6836044Z ✔ rolls back installed files when the manifest transaction cannot be committed (8.485975ms)
+2026-11-04T04:42:10.6837632Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6838644Z   scope: project; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6839594Z   target: /tmp/agent-depot-cli-overwrite-manifest-rollback-RVuxLK/.agents/skills/demo
+2026-11-04T04:42:10.6841002Z   COLLISION: /tmp/agent-depot-cli-overwrite-manifest-rollback-RVuxLK/.agents/skills/demo (content-mismatch)
+2026-11-04T04:42:10.6842336Z   collision handling: target will be replaced because --overwrite --yes was supplied
+2026-11-04T04:42:10.6844855Z   overwrite backup: old Skill will be moved to a retained backup at /tmp/agent-depot-cli-overwrite-manifest-rollback-RVuxLK/.agents/skills/.agent-depot-backup-<generated-suffix> (generated at transaction time; never pruned automatically)
+2026-11-04T04:42:10.6846996Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6847791Z   intended filesystem changes:
+2026-11-04T04:42:10.6850295Z     replace the colliding target at /tmp/agent-depot-cli-overwrite-manifest-rollback-RVuxLK/.agents/skills/demo, retain a backup of the existing Skill at /tmp/agent-depot-cli-overwrite-manifest-rollback-RVuxLK/.agents/skills/.agent-depot-backup-<generated-suffix>, and install the selected source files
+2026-11-04T04:42:10.6852535Z   selected source files:
+2026-11-04T04:42:10.6853212Z     portable/demo/SKILL.md (4 bytes; install into the replacement target)
+2026-11-04T04:42:10.6854431Z     portable/demo/scripts/run.sh (4 bytes, executable; install into the replacement target)
+2026-11-04T04:42:10.6855200Z   possible project locations:
+2026-11-04T04:42:10.6856583Z     /tmp/agent-depot-cli-overwrite-manifest-rollback-RVuxLK/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6858495Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6859634Z   scope: user-global; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6860608Z   target: /tmp/agent-depot-cli-overwrite-global-rollback-v909Tr/.agents/skills/demo
+2026-11-04T04:42:10.6861995Z   COLLISION: /tmp/agent-depot-cli-overwrite-global-rollback-v909Tr/.agents/skills/demo (content-mismatch)
+2026-11-04T04:42:10.6863524Z   collision handling: target will be replaced because --overwrite --yes was supplied
+2026-11-04T04:42:10.6865767Z   overwrite backup: old Skill will be moved to a retained backup at /tmp/agent-depot-cli-overwrite-global-rollback-v909Tr/.agents/skills/.agent-depot-backup-<generated-suffix> (generated at transaction time; never pruned automatically)
+2026-11-04T04:42:10.6867884Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6868690Z   intended filesystem changes:
+2026-11-04T04:42:10.6871218Z     replace the colliding target at /tmp/agent-depot-cli-overwrite-global-rollback-v909Tr/.agents/skills/demo, retain a backup of the existing Skill at /tmp/agent-depot-cli-overwrite-global-rollback-v909Tr/.agents/skills/.agent-depot-backup-<generated-suffix>, and install the selected source files
+2026-11-04T04:42:10.6876132Z   selected source files:
+2026-11-04T04:42:10.6876887Z     portable/demo/SKILL.md (4 bytes; install into the replacement target)
+2026-11-04T04:42:10.6878025Z     portable/demo/scripts/run.sh (4 bytes, executable; install into the replacement target)
+2026-11-04T04:42:10.6878923Z   possible user-global locations:
+2026-11-04T04:42:10.6880306Z     /tmp/agent-depot-cli-overwrite-global-rollback-v909Tr/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6882318Z ✔ rolls back the original tree when overwrite persistence fails in both scopes (26.869462ms)
+2026-11-04T04:42:10.6886783Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6887894Z   scope: project; hosts: pi,claude; version policy: latest
+2026-11-04T04:42:10.6888894Z   target: /tmp/agent-depot-cli-adoption-rollback-FpnZdf/.agents/skills/demo
+2026-11-04T04:42:10.6900493Z   collision status: existing content is identical and can be adopted without replacement
+2026-11-04T04:42:10.6901766Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6902546Z   intended filesystem changes:
+2026-11-04T04:42:10.6903814Z     reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts
+2026-11-04T04:42:10.6904827Z   selected source files:
+2026-11-04T04:42:10.6905544Z     portable/demo/SKILL.md (4 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6906711Z     portable/demo/scripts/run.sh (4 bytes, executable; adopt if identical, create if missing)
+2026-11-04T04:42:10.6907566Z   possible project locations:
+2026-11-04T04:42:10.6908901Z     /tmp/agent-depot-cli-adoption-rollback-FpnZdf/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6911091Z     /tmp/agent-depot-cli-adoption-rollback-FpnZdf/.claude/skills/demo (Claude Host location; fresh install exposes the canonical location by symlink with --yes)
+2026-11-04T04:42:10.6913228Z ✔ rolls back a newly created Claude symlink while preserving an adopted canonical Skill (13.44878ms)
+2026-11-04T04:42:10.6915180Z ✔ reads source methods only from explicit JSON metadata files, never SKILL.md prose (0.414898ms)
+2026-11-04T04:42:10.6916579Z ✔ rejects Windows shell-interpreter executable variants (0.530455ms)
+2026-11-04T04:42:10.6917967Z ✔ executes a safe default method with the exact argv and rejects a failed child (60.918969ms)
+2026-11-04T04:42:10.6919270Z ✔ rejects a realpath cwd that escapes the project root (1.601774ms)
+2026-11-04T04:42:10.6920044Z Resolving portable/demo…
+2026-11-04T04:42:10.6921056Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6922136Z   scope: project; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6922966Z   target: /tmp/agent-depot-cli-snapshot-fNaFHS/.agents/skills/demo
+2026-11-04T04:42:10.6924033Z   collision status: target is absent and will be created
+2026-11-04T04:42:10.6924951Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6925753Z   intended filesystem changes:
+2026-11-04T04:42:10.6926772Z     reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts
+2026-11-04T04:42:10.6927782Z   selected source files:
+2026-11-04T04:42:10.6928549Z     portable/demo/SKILL.md (4 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6929709Z     portable/demo/scripts/run.sh (4 bytes, executable; adopt if identical, create if missing)
+2026-11-04T04:42:10.6930917Z     portable/demo/.agent-depot.json (57 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6931761Z   possible project locations:
+2026-11-04T04:42:10.6933038Z     /tmp/agent-depot-cli-snapshot-fNaFHS/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6935150Z   run external method: argv=["node","--version"] executable="node" args=["--version"] cwd="/tmp/agent-depot-cli-snapshot-fNaFHS"
+2026-11-04T04:42:10.6936336Z Installing portable/demo…
+2026-11-04T04:42:10.6936956Z Installed Skill "demo" at .agents/skills/demo
+2026-11-04T04:42:10.6937985Z Saved project manifest: /tmp/agent-depot-cli-snapshot-fNaFHS/agent-depot.json
+2026-11-04T04:42:10.6939521Z ✔ reads method metadata from the preview snapshot instead of a mutable latest tree (10.491348ms)
+2026-11-04T04:42:10.6941098Z Preview: reconcile Skill "demo" from builtin:agent-depot (destination determined by safe inspection)
+2026-11-04T04:42:10.6944308Z   scope: project; hosts: pi; version policy: latest
+2026-11-04T04:42:10.6945232Z   target: /tmp/agent-depot-cli-method-failure-SQxNee/.agents/skills/demo
+2026-11-04T04:42:10.6946176Z   collision status: target is absent and will be created
+2026-11-04T04:42:10.6947148Z   confirmation: --yes supplied; changes remain subject to final safety checks
+2026-11-04T04:42:10.6948283Z   intended filesystem changes:
+2026-11-04T04:42:10.6949433Z     reconcile the selected source files below: adopt identical files, create missing files, and refuse conflicts
+2026-11-04T04:42:10.6950478Z   selected source files:
+2026-11-04T04:42:10.6951236Z     portable/demo/SKILL.md (4 bytes; adopt if identical, create if missing)
+2026-11-04T04:42:10.6952400Z     portable/demo/scripts/run.sh (4 bytes, executable; adopt if identical, create if missing)
+2026-11-04T04:42:10.6953264Z   possible project locations:
+2026-11-04T04:42:10.6954799Z     /tmp/agent-depot-cli-method-failure-SQxNee/.agents/skills/demo (canonical Host location; safe inspection determines whether this is used)
+2026-11-04T04:42:10.6956728Z   run external method: argv=["node","--version"] executable="node" args=["--version"] cwd="/tmp/agent-depot-cli-method-failure-SQxNee"
+2026-11-04T04:42:10.6958103Z Installed Skill "demo" at .agents/skills/demo
+2026-11-04T04:42:10.6959493Z ✔ persists the manifest before a method failure and does not promise rollback (9.220453ms)
+2026-11-04T04:42:10.6961017Z ✔ refuses unsafe or unsupported upstream methods without executing commands (1.270223ms)
+2026-11-04T04:42:10.6961940Z Checking App updates…
+2026-11-04T04:42:10.6962548Z Checking Package updates…
+2026-11-04T04:42:10.6963160Z Checking user-global Skill updates…
+2026-11-04T04:42:10.6964644Z ✔ reports user-global unmanaged Skill locations separately without resolving them as Sources (12.585964ms)
+2026-11-04T04:42:10.6966386Z ✔ selects one project update by numeric index and writes only through the injected filesystem (13.119885ms)
+2026-11-04T04:42:10.6968032Z ✔ displays unknown versions separately and excludes them from CLI batch updates (9.111476ms)
+2026-11-04T04:42:10.6969108Z Checking project Skill updates…
+2026-11-04T04:42:10.6969668Z Previewing Skill updates…
+2026-11-04T04:42:10.6970150Z Updating 2 Skills…
+2026-11-04T04:42:10.6971359Z ✔ continues after one selected CLI update fails and reports the failed and successful Skills (11.37901ms)
+2026-11-04T04:42:10.6972664Z Checking project Skill updates…
+2026-11-04T04:42:10.6973245Z Previewing Skill updates…
+2026-11-04T04:42:10.6974069Z Updating 1 Skill…
+2026-11-04T04:42:10.6975344Z ✔ reports a failed update preview per Skill, applies nothing and exits 1 when the update tree is unsafe (5.042106ms)
+2026-11-04T04:42:10.6977301Z ✔ checks and applies user-global updates with an external method preview through the injected filesystem (14.300189ms)
+2026-11-04T04:42:10.6978937Z ✔ tui command renders the TUI with the injected Source operations (0.441568ms)
+2026-11-04T04:42:10.6980346Z ✔ tui command fails with a clear error when the terminal is not interactive (0.200646ms)
+2026-11-04T04:42:10.6981718Z ✔ skill remove previews and requires --yes before deleting (8.244161ms)
+2026-11-04T04:42:10.6983109Z ✔ skill remove deletes only the selected user-global Skill and its record (9.444332ms)
+2026-11-04T04:42:10.6984891Z ✔ skill remove accepts a unique skill name and rejects unknown or ambiguous selections (13.280284ms)
+2026-11-04T04:42:10.6986449Z ✔ skill remove requires a selection and warns about modified content (4.141694ms)
+2026-11-04T04:42:10.6987980Z ✔ skill remove does not delete a Skill whose directory changed after the preview (5.084536ms)
+2026-11-04T04:42:10.6989768Z ✔ skill remove explicitly forgets a verified missing managed installation without touching files (32.874294ms)
+2026-11-04T04:42:10.6991527Z ✔ skill remove rechecks all absent records before mutating when a later item reappears (10.940158ms)
+2026-11-04T04:42:10.6993020Z ✔ skill remove does not delete an earlier present Skill when a later missing record reappears (9.499897ms)
+2026-11-04T04:42:10.6995133Z ✔ uninstall summary distinguishes record-only managed recovery (7.510135ms)
+2026-11-04T04:42:10.6996643Z ✔ skill remove skips adopted-content deletion warnings for record-only recovery (6.261604ms)
+2026-11-04T04:42:10.6998118Z ✔ all-host CLI removal reports record-only recovery truthfully (10.97855ms)
+2026-11-04T04:42:10.6999769Z ✔ skill remove refuses missing-record recovery when a Claude location remains (5.355584ms)
+2026-11-04T04:42:10.7000746Z Preview: remove 1 user-global Skill
+2026-11-04T04:42:10.7001985Z ✔ skill remove refuses record-only recovery when an unselected record aliases its target (6.307965ms)
+2026-11-04T04:42:10.7003064Z Preview: remove 1 user-global Skill
+2026-11-04T04:42:10.7004501Z   forget missing installation record for "portable/one" (record only; no files removed)
+2026-11-04T04:42:10.7007437Z   Installation records are reconciled after each successful Skill removal
+2026-11-04T04:42:10.7009373Z ✔ skill remove refuses a record-only apply when the managed record snapshot changes (6.958791ms)
+2026-11-04T04:42:10.7011338Z ✔ skill remove refuses missing-record recovery if the path reappears after preview (5.804305ms)
+2026-11-04T04:42:10.7012799Z Preview: remove 1 user-global Skill
+2026-11-04T04:42:10.7014169Z   remove "portable/one" at /tmp/agent-depot-cli-skill-remove-home-DcyCBv/.agents/skills/one
+2026-11-04T04:42:10.7015619Z     WARNING: this Skill is locally modified or has no trusted baseline; removal deletes those changes
+2026-11-04T04:42:10.7017082Z   Installation records are reconciled after each successful Skill removal
+2026-11-04T04:42:10.7018812Z ✔ skill remove aborts without deleting when installation records changed after the preview (6.632649ms)
+2026-11-04T04:42:11.9675557Z ✔ built CLI approves, installs, updates, wires and uninstalls Apps hermetically (4703.482224ms)
+2026-11-04T04:42:12.3688784Z ▶ agent-depot end to end lifecycle (hermetic)
+2026-11-04T04:42:12.3690340Z   ✔ registers, refreshes and discovers a Git Source (1153.15948ms)
+2026-11-04T04:42:12.3692248Z   ✔ installs project Skills with a canonical directory, Claude directory link and manifest (1031.540793ms)
+2026-11-04T04:42:12.3696391Z   ✔ installs a user-global Skill without reporting Agent Depot's own symlink as skipped (646.986259ms)
+2026-11-04T04:42:12.3704750Z   ✔ updates only after a Source refresh and explicit confirmation (1438.098472ms)
+2026-11-04T04:42:13.1672449Z   ✔ requires --yes and --confirm-path to update a non-canonical adopted project Skill (798.375477ms)
+2026-11-04T04:42:13.5890987Z   ✔ rejects a hostile manifest path and leaves the targeted directory untouched (421.832374ms)
+2026-11-04T04:42:14.5202562Z   ✔ replaces a conflicting Skill only with --overwrite --yes and retains a backup (930.933217ms)
+2026-11-04T04:42:16.1437608Z   ✔ removes an unmanaged global Skill by exact path and refuses managed ones (1250.474556ms)
+2026-11-04T04:42:16.9641852Z   ✔ removes one dependent Skill with its Source, then all Skills, data and the CLI handoff (1192.383603ms)
+2026-11-04T04:42:16.9644064Z ✔ agent-depot end to end lifecycle (hermetic) (8894.603784ms)
+2026-11-04T04:42:16.9909352Z ✔ one pstack-shaped repository yields a Pi and a Claude descriptor over one skills directory (100.313119ms)
+2026-11-04T04:42:16.9910727Z ✔ the Pi lifecycle installs, updates and uninstalls through the fake host with asserted argv (707.994069ms)
+2026-11-04T04:42:16.9912033Z ✔ the Claude lifecycle registers the marketplace, installs, updates and uninstalls (553.208084ms)
+2026-11-04T04:42:16.9913539Z ✔ installed evidence is read from the fixture host home, and an unversioned record is unknown (262.716048ms)
+2026-11-04T04:42:16.9915481Z ✔ a select run writes only packages.json and package-approvals and never a Host skill root (154.596423ms)
+2026-11-04T04:42:16.9919613Z ✔ built CLI transfers Profile choices without approvals, App installs or repeated writes (2500.808555ms)
+2026-11-04T04:42:16.9920995Z ✔ Profile files carry a Package selection through the real state layout without a host command (76.338499ms)
+2026-11-04T04:42:16.9922628Z ✔ clones a new Source into an external bare mirror cache using the registered URL (22.223579ms)
+2026-11-04T04:42:16.9924071Z ✔ fetches every ref from the registered URL and prunes deleted refs (5.311754ms)
+2026-11-04T04:42:16.9925286Z ✔ rejects cache symlinks instead of following them (4.776761ms)
+2026-11-04T04:42:16.9926751Z ✔ serializes concurrent first clones for the same Source (36.016614ms)
+2026-11-04T04:42:16.9928024Z ✔ reports the exact busy Source lock directory without treating it as stale (21.166406ms)
+2026-11-04T04:42:16.9934340Z ✔ reports Git failures through a clean Source access error (3.199927ms)
+2026-11-04T04:42:16.9935900Z ✔ resolves trustworthy Git commit evidence from the selected ref without refreshing (3.882055ms)
+2026-11-04T04:42:16.9937623Z ✔ proves commit ancestry from the cached mirror without fetching (4.71211ms)
+2026-11-04T04:42:16.9939350Z ✔ reads the cached bare mirror HEAD without refreshing and ignores Git symlink entries (2.997286ms)
+2026-11-04T04:42:16.9941016Z ✔ ties selected Git Skill bytes and revision to one snapshot (3.249129ms)
+2026-11-04T04:42:16.9942740Z ✔ reads a selected Git Skill tree with supporting files using blob object IDs (3.567846ms)
+2026-11-04T04:42:16.9944591Z ✔ reads Git Skill trees of 18 MiB with byte preservation (17.052145ms)
+2026-11-04T04:42:16.9946045Z ✔ reads Git Skill trees of 32 MiB with byte preservation (41.660233ms)
+2026-11-04T04:42:16.9947674Z ✔ reads the manifest-selected Git ref instead of silently falling back to HEAD (2.67335ms)
+2026-11-04T04:42:16.9949535Z ✔ rejects Git symlink entries, traversal paths, unsafe refs, and oversized blobs (12.252381ms)
+2026-11-04T04:42:16.9951227Z ✔ uses portable cache locations separate from the Source state location (3.604354ms)
+2026-11-04T04:42:16.9952857Z ✔ rejects malformed, unsafe, excessive, and incomplete selected Skill trees (57.316933ms)
+2026-11-04T04:42:16.9955151Z ✔ GitHub directory Sources clone and fetch the repository without changing their identity (7.741167ms)
+2026-11-04T04:42:16.9956918Z ✔ GitHub directory discovery uses the URL ref and excludes sibling directories (3.632227ms)
+2026-11-04T04:42:16.9958505Z ✔ validates GitHub directory URL refs and paths before registration (0.735829ms)
+2026-11-04T04:42:16.9960108Z ✔ directory Sources read and install the selected branch from a real Git mirror (175.257984ms)
+2026-11-04T04:42:16.9961652Z ✔ an existing lock directory is contention on every platform (1.292242ms)
+2026-11-04T04:42:16.9963711Z ✔ EPERM and EACCES are contention only on Windows, where mkdir fails that way while a rmdir completes (0.205686ms)
+2026-11-04T04:42:16.9965432Z ✔ other failures and non-errors are not contention (0.263824ms)
+2026-11-04T04:42:16.9967262Z ✔ an adopted non-canonical project Skill can be updated and removed after confirming its exact path (25.679506ms)
+2026-11-04T04:42:16.9969294Z ✔ a non-canonical project path without confirmation fails closed and changes nothing (16.637127ms)
+2026-11-04T04:42:16.9971389Z ✔ a hostile manifest aimed at a directory without a matching SKILL.md is rejected even when confirmed (5.184536ms)
+2026-11-04T04:42:16.9973767Z ✔ unsafe non-canonical targets are each rejected even with a valid SKILL.md and confirmation (33.446368ms)
+2026-11-04T04:42:16.9975749Z ✔ canonical project paths keep working without any confirmation (15.746468ms)
+2026-11-04T04:42:16.9977518Z ✔ user-global records keep any in-home installation path because the state file is trusted (13.858851ms)
+2026-11-04T04:42:16.9979581Z ✔ update apply previews a non-canonical project path and requires --yes plus --confirm-path to change it (44.230431ms)
+2026-11-04T04:42:16.9984003Z ✔ update apply --all needs a separate --confirm-path for every non-canonical path (45.727269ms)
+2026-11-04T04:42:16.9986827Z ✔ update apply rejects --confirm-path when nothing needs path confirmation (18.142839ms)
+2026-11-04T04:42:17.0011195Z ✔ no package module reaches the Skill install engine directly or indirectly (38.423194ms)
+2026-11-04T04:42:17.0012897Z ✔ the graph check reports an injected indirect and direct engine edge (37.965667ms)
+2026-11-04T04:42:17.0015509Z ✔ a dual-format pstack repository yields one Pi and one Claude descriptor over the shared skills (36.338757ms)
+2026-11-04T04:42:17.0017509Z ✔ the Claude descriptor reports twelve agents as deferred and no skill is folded in (8.905649ms)
+2026-11-04T04:42:17.0019527Z ✔ Agent Depot declares its agent panel as a Pi Package without exposing Skills (3.962445ms)
+2026-11-04T04:42:17.0021473Z ✔ a Pi package with no pi key discovers the same inventory as the explicit manifest (6.618482ms)
+2026-11-04T04:42:17.0024012Z ✔ a shared skill repository with a plain package.json is one Claude bundle, not a Pi bundle or a duplicate (3.136327ms)
+2026-11-04T04:42:17.0025967Z ✔ the guard attributes a shared skill to the one bound Claude bundle (3.24475ms)
+2026-11-04T04:42:17.0027721Z ✔ a root package.json with only a shared skills directory is not a Pi package (0.478797ms)
+2026-11-04T04:42:17.0029637Z ✔ the pi-package keyword makes a skills-only conventional package a Pi bundle (0.450173ms)
+2026-11-04T04:42:17.0031583Z ✔ a Pi-native extensions directory alone is enough to recognize a conventional Pi bundle (0.481713ms)
+2026-11-04T04:42:17.0033483Z ✔ a marketplace source of the root binds the root plugin once (0.951664ms)
+2026-11-04T04:42:17.0035252Z ✔ manifestDigest changes when any manifest byte changes and is stable across a rebuild (5.897952ms)
+2026-11-04T04:42:17.0036995Z ✔ a scoped Source refuses a Pi package with a warning rather than a throw (0.502081ms)
+2026-11-04T04:42:17.0038392Z ✔ a Pi manifest below the scope root is not a bundle (0.244257ms)
+2026-11-04T04:42:17.0040091Z ✔ a Claude plugin with no in-repo marketplace binding is reported but not installable (6.178274ms)
+2026-11-04T04:42:17.0041745Z ✔ a bundle-declared command marketplace source yields a warning (0.491912ms)
+2026-11-04T04:42:17.0043418Z ✔ a marketplace source outside the repository yields a warning (0.275105ms)
+2026-11-04T04:42:17.0045041Z ✔ installability is a descriptor field, not parsed from warning text (13.831226ms)
+2026-11-04T04:42:17.0046844Z ✔ the marketplace entry version overrides the plugin manifest version (0.582722ms)
+2026-11-04T04:42:17.0048499Z ✔ the owned-skill matcher applies the lifecycle segment filter (8.948292ms)
+2026-11-04T04:42:17.0050214Z ✔ buildComponentInventory surfaces deferred kinds as host-only exactly once (0.395ms)
+2026-11-04T04:42:17.0052131Z ✔ parsePiPackageManifest falls back to the conventional directories without a pi key (0.267873ms)
+2026-11-04T04:42:17.0053921Z ✔ malformed manifests fail closed with a PackageManifestError (0.781214ms)
+2026-11-04T04:42:17.0055416Z ✔ every exported descriptor has a stable typed shape (0.22419ms)
+2026-11-04T04:42:17.0056967Z ✔ the marketplace name is read from the marketplace's own manifest (0.255409ms)
+2026-11-04T04:42:17.0058795Z ✔ package list prints every recorded selection with its install id and verified evidence (3.044926ms)
+2026-11-04T04:42:17.0060580Z ✔ package list rejects extra arguments instead of guessing (1.273616ms)
+2026-11-04T04:42:17.0062597Z ✔ package discover names host-qualified selections and every component with ownership, effect and risk (0.786184ms)
+2026-11-04T04:42:17.0064576Z ✔ package discover requires exactly one Source id (0.449012ms)
+2026-11-04T04:42:17.0066396Z ✔ package inspect reports the host evidence, the approval state and the descriptor (3.580961ms)
+2026-11-04T04:42:17.0068441Z ✔ package inspect qualifies a dirty Pi manifest version as HEAD-only evidence (1.540918ms)
+2026-11-04T04:42:17.0070793Z ✔ package install previews the exact argv, executable, blast radius, cwd and environment, then refuses without --yes (1.447793ms)
+2026-11-04T04:42:17.0072837Z ✔ package install never lets --yes bypass the approval receipt (0.735208ms)
+2026-11-04T04:42:17.0074563Z ✔ package approve writes only the action it was asked for (1.874783ms)
+2026-11-04T04:42:17.0076179Z ✔ package approve refuses select and forget as approval actions (0.796152ms)
+2026-11-04T04:42:17.0077851Z ✔ package update and uninstall preview and execute only when confirmed (1.303482ms)
+2026-11-04T04:42:17.0080049Z ✔ package uninstall without --yes previews the removal argv and runs nothing (0.671498ms)
+2026-11-04T04:42:17.0082111Z ✔ package forget previews that no host command runs, requires --yes, and never runs a lifecycle (0.810389ms)
+2026-11-04T04:42:17.0084449Z ✔ package forget resolves a recorded selection without re-reading the Sources (0.218439ms)
+2026-11-04T04:42:17.0086274Z ✔ every lifecycle verb resolves a recorded pin instead of rebuilding the latest selection (0.712586ms)
+2026-11-04T04:42:17.0087950Z ✔ a Claude token without a plugin name is ambiguous across recorded plugins (1.902686ms)
+2026-11-04T04:42:17.0089485Z ✔ package selections accept a host-qualified token without --host (0.818504ms)
+2026-11-04T04:42:17.0091032Z ✔ package selections refuse a Host that contradicts the token (0.33607ms)
+2026-11-04T04:42:17.0092421Z ✔ package selections need a Host when the token carries none (0.254287ms)
+2026-11-04T04:42:17.0093963Z ✔ package command rejects an unknown Host before planning (0.216887ms)
+2026-11-04T04:42:17.0095695Z ✔ package command rejects --yes where the grammar has no execution to confirm (0.358652ms)
+2026-11-04T04:42:17.0097870Z ✔ package command rejects --action outside approve (0.194845ms)
+2026-11-04T04:42:17.0099371Z ✔ package selections refuse a path that is not Source-relative or not canonical (0.92842ms)
+2026-11-04T04:42:17.0101019Z ✔ package selections refuse a Source that is not registered or is ambiguous (0.397856ms)
+2026-11-04T04:42:17.0102763Z ✔ package selections refuse a bundle the Source does not provide, and name an ambiguous one (0.643296ms)
+2026-11-04T04:42:17.0104715Z ✔ package command rejects an unknown subcommand with the package usage (0.470712ms)
+2026-11-04T04:42:17.0106211Z ✔ package lifecycle reports a non-zero code for a failed host command (0.343864ms)
+2026-11-04T04:42:17.0107675Z ✔ package lifecycle shows a progress step around the host command only (1.780196ms)
+2026-11-04T04:42:17.0110106Z ✔ readView reads fixture files at a resolved commit and reports the scheme-stripped repository origin (157.151758ms)
+2026-11-04T04:42:17.0112013Z ✔ readView strips the ssh scheme while preserving the git username (44.909745ms)
+2026-11-04T04:42:17.0114071Z ✔ a scoped GitHub tree Source carries its directory and ref, reads scope-relative paths, and leaks no local path (117.096188ms)
+2026-11-04T04:42:17.0115924Z ✔ the builtin Source yields a builtin origin and reads the builtin root (9.01981ms)
+2026-11-04T04:42:17.0117620Z ✔ listFiles and readFile reject a missing mirror through the shared bare-mirror guard (2.341458ms)
+2026-11-04T04:42:17.0119025Z ✔ listFiles and readFile reject a symlinked mirror path (2.205563ms)
+2026-11-04T04:42:17.0120386Z ✔ listFiles stays under the requested root and skips symlink and non-blob entries (3.085096ms)
+2026-11-04T04:42:17.0121998Z ✔ readFile returns undefined for an absent or symlinked path and rejects an oversized blob (9.460088ms)
+2026-11-04T04:42:17.0123911Z ✔ a scoped GitHub tree Source carries its directory scope and a plain Source carries none (0.472556ms)
+2026-11-04T04:42:17.0125621Z ✔ discover reads the selected Source snapshot and runs no host command (15.204085ms)
+2026-11-04T04:42:17.0127424Z ✔ install runs the exact host argv once through the injected runner and records the selection (29.020981ms)
+2026-11-04T04:42:17.0129237Z ✔ a manifest change between plan and execute returns stale plan and runs nothing (11.28623ms)
+2026-11-04T04:42:17.0130931Z ✔ a moved Source commit between plan and execute returns stale plan and runs nothing (9.91324ms)
+2026-11-04T04:42:17.0132695Z ✔ planning a lifecycle write fails closed when an external Source cannot be refreshed (2.72687ms)
+2026-11-04T04:42:17.0134606Z ✔ an unapproved declaration fails closed before any host command (4.77603ms)
+2026-11-04T04:42:17.0136073Z ✔ a tampered plan is refused as stale before any host command (6.888023ms)
+2026-11-04T04:42:17.0137629Z ✔ a receipt covers the exact action argv, so another action needs its own approval (7.876239ms)
+2026-11-04T04:42:17.0139658Z ✔ a host state that already satisfies install sets skipExecution and runs nothing (12.929489ms)
+2026-11-04T04:42:17.0141249Z ✔ a fixed Pi pin does not adopt a different installed pin (12.167552ms)
+2026-11-04T04:42:17.0142713Z ✔ a fixed Pi pin whose install leaves a different pin fails and writes no record (14.646763ms)
+2026-11-04T04:42:17.0144538Z ✔ a skipped install fails if the live recheck is absent (9.00713ms)
+2026-11-04T04:42:17.0145891Z ✔ a skipped install fails if the live recheck is unknown (9.921562ms)
+2026-11-04T04:42:17.0147299Z ✔ an install whose host state stays absent fails and writes no record (10.505747ms)
+2026-11-04T04:42:17.0148732Z ✔ an unversioned Pi git package reports unknown, never current (11.224014ms)
+2026-11-04T04:42:17.0150355Z ✔ an update with unknown observed version evidence fails and leaves the record untouched (14.7812ms)
+2026-11-04T04:42:17.0152073Z ✔ an update that installs where the host reported nothing is recorded as updated (17.194943ms)
+2026-11-04T04:42:17.0153712Z ✔ records persist the observed host version evidence (13.250007ms)
+2026-11-04T04:42:17.0155225Z ✔ a dirty checkout displays its HEAD version without recording it as verified (14.932105ms)
+2026-11-04T04:42:17.0156916Z ✔ an update whose observed version is unchanged fails and leaves the record untouched (16.82024ms)
+2026-11-04T04:42:17.0158595Z ✔ reports a native Git update only when cached Source history proves ancestry (10.287077ms)
+2026-11-04T04:42:17.0160081Z ✔ one broken Package in a batch does not hide the other checks (67.528128ms)
+2026-11-04T04:42:17.0161699Z ✔ a Claude install registers the marketplace then applies, and skips a known marketplace (4.756967ms)
+2026-11-04T04:42:17.0163573Z ✔ a fixed-version Claude selection fails closed instead of ignoring the pin (2.037197ms)
+2026-11-04T04:42:17.0165175Z ✔ a blocked WSL Windows executable falls back to manual required (10.313874ms)
+2026-11-04T04:42:17.0166708Z ✔ only launch errors offer manual fallback; unexpected runner errors propagate (27.897757ms)
+2026-11-04T04:42:17.0168342Z ✔ forget requires confirmation, drops the record, and runs no host command (15.525359ms)
+2026-11-04T04:42:17.0169710Z ✔ no package module reaches the Skill install engine (10.327725ms)
+2026-11-04T04:42:17.0171247Z ✔ install and select refuse a Package that would duplicate a managed portable Skill (7.882752ms)
+2026-11-04T04:42:17.0172919Z ✔ install plans normally when the portable installations belong to another Source (5.859421ms)
+2026-11-04T04:42:17.0174511Z ✔ every host exposes a template for every action (1.783773ms)
+2026-11-04T04:42:17.0175782Z ✔ Pi argv is scoped, and only install carries the fixed-version pin (8.932469ms)
+2026-11-04T04:42:17.0177434Z ✔ Claude install adds an unknown marketplace, then installs the plugin at the named marketplace (14.064266ms)
+2026-11-04T04:42:17.0178824Z ✔ a known marketplace omits only the add step (1.107015ms)
+2026-11-04T04:42:17.0180114Z ✔ Claude update always names the marketplace it refreshes (1.509469ms)
+2026-11-04T04:42:17.0181570Z ✔ Claude uninstall names the plugin and its marketplace, and select runs nothing (0.937967ms)
+2026-11-04T04:42:17.0183069Z ✔ a Claude plan that must name an unresolved marketplace fails closed (1.349348ms)
+2026-11-04T04:42:17.0184727Z ✔ a Claude descriptor with no in-repo marketplace binding is refused (0.605445ms)
+2026-11-04T04:42:17.0186115Z ✔ a Pi package from a scoped Source is refused (1.35018ms)
+2026-11-04T04:42:17.0187565Z ✔ a descriptor and selection that disagree on the host are refused (0.658685ms)
+2026-11-04T04:42:17.0189100Z ✔ a built-in or local path Source has no host-facing command (0.651982ms)
+2026-11-04T04:42:17.0190754Z ✔ shell syntax, control characters, and blocked executables are refused (1.252597ms)
+2026-11-04T04:42:17.0192338Z ✔ V1 scoped verbs make every action affect only the selection's coordinates (0.428002ms)
+2026-11-04T04:42:17.0194139Z ✔ the approval digest is canonical over the declaration and its exact argv order (0.93914ms)
+2026-11-04T04:42:17.0196159Z ✔ classifyUpdate compares like evidence and reports a mixed pair unknown (1.195621ms)
+2026-11-04T04:42:17.0197857Z ✔ a fixed-version Claude selection is refused instead of silently ignoring the pin (0.820157ms)
+2026-11-04T04:42:17.0199504Z ✔ the install identity is the host's own token for the selection (0.585327ms)
+2026-11-04T04:42:17.0201361Z ✔ host state defaults to the isolated test home instead of inherited Pi state (2.51328ms)
+2026-11-04T04:42:17.0203175Z ✔ the observed Pi settings shapes parse into identity, pin, and object-form records (1.171986ms)
+2026-11-04T04:42:17.0205110Z ✔ a drifted Pi entry becomes a drifted record rather than a throw (0.265968ms)
+2026-11-04T04:42:17.0206689Z ✔ a Pi settings value with no packages array yields no records (0.21322ms)
+2026-11-04T04:42:17.0208245Z ✔ the observed Claude installed_plugins.json v2 and v1 shapes parse (0.647283ms)
+2026-11-04T04:42:17.0209787Z ✔ an unknown Claude install shape becomes a drifted record (0.246522ms)
+2026-11-04T04:42:17.0211518Z ✔ the observed known_marketplaces.json shapes parse into typed sources (0.611336ms)
+2026-11-04T04:42:17.0213557Z ✔ readHostInstallView reads the three host files at their home-relative paths (16.501426ms)
+2026-11-04T04:42:17.0215177Z ✔ a missing host file is an empty section, not an error (2.11297ms)
+2026-11-04T04:42:17.0216703Z ✔ drifted JSON and unreadable files degrade to an issue and never throw (0.920194ms)
+2026-11-04T04:42:17.0218341Z ✔ a read-only host home is read without writing anything (17.536561ms)
+2026-11-04T04:42:17.0219920Z ✔ Pi identity is the repository URL without the ref, and never npm (0.818745ms)
+2026-11-04T04:42:17.0221620Z ✔ findInstalledBundle uses the verified checkout HEAD, not the settings pin (0.360285ms)
+2026-11-04T04:42:17.0223186Z ✔ a Pi descriptor root must match the selected root exactly (0.30963ms)
+2026-11-04T04:42:17.0225125Z ✔ a Pi settings record proves membership when checkout version evidence is unavailable (0.299311ms)
+2026-11-04T04:42:17.0226808Z ✔ a drifted Pi entry or an unreadable file makes the Pi lookup unknown (0.198733ms)
+2026-11-04T04:42:17.0228366Z ✔ Claude marketplace names resolve from the record's own source (0.343874ms)
+2026-11-04T04:42:17.0230138Z ✔ findInstalledBundle attributes a Claude install only through its marketplace binding (0.582231ms)
+2026-11-04T04:42:17.0231927Z ✔ a clean Pi checkout yields its HEAD and package manifest version (66.883217ms)
+2026-11-04T04:42:17.0233840Z ✔ a Pi package path inside a parent Git repository is refused as not the checkout root (58.909823ms)
+2026-11-04T04:42:17.0235931Z ✔ Pi checkout origin mismatch blocks version evidence while local modifications only block commit evidence (92.335554ms)
+2026-11-04T04:42:17.0237909Z ✔ only a matching root-only untracked npm lockfile permits Pi update comparison (171.140344ms)
+2026-11-04T04:42:17.0239945Z ✔ npm's generated root lock with matching bin metadata is verified clean checkout evidence (#50) (436.041627ms)
+2026-11-04T04:42:17.0242101Z ✔ npm's generated root lock normalizes a string bin to the unscoped package name (178.913524ms)
+2026-11-04T04:42:17.0244145Z ✔ a modified tracked Pi lockfile keeps the HEAD version but no update identity (70.131841ms)
+2026-11-04T04:42:17.0245913Z ✔ a modified working-tree Pi manifest cannot replace HEAD version evidence (56.29884ms)
+2026-11-04T04:42:17.0247578Z ✔ an untracked Pi manifest cannot provide installed version evidence (74.676615ms)
+2026-11-04T04:42:17.0249407Z ✔ a Pi checkout symlink preserves installation membership but cannot provide version evidence (48.504202ms)
+2026-11-04T04:42:17.0251367Z ✔ findInstalledBundle refuses a descriptor that disagrees with the selection host (0.242495ms)
+2026-11-04T04:42:17.0253556Z ✔ PACKAGE_HOSTS is the V1 host set and DEFERRED_COMPONENT_KINDS is the single deferred list (2.128739ms)
+2026-11-04T04:42:17.0255180Z ✔ bundleRoot returns the directory where a bundle lives (0.24008ms)
+2026-11-04T04:42:17.0256518Z ✔ describeCoordinates renders each host form (0.2078ms)
+2026-11-04T04:42:17.0257994Z ✔ selectionKey is stable across a bundle rename and version-policy change (0.28782ms)
+2026-11-04T04:42:17.0259919Z ✔ selectionKey changes when the source or coordinates change (0.495969ms)
+2026-11-04T04:42:17.0261596Z ✔ a Claude coordinate cannot be constructed without both marketplace fields (0.216305ms)
+2026-11-04T04:42:17.0265630Z ✔ the Source snapshot carries the bundle manifests beside the Skill files (38.852032ms)
+2026-11-04T04:42:17.0267480Z ✔ a registered Git Source yields bundle ownership only for a selected bundle (161.760541ms)
+2026-11-04T04:42:17.0269187Z ✔ assertSkillNotPackageOwned names the Package and its Host (35.235557ms)
+2026-11-04T04:42:17.0271099Z ✔ the name matcher reads declared Skill names and refuses anything but a bare directory name (39.208405ms)
+2026-11-04T04:42:17.0273190Z ✔ bundle ownership comes from one snapshot read per Source and matches discovery output (35.915851ms)
+2026-11-04T04:42:17.0275500Z ✔ a Source that cannot be read produces no exclusions and does not hide Skills (36.467321ms)
+2026-11-04T04:42:17.0277417Z ✔ the unmanaged inventory hides bundle-owned Skills only when the Package is active (50.502751ms)
+2026-11-04T04:42:17.0288357Z ✔ removing a bundle-owned unmanaged Skill or link is refused and changes nothing (43.77564ms)
+2026-11-04T04:42:17.0290371Z ✔ the CLI uninstall refuses a bundle-owned unmanaged path through the registered Source (133.768891ms)
+2026-11-04T04:42:17.0292264Z ✔ a CLI install allows a bundle-owned Skill while its Package is unselected (65.225774ms)
+2026-11-04T04:42:17.0294296Z ✔ a CLI install refuses a bundle-owned Skill once the Package is selected (62.271575ms)
+2026-11-04T04:42:17.0296256Z ✔ a selected Package discovered after the install preview blocks execution and persists no record (35.218634ms)
+2026-11-04T04:42:17.0297846Z ✔ an unselected and absent bundle owns nothing (27.26848ms)
+2026-11-04T04:42:17.0299395Z ✔ a bundle selected from its own Source owns its Skills, and an unrelated Source does not (4.113338ms)
+2026-11-04T04:42:17.0301000Z ✔ a host-proven install owns its Skills with no selection record (10.342511ms)
+2026-11-04T04:42:17.0302440Z ✔ a dirty Pi checkout remains installed and keeps its Skills Package-owned (5.949309ms)
+2026-11-04T04:42:17.0304284Z ✔ an install for an unrelated Source or an unreadable host file never claims (13.756303ms)
+2026-11-04T04:42:17.0306191Z ✔ a noninstallable descriptor never owns its Skills, even when a selection names it (0.609282ms)
+2026-11-04T04:42:17.0307757Z ✔ the Matt tdd Skill stays portable until its Package is active (9.20521ms)
+2026-11-04T04:42:17.0309059Z ✔ a native pstack Pi selection still owns its Skills (2.647411ms)
+2026-11-04T04:42:17.0310517Z ✔ a fresh state directory lists nothing and never creates the state file (14.472145ms)
+2026-11-04T04:42:17.0312192Z ✔ a record round-trips and an upsert replaces the record for the same selection (12.490984ms)
+2026-11-04T04:42:17.0313938Z ✔ the store stamps one ISO verification time per write and ignores a caller's (6.185362ms)
+2026-11-04T04:42:17.0315402Z ✔ a non-canonical root or a multi-segment plugin name fails closed (2.912113ms)
+2026-11-04T04:42:17.0316903Z ✔ findAffected returns the records for one coordinate across both host arms (10.851649ms)
+2026-11-04T04:42:17.0318508Z ✔ a raw caller spelling is canonicalized once, so the record still resolves (9.103013ms)
+2026-11-04T04:42:17.0320370Z ✔ records for different coordinates or Sources stay separate and are stored in key order (12.668238ms)
+2026-11-04T04:42:17.0322107Z ✔ reconcile applies keyed upserts and drops in one window (8.46849ms)
+2026-11-04T04:42:17.0323843Z ✔ corrupted state fails closed and the file is never rewritten (22.134659ms)
+2026-11-04T04:42:17.0325505Z ✔ a caller record that fails validation is refused before any write (6.500551ms)
+2026-11-04T04:42:17.0327072Z ✔ concurrent writers in one process converge without losing a record (126.88544ms)
+2026-11-04T04:42:17.0328802Z ✔ concurrent writers in separate processes converge without corrupting the file (227.288477ms)
+2026-11-04T04:42:17.0330867Z ✔ a receipt approves only its own digest, and a restored receipt approves again (6.748116ms)
+2026-11-04T04:42:17.0332676Z ✔ a malformed, mismatched or renamed receipt needs approval instead of throwing (6.817796ms)
+2026-11-04T04:42:17.0334522Z ✔ an invalid digest is refused before the filesystem is touched (1.40348ms)
+2026-11-04T04:42:17.0336516Z ✔ receipts are 0600 inside a 0700 directory even when both already exist looser (6.331465ms)
+2026-11-04T04:42:17.0338154Z ✔ a credentialed Source URL cannot reach the error message (4.348815ms)
+2026-11-04T04:42:17.0339698Z ✔ uses portable per-user state locations under the Source state directory (0.820167ms)
+2026-11-04T04:42:17.0341557Z ✔ package-state.ts is the only module that names the state file or the receipts directory (50.047818ms)
+2026-11-04T04:42:17.0343846Z ✔ update check lists Package rows with the shared unknown, current and update-available statuses (23.190625ms)
+2026-11-04T04:42:17.0345786Z ✔ update check reads every recorded Package when no filter is given (12.887272ms)
+2026-11-04T04:42:17.0347154Z ✔ update check can filter to one Package (10.642704ms)
+2026-11-04T04:42:17.0348592Z ✔ update check refuses an unknown Package selection with one usage error (1.772442ms)
+2026-11-04T04:42:17.0350464Z ✔ update apply --all includes Packages, isolates one failure, and never offers an unknown Package (2.560869ms)
+2026-11-04T04:42:17.0352273Z ✔ update apply --package updates exactly the named Package (1.617381ms)
+2026-11-04T04:42:17.0354254Z ✔ update apply --package accepts the Source-id spelling that package discover prints (1.382471ms)
+2026-11-04T04:42:17.0356098Z ✔ update apply refuses an unknown version Package instead of offering it (1.099741ms)
+2026-11-04T04:42:17.0357831Z ✔ update apply refuses a current Package instead of running the host command (1.726035ms)
+2026-11-04T04:42:17.0359640Z ✔ update apply refuses an unapproved Package without executing it (2.102069ms)
+2026-11-04T04:42:17.0361408Z ✔ one failing Package check does not hide the other checks or the Skill batch (5.686045ms)
+2026-11-04T04:42:17.0364501Z ✔ a failed Package batch check is reported as a failure without stopping Skills (1.939956ms)
+2026-11-04T04:42:17.0366024Z ✔ project scope never selects a Package (0.450073ms)
+2026-11-04T04:42:17.0367506Z ✔ project scope --all skips Packages without reading their state (1.516282ms)
+2026-11-04T04:42:17.0369314Z ✔ update apply rejects --package together with --all (1.406996ms)
+2026-11-04T04:42:17.0370836Z ✔ update apply rejects a duplicate Package selection (1.131082ms)
+2026-11-04T04:42:17.0372547Z ✔ install rejects hostile Skill names and tree paths without writing anything (26.443948ms)
+2026-11-04T04:42:17.0374971Z ✔ a hostile manifest installation path cannot aim removal or update at arbitrary project directories (165.884708ms)
+2026-11-04T04:42:17.0377873Z ✔ symlinked tracked Skill directories are never followed by removal or update (5.927829ms)
+2026-11-04T04:42:17.0379754Z ✔ a symlinked project skills root cannot redirect removal outside the project (4.088531ms)
+2026-11-04T04:42:17.0381828Z ✔ unmanaged user-global removal rejects hostile explicit paths and symlinked Skill directories (34.637279ms)
+2026-11-04T04:42:17.0383872Z ✔ pathsOverlap reports equal, nested and reverse-nested paths but not siblings (1.461448ms)
+2026-11-04T04:42:17.0385674Z ✔ assertNoSymlinkPath accepts real and missing paths and names the symlinked component (9.953673ms)
+2026-11-04T04:42:17.0387483Z ✔ pathsOverlap treats dot-dot prefixed names as children and normalizes traversal segments (0.64069ms)
+2026-11-04T04:42:17.0389164Z ✔ assertNoSymlinkPath normalizes traversal and resolves relative candidates (7.098278ms)
+2026-11-04T04:42:17.0390931Z ✔ assertNoSymlinkPath rejects a symlinked leaf, a dangling link and the first link of several (2.814832ms)
+2026-11-04T04:42:17.0392692Z ✔ assertNoSymlinkPath accepts the filesystem root and surfaces non-ENOENT errors (3.069946ms)
+2026-11-04T04:42:17.3880158Z ✔ the versioned pstack-shaped fixture parses without inventing missing telemetry (16.593035ms)
+2026-11-04T04:42:17.3900719Z ✔ the panel explains a missing provider and does not invent agent records (1.637279ms)
+2026-11-04T04:42:17.3902605Z ✔ the RPC command requests a fresh ordered snapshot with sanitized details and measured usage (3.119626ms)
+2026-11-04T04:42:19.3975648Z ✔ the RPC command reports a missing provider after its bounded request wait (2002.989288ms)
+2026-11-04T04:42:19.3980499Z ✔ the RPC command without a UI refuses before requesting a snapshot (0.973414ms)
+2026-11-04T04:42:19.3984889Z ✔ the panel sanitizes model, thinking, and ID before terminal rendering (2.79645ms)
+2026-11-04T04:42:19.3989217Z ✔ the panel validates snapshots, sorts running agents first, and preserves selection by ID (2.181879ms)
+2026-11-04T04:42:22.5088223Z ✔ a provider timeout discards its last snapshot instead of showing stale agents (3100.940655ms)
+2026-11-04T04:42:22.5090271Z ✔ the panel rejects malformed and stale provider responses (1.094921ms)
+2026-11-04T04:42:22.5097307Z ✔ the panel clamps rendering to available rows and terminal columns (8.84205ms)
+2026-11-04T04:42:23.6088669Z ✔ closing the panel stops timer renders and releases its snapshot listener (1100.415678ms)
+2026-11-04T04:42:23.6230380Z ✔ the isolation preload keeps the home, state and cache roots out of inherited sentinels (72.852484ms)
+2026-11-04T04:42:23.6231436Z ✔ a git child under the isolation preload does not read XDG_CONFIG_HOME/git/config (46.895801ms)
+2026-11-04T04:42:23.6232949Z ✔ a git child under the isolation preload does not read GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM files (62.801616ms)
+2026-11-04T04:42:26.5095787Z ✔ resolves with exit code and captured stdout and stderr (47.65041ms)
+2026-11-04T04:42:26.5097370Z ✔ does not capture stdout unless requested and honors cwd (40.914333ms)
+2026-11-04T04:42:26.5098929Z ✔ kills the process and flags output above the byte limit (56.391003ms)
+2026-11-04T04:42:26.5100022Z ✔ kills a process that exceeds its time budget (45.000995ms)
+2026-11-04T04:42:26.5101535Z ✔ rejects when the command cannot be spawned (3.64986ms)
+2026-11-04T04:42:26.5102790Z ✔ caps stderr as well as stdout and closes stdin for non-interactive commands (118.179348ms)
+2026-11-04T04:42:26.5104877Z ✔ a stdout-only byte limit permits large stderr warnings (40.330749ms)
+2026-11-04T04:42:26.5106715Z ﹣ on win32 a timeout terminates the whole process tree of a batch file within a bound (0.221034ms) # needs cmd.exe and taskkill to run a real batch file
+2026-11-04T04:42:26.5109337Z ﹣ on win32 output overflow terminates the whole process tree of a batch file within a bound (0.131046ms) # needs cmd.exe and taskkill to run a real batch file
+2026-11-04T04:42:26.5112031Z ﹣ on win32 the result is still returned within a bound when taskkill is unavailable and a grandchild survives (0.185909ms) # needs cmd.exe and taskkill to run a real batch file
+2026-11-04T04:42:26.5115199Z ✔ on POSIX a timeout terminates a forked descendant that holds the stdio pipes within a bound (1021.043358ms)
+2026-11-04T04:42:26.5117238Z ✔ on POSIX output overflow terminates a forked descendant that holds the stdio pipes within a bound (42.544014ms)
+2026-11-04T04:42:26.5118484Z ✔ on POSIX a child that ignores SIGTERM is killed after a grace period and reported as terminated (3009.704422ms)
+2026-11-04T04:42:26.5119838Z ✔ on POSIX the result is still returned within a bound when a descendant has left the process tree and holds the pipes (5011.206811ms)
+2026-11-04T04:42:27.5231627Z ✔ on POSIX a timeout still kills the child and settles when the process list cannot be read (1013.200669ms)
+2026-11-04T04:42:27.6325004Z ✔ on POSIX a terminal SIGINT to the foreground process group still stops the child (non-regression guard) (109.948788ms)
+2026-11-04T04:42:36.5261028Z ✔ import classifies Package additions, identical records and version conflicts by selection identity (17.944064ms)
+2026-11-04T04:42:36.5263709Z ✔ confirmed import selects an added Package and never approves install or update (5.327804ms)
+2026-11-04T04:42:36.5265737Z ✔ replica intent is preview-only on import and does not approve or install Apps or Packages (12.565377ms)
+2026-11-04T04:42:36.5267643Z ✔ import refuses a select plan that carries host steps instead of running them (4.34903ms)
+2026-11-04T04:42:36.5269749Z ✔ import reports a Package select the flow did not complete and fails items without Package operations (11.755099ms)
+2026-11-04T04:42:36.5271657Z ✔ a Profile round trip restores a Package selection and never installs a bundle (42.768346ms)
+2026-11-04T04:42:36.5273622Z ✔ import plan classifies identical choices and shows conflicts without writing (8.288722ms)
+2026-11-04T04:42:36.5275671Z ✔ confirmed import installs recorded Hosts and methods, writes unapproved recipes and continues after failures (48.386284ms)
+2026-11-04T04:42:36.5284852Z ✔ CLI import requires confirmation, supports export filters, and rejects malformed profiles before writes (11.507274ms)
+2026-11-04T04:42:36.5287436Z ✔ import uses the configured immutable Source tree, preserves both methods, and previews before execution (48.102864ms)
+2026-11-04T04:42:36.5289672Z ✔ import rechecks additions and never overwrites conflicting destination recipes or Skill content (27.011279ms)
+2026-11-04T04:42:36.5291752Z ✔ built CLI fetches an unregistered pinned Git Source without registering it or using the network (231.742876ms)
+2026-11-04T04:42:36.5293878Z ✔ reimported recipes cannot inherit approval from a previously deleted import (9.246137ms)
+2026-11-04T04:42:36.5295954Z ✔ platform-less incoming recipes conflict with same-name platform-specific destinations without breaking existing Apps (3.369855ms)
+2026-11-04T04:42:36.5298154Z ✔ invalid destination recipes reserve known names while unknown names warn without blocking (4.753878ms)
+2026-11-04T04:42:36.5300082Z ✔ unconfirmed CLI preview discloses Skill identity and every user method without fetching or writing (4.9893ms)
+2026-11-04T04:42:36.5302162Z ✔ conflicts show only differing keys and existing Sources explain ignored discovery inclusion (4.162751ms)
+2026-11-04T04:42:36.5304242Z ✔ CLI invalid JSON diagnostics identify the profile file and leave destination untouched (2.005479ms)
+2026-11-04T04:42:36.5306118Z ✔ later blocks recheck destination recipes created by a confirmed Skill method (44.841743ms)
+2026-11-04T04:42:36.5307836Z ✔ same-name destination recipes allow disjoint platforms and remain usable on Linux (4.098008ms)
+2026-11-04T04:42:36.5309319Z ✔ profile import adds both same-name Linux and Darwin recipes (3.718078ms)
+2026-11-04T04:42:36.5310951Z ✔ invalid recipe JSON reserves only its overlapping name and platform (3.000092ms)
+2026-11-04T04:42:36.5312476Z ✔ unknown-name recipe warnings include raw JSON read or parse failure details (3.632417ms)
+2026-11-04T04:42:36.5314152Z ✔ registered Source URL spelling does not produce an unregistered-fetch warning (4.366674ms)
+2026-11-04T04:42:36.5315736Z ✔ portable v1 profile round-trips Sources, selections and full cross-platform recipes (7.635578ms)
+2026-11-04T04:42:36.5317351Z ✔ v2 replica intents are identity-only, reference declarations, and read legacy profiles (2.946441ms)
+2026-11-04T04:42:36.5319441Z ✔ Package declarations round-trip canonically and an older profile parses as an empty list (5.372739ms)
+2026-11-04T04:42:36.5321056Z ✔ Package declarations refuse receipts, machine paths and non-canonical coordinates (2.820846ms)
+2026-11-04T04:42:36.5322592Z ✔ profile rejects unknown fields, versions and nonportable content with field paths (1.299906ms)
+2026-11-04T04:42:36.5326436Z ✔ export includes portable managed state without running App lifecycle commands (31.842993ms)
+2026-11-04T04:42:36.5327768Z ✔ export writes Package declarations without receipts or installed state (7.418522ms)
+2026-11-04T04:42:36.5328678Z ✔ approved App recipes are available choices, but only a tracked installation becomes replica intent (26.016795ms)
+2026-11-04T04:42:36.5329596Z ✔ a saved Package selection becomes replica intent only when host evidence says installed (10.768189ms)
+2026-11-04T04:42:36.5330351Z ✔ Package filters follow the Source and Skill filter conventions (26.842342ms)
+2026-11-04T04:42:36.5331153Z ✔ export reports a recorded Package whose coordinates are not portable instead of writing it (5.696655ms)
+2026-11-04T04:42:36.5331990Z ✔ CLI Package filters parse on export and import and need Package operations to select (24.801377ms)
+2026-11-04T04:42:36.5332843Z ✔ CLI export keeps stdout JSON-only, previews on stderr, and supports file output and filters (15.898393ms)
+2026-11-04T04:42:36.5334833Z ✔ export explains local Sources, App-owned Skills and invalid recipes, even with Apps deselected (16.423929ms)
+2026-11-04T04:42:36.5336394Z ✔ export preserves explicit discovery choices and repeated selections (7.978912ms)
+2026-11-04T04:42:36.5337735Z ✔ manual shell instructions cannot hide credentials behind shell syntax (0.392676ms)
+2026-11-04T04:42:36.5339172Z ✔ profile rejects drive-absolute Skill paths and duplicate portable identities (0.977672ms)
+2026-11-04T04:42:36.5340619Z ✔ portable command arguments reject root-only and Windows root-relative paths (0.557014ms)
+2026-11-04T04:42:36.5341448Z ✔ Skill parser errors use profile field paths rather than manifest wrappers (0.243747ms)
+2026-11-04T04:42:36.5342424Z ✔ portable profiles reject query credentials in method URLs (2.136444ms)
+2026-11-04T04:42:36.5343859Z ✔ portable recipe instructions allow home-relative guidance and regex path literals (0.284534ms)
+2026-11-04T04:42:36.5345342Z ✔ CLI export refuses an existing output path with guidance and leaves it unchanged (11.270571ms)
+2026-11-04T04:42:36.5346909Z ✔ Source and external Skill URLs reject credentials with the corresponding field path (0.527798ms)
+2026-11-04T04:42:36.5348414Z ✔ CLI filters Skills and Apps by name and records the running package version (10.95538ms)
+2026-11-04T04:42:36.5349852Z ✔ export is canonical across insertion orders and warns about omitted Skill Sources (35.575863ms)
+2026-11-04T04:42:36.5351211Z ✔ export reports named unmanaged Skills and only real exclusions (11.024424ms)
+2026-11-04T04:42:36.5352652Z ✔ profile serialization orders same-name platform recipes independently of input order (0.904916ms)
+2026-11-04T04:42:36.5354460Z ✔ query credential checks cover non-HTTP URLs and encoded parameter names (0.257252ms)
+2026-11-04T04:42:36.5355714Z ✔ malformed URLs in recipe text report the exact field path (0.360646ms)
+2026-11-04T04:42:36.5356866Z ✔ URL credential keys normalize separators and cover fragments (2.599421ms)
+2026-11-04T04:42:36.5358171Z ✔ profile rejects same-name recipes whose applicability overlaps on any platform (0.983823ms)
+2026-11-04T04:42:36.5359621Z ✔ empty exports are refused by the core writer and CLI without creating files or stdout (11.988977ms)
+2026-11-04T04:42:36.5361193Z ✔ export exposes classified exclusions and warnings while preserving the CLI preview (6.265572ms)
+2026-11-04T04:42:36.5362868Z ✔ a non-interactive stderr gets one plain line per step and no animation (2.079477ms)
+2026-11-04T04:42:36.5364715Z ✔ a stream without an isTTY flag is treated as non-interactive (0.226905ms)
+2026-11-04T04:42:36.5366166Z ✔ an interactive stderr animates the spinner, shows elapsed time from 1s and erases the line on success (0.674264ms)
+2026-11-04T04:42:36.5368091Z ✔ the spinner line is erased and the error propagates when the step throws (1.589418ms)
+2026-11-04T04:42:36.5369334Z ✔ a redraw timer is unref'd and cleared after success and after a throw (0.37376ms)
+2026-11-04T04:42:36.5371120Z ✔ a step finished before any redraw leaves no stray timer or text, even with real timers (240.780756ms)
+2026-11-04T04:42:36.5372773Z ✔ AGENT_DEPOT_NO_ANIMATION=1 on a terminal prints one static line with no timer or elapsed time (0.558536ms)
+2026-11-04T04:42:36.5376019Z ✔ a step that may prompt on the terminal prints one static line and never animates or redraws (0.443842ms)
+2026-11-04T04:42:36.5377692Z ✔ clear() erases a drawn spinner so printed lines are not garbled, and the next tick redraws it (0.377778ms)
+2026-11-04T04:42:36.5378928Z ✔ clear() writes nothing when no spinner is drawn (0.321953ms)
+2026-11-04T04:42:36.5379975Z ✔ a step started inside another step is not shown separately (0.263213ms)
+2026-11-04T04:42:36.5380995Z ✔ a step after a failed one is shown again (0.281127ms)
+2026-11-04T04:42:36.5382022Z ✔ a long label is cut to fit the terminal width so it cannot wrap (22.315639ms)
+2026-11-04T04:42:36.5383037Z ✔ NO_PROGRESS runs the step and writes nothing (0.144731ms)
+2026-11-04T04:42:36.5384747Z ✔ installs a full project Skill tree at the canonical path and exposes Claude by managed directory link (20.506869ms)
+2026-11-04T04:42:36.5386434Z ✔ recognizes and unlinks a native Claude directory junction without touching canonical files (26.608603ms)
+2026-11-04T04:42:36.5388002Z ✔ preserves skill-relative agents support files during install and adoption (7.456293ms)
+2026-11-04T04:42:36.5389457Z ✔ installs the exact preview tree without rereading a mutable Source (5.687388ms)
+2026-11-04T04:42:36.5390890Z ✔ requires explicit compatibility evidence instead of claiming every Host by default (1.11ms)
+2026-11-04T04:42:36.5392429Z ✔ rejects host-specific incompatibility metadata even with the portable V1 baseline (1.226648ms)
+2026-11-04T04:42:36.5394137Z ✔ rejects an incompatible selected Host before reading or changing the project (1.320835ms)
+2026-11-04T04:42:36.5395501Z ✔ rejects a symlinked ancestor during update preview before reading the target (4.111415ms)
+2026-11-04T04:42:36.5396979Z ﹣ native Windows junction ancestor is refused without writing through it (0.227877ms) # SKIP
+2026-11-04T04:42:36.5398429Z ✔ rejects a symlinked project subpath ancestor before writing outside the project (2.38005ms)
+2026-11-04T04:42:36.5400026Z ✔ rejects a symlinked project root ancestor before reading or writing outside the project (2.52924ms)
+2026-11-04T04:42:36.5401525Z ✔ rejects Windows-invalid Skill names and tree segments before writing (2.922216ms)
+2026-11-04T04:42:36.5402721Z ✔ retains the other portable V1 directory exclusions (4.490525ms)
+2026-11-04T04:42:36.5403936Z ✔ never overwrites an existing canonical target (3.526559ms)
+2026-11-04T04:42:36.5405215Z ✔ classifies a real target collision without writing or rereading the mutable Source (4.074835ms)
+2026-11-04T04:42:36.5406750Z ﹣ native Windows overwrite exposes a junction and transaction rollback restores the original (0.189094ms) # SKIP
+2026-11-04T04:42:36.5407582Z ✔ overwrites one untracked real directory with a retained exact backup (11.309029ms)
+2026-11-04T04:42:36.5408344Z ✔ rejects an overwrite when the inspected target changes before the atomic move (6.759941ms)
+2026-11-04T04:42:36.5409103Z ✔ restores the moved tree when the backup changes before staged installation (7.587249ms)
+2026-11-04T04:42:36.5409726Z ✔ fails closed when rollback backup content changes (9.98574ms)
+2026-11-04T04:42:36.5410339Z ✔ preserves a concurrently modified replacement during rollback (8.944992ms)
+2026-11-04T04:42:36.5411063Z ✔ rejects canonical overwrite when Claude is a separate identical real directory (7.111757ms)
+2026-11-04T04:42:36.5411727Z ✔ binds an overwrite to the inspected destination receipt (6.554413ms)
+2026-11-04T04:42:36.5412309Z ✔ rolls back an overwrite when the replacement move fails (7.81241ms)
+2026-11-04T04:42:36.5413194Z ✔ reports an incomplete rollback when restoring the original tree fails (7.199642ms)
+2026-11-04T04:42:36.5414305Z ✔ rolls back the canonical target when Claude symlink creation fails (4.935289ms)
+2026-11-04T04:42:36.5415321Z ✔ does not delete a concurrently replaced file during rollback and reports incomplete cleanup (4.073354ms)
+2026-11-04T04:42:36.5416134Z ✔ detects a replaced file during rollback even when the inode is reused (4.138495ms)
+2026-11-04T04:42:36.5416735Z ✔ surfaces cleanup failures instead of hiding them (3.7464ms)
+2026-11-04T04:42:36.5417369Z ✔ rolls back a partially written target after an injected file failure (4.449919ms)
+2026-11-04T04:42:36.5418000Z ✔ refuses a symlink collision during read-only inspection (2.255266ms)
+2026-11-04T04:42:36.5418622Z ✔ adopts an identical canonical Skill in place without writing it (4.332508ms)
+2026-11-04T04:42:36.5419266Z ✔ adopts an identical noncanonical Claude directory in place (4.290911ms)
+2026-11-04T04:42:36.5419943Z ✔ adopts a canonical Skill and its Claude symlink on a repeat installation (4.151229ms)
+2026-11-04T04:42:36.5420630Z ✔ rejects an unrelated Claude Skill symlink during adoption (2.346027ms)
+2026-11-04T04:42:36.5421300Z ✔ adds a missing Claude exposure only with separate explicit confirmation (5.959177ms)
+2026-11-04T04:42:36.5421930Z ✔ does not add missing Claude exposure during adoption (4.272637ms)
+2026-11-04T04:42:36.5422506Z ✔ adoption refuses an existing Skill with different content (4.637702ms)
+2026-11-04T04:42:36.5423137Z ✔ adoption refuses an existing Skill path that is not a directory (2.674041ms)
+2026-11-04T04:42:36.5424131Z ✔ adoption reports an uninspectable existing Skill and a missing reader adapter (9.449097ms)
+2026-11-04T04:42:36.5424916Z ✔ adoption never moves or copies a Claude-only Skill to another Host location (8.164009ms)
+2026-11-04T04:42:36.5426050Z ✔ adoption reports a failing additional Claude symlink (4.859276ms)
+2026-11-04T04:42:36.5426749Z ✔ validates a self-contained manifest for built-in and URL Sources (2.92426ms)
+2026-11-04T04:42:36.5427505Z ✔ accepts optional user install and update methods while preserving older manifests (3.057379ms)
+2026-11-04T04:42:36.5428289Z ✔ accepts an optional actual installation record while preserving older manifests (1.47291ms)
+2026-11-04T04:42:36.5429034Z ✔ records trustworthy resolved version evidence and a content baseline (0.792415ms)
+2026-11-04T04:42:36.5430637Z ✔ rejects version evidence that cannot identify the selected Source or baseline (0.61346ms)
+2026-11-04T04:42:36.5431834Z ✔ requires an explicit non-empty supported Host set (0.308718ms)
+2026-11-04T04:42:36.5432939Z ✔ validates fixed/latest policies and rejects ambiguous versions (0.696295ms)
+2026-11-04T04:42:36.5434201Z ✔ fails closed on unsafe Source and skill identities (0.561863ms)
+2026-11-04T04:42:36.5435114Z ✔ rejects unsafe or unknown user method fields (0.741209ms)
+2026-11-04T04:42:36.5436222Z ✔ rejects credential token and key flags with inline or separated values (0.882965ms)
+2026-11-04T04:42:36.5437468Z ✔ rejects common shell interpreters and unsafe portable cwd values (0.493154ms)
+2026-11-04T04:42:36.5438690Z ✔ rejects unsupported root fields and duplicate Source/path selections (0.532748ms)
+2026-11-04T04:42:36.5440058Z ✔ persists and reloads the project manifest without consulting global Source state (14.595441ms)
+2026-11-04T04:42:36.5441329Z ✔ treats a missing manifest as an empty validated selection set (1.026904ms)
+2026-11-04T04:42:36.5442663Z ✔ atomically replaces a manifest symlink without following its redirect (2.325288ms)
+2026-11-04T04:42:36.5444249Z ✔ fails closed on malformed persisted JSON and preserves it (2.427639ms)
+2026-11-04T04:42:36.5445547Z ✔ reports the first failing installation method rule in a stable order (0.371707ms)
+2026-11-04T04:42:36.5446950Z ✔ rejects fixed versions and resolved versions that disagree with the Source ref (0.36259ms)
+2026-11-04T04:42:36.5448574Z ✔ checks current status with the real npm CLI and a temporary global prefix without installing (229.692398ms)
+2026-11-04T04:42:36.5450533Z ✔ checks npm global provenance before reading the registry and pins a confirmed update (4.591635ms)
+2026-11-04T04:42:36.5451588Z ✔ refuses npm-path shims whose global package root is not this installation (4.091557ms)
+2026-11-04T04:42:36.5452810Z ✔ refuses npm-linked local Git checkouts even when npm reports the link as global (3.969379ms)
+2026-11-04T04:42:36.5453944Z ✔ does not trust an arbitrary npm PATH shim as installation provenance (3.609033ms)
+2026-11-04T04:42:36.5454996Z ✔ accepts a win32 npm.cmd shim with a sibling npm-cli.js (case-insensitive) and still checks the global root (6.227791ms)
+2026-11-04T04:42:36.5456248Z ✔ refuses win32 npm.cmd shims without a sibling npm-cli.js, non-npm .cmd files, and foreign package roots (5.457387ms)
+2026-11-04T04:42:36.5457243Z ✔ treats current, prerelease, and older registry versions without downgrading (4.560526ms)
+2026-11-04T04:42:36.5458125Z ✔ rejects invalid registry versions and npm root failures before any install (3.59655ms)
+2026-11-04T04:42:36.5459053Z ✔ previews without applying until --yes and gives manual guidance when unsupported (2.634406ms)
+2026-11-04T04:42:36.5459888Z ✔ reports npm update failures instead of claiming success (5.817052ms)
+2026-11-04T04:42:36.5460631Z ✔ rejects unsupported self subcommands and update options (0.457788ms)
+2026-11-04T04:42:36.5461367Z ✔ compares Skill trees by exact relative paths and bytes (1.591061ms)
+2026-11-04T04:42:36.5462082Z ✔ reads an existing tree without following symlinks (17.561821ms)
+2026-11-04T04:42:36.5462923Z ✔ discovers valid portable Skills recursively without selecting lifecycle subtrees (9.94121ms)
+2026-11-04T04:42:36.5464017Z ✔ parses quoted and folded required frontmatter fields and rejects incomplete metadata (0.442469ms)
+2026-11-04T04:42:36.5465197Z ✔ skips nested block scalars inside a metadata mapping and rejects tabs within them (0.520495ms)
+2026-11-04T04:42:36.5466183Z ✔ accepts optional boolean metadata without weakening required fields (0.203231ms)
+2026-11-04T04:42:36.5467126Z ✔ parses nested optional metadata without treating nested required fields as top-level (0.293881ms)
+2026-11-04T04:42:36.5467967Z ✔ rejects malformed nested metadata indentation and values (0.170911ms)
+2026-11-04T04:42:36.5468688Z ✔ discovers a real-shaped pr Skill with nested metadata (0.30948ms)
+2026-11-04T04:42:36.5469408Z ✔ fails closed without throwing for deeply nested metadata (0.523932ms)
+2026-11-04T04:42:36.5470245Z ✔ reads only nested SKILL.md files and skips lifecycle subtrees before reading (16.31275ms)
+2026-11-04T04:42:36.5471826Z ✔ reads a selected built-in Skill tree without changing discovery reads (9.100355ms)
+2026-11-04T04:42:36.5473104Z ✔ rejects targeted built-in paths that could escape the Source root (2.200223ms)
+2026-11-04T04:42:36.5474599Z ✔ rejects symbolic links and oversized files in a selected built-in Skill tree (7.19792ms)
+2026-11-04T04:42:36.5475499Z ✔ does not traverse symbolic links in a package-owned built-in root (3.504127ms)
+2026-11-04T04:42:36.5476505Z ✔ default built-in root resolves to the package skills directory containing the doctor skills (1.669349ms)
+2026-11-04T04:42:36.5477841Z ✔ reads the full tree of each shipped built-in skill, including large bundled assets (33.999085ms)
+2026-11-04T04:42:36.5478724Z ✔ reads built-in Skill trees of 18 MiB with byte preservation (46.314394ms)
+2026-11-04T04:42:36.5479501Z ✔ reads built-in Skill trees of 32 MiB with byte preservation (92.880901ms)
+2026-11-04T04:42:36.5480310Z ✔ adding claude creates only the managed symlink and records the host (23.892025ms)
+2026-11-04T04:42:36.5481279Z ✔ adding a host requires the explicit additional-host confirmation and changes nothing without it (9.592046ms)
+2026-11-04T04:42:36.5482323Z ✔ adding a host that shares the canonical location changes only the record (10.033203ms)
+2026-11-04T04:42:36.5483428Z ✔ adding claude refuses a location that holds different content (5.306004ms)
+2026-11-04T04:42:36.5484480Z ✔ adding a non-claude host to a Claude-only installation is refused instead of copying (4.448236ms)
+2026-11-04T04:42:36.5485596Z ✔ adding rejects hosts that are already recorded or unknown (3.938626ms)
+2026-11-04T04:42:36.5486449Z ✔ removing claude deletes only the symlink and keeps the shared canonical Skill (10.032782ms)
+2026-11-04T04:42:36.5487707Z ✔ removing a shared-location host keeps every file because the canonical Skill backs the remaining hosts (9.299738ms)
+2026-11-04T04:42:36.5488654Z ✔ removing every recorded host is a full removal (9.947572ms)
+2026-11-04T04:42:36.5489670Z ✔ removing an unrecorded host fails before anything changes (4.783353ms)
+2026-11-04T04:42:36.5490964Z ✔ host removal rechecks the target and deletes nothing when it changed after the plan (6.902084ms)
+2026-11-04T04:42:36.5492467Z ✔ removing claude from a Claude-only real directory installation is refused (3.878729ms)
+2026-11-04T04:42:36.5494174Z ✔ adding claude removes the new symlink again when the record update fails (7.197528ms)
+2026-11-04T04:42:36.5495610Z ✔ adding claude reports both errors when the record update and the rollback fail (9.089012ms)
+2026-11-04T04:42:36.5497148Z ✔ adding claude refuses a foreign symlink at the claude location and leaves it untouched (4.500354ms)
+2026-11-04T04:42:36.5498724Z ✔ removing claude refuses a foreign symlink at the claude location and leaves it untouched (4.917376ms)
+2026-11-04T04:42:36.5500232Z ✔ removing claude replaced by a foreign symlink after the plan deletes nothing (7.607316ms)
+2026-11-04T04:42:36.5501557Z ✔ removing claude deletes the symlink without a recursive removal (9.058897ms)
+2026-11-04T04:42:36.5503015Z ✔ removing claude refuses to unlink a path that became a real directory just before deletion (10.890579ms)
+2026-11-04T04:42:36.5504942Z ✔ removing claude explains how to recover when the record update fails after the symlink is gone (13.243087ms)
+2026-11-04T04:42:36.5506444Z ✔ selectUserGlobalSkills treats duplicate exact paths as ambiguous (1.342075ms)
+2026-11-04T04:42:36.5507871Z ✔ selectUserGlobalSkills resolves a unique exact path over same-named paths (0.744215ms)
+2026-11-04T04:42:36.5509356Z ✔ missing-record inspection accepts absent intermediate skill-root directories (8.112172ms)
+2026-11-04T04:42:36.5510736Z ✔ missing-record inspection rejects an unsafe recorded path (1.908607ms)
+2026-11-04T04:42:36.5512042Z ✔ missing-record inspection propagates non-ENOENT filesystem errors (1.497206ms)
+2026-11-04T04:42:36.5513492Z ✔ missing-record inspection rejects a synthetic symlink ancestor (1.423278ms)
+2026-11-04T04:42:36.5514930Z ✔ missing-record inspection refuses a potential dangling Claude link even when unrecorded (3.05246ms)
+2026-11-04T04:42:36.5516494Z ✔ missing-record inspection refuses selected alias records with overlapping install paths (1.52034ms)
+2026-11-04T04:42:36.5518082Z ✔ previews an immutable update and requires explicit overwrite confirmation for local edits (19.573982ms)
+2026-11-04T04:42:36.5519562Z ✔ rejects incompatible portable trees during update preview before confirmation (4.312762ms)
+2026-11-04T04:42:36.5520921Z ✔ updates skill-relative agents support files without dropping them (22.675607ms)
+2026-11-04T04:42:36.5522355Z ✔ rejects unsafe paths under skill-relative agents support files during update (5.498745ms)
+2026-11-04T04:42:36.5524024Z ✔ rolls back managed files when an explicitly confirmed external method fails (11.99016ms)
+2026-11-04T04:42:36.5525411Z ✔ restores persisted state when deleting the filesystem backup fails (9.504111ms)
+2026-11-04T04:42:36.5526816Z ✔ binds update bytes, method argv, and method context to the displayed candidate (8.583265ms)
+2026-11-04T04:42:36.5528155Z ✔ rejects an external method cwd before replacing the managed tree (5.606206ms)
+2026-11-04T04:42:36.5529333Z ✔ executes a direct user-global update and persists new evidence (10.90698ms)
+2026-11-04T04:42:36.5530655Z ✔ rolls back a direct user-global update when persistence fails after writing (11.862974ms)
+2026-11-04T04:42:36.5531873Z ✔ continues a batch after one independent update fails (12.882251ms)
+2026-11-04T04:42:36.5533705Z ✔ the focused module writes no user state when the isolation preload is omitted (607.540341ms)
+2026-11-04T04:42:36.5535115Z ✔ lists the package-owned built-in Source without registering it (8.904377ms)
+2026-11-04T04:42:36.5536453Z ✔ resolves package and Git version evidence without refreshing Sources (4.906485ms)
+2026-11-04T04:42:36.5537945Z ✔ sorts installation baseline paths by UTF-8 byte order (0.486201ms)
+2026-11-04T04:42:36.5539272Z ✔ exposes the immutable Skill tree snapshot seam without executing a method (1.56873ms)
+2026-11-04T04:42:36.5540768Z ✔ adds a Git Source, keeps its URL identity stable, and does not refresh on registration (5.398226ms)
+2026-11-04T04:42:36.5542091Z ✔ rejects non-Git and unsafe URLs before changing state (1.545026ms)
+2026-11-04T04:42:36.5543701Z ✔ refreshes a registered Source through the injected Git access at its registered URL (3.367631ms)
+2026-11-04T04:42:36.5545224Z ✔ serializes concurrent registrations without losing catalog updates (118.995329ms)
+2026-11-04T04:42:36.5546486Z ✔ keeps the old identity when a new URL is added (4.059538ms)
+2026-11-04T04:42:36.5547863Z ✔ migrates selected user-global identities atomically and rejects replacement collisions (10.488716ms)
+2026-11-04T04:42:36.5549514Z ✔ removes a Git Source while keeping dependent user-global Skills by default (6.430962ms)
+2026-11-04T04:42:36.5550993Z ✔ removes only explicitly selected dependent user-global Skills with the Source (7.234097ms)
+2026-11-04T04:42:36.5552390Z ✔ selects Sources only for the current operation and never saves a default (3.902773ms)
+2026-11-04T04:42:36.5553959Z ✔ fails closed on corrupt or unsupported state and preserves bytes when adding (6.441051ms)
+2026-11-04T04:42:36.5555543Z ✔ discovers only explicitly selected Source snapshots without refreshing or persisting selection (3.872607ms)
+2026-11-04T04:42:36.5557195Z ✔ loads legacy Source state and persists user-global installations in the shared catalog (8.010502ms)
+2026-11-04T04:42:36.5558829Z ✔ reconciles selected user-global records and removes catalog data without touching caches (7.32148ms)
+2026-11-04T04:42:36.5560273Z ✔ validates source methods with the same portable no-shell safety rules (0.767549ms)
+2026-11-04T04:42:36.5561935Z ✔ rejects persisted user-global installations without an installation location (2.435284ms)
+2026-11-04T04:42:36.5562739Z ✔ rejects adding a user-global installation without an installation location (1.039347ms)
+2026-11-04T04:42:36.5564044Z ✔ uses portable per-user state locations on Linux and Windows (0.385913ms)
+2026-11-04T04:42:36.5565777Z ✔ isolateUserState redirects every default state and cache path under the home despite shell overrides, then restores (1.670911ms)
+2026-11-04T04:42:36.5567080Z ✔ App renders the header and the Sources view (147.07021ms)
+2026-11-04T04:42:36.5568317Z ✔ App fills its startup screen and tracks terminal resize while Sources is loading (49.746886ms)
+2026-11-04T04:42:36.5569446Z ✔ App shows the package version in the header (67.507718ms)
+2026-11-04T04:42:36.5570296Z ✔ App calls onExit when q is pressed (61.284441ms)
+2026-11-04T04:42:36.5571266Z ✔ App switches views with 1 and 2 and shows the active view (150.408809ms)
+2026-11-04T04:42:36.5572382Z ✔ App opens the catalog of the highlighted source with Enter (126.314743ms)
+2026-11-04T04:42:36.5573845Z ✔ App does not switch views or quit while the catalog filter captures keys (119.393215ms)
+2026-11-04T04:42:36.5575944Z ✔ App ignores q and view keys sent in the same burst as the catalog filter key (113.613521ms)
+2026-11-04T04:42:36.5577434Z ✔ App views render with the real source operations on a temporary home (307.551272ms)
+2026-11-04T04:42:36.5578905Z ✔ the bordered header contains the tabs before the page and keeps the viewport full (54.441514ms)
+2026-11-04T04:42:36.5580125Z ✔ App footer for the Catalog offers install only (71.966931ms)
+2026-11-04T04:42:36.5581680Z ✔ no footer repeats the view-switch hints the tab bar already shows, and each names its own keys (171.955337ms)
+2026-11-04T04:42:36.5595185Z ✔ Tab advances and Shift+Tab reverses with wrapping across every main view (161.023328ms)
+2026-11-04T04:42:36.5596530Z ✔ Tab is captured by a Catalog filter instead of leaking navigation (123.897107ms)
+2026-11-04T04:42:36.5597687Z ✔ Tab directions stay inside an active Skills checklist (155.271501ms)
+2026-11-04T04:42:36.5598601Z ✔ the number keys still switch views (203.040792ms)
+2026-11-04T04:42:36.5599690Z ✔ key 5 opens Profile actions (95.704191ms)
+2026-11-04T04:42:36.5600992Z ✔ Installations excludes unapproved recipes without running their commands (162.245777ms)
+2026-11-04T04:42:36.5601838Z ✔ approved externally installed Apps remain visible without an Agent Depot record (152.670337ms)
+2026-11-04T04:42:36.5602601Z ✔ Installations does not treat an unknown App inspection as installed (84.300125ms)
+2026-11-04T04:42:36.5603244Z ✔ runBatch applies items in order and reports each outcome (2.732932ms)
+2026-11-04T04:42:36.5604759Z ✔ runBatch keeps going after a failure and describes it with the failure formatter (0.420147ms)
+2026-11-04T04:42:36.5606204Z ✔ Catalog does not treat resolver failures as proof that an App is absent (212.174478ms)
+2026-11-04T04:42:36.5607510Z ✔ Catalog does not treat spawn failures as proof that an App is absent (110.974551ms)
+2026-11-04T04:42:36.5608813Z ✔ Catalog does not treat signal failures as proof that an App is absent (120.968204ms)
+2026-11-04T04:42:36.5610141Z ✔ Catalog does not treat pattern failures as proof that an App is absent (125.764605ms)
+2026-11-04T04:42:36.5611565Z ✔ Catalog installs an approved App recipe only after preview confirmation (789.050983ms)
+2026-11-04T04:42:36.5612899Z ✔ marks a skill that has an unmanaged copy on disk and keeps it installable (246.417375ms)
+2026-11-04T04:42:36.5614761Z ✔ an unmanaged copy with different content is decided by the install collision rules (230.64915ms)
+2026-11-04T04:42:36.5616313Z ✔ space marks skills, a marks every visible skill and a again clears them (144.851106ms)
+2026-11-04T04:42:36.5617629Z ✔ space on a source row explains that skills are marked (132.303176ms)
+2026-11-04T04:42:36.5619599Z ✔ i installs the marked skills with one host, scope and version choice and one combined preview (306.279496ms)
+2026-11-04T04:42:36.5620983Z ✔ a project batch records every skill in the manifest (287.643987ms)
+2026-11-04T04:42:36.5622583Z ✔ a skill that cannot be prepared is shown in the preview and skipped while the others install (287.75067ms)
+2026-11-04T04:42:36.5624249Z ✔ one item failing while installing does not stop the others (256.428495ms)
+2026-11-04T04:42:36.5625817Z ✔ one additional-host confirmation covers the items that need it; n installs nothing (230.591091ms)
+2026-11-04T04:42:36.5627328Z ✔ i on the highlighted skill without marks installs just that skill (128.139754ms)
+2026-11-04T04:42:36.5628944Z ✔ keys sent in one burst move and mark against the latest state (114.417649ms)
+2026-11-04T04:42:36.5630195Z ✔ a then i in one burst opens the install steps for every listed skill (115.348775ms)
+2026-11-04T04:42:36.5631457Z ✔ several keys delivered in a single write are handled one by one (102.88709ms)
+2026-11-04T04:42:36.5632800Z ✔ Catalog without installation operations lists the skill and does not crash (187.28122ms)
+2026-11-04T04:42:36.5634523Z ✔ Catalog hides a Skill installed user-global or in the project (195.59476ms)
+2026-11-04T04:42:36.5635641Z ✔ Catalog offers install only: u and h do nothing (146.151574ms)
+2026-11-04T04:42:36.5637077Z ✔ i installs user-global step by step with a multi-host preview and confirmation (344.953802ms)
+2026-11-04T04:42:36.5638347Z ✔ host step requires at least one host (147.87306ms)
+2026-11-04T04:42:36.5639651Z ✔ n declines the install preview without changing anything (217.945905ms)
+2026-11-04T04:42:36.5641017Z ✔ i installs into the project manifest and shows the project marker (278.15016ms)
+2026-11-04T04:42:36.5642489Z ✔ fixed version policy asks for the version text (311.340556ms)
+2026-11-04T04:42:36.5644479Z ✔ adopting an identical Skill with a missing Host location needs a separate confirmation (418.993142ms)
+2026-11-04T04:42:36.5647484Z (node:7016) Warning: WARNING: Skipping Package-owned Skill exclusions for Source git:3f64ecbd1559d9583a902611: Git Source mirror is not available: /tmp/agent-depot-test-home-V7lUAU/.cache/agent-depot/git-sources/3f64ecbd1559d9583a902611
+2026-11-04T04:42:36.5664719Z (Use `node --trace-warnings ...` to show where the warning was created)
+2026-11-04T04:42:36.5669933Z (node:7016) Warning: WARNING: Skipping Package-owned Skill exclusions for Source git:3f64ecbd1559d9583a902611: Git Source mirror is not available: /tmp/agent-depot-test-home-V7lUAU/.cache/agent-depot/git-sources/3f64ecbd1559d9583a902611
+2026-11-04T04:42:36.5672702Z ✔ the Git Source is refreshed before the preview, which reflects the refreshed content; y does not refresh again (234.187194ms)
+2026-11-04T04:42:36.5674784Z ✔ a failed refresh aborts the install with an error and writes nothing (175.186579ms)
+2026-11-04T04:42:36.5675904Z ✔ install flow captures keys, and Esc cancels it (157.278126ms)
+2026-11-04T04:42:36.5677277Z ✔ a slow install preparation shows a specific progress label until the preview opens (202.821552ms)
+2026-11-04T04:42:36.5678663Z ✔ Catalog labels show repository names and GitHub directory scope (3.067729ms)
+2026-11-04T04:42:36.5679960Z ✔ Catalog repository labels keep stable tree and Skill identities (1.159252ms)
+2026-11-04T04:42:36.5681404Z ✔ a Catalog Skill carries its owner only when the Package is active (1.331044ms)
+2026-11-04T04:42:36.5682928Z ✔ i on a Catalog bundle previews the frozen plan, approves the missing receipt, then runs it (304.706247ms)
+2026-11-04T04:42:36.5684747Z ✔ an approved Catalog bundle runs on the first y with no second gate (152.366686ms)
+2026-11-04T04:42:36.5686224Z ✔ the Catalog reload after a Package action keeps counting the action's elapsed time (268.538013ms)
+2026-11-04T04:42:36.5687594Z ✔ n and Esc at either Catalog bundle gate write and run nothing (226.374974ms)
+2026-11-04T04:42:36.5688976Z ✔ a stale Catalog bundle plan is reported and never executed again (159.334791ms)
+2026-11-04T04:42:36.5690236Z ✔ a Catalog bundle planning failure is shown and runs nothing (109.01605ms)
+2026-11-04T04:42:36.5691596Z ✔ pressing i on a bundle installs the Package even when loose skills are marked (144.456573ms)
+2026-11-04T04:42:36.5692696Z ✔ CatalogView shows a loading state (95.498851ms)
+2026-11-04T04:42:36.5694453Z ✔ CatalogView lists skills as a tree under their source, with the installable count on the source (143.803315ms)
+2026-11-04T04:42:36.5696205Z ✔ CatalogView hides installed skills (user-global or project) and sources left with none (95.894002ms)
+2026-11-04T04:42:36.5697509Z ✔ CatalogView says so when every skill is installed (67.269983ms)
+2026-11-04T04:42:36.5698729Z ✔ CatalogRowLine keeps Package-owned rows to one physical terminal line (85.968411ms)
+2026-11-04T04:42:36.5700238Z ✔ CatalogRowLine remains one line after a narrow resize with unicode and unmanaged markers (39.355404ms)
+2026-11-04T04:42:36.5701826Z ✔ Catalog ownership details keep a fixed Ink panel height across loose and long Unicode owners (57.8196ms)
+2026-11-04T04:42:36.5703150Z ✔ Package-owned Catalog row text keeps readable contrast (1.12062ms)
+2026-11-04T04:42:36.5704574Z ✔ CatalogView truncates long descriptions (68.577741ms)
+2026-11-04T04:42:36.5705585Z ✔ CatalogView shows empty, error and unsupported states (150.703906ms)
+2026-11-04T04:42:36.5707059Z ✔ CatalogView navigates the tree with j/k and arrows, clamped, and expands or collapses sources (151.682138ms)
+2026-11-04T04:42:36.5708888Z ✔ CatalogView filter keeps pasted text that starts like an escape remnant (95.464718ms)
+2026-11-04T04:42:36.5709758Z ✔ CatalogView filters leaves case-insensitively, keeps their sources and shows an n of m count (146.948056ms)
+2026-11-04T04:42:36.5710489Z ✔ CatalogView matches descriptions and shows no matches (99.636566ms)
+2026-11-04T04:42:36.5711302Z ✔ CatalogView a toggles only the highlighted repository and preserves marks in other repositories (138.482031ms)
+2026-11-04T04:42:36.5712031Z ✔ CatalogView a leaves filtered-out marks alone (191.315667ms)
+2026-11-04T04:42:36.5712959Z ✔ CatalogView a resolves the repository from Source, group, Package, and Skill rows (138.330517ms)
+2026-11-04T04:42:36.5714181Z ✔ CatalogView a excludes active Package-owned skills (87.772547ms)
+2026-11-04T04:42:36.5715136Z ✔ CatalogView toggles all sources with s (126.137344ms)
+2026-11-04T04:42:36.5716464Z ✔ CatalogView starts on all sources when no source is given (66.417056ms)
+2026-11-04T04:42:36.5717556Z ✔ CatalogView calls discoverSkills with its receiver (73.590867ms)
+2026-11-04T04:42:36.5719040Z ✔ CatalogView windows a long tree around the highlight and pages with PgUp/PgDn (99.872964ms)
+2026-11-04T04:42:36.5720999Z ✔ CatalogView keeps healthy Sources browsable when a Git mirror is unavailable (84.767305ms)
+2026-11-04T04:42:36.5722616Z ✔ CatalogView shows repository names rather than Git IDs (74.502435ms)
+2026-11-04T04:42:36.5724567Z ✔ CatalogView lists a Source's bundles and marks the Skills they own (88.011617ms)
+2026-11-04T04:42:36.5726344Z ✔ CatalogView hides only the exact host-proven installed bundle (86.514972ms)
+2026-11-04T04:42:36.5728600Z ✔ CatalogView keeps Package rows reachable and explains owned Skills without enabling loose install (102.139107ms)
+2026-11-04T04:42:36.5730682Z ✔ CatalogView starts collapsed, expands on demand, and opens filter matches (123.19882ms)
+2026-11-04T04:42:36.5732613Z ✔ export file names gain .json only when they have no extension, and unsafe names are refused (2.937314ms)
+2026-11-04T04:42:36.5734710Z ✔ the picker start directory follows startDirectory, then projectRoot, and is always absolute (0.408385ms)
+2026-11-04T04:42:36.5736231Z ✔ directory entries sort folders before files and files by code point (0.387967ms)
+2026-11-04T04:42:36.5737507Z ✔ file purpose hides non-JSON files until showAllFiles (0.3735ms)
+2026-11-04T04:42:36.5738884Z ✔ the directory picker selects the current folder and descends into a subfolder (233.520866ms)
+2026-11-04T04:42:36.5740207Z ✔ the file picker hides non-JSON files until f and toggles back (109.321185ms)
+2026-11-04T04:42:36.5741418Z ✔ the picker cancel key calls back while the notice stays inline (78.309364ms)
+2026-11-04T04:42:36.5742593Z ✔ a slow earlier read never replaces a newer directory (282.827242ms)
+2026-11-04T04:42:36.5743989Z ✔ a directory read error is shown in the picker and Esc leaves it (96.941409ms)
+2026-11-04T04:42:36.5745627Z ✔ the picker stays inside a narrow terminal at its default list height with a long real path (106.469484ms)
+2026-11-04T04:42:36.5747324Z ✔ pathExists reports ENOENT as absent, exists as present, and propagates permission errors (5.406142ms)
+2026-11-04T04:42:36.5748903Z ✔ a symlink to a directory is classified as a directory and navigated into (120.196323ms)
+2026-11-04T04:42:36.5750599Z ✔ a failed read recovers through parent navigation, and loading allows leaving a slow directory (204.118461ms)
+2026-11-04T04:42:36.5752482Z ✔ the picker fits a wrapped long directory, many entries and its footer without a list height override (83.468151ms)
+2026-11-04T04:42:36.5995448Z ✔ a tracked App stays cached at load and reconciles a newer version only when focused (318.047072ms)
+2026-11-04T04:42:36.6003248Z ✔ a changed recipe keeps a recorded Installation visible but blocks lifecycle commands (260.732425ms)
+2026-11-04T04:42:36.6005563Z ✔ a malformed recipe keeps its recorded Installation visible and blocks actions (239.305493ms)
+2026-11-04T04:42:36.6013029Z ✔ manual App setup and teardown remain separate confirmed Host actions (364.705759ms)
+2026-11-04T04:42:36.6015083Z ✔ Esc cancels an App Host checklist and lifecycle preview without running commands (350.991105ms)
+2026-11-04T04:42:36.6016629Z ✔ App marks remain active when the cursor moves to an unmarked Skill (300.662891ms)
+2026-11-04T04:42:36.6018106Z ✔ mixed App and Skill marks reject i without running commands (211.812469ms)
+2026-11-04T04:42:36.6019821Z ✔ mixed App and Skill marks reject u without running commands (219.019347ms)
+2026-11-04T04:42:36.6029904Z ✔ mixed App and Skill marks reject h without running commands (225.156266ms)
+2026-11-04T04:42:36.6032048Z ✔ an App without declared Host steps reports that state without running commands (213.436563ms)
+2026-11-04T04:42:36.6034040Z ✔ App adoption explains that adoption applies to unmanaged Skills (203.439314ms)
+2026-11-04T04:42:36.6036099Z ✔ a failed focused check can be retried without treating its error as absence (208.168333ms)
+2026-11-04T04:42:36.6037892Z ✔ a rejected focused check from before a cancelled action cannot replace the result (288.768456ms)
+2026-11-04T04:42:36.6039534Z ✔ the focused App check shows an inline indicator that does not block keys (188.775651ms)
+2026-11-04T04:42:36.6041217Z ✔ a focused App whose status stays unknown is checked once while focused, not in a loop (482.617032ms)
+2026-11-04T04:42:36.6042795Z ✔ unreadable App tracking state does not hide independently discovered Skills (99.631599ms)
+2026-11-04T04:42:36.6044809Z ✔ an approved recipe without a verified installation record is not listed as an Installation (67.679513ms)
+2026-11-04T04:42:36.6046712Z ✔ key 3 opens the Installations view, listed in the header and footer hints (155.024355ms)
+2026-11-04T04:42:36.6048453Z ✔ u on a user-global installation runs the uninstall flow inside the Installations view (179.079235ms)
+2026-11-04T04:42:36.6050394Z ✔ h on an installation with missing hosts opens the host checklist without leaving the view (176.843496ms)
+2026-11-04T04:42:36.6052302Z ✔ q and number keys are blocked while the adoption flow captures keys (256.036105ms)
+2026-11-04T04:42:36.7651045Z ✔ space marks a leaf, shows the count and toggles it off (221.469053ms)
+2026-11-04T04:42:36.7674743Z ✔ space on a group row says to mark skills (89.870545ms)
+2026-11-04T04:42:36.7705189Z ✔ a marks every visible leaf, marks on collapsed rows stay counted, and a again clears the visible ones (223.022188ms)
+2026-11-04T04:42:36.7714791Z ✔ space and j in one burst mark the row that was highlighted when space was pressed (110.030315ms)
+2026-11-04T04:42:36.7764861Z ✔ bulk TUI uninstall previews, cancels and confirms record-only recovery truthfully (207.01947ms)
+2026-11-04T04:42:36.7767585Z ✔ u with marks shows ONE combined preview with every path, warnings and the skipped project item (266.243023ms)
+2026-11-04T04:42:36.7784601Z ✔ y removes every marked managed and unmanaged skill, skips the project one and keeps its mark (325.323524ms)
+2026-11-04T04:42:36.7786475Z ✔ n on the combined preview cancels everything and keeps the marks (256.520009ms)
+2026-11-04T04:42:36.7788075Z ✔ one failing item does not stop the others and stays marked (307.742362ms)
+2026-11-04T04:42:36.7789809Z ✔ u with only project installations marked explains that nothing can be uninstalled (145.132473ms)
+2026-11-04T04:42:36.7791647Z ✔ h with marks asks the hosts once (the union of what is missing) and previews every item (259.919375ms)
+2026-11-04T04:42:36.7793810Z ✔ y, then one exposure confirmation naming the items, adds the hosts to each item and unmarks them (267.70313ms)
+2026-11-04T04:42:36.7795725Z ✔ several items are applied one after another against the moving records (191.441105ms)
+2026-11-04T04:42:36.7797144Z ✔ n on the exposure confirmation cancels every item (158.76359ms)
+2026-11-04T04:42:36.7798430Z ✔ n on the combined host preview cancels every item (173.933152ms)
+2026-11-04T04:42:36.7799966Z ✔ a host addition that fails does not stop the other items and stays marked (240.262113ms)
+2026-11-04T04:42:36.7824640Z ✔ h with only unmanaged or complete items says why nothing can be added (172.325339ms)
+2026-11-04T04:42:36.7854987Z ✔ the bulk flows capture keys and Esc cancels the host checklist without changes (184.405606ms)
+2026-11-04T04:42:37.1405716Z ✔ an external record change between items fails the remaining uninstalls with a drift reason and leaves their files (374.455896ms)
+2026-11-04T04:42:37.4995643Z ✔ an external record change between items fails the remaining host additions with a drift reason and leaves their files (361.226196ms)
+2026-11-04T04:42:37.7669997Z ✔ u previews a missing record without deletion warnings, cancels, then forgets it and reloads (448.543861ms)
+2026-11-04T04:42:37.7672461Z ✔ full TUI host-checklist removal reports record-only recovery truthfully (296.451076ms)
+2026-11-04T04:42:38.0318471Z ✔ u on a single-host installation previews, confirms and removes it without leaving the view (264.431377ms)
+2026-11-04T04:42:38.2977720Z ✔ the reload after an action says it is refreshing and keeps a single indicator (265.132422ms)
+2026-11-04T04:42:38.6436923Z ✔ the refresh after an action keeps counting the action's elapsed time (345.615621ms)
+2026-11-04T04:42:38.9342000Z ✔ u on an installation with several hosts offers all hosts or a host checklist (290.678449ms)
+2026-11-04T04:42:39.1768827Z ✔ u with all hosts chosen removes the whole installation (242.758549ms)
+2026-11-04T04:42:39.4501093Z ✔ h adds only the missing hosts after two confirmations (272.04446ms)
+2026-11-04T04:42:39.7097085Z ✔ i adds only the missing hosts after two confirmations (260.390335ms)
+2026-11-04T04:42:39.8564771Z ✔ h on an installation that already has every host says so (146.166329ms)
+2026-11-04T04:42:40.0818562Z ✔ the manage flows capture keys and Esc cancels without changes (223.597034ms)
+2026-11-04T04:42:40.2598250Z ✔ u and h ignore group rows and project installations stay read-only (179.054625ms)
+2026-11-04T04:42:40.4160175Z ✔ unapproved App recipes do not appear as Installations alongside managed Skills (157.187636ms)
+2026-11-04T04:42:40.4558328Z ✔ groups unmanaged entries by name as one leaf with the hosts of every location that holds it (262.285545ms)
+2026-11-04T04:42:40.4559578Z ✔ a skill in one root lists only the hosts that read that root (128.72004ms)
+2026-11-04T04:42:40.4563125Z ✔ shows symlinks with their target (149.729405ms)
+2026-11-04T04:42:40.4565695Z ✔ u removes every location of an unmanaged skill after listing each exact path and warning (333.773482ms)
+2026-11-04T04:42:40.4567290Z ✔ n at the preview removes nothing (226.689045ms)
+2026-11-04T04:42:40.4568970Z ✔ the checklist removes only the chosen locations (305.738837ms)
+2026-11-04T04:42:40.4570523Z ✔ removing a symlinked skill removes only the links and keeps the target (263.001693ms)
+2026-11-04T04:42:40.4572170Z ✔ a Claude link to an unmanaged canonical skill is removed together with it (274.640253ms)
+2026-11-04T04:42:40.4574119Z ✔ a location that changed after the preview is kept and the others are still removed (270.670372ms)
+2026-11-04T04:42:40.4575782Z ✔ keys without an action on the highlighted row explain why (184.578035ms)
+2026-11-04T04:42:40.4577037Z ✔ adoption is not available for a symlink (126.856239ms)
+2026-11-04T04:42:40.4578540Z ✔ choosing only the canonical directory also removes the Claude link that would dangle (289.292079ms)
+2026-11-04T04:42:40.4580056Z ✔ a directory is kept when a link that targets it could not be removed (19.301243ms)
+2026-11-04T04:42:40.4581498Z ✔ App declarations hide owned directories and links from the Unmanaged group (120.39084ms)
+2026-11-04T04:42:40.4583036Z ✔ recipe loading failure keeps the Unmanaged group usable and shows a warning (123.940014ms)
+2026-11-04T04:42:40.7316295Z ✔ shows a tree of scope, then Source, then Skills with counts, source and managed state on each leaf (303.217162ms)
+2026-11-04T04:42:40.7325357Z ✔ the legend appears only while a visible row carries adopted or modified (150.750302ms)
+2026-11-04T04:42:40.7327577Z ✔ Enter and the right arrow expand, the left arrow collapses or moves to the parent (140.474333ms)
+2026-11-04T04:42:40.7329328Z ✔ keys pressed in one burst act on the latest tree state (100.870267ms)
+2026-11-04T04:42:40.7330684Z ✔ shows loading, then the empty state (86.288905ms)
+2026-11-04T04:42:40.7332023Z ✔ shows an error when the installation state cannot be read (71.297688ms)
+2026-11-04T04:42:40.7333974Z ✔ missing user-global operations are reported as not supported (68.455009ms)
+2026-11-04T04:42:40.7338176Z ✔ j and k move the highlight across installations (156.159385ms)
+2026-11-04T04:42:40.7340781Z ✔ a long tree renders only the rows that fit, keeps the highlight visible and pages with PgDn (189.06243ms)
+2026-11-04T04:42:40.7364877Z ✔ lists unmanaged user-global Skills in their own section, one leaf per name with its hosts (139.823196ms)
+2026-11-04T04:42:40.7366800Z ✔ A adopts an identical unmanaged Skill after host, version, preview and y (306.084764ms)
+2026-11-04T04:42:40.7368874Z ✔ adoption of a Skill whose content differs shows why and writes nothing (246.274063ms)
+2026-11-04T04:42:40.7370535Z ✔ adoption without a Source Skill of the same name explains why (177.914829ms)
+2026-11-04T04:42:40.7372418Z ✔ adopting with an extra host needs a separate exposure confirmation; n writes nothing (270.764066ms)
+2026-11-04T04:42:40.7374196Z ✔ n at the preview cancels without writing (274.459865ms)
+2026-11-04T04:42:41.0590087Z ✔ adopting with an extra host: two confirmations create the host location and update the record (327.874963ms)
+2026-11-04T04:42:41.3466729Z ✔ declining the exposure confirmation creates no host location (287.489195ms)
+2026-11-04T04:42:41.5877200Z ✔ a content mismatch with an extra host creates no host location (241.799162ms)
+2026-11-04T04:42:41.8684568Z ✔ several Source Skills with the same name open a picker, and the chosen one is adopted (280.481251ms)
+2026-11-04T04:42:42.0768189Z ✔ Esc in the picker adopts nothing (207.94765ms)
+2026-11-04T04:42:42.1758203Z ✔ several keys delivered in a single write are handled one by one (99.41893ms)
+2026-11-04T04:42:42.2874811Z ✔ InstallationsView starts with every scope collapsed and opens each level on demand (111.556847ms)
+2026-11-04T04:42:42.8314722Z ✔ a burst of plain characters is delivered one key at a time, in order (105.444236ms)
+2026-11-04T04:42:42.8316662Z ✔ a pasted URL is delivered character by character (61.354704ms)
+2026-11-04T04:42:42.8318429Z ✔ escape sequences that reach the handler without their ESC are never split (408.682449ms)
+2026-11-04T04:42:42.8320145Z ✔ escape sequences with their ESC do not leak single keys either (166.263347ms)
+2026-11-04T04:42:42.8321813Z ✔ text inside a bracketed paste is still delivered as keys (100.847111ms)
+2026-11-04T04:42:42.8324075Z ✔ text that only looks like a remnant is split into keys again (268.25292ms)
+2026-11-04T04:42:42.8334834Z ✔ Ink decodes Tab and Shift+Tab as navigation keys without leaking sequence bytes (74.769466ms)
+2026-11-04T04:42:42.8344493Z ✔ real terminal remnants are kept whole (961.536368ms)
+2026-11-04T04:42:42.8529826Z ✔ moveCursor moves with arrows and j/k and stays within the list (1.294776ms)
+2026-11-04T04:42:42.8565194Z ✔ read-only preview arrows and page keys move by a page while j/k move one line (0.359875ms)
+2026-11-04T04:42:42.8592190Z ✔ toggleChoice flips one choice and keeps the order of the choices (1.253218ms)
+2026-11-04T04:42:42.8648487Z ✔ hostChecklistKey cancels, moves, toggles by space or digit and submits only a selection (0.569176ms)
+2026-11-04T04:42:42.8684740Z ✔ answerYesNo confirms on y, declines on n or Esc and ignores other keys (0.373009ms)
+2026-11-04T04:42:44.3482918Z ✔ a Claude install disappears from Catalog and shows a verified available update (1577.716358ms)
+2026-11-04T04:42:44.3485350Z ✔ n adds a Git Source, refresh discovers its Package, and i installs it through the shared flow (1639.519731ms)
+2026-11-04T04:42:44.6355828Z ✔ an unversioned Package row reports the host evidence and never guesses the status (267.870552ms)
+2026-11-04T04:42:44.6365046Z ✔ a Package row shows the drift when the bundle no longer resolves (162.978909ms)
+2026-11-04T04:42:44.6367317Z ✔ i previews the frozen install declaration, approves it, then confirms before running (358.993044ms)
+2026-11-04T04:42:44.6368979Z ✔ U updates and u uninstalls an approved Package with one confirmation each (355.734948ms)
+2026-11-04T04:42:44.6370245Z ✔ f forgets only the selection record and runs no host command (225.957724ms)
+2026-11-04T04:42:44.6371429Z ✔ Enter approves the install declaration without executing it (239.347155ms)
+2026-11-04T04:42:44.6372874Z ✔ approval and forget panels page inside a short terminal, and y works from the first page (260.168162ms)
+2026-11-04T04:42:45.0170072Z ✔ n and Esc cancel at every Package confirmation without approving or running (382.221753ms)
+2026-11-04T04:42:45.1137948Z ✔ listing and reloading Packages run no lifecycle step (96.615169ms)
+2026-11-04T04:42:45.1876692Z ✔ a Package list failure is confined to the Packages group (74.275804ms)
+2026-11-04T04:42:45.3309390Z ✔ a Package row is not markable for bulk actions (143.53864ms)
+2026-11-04T04:42:45.6461596Z ✔ export shows grouped choices and exclusions, confirms a new file and refuses replacement (760.01297ms)
+2026-11-04T04:42:45.6465356Z ✔ confirming an import subset preserves the selected item after reindexing (346.32734ms)
+2026-11-04T04:42:45.6468059Z ✔ import warns on newer producers, skips conflicts and adds recipes unapproved without commands (327.096652ms)
+2026-11-04T04:42:45.6470080Z ✔ import reports malformed JSON in the browser without writing or losing navigation (419.443811ms)
+2026-11-04T04:42:45.6471962Z ✔ import reports invalid profile in the browser without writing or losing navigation (389.37468ms)
+2026-11-04T04:42:46.0912903Z ✔ import reports schema-invalid profile in the browser without writing or losing navigation (444.619ms)
+2026-11-04T04:42:47.0918303Z ✔ a directory read error stays recoverable and long export lists are windowed (999.405464ms)
+2026-11-04T04:42:47.4959320Z ✔ import previews recorded method argv and unregistered Sources; declining returns to the checklist (404.794676ms)
+2026-11-04T04:42:48.0197322Z ✔ export renders real group headers and plain exclusions rather than synthetic App checkboxes (523.515486ms)
+2026-11-04T04:42:48.4172215Z ✔ export panel stays inside a resized terminal with wrapped choices and the picker and name stages (397.526452ms)
+2026-11-04T04:42:48.9707741Z ✔ export group selection and numbering survive scrolling, collapse, expansion and resize (552.932096ms)
+2026-11-04T04:42:49.4951907Z ✔ Packages appear in the export checklist and import previews the recorded selection (524.856927ms)
+2026-11-04T04:42:49.9275549Z ✔ v2 replica intent is preview-only and follows the selected import resources (431.546347ms)
+2026-11-04T04:42:50.3438384Z ✔ space and all toggle export choices; e with an empty selection stops before the picker (416.763327ms)
+2026-11-04T04:42:50.5845469Z ✔ the export footer labels keys, names the Esc target, and drops Enter where it does nothing (238.426258ms)
+2026-11-04T04:42:50.9109349Z ✔ Enter on a resource row never starts export; e on any row exports the aggregate (328.713629ms)
+2026-11-04T04:42:51.1975750Z ✔ e exports the aggregate selection from a collapsed group row (284.837641ms)
+2026-11-04T04:42:51.7632655Z ✔ the picker keeps view and quit keys, moves, and the name editor captures text, clears and preserves (566.9287ms)
+2026-11-04T04:42:52.3221880Z ✔ Esc cancels the export checklist and the import browser, and a fresh browse clears the notice (559.161185ms)
+2026-11-04T04:42:52.6775046Z ✔ export refuses an existing file and a dangling symlink at the name stage (354.878212ms)
+2026-11-04T04:42:53.0677882Z ✔ unchecking an exported Source recomputes the subset's omitted-Source warning (390.241804ms)
+2026-11-04T04:42:53.7049968Z ✔ import shows same reasons, keeps them unselectable, and reports Sources and successful and failing Skills (636.535867ms)
+2026-11-04T04:42:54.2605544Z ✔ import can deselect every addition and confirm an empty plan without adding recipes (554.80471ms)
+2026-11-04T04:42:54.8753070Z ✔ busy import ignores view, quit, cancel, toggle and action keys until the runner finishes (615.816036ms)
+2026-11-04T04:42:55.1825536Z ✔ export keeps notes separate from resource selection (306.456991ms)
+2026-11-04T04:42:55.5155906Z ✔ a slow existence check for an older name never confirms after the name is edited (333.663954ms)
+2026-11-04T04:42:55.7444217Z ✔ a pending destination check shows an inline indicator and keys still edit the name (228.556218ms)
+2026-11-04T04:42:55.9872888Z ✔ a failing destination check is reported inline in the name stage (241.799733ms)
+2026-11-04T04:42:56.2566385Z ✔ the Enter that chooses the export folder is not also submitted to the name stage (269.75144ms)
+2026-11-04T04:42:56.2995442Z ✔ n opens an input, Enter adds the Git Source, reloads the list and reports success (218.464349ms)
+2026-11-04T04:42:56.2997560Z ✔ pasting text that starts like an escape remnant keeps it in the URL input (77.207519ms)
+2026-11-04T04:42:56.2999826Z ✔ Esc cancels the add input without calling operations; backspace edits (111.412525ms)
+2026-11-04T04:42:56.3001271Z ✔ add errors are shown and keep the list (103.391123ms)
+2026-11-04T04:42:56.3003077Z ✔ r previews, y confirms and refreshes the highlighted source (117.865877ms)
+2026-11-04T04:42:56.3004665Z ✔ refresh failures use the titled error result panel (104.317563ms)
+2026-11-04T04:42:56.3005840Z ✔ n and Esc cancel a refresh confirmation (158.072682ms)
+2026-11-04T04:42:56.3007157Z ✔ r and d act on the first Git source, never on the fixed built-in row (99.304175ms)
+2026-11-04T04:42:56.3009077Z ✔ d previews, y removes the source and reloads the list (160.000685ms)
+2026-11-04T04:42:56.3015583Z ✔ d is blocked when user-global installations depend on the source (110.156201ms)
+2026-11-04T04:42:56.3017023Z ✔ d says not supported when removal is unavailable (95.584758ms)
+2026-11-04T04:42:56.3018218Z ✔ a busy action ignores other keys (114.962424ms)
+2026-11-04T04:42:56.3019475Z ✔ App shows key hints and q does not quit while typing or confirming (226.67511ms)
+2026-11-04T04:42:56.3020924Z ✔ App ignores q and view keys sent in the same burst as a capturing key (98.954272ms)
+2026-11-04T04:42:56.3022237Z ✔ App does not quit or switch views while an action is busy (171.378639ms)
+2026-11-04T04:42:56.3023915Z ✔ the highlight stays on the same source when a new source sorts before it (115.979122ms)
+2026-11-04T04:42:56.3025585Z ✔ no reload is issued after the view unmounts mid-action (98.752999ms)
+2026-11-04T04:42:56.3027004Z ✔ the header row is outside the list and never highlighted (189.425837ms)
+2026-11-04T04:42:56.3028455Z ✔ space toggles the highlighted source and markers show the selection (98.763064ms)
+2026-11-04T04:42:56.3033074Z ✔ a toggles all Git sources and never marks the built-in source (96.075958ms)
+2026-11-04T04:42:56.3034980Z ✔ r refreshes the selected sources with one combined preview and one confirmation (167.667558ms)
+2026-11-04T04:42:56.3036609Z ✔ one failing refresh does not stop the others and is reported with its reason (120.083727ms)
+2026-11-04T04:42:56.3038049Z ✔ r without a selection refreshes the highlighted source (111.455909ms)
+2026-11-04T04:42:56.3039297Z ✔ d stays single-source even with a selection (126.513917ms)
+2026-11-04T04:42:56.3040605Z ✔ keys sent in one burst move and mark against the latest state (84.116575ms)
+2026-11-04T04:42:56.3041953Z ✔ space, j, space in one burst marks two sources (75.169611ms)
+2026-11-04T04:42:56.3043816Z ✔ a then r in one burst previews every marked source (77.286897ms)
+2026-11-04T04:42:56.3045254Z ✔ j, j, r in one burst previews the source the highlight reached (72.153469ms)
+2026-11-04T04:42:56.3046709Z ✔ several keys delivered in a single write are handled one by one (75.25839ms)
+2026-11-04T04:42:56.3048935Z ✔ Sources lists every recipe status and path without running commands or fetching latest (234.308391ms)
+2026-11-04T04:42:56.3050816Z ✔ Enter previews every step; only y approves and changed content needs approval again (399.917209ms)
+2026-11-04T04:42:56.3053161Z ✔ recipe add guide offers exactly AI and manual routes, and AI reuses confirmed Skill installation (520.701584ms)
+2026-11-04T04:42:56.3055399Z ✔ recipe reload failures stay local and Git Source add keys remain usable (209.528444ms)
+2026-11-04T04:42:56.3057098Z ✔ recipe changes after preview and foreign-platform recipes cannot be approved (462.051107ms)
+2026-11-04T04:42:56.3058709Z ✔ recipe guide captures global number and quit keys in the shell (311.274568ms)
+2026-11-04T04:42:56.3060358Z ✔ core approval status is explicit and reads no executables, commands or latest (17.298196ms)
+2026-11-04T04:42:56.3061935Z ✔ Git Sources and recipes share one bounded list and cursor without Tab (323.89017ms)
+2026-11-04T04:42:56.3064058Z ✔ invalid recipes cannot open approval and moving the cursor clears action errors (180.515046ms)
+2026-11-04T04:42:56.3066065Z ✔ an unmanaged recipe Skill skips installation and goes straight to the agent prompt (171.184505ms)
+2026-11-04T04:42:56.3067890Z ✔ one cursor dispatches contextual actions for Skill Sources and App recipes (403.951458ms)
+2026-11-04T04:42:56.3069452Z ✔ n cancels recipe Skill installation at host without installing (193.26756ms)
+2026-11-04T04:42:56.3070967Z ✔ Esc cancels recipe Skill installation at host without installing (234.190607ms)
+2026-11-04T04:42:56.3072463Z ✔ n cancels recipe Skill installation at scope without installing (229.253812ms)
+2026-11-04T04:42:56.3074588Z ✔ Esc cancels recipe Skill installation at scope without installing (225.211491ms)
+2026-11-04T04:42:56.3076274Z ✔ n cancels recipe Skill installation at version without installing (217.279059ms)
+2026-11-04T04:42:56.3078136Z ✔ Esc cancels recipe Skill installation at version without installing (226.63725ms)
+2026-11-04T04:42:56.3079792Z ✔ n cancels recipe Skill installation at confirm without installing (258.809948ms)
+2026-11-04T04:42:56.3086001Z ✔ Esc cancels recipe Skill installation at confirm without installing (279.660513ms)
+2026-11-04T04:42:56.3087697Z ✔ n can add the first App recipe and closing the guide reloads the unified list (172.968365ms)
+2026-11-04T04:42:56.3089342Z ✔ d removes an uninstalled recipe only after preview and confirmation (371.34365ms)
+2026-11-04T04:42:56.3090713Z ✔ declining optional uninstall cancels recipe removal (139.219547ms)
+2026-11-04T04:42:56.3092218Z ✔ successful optional uninstall is followed by separate recipe removal confirmation (232.639617ms)
+2026-11-04T04:42:56.3093776Z ✔ failed optional uninstall retains the recipe (199.586876ms)
+2026-11-04T04:42:56.3095241Z ✔ manual uninstall requires attestation and verified absence before recipe deletion (263.061406ms)
+2026-11-04T04:42:56.3096916Z ✔ Sources footer follows a single cursor and hides unsupported recipe mark actions (274.486285ms)
+2026-11-04T04:42:56.3098515Z ✔ removal approval gates version checks before any uninstall or deletion (372.544964ms)
+2026-11-04T04:42:56.3100374Z ✔ SourcesView shows a loading state before sources resolve (116.383279ms)
+2026-11-04T04:42:56.3106429Z ✔ SourcesView lists id, kind and url of each source (72.689537ms)
+2026-11-04T04:42:56.3108651Z ✔ SourcesView shows an empty Git state, with or without the built-in source (128.836282ms)
+2026-11-04T04:42:56.3111036Z ✔ SourcesView shows the built-in source as a fixed row above the list that is never highlighted (69.220354ms)
+2026-11-04T04:42:56.3112594Z ✔ SourcesView shows the error message when loading fails (57.173677ms)
+2026-11-04T04:42:56.3114237Z ✔ SourcesView moves the selection with arrows and j/k, clamped to the list (102.170914ms)
+2026-11-04T04:42:56.3115961Z ✔ theme carries Xeo colors through explicit semantic roles (1.826733ms)
+2026-11-04T04:42:56.3117414Z ✔ separatorLine fills the terminal width with a fallback (0.20323ms)
+2026-11-04T04:42:56.3119205Z ✔ all groups start collapsed (1.907785ms)
+2026-11-04T04:42:56.3120557Z ✔ empty groups also remain collapsed by default (0.271088ms)
+2026-11-04T04:42:56.3122144Z ✔ flattenVisible reports depth, parent, expandability and state (0.393517ms)
+2026-11-04T04:42:56.3124020Z ✔ expand, toggle and collapse never mutate the input and ignore leaves (0.284152ms)
+2026-11-04T04:42:56.3126129Z ✔ collapseOrParent collapses an open node, else moves selection to the parent (0.334858ms)
+2026-11-04T04:42:56.3127948Z ✔ resolveSelection follows the stable id, else falls back to the bounded index (0.422799ms)
+2026-11-04T04:42:56.3129656Z ✔ selection survives collapsing an ancestor by moving to it (0.241042ms)
+2026-11-04T04:42:56.3131172Z ✔ App updates preview the loaded check and apply verified versions (322.710479ms)
+2026-11-04T04:42:56.3132763Z ✔ manual App updates verify normalized version change: v1.0.0+build (239.365434ms)
+2026-11-04T04:42:56.3134944Z ✔ manual App updates verify normalized version change: 1.5.0 (228.170757ms)
+2026-11-04T04:42:56.3136535Z ✔ r rechecks installed Apps; an invalid recipe is excluded from Updates (182.813309ms)
+2026-11-04T04:42:56.3138120Z ✔ spawn failure guides manual completion and declining continues the batch (232.628887ms)
+2026-11-04T04:42:56.3139463Z ✔ Skill state failure does not hide App updates (96.065977ms)
+2026-11-04T04:42:56.3140788Z ✔ App directory failure has its own error without failing Skill scopes (128.770085ms)
+2026-11-04T04:42:56.3142273Z ✔ recipe changes after preview refuse execution and preserve tracking (187.113225ms)
+2026-11-04T04:42:56.3143827Z ✔ spawn fallback explains why the manual step is needed (231.024518ms)
+2026-11-04T04:42:56.3145367Z ✔ unmount cancels pending manual evidence instead of leaving the batch waiting (213.490873ms)
+2026-11-04T04:42:57.9682911Z ✔ Updates and shared confirmation panels use semantic Xeo colors (5010.496146ms)
+2026-11-04T04:42:57.9862493Z ✔ lists only updatable items, counts the up-to-date ones and folds the unassessable into one line (294.683083ms)
+2026-11-04T04:42:57.9864977Z ✔ Enter on the cannot-be-checked line lists each item with its reason, and left collapses it (272.978296ms)
+2026-11-04T04:42:57.9867397Z ✔ never offers a built-in Skill installed by a newer Agent Depot and says why (175.938216ms)
+2026-11-04T04:42:57.9869001Z ✔ shows the empty state and the error state (220.189994ms)
+2026-11-04T04:42:57.9870480Z ✔ the scope filter defaults to all and t, p and g switch it without checking again (156.802908ms)
+2026-11-04T04:42:57.9871976Z ✔ a pasted prototype property name never changes the scope filter (173.01309ms)
+2026-11-04T04:42:57.9874370Z ✔ changing the scope filter drops selected items so nothing hidden is applied (125.094738ms)
+2026-11-04T04:42:57.9875978Z ✔ the elapsed time of a check keeps running when it moves from refreshing to checking (87.389191ms)
+2026-11-04T04:42:57.9878382Z ✔ refreshes the Git sources involved before the assessment, showing a busy state and then when it checked (98.584331ms)
+2026-11-04T04:42:57.9880151Z ✔ refreshes each distinct Git source once even when installed in both scopes (97.361097ms)
+2026-11-04T04:42:57.9881658Z ✔ u previews the selected batch and n cancels without running an update (185.921201ms)
+2026-11-04T04:42:57.9882874Z ✔ r refreshes the sources again and rechecks (131.695229ms)
+2026-11-04T04:42:57.9884670Z ✔ a failed refresh is reported per source and the check still runs on the current data (99.586869ms)
+2026-11-04T04:42:57.9885993Z ✔ says so when there is no Git source to refresh (95.577615ms)
+2026-11-04T04:42:57.9886970Z ✔ formats the age of the check (0.407313ms)
+2026-11-04T04:42:57.9887848Z ✔ the age of the check follows the clock (105.495934ms)
+2026-11-04T04:42:57.9889240Z ✔ space toggles updatable items only, a selects all of them, Enter needs a selection (148.331391ms)
+2026-11-04T04:42:57.9890975Z ✔ previews the update, writes nothing before y, then reports and reloads without refreshing again (187.372377ms)
+2026-11-04T04:42:57.9892770Z ✔ n cancels the preview and leaves the files untouched (156.844658ms)
+2026-11-04T04:42:57.9894720Z ✔ warns about local modifications in the preview (188.802949ms)
+2026-11-04T04:42:57.9896577Z ✔ previews the external command and runs it only after y (202.865745ms)
+2026-11-04T04:42:57.9898200Z ✔ a non-canonical location needs a second confirmation naming the exact path (277.646468ms)
+2026-11-04T04:42:57.9900267Z ✔ continues after one item fails and reports the reason per item (208.406352ms)
+2026-11-04T04:42:57.9901896Z ✔ one preview and confirmation applies project and user-global updates together (236.423313ms)
+2026-11-04T04:42:57.9903680Z ✔ the same Skill installed in both scopes is two separate selectable items (111.859123ms)
+2026-11-04T04:42:58.1286993Z ✔ reports capturing while refreshing and previewing, and not while browsing (143.262499ms)
+2026-11-04T04:42:58.3810502Z ✔ key 4 opens the Updates view; q and number keys are ignored while confirming (252.018369ms)
+2026-11-04T04:42:58.5182702Z ✔ the footer names the scope keys and the check (137.155759ms)
+2026-11-04T04:42:58.6348851Z ✔ windows a long list of updates around the highlight and pages with PgDn (116.021775ms)
+2026-11-04T04:42:58.7206986Z ✔ a refresh phase that cannot read the installations says so instead of claiming there was nothing to refresh (86.218877ms)
+2026-11-04T04:42:58.7398944Z ✔ a non-canonical path is confirmed per scope and path: the other scope's confirmation of the same string does not count (19.244431ms)
+2026-11-04T04:42:58.9175263Z ✔ the confirm-paths panel labels each path with its scope (177.609832ms)
+2026-11-04T04:42:59.0669671Z ✔ a Skill that became locally modified after the preview is not overwritten (149.366267ms)
+2026-11-04T04:42:59.2016797Z ✔ an item whose preview failed is excluded from the apply and its files stay untouched (134.733691ms)
+2026-11-04T04:42:59.3396397Z ✔ with a scope filter active, y applies only the visible items and leaves the hidden ones' files untouched (137.667656ms)
+2026-11-04T04:42:59.4645746Z ✔ after a failed refresh the apply works on the current data and the view said the data was not fresh (124.863104ms)
+2026-11-04T04:42:59.5414600Z ✔ keys sent in one burst move and select against the latest state (76.895444ms)
+2026-11-04T04:42:59.6368386Z ✔ j, j, space, Enter in one burst previews the item the highlight reached (95.350688ms)
+2026-11-04T04:42:59.7159447Z ✔ a scope key followed by navigation in one burst acts on the filtered list (79.042755ms)
+2026-11-04T04:42:59.7905072Z ✔ the right arrow and j in one burst move within the expanded cannot-be-checked lines (74.33186ms)
+2026-11-04T04:42:59.8755739Z ✔ several keys delivered in a single write are handled one by one (85.056037ms)
+2026-11-04T04:43:00.0495120Z ✔ mixed Skills and Apps continue after App failure with a combined summary (173.614017ms)
+2026-11-04T04:43:00.1832027Z ✔ App inventory failure leaves user-global Skill updates available (133.792043ms)
+2026-11-04T04:43:00.3214969Z ✔ a recorded Package joins the batch, previews its frozen plan and approves before updating (138.209602ms)
+2026-11-04T04:43:00.3910300Z ✔ an unknown Package is folded with its reason and is never offered as an update (69.555502ms)
+2026-11-04T04:43:00.4164586Z ✔ list height keeps the default minimum, allows a lower picker minimum, and preserves overrides (114.098163ms)
+2026-11-04T04:43:00.4166352Z ✔ 80-column tab layout keeps every numbered destination on one line (0.473197ms)
+2026-11-04T04:43:00.4167881Z ✔ 40-column tab layout wraps without dropping any numbered destination (0.400841ms)
+2026-11-04T04:43:00.4169404Z ✔ computeWindow shows everything without an indicator when the list fits (1.493938ms)
+2026-11-04T04:43:00.4171149Z ✔ computeWindow keeps the selection visible at the top, middle and end with a correct indicator (0.36797ms)
+2026-11-04T04:43:00.4172798Z ✔ computeWindow never renders less than one row and clamps an out-of-range selection (0.315591ms)
+2026-11-04T04:43:00.4174993Z ✔ preview confirmation follows the rendered physical rows at the viewport end (2.743208ms)
+2026-11-04T04:43:00.4177027Z ✔ preview viewport wraps complete long terms and responds to the latest terminal dimensions (39.284486ms)
+2026-11-04T04:43:00.4178868Z ✔ preview viewport offsets preserve grapheme text through CJK, combining marks and emoji wraps (1.888709ms)
+2026-11-04T04:43:00.4180521Z ✔ preview chrome wraps long approval names into the shared viewport geometry (2.535108ms)
+2026-11-04T04:43:00.4182014Z ✔ pageStep is the window height, at least one row (0.230362ms)
+2026-11-04T04:43:00.4183564Z ✔ SourcesView renders only the rows that fit and keeps the highlighted row visible (358.656596ms)
+2026-11-04T04:43:00.4184924Z ✔ formatElapsed hides the first second, then counts seconds and minutes (1.296499ms)
+2026-11-04T04:43:00.4186033Z ✔ animation is off only for AGENT_DEPOT_NO_ANIMATION=1 (0.234138ms)
+2026-11-04T04:43:00.4186963Z ✔ isWorkingFrame tells a Working line from content (0.352941ms)
+2026-11-04T04:43:00.4188275Z ✔ isBusy finds a Working line anywhere in a shell frame but not footer separators (0.359152ms)
+2026-11-04T04:43:00.4189642Z ✔ Working advances the spinner frame while animating (200.140333ms)
+2026-11-04T04:43:00.4190746Z ✔ Working shows elapsed time only from one second on (207.128255ms)
+2026-11-04T04:43:00.4191952Z ✔ Working keeps counting from `since` when the label changes (144.245658ms)
+2026-11-04T04:43:00.4193143Z ✔ Working without animation is one static line with no timer (236.636529ms)
+2026-11-04T04:43:00.4194817Z ✔ Working clears an unref'd timer on unmount (36.167765ms)
+2026-11-04T04:43:00.4196063Z ✔ busy keeps the start time of an operation already busy and restarts otherwise (1.517222ms)
+2026-11-04T04:43:00.4197744Z ✔ the inventory lists unmanaged symlinks separately and keeps them out of the removal candidates (33.059961ms)
+2026-11-04T04:43:00.4199156Z ✔ removes only the symbolic link and keeps its target (14.380823ms)
+2026-11-04T04:43:00.4200442Z ✔ refuses a real directory, a relative path and a managed location (12.385428ms)
+2026-11-04T04:43:00.4201836Z ✔ does not remove a link that was replaced or retargeted after the inspection (12.276245ms)
+2026-11-04T04:43:00.4203516Z ✔ does not remove a link when the managed records changed after the inspection (15.600476ms)
+2026-11-04T04:43:00.4205162Z ✔ does not remove anything when the link is swapped for a real directory after the recheck (14.894904ms)
+2026-11-04T04:43:00.4207091Z ✔ does not remove a link replaced by another link that reuses the same dev:ino but has a different birth time (16.924617ms)
+2026-11-04T04:43:00.4209492Z ✔ does not remove a link replaced by another link that reuses the same dev:ino but has a different size (18.558427ms)
+2026-11-04T04:43:00.4211165Z ✔ assesses latest built-in updates from the immutable current snapshot (4.087727ms)
+2026-11-04T04:43:00.4212609Z ✔ treats skill-relative agents support files as portable update content (1.180441ms)
+2026-11-04T04:43:00.4214314Z ✔ treats a latest installation with matching version and baseline as current (0.60324ms)
+2026-11-04T04:43:00.4216040Z ✔ never proposes a downgrade when the running Agent Depot is older than the installed built-in Skill (0.68301ms)
+2026-11-04T04:43:00.4217922Z ✔ reports a built-in Skill pinned to another Agent Depot version as unknown, naming both versions (0.595776ms)
+2026-11-04T04:43:00.4219605Z ✔ compares built-in versions as semver, so a prerelease installed before its release still updates (1.957567ms)
+2026-11-04T04:43:00.4221002Z ✔ uses the supplied baseline calculator and detects changed content at the same version (0.638496ms)
+2026-11-04T04:43:00.4222499Z ✔ fixed policy is current only at its fixed target and unknown when the source snapshot disagrees (1.586051ms)
+2026-11-04T04:43:00.4224260Z ✔ a missing installation baseline is unknown even when version evidence matches (0.711052ms)
+2026-11-04T04:43:00.4225309Z ✔ malformed runtime selections fail closed without aborting valid entries (0.78497ms)
+2026-11-04T04:43:00.4225993Z ✔ a malformed tree snapshot does not abort independent entries (0.620592ms)
+2026-11-04T04:43:00.4226755Z ✔ latest external selections require trustworthy installed and current version evidence (3.272499ms)
+2026-11-04T04:43:00.4227751Z ✔ legacy or uninstalled selections are unknown and never updateable (0.399017ms)
+2026-11-04T04:43:00.4228410Z ✔ assesses all entries independently and preserves input order (0.619741ms)
+2026-11-04T04:43:00.4229058Z ✔ selects all updateable entries or a validated subset only (1.055827ms)
+2026-11-04T04:43:00.4229918Z ✔ rejects malformed runtime mode requests instead of selecting all updateable entries (0.410449ms)
+2026-11-04T04:43:00.4230721Z ✔ accepts a parsed project manifest without invoking a CLI or update executor (0.571881ms)
+2026-11-04T04:43:00.4231517Z ✔ scans only immediate real Skill directories and classifies persisted managed paths (36.517092ms)
+2026-11-04T04:43:00.4232332Z ✔ deduplicates a managed Claude exposure without hiding a separate real duplicate (14.344617ms)
+2026-11-04T04:43:00.4233242Z ✔ treats a Claude symlink to the same-name canonical directory of a listed unmanaged Skill as an exposure (8.558801ms)
+2026-11-04T04:43:00.4234496Z ✔ still reports Claude symlinks that are not a same-name exposure of a listed canonical Skill (11.671032ms)
+2026-11-04T04:43:00.4235420Z ✔ preserves noncanonical adoption and path normalization while exposing a same-name real copy (7.715813ms)
+2026-11-04T04:43:00.4236205Z ✔ protects canonical and Claude alias paths during unmanaged removal (18.742565ms)
+2026-11-04T04:43:00.4236992Z ✔ matches managed paths and transient exclusions with Windows-like case differences (7.935913ms)
+2026-11-04T04:43:00.4237832Z ✔ reports unsafe links and malformed Skill files instead of making them removal candidates (10.996017ms)
+2026-11-04T04:43:00.4238606Z ✔ excludes Agent Depot backup and staging names without traversing them (13.119933ms)
+2026-11-04T04:43:00.4239296Z ✔ rechecks unmanaged content and identity before permanent deletion (12.690508ms)
+2026-11-04T04:43:00.4239962Z ✔ moves an unmanaged tree to same-parent staging before deleting it (19.986531ms)
+2026-11-04T04:43:00.4240581Z ✔ restores the original path when staging deletion fails (24.088336ms)
+2026-11-04T04:43:00.4241370Z ✔ restores a staged tree when permanent deletion fails and retains it when restoration is uncertain (39.073451ms)
+2026-11-04T04:43:00.4242156Z ✔ rejects a symlinked global root ancestor before scanning or removal (16.179465ms)
+2026-11-04T04:43:00.4242865Z ✔ reports a symlinked global root as unsafe and does not scan through it (14.907969ms)
+2026-11-04T04:43:00.4243943Z ✔ app declarations exclude directories and links before inspecting their content, without approval (18.934387ms)
+2026-11-04T04:43:00.4244909Z ✔ ownership matches whole names case-sensitively with only star special and only applicable recipes (31.71475ms)
+2026-11-04T04:43:00.4245734Z ✔ invalid recipes warn by file without disabling valid ownership exclusions (28.515441ms)
+2026-11-04T04:43:00.4246433Z ✔ the package version is a semantic version read from package.json (6.183322ms)
+2026-11-04T04:43:00.4247439Z ✔ --version prints only the package version and exits 0 (3.840017ms)
+2026-11-04T04:43:00.4248054Z ✔ -v prints only the package version and exits 0 (1.106683ms)
+2026-11-04T04:43:00.4248554Z ✔ --version does not accept extra arguments (0.647363ms)
+2026-11-04T04:43:00.4249147Z ✔ --help prints the usage to stdout without an error prefix and exits 0 (0.517169ms)
+2026-11-04T04:43:00.4249822Z ✔ -h prints the usage to stdout without an error prefix and exits 0 (0.298769ms)
+2026-11-04T04:43:00.4250480Z ✔ help prints the usage to stdout without an error prefix and exits 0 (0.264656ms)
+2026-11-04T04:43:00.4251133Z ✔ a bare invocation and help with extra arguments stay usage errors (0.58698ms)
+2026-11-04T04:43:00.4251841Z ✔ Windows resolution skips the extensionless npm sh shim and picks name.cmd (20.009005ms)
+2026-11-04T04:43:00.4252588Z ✔ Windows resolution accepts a name that already carries a PATHEXT extension (2.51974ms)
+2026-11-04T04:43:00.4253566Z ✔ Windows resolution reports nothing when only the extensionless shim exists (1.960182ms)
+2026-11-04T04:43:00.4254530Z ✔ a Windows batch file runs through cmd.exe with escaped verbatim arguments (0.685444ms)
+2026-11-04T04:43:00.4255227Z ✔ a Windows batch file path with metacharacters is escaped for cmd.exe (0.216686ms)
+2026-11-04T04:43:00.4255828Z ✔ executables and non-Windows hosts spawn directly (0.24548ms)
+2026-11-04T04:43:00.4256390Z ✔ batch-file arguments follow the MSVCRT backslash rule (0.263143ms)
+2026-11-04T04:43:00.4257093Z ✔ a long backslash run before a quote is encoded exactly (0.605845ms)
+2026-11-04T04:43:00.4257823Z ✔ batch-file arguments cmd.exe could misparse are rejected with EINVAL naming the index (1.103217ms)
+2026-11-04T04:43:00.4258613Z ✔ the batch-file runner is ComSpec, falling back to cmd.exe when unset or empty (0.434864ms)
+2026-11-04T04:43:00.4259411Z ✔ Windows resolution falls back to the default PATHEXT when it is empty or blank (5.676093ms)
+2026-11-04T04:43:00.4260507Z ﹣ runProcess round-trips arguments byte-identically through a real .cmd in a path with a space and (x86) (0.146815ms) # needs cmd.exe to run a real batch file
+2026-11-04T04:43:00.4261197Z ℹ tests 1183
+2026-11-04T04:43:00.4261414Z ℹ suites 1
+2026-11-04T04:43:00.4261622Z ℹ pass 1176
+2026-11-04T04:43:00.4261829Z ℹ fail 1
+2026-11-04T04:43:00.4262032Z ℹ cancelled 0
+2026-11-04T04:43:00.4262243Z ℹ skipped 6
+2026-11-04T04:43:00.4262446Z ℹ todo 0
+2026-11-04T04:43:00.4262685Z ℹ duration_ms 56300.129499
+2026-11-04T04:43:00.4262844Z 
+2026-11-04T04:43:00.4262964Z ✖ failing tests:
+2026-11-04T04:43:00.4263090Z 
+2026-11-04T04:43:00.4263490Z test at dist/tests/cli-progress.test.js:143:1
+2026-11-04T04:43:00.4264102Z ✖ source remove shows inspection, file removal and Source removal (68.257744ms)
+2026-11-04T04:43:00.4264693Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+2026-11-04T04:43:00.4265121Z   + actual - expected
+2026-11-04T04:43:00.4265338Z   
+2026-11-04T04:43:00.4265517Z     [
+2026-11-04T04:43:00.4265760Z       'Inspecting 1 Skill for removal',
+2026-11-04T04:43:00.4266054Z       'Removing Skill files',
+2026-11-04T04:43:00.4266395Z   +   'Revalidating Skill records before Source removal',
+2026-11-04T04:43:00.4266795Z       'Removing Git Source git:7f7fdc44f731cc1634523a5f'
+2026-11-04T04:43:00.4267097Z     ]
+2026-11-04T04:43:00.4267266Z   
+2026-11-04T04:43:00.4267762Z       at assertProgress (file:///home/runner/work/agent-depot/agent-depot/dist/tests/cli-progress.test.js:82:12)
+2026-11-04T04:43:00.4268650Z       at async TestContext.<anonymous> (file:///home/runner/work/agent-depot/agent-depot/dist/tests/cli-progress.test.js:144:5)
+2026-11-04T04:43:00.4269311Z       at async Test.run (node:internal/test_runner/test:1409:7)
+2026-11-04T04:43:00.4269825Z       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+2026-11-04T04:43:00.4270255Z     generatedMessage: true,
+2026-11-04T04:43:00.4270507Z     code: 'ERR_ASSERTION',
+2026-11-04T04:43:00.4271264Z     actual: [ 'Inspecting 1 Skill for removal', 'Removing Skill files', 'Revalidating Skill records before Source removal', 'Removing Git Source git:7f7fdc44f731cc1634523a5f' ],
+2026-11-04T04:43:00.4272303Z     expected: [ 'Inspecting 1 Skill for removal', 'Removing Skill files', 'Removing Git Source git:7f7fdc44f731cc1634523a5f' ],
+2026-11-04T04:43:00.4272872Z     operator: 'deepStrictEqual',
+2026-11-04T04:43:00.4273127Z     diff: 'simple'
+2026-11-04T04:43:00.4273536Z   }
+2026-11-04T04:43:00.4564898Z [ELIFECYCLE] Test failed. See above for more details.
+2026-11-04T04:43:00.4875293Z ##[error]Process completed with exit code 1.
+2026-11-04T04:43:00.4997236Z Post job cleanup.
+2026-11-04T04:43:00.6630027Z Pruning is unnecessary.
+2026-11-04T04:43:00.6785809Z Post job cleanup.
+2026-11-04T04:43:00.7792930Z [command]/usr/bin/git version
+2026-11-04T04:43:00.7854206Z git version 2.56.0
+2026-11-04T04:43:00.7907253Z Temporarily overriding HOME='/home/runner/work/_temp/a3660cf4-dac5-4c96-980e-51657e4b2ebf' before making global git config changes
+2026-11-04T04:43:00.7922677Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-04T04:43:00.7925000Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/agent-depot/agent-depot
+2026-11-04T04:43:00.7970252Z Removing SSH command configuration
+2026-11-04T04:43:00.7971163Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-04T04:43:00.8017972Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-04T04:43:00.8417185Z Removing HTTP extra header
+2026-11-04T04:43:00.8429612Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-04T04:43:00.8488640Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-04T04:43:00.8874921Z Removing includeIf entries pointing to credentials config files
+2026-11-04T04:43:00.8882394Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-04T04:43:00.8914238Z includeif.gitdir:/home/runner/work/agent-depot/agent-depot/.git.path
+2026-11-04T04:43:00.8915484Z includeif.gitdir:/home/runner/work/agent-depot/agent-depot/.git/worktrees/*.path
+2026-11-04T04:43:00.8916492Z includeif.gitdir:/github/workspace/.git.path
+2026-11-04T04:43:00.8917351Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-04T04:43:00.8925140Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/agent-depot/agent-depot/.git.path
+2026-11-04T04:43:00.8949528Z /home/runner/work/_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config
+2026-11-04T04:43:00.8959503Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/agent-depot/agent-depot/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-20107ede\-0698\-4822\-8ccf\-83ad94dcf579\.config
+2026-11-04T04:43:00.9001258Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/agent-depot/agent-depot/.git/worktrees/*.path
+2026-11-04T04:43:00.9033518Z /home/runner/work/_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config
+2026-11-04T04:43:00.9044693Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/agent-depot/agent-depot/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-20107ede\-0698\-4822\-8ccf\-83ad94dcf579\.config
+2026-11-04T04:43:00.9078970Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-11-04T04:43:00.9102952Z /github/runner_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config
+2026-11-04T04:43:00.9110547Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-20107ede\-0698\-4822\-8ccf\-83ad94dcf579\.config
+2026-11-04T04:43:00.9144241Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-04T04:43:00.9168479Z /github/runner_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config
+2026-11-04T04:43:00.9178336Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-20107ede\-0698\-4822\-8ccf\-83ad94dcf579\.config
+2026-11-04T04:43:00.9216135Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-04T04:43:00.9494029Z Removing credentials config '/home/runner/work/_temp/git-credentials-20107ede-0698-4822-8ccf-83ad94dcf579.config'
+2026-11-04T04:43:00.9653732Z Cleaning up orphan processes

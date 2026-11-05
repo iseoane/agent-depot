@@ -1,0 +1,659 @@
+{
+  "repository": "C:\\0-BackupVF\\WorkSpace\\agent-depot",
+  "gitExecutable": "C:\\Program Files\\Git\\ucrt64\\bin\\git.exe",
+  "baseSha": "ca2242730380788d49e36a35a8974420df5cbdb0",
+  "candidateSha": "01ff29264cf8cbb9164e10986bad5edb7fab5ed2",
+  "sourceDelta": "docs/agents/workflows.md",
+  "operations": [
+    {
+      "operation": "identity",
+      "status": "ok"
+    },
+    {
+      "operation": "diff",
+      "status": "ok",
+      "patchBytes": 33309,
+      "patchSha256": "52550351ce5457bc20e9dd14e1fd69ff195fda04bcc4764c988b4e40bb0ffaaf"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "AGENTS.md",
+      "status": "ok",
+      "bytes": 1148,
+      "sha256": "1fec3520a690ee5734facb914ccaefdf92ed197df15efe5f325ef6a3cef3ffef"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "CONTEXT.md",
+      "status": "ok",
+      "bytes": 7776,
+      "sha256": "d99411841ec39689d831db7953caa0c6a179f9a2f64cfbc439b1990fed3ca5a5"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "DESIGN.md",
+      "status": "ok",
+      "bytes": 18361,
+      "sha256": "4b4f57051054866ab8eb61d65b8ffb228fddd715e297f9206f72d85e69cffb8c"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "docs/agents/domain.md",
+      "status": "ok",
+      "bytes": 877,
+      "sha256": "ff9e7740b3ba7b52d0872314e4c5331527d194d1685186b628119218c27d3d8a"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "docs/agents/workflows.md",
+      "status": "ok",
+      "bytes": 1969,
+      "sha256": "989f0db22602ca7a20d5cc44c4f75a05083ea4bd8e3cbc318f850a30fb000cfa"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "docs/adr/0006-shared-core-module-per-write-flow.md",
+      "status": "ok",
+      "bytes": 796,
+      "sha256": "4d3ba759740141b7ba0ce5eff3bc0258cea4b42bca084ca3da99cdf22ce29ed3"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "docs/adr/0009-delegate-package-lifecycle-to-host-clis.md",
+      "status": "ok",
+      "bytes": 8236,
+      "sha256": "e42c2d68fe83cf8c0bd0fa5b0be6e3c7053338f0fe1f568f5240d979f07193d4"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-bundles.ts",
+      "status": "ok",
+      "bytes": 28306,
+      "sha256": "b0c9006a65a27e5ce75878065f3217dca0da0b4f229749bded55bddfabe71ece"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-cli.ts",
+      "status": "ok",
+      "bytes": 21697,
+      "sha256": "b1a5a396aa22d557ba7070c1b503f3895e5775d3cbc89c0d21817ba58205a4a6"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-flow.ts",
+      "status": "ok",
+      "bytes": 36871,
+      "sha256": "05e628388988534e25d1e40765afab76e46a9938f05851224cc3a2172a6b4cc7"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-host-plans.ts",
+      "status": "ok",
+      "bytes": 13574,
+      "sha256": "3502c82bd37be6cc49912acdcd33bda3d25dbbaa3f07ee8e612e906fa2e33c0b"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-model.ts",
+      "status": "ok",
+      "bytes": 8268,
+      "sha256": "e079025fce00734dc9713a7a0f170e1666152dd96d94d555df84fab6000cfced"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-host-state.ts",
+      "status": "ok",
+      "bytes": 30403,
+      "sha256": "9bdb3984ed88f560353a85373dd3c73eea277628b4a835df83e2037c7a62bea6"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-state.ts",
+      "status": "ok",
+      "bytes": 19488,
+      "sha256": "be50694c98ffae5c36e3c04e3e8665f74ab314364f632686e64fbb9575ccf25e"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-content.ts",
+      "status": "ok",
+      "bytes": 8812,
+      "sha256": "41ea94f789656d1760d8b03e26bbeb2ac900e26c4cf38f09dd4950d41310079f"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/package-owned-skills.ts",
+      "status": "ok",
+      "bytes": 8267,
+      "sha256": "2e5a57ddec73f4291d289525ddbbe502bda35c37baa29a9d9d226493315920dd"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/app-version.ts",
+      "status": "ok",
+      "bytes": 1726,
+      "sha256": "5c0487c04c622a1c0dabd8911b4ddf7800529adf4bdc09aeae7801a8595368a4"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/git-source.ts",
+      "status": "ok",
+      "bytes": 25845,
+      "sha256": "d890f6019dfd2133d4078c1e9711b38f6ef24956155fffdf2cf94e2f3b704753"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/tui/installations-rows.tsx",
+      "status": "ok",
+      "bytes": 3766,
+      "sha256": "cf2ec4537b9d9e06829d4fa89346d58782e4cd928860177319d3e3e4c0462487"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/tui/package-rows.ts",
+      "status": "ok",
+      "bytes": 6278,
+      "sha256": "2435d43f404b6bf9e6e2479871ea201d6c4b40b9479e9908b9093cfab48a9d12"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/tui/updates-panel.tsx",
+      "status": "ok",
+      "bytes": 6755,
+      "sha256": "373e52defbbca116a0f40a82d1d10e28e93aeb382c5c2144c617aece57c6dcb6"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/tui/updates.ts",
+      "status": "ok",
+      "bytes": 21521,
+      "sha256": "1bb3f5fd1f6ab4c3b7da1ca156a7ba1414f563af6834b1c80aff0af5e7f85c31"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/tui/updates-model.ts",
+      "status": "ok",
+      "bytes": 3840,
+      "sha256": "08c18527d771e5ce1bcf79915ff4b9c3f6bd5156fe5df873aa8febc9f9531a2d"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/tui/updates-flow.ts",
+      "status": "ok",
+      "bytes": 5363,
+      "sha256": "d54ad3a34284208f305c8b4e8d1f1b819bc0266ef15a0d52478d8811d77f0931"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "src/tui/package-actions.tsx",
+      "status": "ok",
+      "bytes": 10663,
+      "sha256": "689c4ef3fde429c086635d7b87926f4754450799179d9f524bb9d2f39b3a13e3"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/package-evidence.test.ts",
+      "status": "absent"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/package-flow.test.ts",
+      "status": "ok",
+      "bytes": 32561,
+      "sha256": "25245407080204229b63efd634e39c6dd01fc9c49de2f397b59e1328110c64e6"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/package-bundles.test.ts",
+      "status": "ok",
+      "bytes": 15793,
+      "sha256": "f7ad0b7124e6bfb2396dad39640c97bbd8239f739692d8be37324b79bcd213d8"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/tui-updates-view.test.tsx",
+      "status": "ok",
+      "bytes": 51283,
+      "sha256": "16495c1e01718926766cc8597fa1f223afb4b789374ce8efc3fcac0c71f204d2"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/package-host-plans.test.ts",
+      "status": "ok",
+      "bytes": 14911,
+      "sha256": "d156a33d6f0de29f0fb5e8ec4fb7fe7739fadc3ff33729408db9f218b7d80d70"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/package-cli.test.ts",
+      "status": "ok",
+      "bytes": 22394,
+      "sha256": "34a2cac261c2010d604c231e28358a399f75d588c5d692de84b8eb7920a052ee"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/package-updates.test.ts",
+      "status": "ok",
+      "bytes": 15904,
+      "sha256": "390bbb995b8a17529df05fd69ab282ff98145d08d5c932df57b399ab833db765"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/isolated-env.ts",
+      "status": "ok",
+      "bytes": 2400,
+      "sha256": "e20b5a5f568411f5400dfdcdb044bbd9238cb81cdbbecf4a2149db43293532b9"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "tests/fake-package-operations.ts",
+      "status": "ok",
+      "bytes": 838,
+      "sha256": "36805f5aac77a9cfaacff3b4829b1c9922ae740fe4c9b3f2a3196f6339d5f4f5"
+    },
+    {
+      "operation": "content",
+      "slot": "base",
+      "path": "package.json",
+      "status": "ok",
+      "bytes": 3463,
+      "sha256": "e911d23299136ef44bec3287adff3f0da6a40fdfa0817388c4e11efc0ddb200d"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "AGENTS.md",
+      "status": "ok",
+      "bytes": 1148,
+      "sha256": "1fec3520a690ee5734facb914ccaefdf92ed197df15efe5f325ef6a3cef3ffef"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "CONTEXT.md",
+      "status": "ok",
+      "bytes": 7776,
+      "sha256": "d99411841ec39689d831db7953caa0c6a179f9a2f64cfbc439b1990fed3ca5a5"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "DESIGN.md",
+      "status": "ok",
+      "bytes": 18361,
+      "sha256": "4b4f57051054866ab8eb61d65b8ffb228fddd715e297f9206f72d85e69cffb8c"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "docs/agents/domain.md",
+      "status": "ok",
+      "bytes": 877,
+      "sha256": "ff9e7740b3ba7b52d0872314e4c5331527d194d1685186b628119218c27d3d8a"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "docs/agents/workflows.md",
+      "status": "ok",
+      "bytes": 2139,
+      "sha256": "878e563917b98b182c4f7a0d557b5837407044ed615b934412458679a22c1b7c"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "docs/adr/0006-shared-core-module-per-write-flow.md",
+      "status": "ok",
+      "bytes": 796,
+      "sha256": "4d3ba759740141b7ba0ce5eff3bc0258cea4b42bca084ca3da99cdf22ce29ed3"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "docs/adr/0009-delegate-package-lifecycle-to-host-clis.md",
+      "status": "ok",
+      "bytes": 9602,
+      "sha256": "f7a47e37f37b72a67818873641cb83c8492b5a2d43c49e4ed999d7b6854e65b8"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-bundles.ts",
+      "status": "ok",
+      "bytes": 28306,
+      "sha256": "db1f8b61bc81570d86c880b126abba60ffb1c6dcc5b4f943dcaf859414bf67c6"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-cli.ts",
+      "status": "ok",
+      "bytes": 22296,
+      "sha256": "67e95c1ee49fd77d72cb8b69aa0f93ffd9dfcf6ccc00af07ac1e1674fc2436be"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-flow.ts",
+      "status": "ok",
+      "bytes": 37434,
+      "sha256": "889106c359656aa600121a9139c994707a081ecc22a60eddad3a659c9df2e5ed"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-host-plans.ts",
+      "status": "ok",
+      "bytes": 14710,
+      "sha256": "84cd130e15660e25781c83cd4b029d5b68acd39c252641c47f0978703725ad2f"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-model.ts",
+      "status": "ok",
+      "bytes": 8421,
+      "sha256": "615c065c9ce70d1eb8ae579b8731dbedb8d5f3c20bdd70f95908a26b86b53f4f"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-host-state.ts",
+      "status": "ok",
+      "bytes": 30403,
+      "sha256": "9bdb3984ed88f560353a85373dd3c73eea277628b4a835df83e2037c7a62bea6"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-state.ts",
+      "status": "ok",
+      "bytes": 19488,
+      "sha256": "be50694c98ffae5c36e3c04e3e8665f74ab314364f632686e64fbb9575ccf25e"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-content.ts",
+      "status": "ok",
+      "bytes": 8812,
+      "sha256": "41ea94f789656d1760d8b03e26bbeb2ac900e26c4cf38f09dd4950d41310079f"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/package-owned-skills.ts",
+      "status": "ok",
+      "bytes": 8267,
+      "sha256": "2e5a57ddec73f4291d289525ddbbe502bda35c37baa29a9d9d226493315920dd"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/app-version.ts",
+      "status": "ok",
+      "bytes": 1726,
+      "sha256": "5c0487c04c622a1c0dabd8911b4ddf7800529adf4bdc09aeae7801a8595368a4"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/git-source.ts",
+      "status": "ok",
+      "bytes": 25845,
+      "sha256": "d890f6019dfd2133d4078c1e9711b38f6ef24956155fffdf2cf94e2f3b704753"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/tui/installations-rows.tsx",
+      "status": "ok",
+      "bytes": 3870,
+      "sha256": "738b8fa0561dc122b7561614c159933fea0814c717a06fe58cd873470ea0e5d6"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/tui/package-rows.ts",
+      "status": "ok",
+      "bytes": 6786,
+      "sha256": "13948bad4b91c5f88cac5e50899f46ac55ddbfbb86e348d198836ee5f1b1750d"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/tui/updates-panel.tsx",
+      "status": "ok",
+      "bytes": 6983,
+      "sha256": "4bfc14beac4b61c33f3b69b6679bf5ded8811bec77cb96ace8688248fe25853f"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/tui/updates.ts",
+      "status": "ok",
+      "bytes": 21683,
+      "sha256": "c63d6f064e13b15a73d1f944272cde217deca21e72689d536ada2c6da651092e"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/tui/updates-model.ts",
+      "status": "ok",
+      "bytes": 3840,
+      "sha256": "08c18527d771e5ce1bcf79915ff4b9c3f6bd5156fe5df873aa8febc9f9531a2d"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/tui/updates-flow.ts",
+      "status": "ok",
+      "bytes": 5363,
+      "sha256": "d54ad3a34284208f305c8b4e8d1f1b819bc0266ef15a0d52478d8811d77f0931"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "src/tui/package-actions.tsx",
+      "status": "ok",
+      "bytes": 10663,
+      "sha256": "689c4ef3fde429c086635d7b87926f4754450799179d9f524bb9d2f39b3a13e3"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/package-evidence.test.ts",
+      "status": "ok",
+      "bytes": 3268,
+      "sha256": "1c393d758c13d604c289ea77d249478c9f9ff827a13e59e7abdb55aadd79c687"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/package-flow.test.ts",
+      "status": "ok",
+      "bytes": 34791,
+      "sha256": "08dd8fd3b6694a8147c9073b5650bb7a92f3e0323b37e4bd2de2cdcbb62bddb1"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/package-bundles.test.ts",
+      "status": "ok",
+      "bytes": 16244,
+      "sha256": "5136360dbb27ca0133164e234dc004392235f860e993cdb6cbdc8dd0f151b369"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/tui-updates-view.test.tsx",
+      "status": "ok",
+      "bytes": 53330,
+      "sha256": "804f3ada04ea50f9e076b589b4d0928e9ec883a85e991d769ef502e767ee7561"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/package-host-plans.test.ts",
+      "status": "ok",
+      "bytes": 14911,
+      "sha256": "d156a33d6f0de29f0fb5e8ec4fb7fe7739fadc3ff33729408db9f218b7d80d70"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/package-cli.test.ts",
+      "status": "ok",
+      "bytes": 22394,
+      "sha256": "34a2cac261c2010d604c231e28358a399f75d588c5d692de84b8eb7920a052ee"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/package-updates.test.ts",
+      "status": "ok",
+      "bytes": 15904,
+      "sha256": "390bbb995b8a17529df05fd69ab282ff98145d08d5c932df57b399ab833db765"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/isolated-env.ts",
+      "status": "ok",
+      "bytes": 2400,
+      "sha256": "e20b5a5f568411f5400dfdcdb044bbd9238cb81cdbbecf4a2149db43293532b9"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "tests/fake-package-operations.ts",
+      "status": "ok",
+      "bytes": 838,
+      "sha256": "36805f5aac77a9cfaacff3b4829b1c9922ae740fe4c9b3f2a3196f6339d5f4f5"
+    },
+    {
+      "operation": "content",
+      "slot": "candidate",
+      "path": "package.json",
+      "status": "ok",
+      "bytes": 3463,
+      "sha256": "e911d23299136ef44bec3287adff3f0da6a40fdfa0817388c4e11efc0ddb200d"
+    }
+  ],
+  "resources": [
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\hosts\\pi\\agents\\isswf-reviewer.md",
+      "readable": true,
+      "bytes": 705
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\roles\\reviewer.md",
+      "readable": true,
+      "bytes": 5512
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\skills\\isswf-review\\SKILL.md",
+      "readable": true,
+      "bytes": 2707
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\roles\\references\\review.md",
+      "readable": true,
+      "bytes": 17883
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\roles\\references\\review-convergence.md",
+      "readable": true,
+      "bytes": 3114
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\roles\\references\\design-principles.md",
+      "readable": true,
+      "bytes": 5184
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\roles\\references\\code-quality.md",
+      "readable": true,
+      "bytes": 2028
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\roles\\references\\comments.md",
+      "readable": true,
+      "bytes": 705
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\roles\\references\\verification-principles.md",
+      "readable": true,
+      "bytes": 3261
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\skills\\isswf-tdd\\SKILL.md",
+      "readable": true,
+      "bytes": 2388
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\roles\\references\\tdd.md",
+      "readable": true,
+      "bytes": 2094
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\skills\\isswf-writing\\SKILL.md",
+      "readable": true,
+      "bytes": 4521
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\skills\\isswf-writing\\references\\human-documents.md",
+      "readable": true,
+      "bytes": 2179
+    },
+    {
+      "path": "C:\\0-BackupVF\\WorkSpace\\isSWF\\.agents\\skills\\isswf-writing\\references\\agent-documents.md",
+      "readable": true,
+      "bytes": 2829
+    },
+    {
+      "path": "C:/Users/iseoane/.agents/skills/work-unit-commits/SKILL.md",
+      "readable": true
+    },
+    {
+      "path": "C:/Users/iseoane/.agents/skills/cognitive-doc-design/SKILL.md",
+      "readable": true
+    }
+  ],
+  "reviewGuide": "REVIEW.md absent",
+  "status": "pass"
+}
