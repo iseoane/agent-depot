@@ -80,6 +80,7 @@
         "name": "infrastructure",
         "patterns": [
           "src/git-source.ts",
+          "src/source-snapshot.ts",
           "src/path-safety.ts",
           "src/process-runner.ts",
           "src/executable-resolution.ts",
