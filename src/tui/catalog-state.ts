@@ -11,11 +11,12 @@ import { filterReducer, initialFilter, type FilterEvent, type FilterState } from
 import { loadInstalledSkills, NO_INSTALLED, type InstalledSkills } from "./catalog-installs.js";
 import { sourceLabel, type BundleEntry } from "./catalog-tree.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
+import type { ViewRetention } from "./view-retention.js";
 
 export type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly message: string }
-  | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly bundles: readonly BundleEntry[]; readonly activeBundles: readonly BundleDescriptor[]; readonly warnings: readonly string[]; readonly sources: readonly Source[] };
+  | { readonly status: "ready"; readonly skills: readonly SkillCandidate[]; readonly bundles: readonly BundleEntry[]; readonly activeBundles: readonly BundleDescriptor[]; readonly warnings: readonly string[]; readonly sources: readonly Source[]; /** Kept from an earlier visit and being reloaded. */ readonly stale?: boolean };
 
 export interface CatalogAppRow {
   readonly entry: AppEntry;
@@ -24,18 +25,25 @@ export interface CatalogAppRow {
 
 export type CatalogAppsState =
   | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly rows: readonly CatalogAppRow[]; readonly error?: string };
+  | { readonly status: "ready"; readonly rows: readonly CatalogAppRow[]; readonly error?: string; readonly stale?: boolean };
 
 /** Discovers the Skills of one Source, or of all of them, and again whenever those inputs or `reloadKey` change. */
-export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean, env: TuiEnvironment, reloadKey = 0): LoadState {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
+export function useCatalogSkills(operations: SourceOperations, sourceId: string | undefined, all: boolean, env: TuiEnvironment, reloadKey = 0, retention?: ViewRetention): LoadState {
+  const key = `${sourceId ?? ""}|${all}`;
+  /** The last result of this scope, shown while it is discovered again. */
+  const retained = (): LoadState => {
+    const kept = retention?.catalogKey === key ? retention.catalogSkills : undefined;
+    return kept ? { ...kept, stale: true } : { status: "loading" };
+  };
+  const [state, setState] = useState<LoadState>(retained);
   useEffect(() => {
     let cancelled = false;
+    const generation = retention?.generation;
     if (!operations.discoverSkills) {
       setState({ status: "error", message: "Discovery is not supported by the configured operations" });
       return;
     }
-    setState({ status: "loading" });
+    setState(retained());
     void (async () => {
       try {
         const sources = await operations.listSources();
@@ -89,7 +97,13 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
           const detail = error instanceof Error ? error.message : String(error);
           warnings.push(`Package ownership unavailable: ${detail}`);
         }
-        if (!cancelled) setState({ status: "ready", skills, bundles, activeBundles, warnings, sources });
+        const ready = { status: "ready", skills, bundles, activeBundles, warnings, sources } as const;
+        // A result that began before an invalidation may predate the change, so it is not kept.
+        if (!cancelled && retention && retention.generation === generation) {
+          retention.catalogKey = key;
+          retention.catalogSkills = ready;
+        }
+        if (!cancelled) setState(ready);
       } catch (error) {
         if (!cancelled) setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
       }
@@ -101,52 +115,62 @@ export function useCatalogSkills(operations: SourceOperations, sourceId: string 
   return state;
 }
 
-export function useCatalogApps(apps: AppOperations): { readonly state: CatalogAppsState; readonly reload: () => Promise<void> } {
-  const [state, setState] = useState<CatalogAppsState>({ status: "loading" });
+export function useCatalogApps(apps: AppOperations, retention?: ViewRetention): { readonly state: CatalogAppsState; readonly reload: () => Promise<void> } {
+  const [state, setState] = useState<CatalogAppsState>(() => retention?.catalogApps ? { ...retention.catalogApps, stale: true } : { status: "loading" });
   const generation = useRef(0);
-  const reload = useCallback(async () => {
+  /** `keepShown` reloads behind the rows already on screen instead of replacing them with a loading state. */
+  const load = useCallback(async (keepShown: boolean) => {
     const current = ++generation.current;
-    setState({ status: "loading" });
+    const retained = retention?.generation;
+    if (!keepShown) setState({ status: "loading" });
     try {
       const rows = await Promise.all((await apps.load()).filter(entry => entry.applicable).map(async (entry) => ({
         entry,
         inspection: await apps.inspect(entry),
       })));
-      if (generation.current === current) setState({
-        status: "ready",
-        rows: rows.filter(row => row.inspection.status === "not installed"),
-      });
+      if (generation.current === current) {
+        const ready = { status: "ready", rows: rows.filter(row => row.inspection.status === "not installed") } as const;
+        if (retention && retention.generation === retained) retention.catalogApps = ready;
+        setState(ready);
+      }
     } catch (error) {
       if (generation.current === current) setState({ status: "ready", rows: [], error: error instanceof Error ? error.message : String(error) });
     }
-  }, [apps]);
+  }, [apps, retention]);
+  const reload = useCallback(() => load(false), [load]);
   useEffect(() => {
-    void reload();
+    void load(retention?.catalogApps !== undefined);
     return () => { generation.current += 1; };
-  }, [reload]);
+  }, [load, retention]);
   return { state, reload };
 }
 
 export interface InstalledState {
   readonly installed: InstalledSkills;
   readonly installedReady: boolean;
+  /** The Skills shown come from an earlier visit and are being reloaded. */
+  readonly installedStale: boolean;
   readonly reloadInstalled: () => Promise<void>;
 }
 
 /** The Skills already installed, loaded on mount and on demand. */
-export function useInstalledSkills(operations: SourceOperations, env: TuiEnvironment, mounted: MutableRefObject<boolean>): InstalledState {
-  const [installed, setInstalled] = useState<InstalledSkills>(NO_INSTALLED);
-  const [installedReady, setInstalledReady] = useState(false);
+export function useInstalledSkills(operations: SourceOperations, env: TuiEnvironment, mounted: MutableRefObject<boolean>, retention?: ViewRetention): InstalledState {
+  const [installed, setInstalled] = useState<InstalledSkills>(retention?.installed ?? NO_INSTALLED);
+  const [installedReady, setInstalledReady] = useState(retention?.installed !== undefined);
+  const [installedStale, setInstalledStale] = useState(retention?.installed !== undefined);
   const reloadInstalled = useCallback(async () => {
+    const generation = retention?.generation;
     const loaded = await loadInstalledSkills(operations, env);
+    if (retention && retention.generation === generation) retention.installed = loaded;
     if (!mounted.current) return;
     setInstalled(loaded);
     setInstalledReady(true);
-  }, [operations, env, mounted]);
+    setInstalledStale(false);
+  }, [operations, env, mounted, retention]);
   useEffect(() => {
     void reloadInstalled();
   }, [reloadInstalled]);
-  return { installed, installedReady, reloadInstalled };
+  return { installed, installedReady, installedStale, reloadInstalled };
 }
 
 export interface CatalogFilterControls {

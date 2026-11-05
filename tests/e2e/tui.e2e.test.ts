@@ -1241,7 +1241,7 @@ test("a slow App install shows an advancing spinner, elapsed time from 1s, and c
     PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
   }, 80, 24);
   // A braille spinner glyph, the busy label and, from one second on, the elapsed time. The static `·` never matches.
-  const working = /([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]) (?:Running|Preparing) App step…(?: (\d+)s)?/u;
+  const working = /([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]) (?:Running|Preparing) App step: fixture-app…(?: (\d+)s)?/u;
   const anySpinner = /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] \S[^\n]*…/u;
   const samples: Array<{ at: number; screen: string }> = [];
   let sampler: NodeJS.Timeout | undefined;

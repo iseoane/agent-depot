@@ -33,6 +33,8 @@ export interface Busy {
   readonly kind: "busy";
   readonly label: string;
   readonly startedAt: number;
+  /** Result lines of the items of a batch finished so far. */
+  readonly done?: readonly string[];
 }
 
 /** When an operation began: the start time of the busy mode it continues, otherwise now. Only busy modes carry one. */

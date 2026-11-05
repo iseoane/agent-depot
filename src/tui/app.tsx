@@ -12,6 +12,7 @@ import { ProfileView } from "./profile-view.js";
 import { SourcesView, sourceRowHints } from "./sources-view.js";
 import { theme } from "./theme.js";
 import { UpdatesView } from "./updates-view.js";
+import { createViewRetention, invalidateRetention } from "./view-retention.js";
 
 export interface AppProps {
   /** Source operations the views call directly; injectable for tests. */
@@ -65,14 +66,26 @@ export function App({ operations, environment, onExit }: AppProps) {
   const [capturing, setCapturing] = useState(false);
   // Updated synchronously by the views so keys in the same burst never see a stale capturing state.
   const capturingRef = useRef(false);
+  const [view, setView] = useState<ViewName>("sources");
+  // Catalog and Installations unmount on a tab change; this keeps what they loaded, for display only.
+  const [retention] = useState(createViewRetention);
+  // Sources, Updates and Profile may change what the retained data describes. Any mode they capture
+  // keys for (add, refresh, approve, confirm, import) can, so leaving after one drops the retention.
+  const viewRef = useRef<ViewName>(view);
+  const touched = useRef(false);
   const onCapturingChange = useCallback((value: boolean) => {
     capturingRef.current = value;
+    if (value && viewRef.current !== "catalog" && viewRef.current !== "installations") touched.current = true;
     setCapturing(value);
   }, []);
-  const [view, setView] = useState<ViewName>("sources");
   const [catalogSourceId, setCatalogSourceId] = useState<string | undefined>();
   const [sourcesHints, setSourcesHints] = useState(sourceRowHints(undefined));
-  const showView = (next: ViewName) => setView(next);
+  const showView = (next: ViewName) => {
+    if (touched.current) invalidateRetention(retention);
+    touched.current = false;
+    viewRef.current = next;
+    setView(next);
+  };
 
   useKeys((input, key) => {
     if (capturingRef.current) return;
@@ -102,7 +115,7 @@ export function App({ operations, environment, onExit }: AppProps) {
             onHintsChange={setSourcesHints}
             onOpenCatalog={(source) => {
               setCatalogSourceId(source.id);
-              setView("catalog");
+              showView("catalog");
             }}
           />
         ) : view === "installations" ? (
@@ -110,6 +123,7 @@ export function App({ operations, environment, onExit }: AppProps) {
             operations={operations}
             environment={environment}
             onCapturingChange={onCapturingChange}
+            retention={retention}
           />
         ) : view === "profile" ? (
           <ProfileView operations={operations} environment={environment} onCapturingChange={onCapturingChange} />
@@ -121,6 +135,7 @@ export function App({ operations, environment, onExit }: AppProps) {
             sourceId={catalogSourceId}
             environment={environment}
             onCapturingChange={onCapturingChange}
+            retention={retention}
           />
         )}
       </Box>

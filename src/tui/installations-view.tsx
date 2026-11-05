@@ -24,6 +24,7 @@ import { busy } from "./working-model.js";
 import { useLoadingSince, useMarks, useMounted, type ViewMessage } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
+import { invalidateRetention, type ViewRetention } from "./view-retention.js";
 
 export interface InstallationsViewProps {
   readonly operations: SourceOperations;
@@ -32,6 +33,8 @@ export interface InstallationsViewProps {
   readonly onCapturingChange?: (capturing: boolean) => void;
   /** Rows the tree may use; defaults to what the terminal leaves. Injectable for tests. */
   readonly listHeight?: number;
+  /** Last loaded data kept above the view; a revisit shows it while the list reloads. */
+  readonly retention?: ViewRetention;
 }
 
 const NO_ENVIRONMENT: TuiEnvironment = {};
@@ -43,13 +46,15 @@ type LoadState =
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly data: InstallationsData };
 
-export function InstallationsView({ operations, environment, onCapturingChange, listHeight }: InstallationsViewProps) {
+export function InstallationsView({ operations, environment, onCapturingChange, listHeight, retention }: InstallationsViewProps) {
   const { rows: terminalRows, columns: terminalColumns } = useWindowSize();
   const height = useListHeight(listHeight, 7);
   const env = environment ?? NO_ENVIRONMENT;
   const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
   const packages = useMemo(() => packageOperationsOf(env), [env]);
-  const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [state, setState] = useState<LoadState>(() => retention?.installations ? { status: "ready", data: retention.installations } : { status: "loading" });
+  // The data shown comes from an earlier visit until the first reload of this one ends.
+  const [stale, setStale] = useState(retention?.installations !== undefined);
   const [mode, setModeState] = useState<InstallationsMode>(BROWSE);
   // Mirrors the mode synchronously so later keystrokes and the shell never see stale state.
   const modeRef = useRef<InstallationsMode>(BROWSE);
@@ -72,16 +77,25 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const loadGeneration = useRef(0);
   const reload = useCallback(async () => {
     const generation = ++loadGeneration.current;
+    const retained = retention?.generation;
     if (reloads.current++ === 0 && mounted.current) setRefreshingSince(Date.now());
     try {
       const data = await loadInstallations(operations, env, apps, packages);
-      if (mounted.current && generation === loadGeneration.current) setState({ status: "ready", data });
+      // A result that began before an invalidation may predate the change, so it is not kept.
+      if (retention && retention.generation === retained) retention.installations = data;
+      if (mounted.current && generation === loadGeneration.current) {
+        setState({ status: "ready", data });
+        setStale(false);
+      }
     } catch (error) {
-      if (mounted.current && generation === loadGeneration.current) setState({ status: "error", message: errorText(error) });
+      if (mounted.current && generation === loadGeneration.current) {
+        setState({ status: "error", message: errorText(error) });
+        setStale(false);
+      }
     } finally {
       if (--reloads.current === 0 && mounted.current) setRefreshingSince(undefined);
     }
-  }, [operations, env, apps, packages, mounted]);
+  }, [operations, env, apps, packages, mounted, retention]);
 
   useEffect(() => {
     void reload();
@@ -143,6 +157,8 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const refresh = async () => {
     const current = modeRef.current;
     if ("startedAt" in current && mounted.current) setMode(busy("Refreshing installations…", current));
+    // The action changed what is installed, so what was kept no longer describes it.
+    invalidateRetention(retention);
     await reload();
   };
   const manage: ManageContext = {
@@ -210,7 +226,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   return (
     <Box flexDirection="column">
       {/* While an action runs its own busy panel is the one indicator. */}
-      {refreshingSince !== undefined && mode.kind === "browse" ? <Working label="Refreshing installations…" since={refreshingSince} /> : null}
+      {refreshingSince !== undefined && mode.kind === "browse" ? <Working label={stale ? "Refreshing installations (last data shown)…" : "Refreshing installations…"} since={refreshingSince} /> : null}
       {ready.global === undefined ? <Text>User-global installations are not supported by the configured operations</Text> : null}
       {ready.projectError === undefined ? null : <Text color={theme.error}>Error: {ready.projectError}</Text>}
       {listed.map((row, offset) => (

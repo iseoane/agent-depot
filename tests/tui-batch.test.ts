@@ -26,3 +26,14 @@ test("runBatch keeps going after a failure and describes it with the failure for
   assert.equal(outcomes[1]!.line, "Failed b: boom");
   assert.equal(outcomes[2]!.line, "did c");
 });
+
+test("runBatch announces each item with its position and the outcomes so far before it runs", async () => {
+  const seen: string[] = [];
+  await runBatch(["a", "b", "c"], async (item) => {
+    if (item === "b") throw new Error("boom");
+    return `ok ${item}`;
+  }, (item) => `failed ${item}`, (item, position, total, finished) => {
+    seen.push(`${item} ${position}/${total} after [${finished.map((outcome) => outcome.line).join(",")}]`);
+  });
+  assert.deepEqual(seen, ["a 1/3 after []", "b 2/3 after [ok a]", "c 3/3 after [ok a,failed b]"]);
+});

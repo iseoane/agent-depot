@@ -4,7 +4,7 @@ import { PROJECT_HOSTS, type ProjectHost, type ProjectSkillSelection } from "../
 import { assertManagedInstallationRecordsUnchanged } from "../skill-removal.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
-import { errorText, runBatch } from "./batch.js";
+import { errorText, runBatch, type BatchOutcome, type BatchStart } from "./batch.js";
 import {
   missingHosts,
   prepareHostAddition,
@@ -194,8 +194,19 @@ function resultOf<T extends { readonly id: string }>(
   };
 }
 
+/** Reports which item of a batch runs now: the busy label and the result lines finished so far. */
+export type BulkProgress = (label: string, done: readonly string[]) => void;
+
+/** `Removing name (2/5)…` for each item as it starts. */
+function startOf<T extends { readonly label: string }>(verb: string, progress: BulkProgress | undefined): BatchStart<T> | undefined {
+  if (!progress) return undefined;
+  return (item, position, total, finished: readonly BatchOutcome<T>[]) => {
+    progress(`${verb} ${item.label} (${position}/${total})…`, finished.map(outcome => outcome.line));
+  };
+}
+
 /** Execute step: each item is rechecked and applied on its own against the records the previous items were expected to leave. */
-export async function runBulkUninstall(plan: BulkUninstallPlan, operations: SourceOperations, env: TuiEnvironment): Promise<BulkResult> {
+export async function runBulkUninstall(plan: BulkUninstallPlan, operations: SourceOperations, env: TuiEnvironment, progress?: BulkProgress): Promise<BulkResult> {
   let expected = plan.installations;
   const outcomes = await runBatch(plan.items, async (item) => {
     await assertNoDrift(operations, expected);
@@ -210,7 +221,7 @@ export async function runBulkUninstall(plan: BulkUninstallPlan, operations: Sour
     return item.prepared.plan.inspections.every((inspection) => inspection.recordOnly)
       ? `Forgot missing installation record for ${item.label}; no files were removed`
       : `Removed ${item.label}`;
-  }, (item, error) => (item.kind === "unmanaged" ? errorText(error) : `Failed ${item.label}: ${errorText(error)}`));
+  }, (item, error) => (item.kind === "unmanaged" ? errorText(error) : `Failed ${item.label}: ${errorText(error)}`), startOf("Removing", progress));
   return resultOf(outcomes, plan.skipped);
 }
 
@@ -266,7 +277,7 @@ export async function prepareBulkHostAddition(
 }
 
 /** Execute step: the single exposure confirmation covers every item; each one is rechecked on its own. */
-export async function runBulkHostAddition(plan: BulkHostPlan, operations: SourceOperations, env: TuiEnvironment): Promise<BulkResult> {
+export async function runBulkHostAddition(plan: BulkHostPlan, operations: SourceOperations, env: TuiEnvironment, progress?: BulkProgress): Promise<BulkResult> {
   let expected = plan.installations;
   const outcomes = await runBatch(plan.items, async (item) => {
     await assertNoDrift(operations, expected);
@@ -275,7 +286,7 @@ export async function runBulkHostAddition(plan: BulkHostPlan, operations: Source
     const { selection, updated } = item.prepared.plan;
     expected = expected.map((record) => (sameRecord(record, selection) ? updated : record));
     return line;
-  }, (item, error) => `Failed ${item.label}: ${errorText(error)}`);
+  }, (item, error) => `Failed ${item.label}: ${errorText(error)}`, startOf("Changing hosts of", progress));
   return resultOf(outcomes, plan.skipped);
 }
 
@@ -339,11 +350,15 @@ function prepareHosts(context: BulkContext, mode: Extract<BulkMode, { kind: "bul
   );
 }
 
-async function apply(context: BulkContext, label: string, action: () => Promise<BulkResult>): Promise<void> {
-  context.setMode(busy(label));
+async function apply(context: BulkContext, label: string, action: (progress: BulkProgress) => Promise<BulkResult>): Promise<void> {
+  const started = busy(label);
+  context.setMode(started);
   let result: BulkResult;
   try {
-    result = await action();
+    // Each item names itself, but the clock of the whole batch keeps running.
+    result = await action((itemLabel, done) => {
+      if (context.isMounted()) context.setMode({ ...busy(itemLabel, started), done });
+    });
   } catch (error) {
     result = { message: { kind: "error", text: errorText(error) }, applied: [] };
   }
@@ -367,7 +382,7 @@ export function handleBulkKey(context: BulkContext, mode: { readonly kind: strin
     }
     case "confirm-bulk-uninstall":
       answerYesNo(input, key, () => {
-        void apply(context, `Removing ${count(current.plan.items.length, "item")}…`, () => runBulkUninstall(current.plan, operations, env));
+        void apply(context, `Removing ${count(current.plan.items.length, "item")}…`, (progress) => runBulkUninstall(current.plan, operations, env, progress));
       }, () => cancel(context, "Uninstall cancelled"));
       return true;
     case "confirm-bulk-hosts":
@@ -375,7 +390,7 @@ export function handleBulkKey(context: BulkContext, mode: { readonly kind: strin
       return true;
     case "confirm-bulk-exposure":
       answerYesNo(input, key, () => {
-        void apply(context, `Changing hosts of ${count(current.plan.items.length, "item")}…`, () => runBulkHostAddition(current.plan, operations, env));
+        void apply(context, `Changing hosts of ${count(current.plan.items.length, "item")}…`, (progress) => runBulkHostAddition(current.plan, operations, env, progress));
       }, () => cancel(context, "Add hosts cancelled"));
       return true;
     default:

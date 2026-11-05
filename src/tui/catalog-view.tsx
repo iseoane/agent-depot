@@ -18,6 +18,7 @@ import { useCatalogApps, useCatalogFilter, useCatalogSkills, useInstalledSkills 
 import { buildTree, leavesOf, openByDefault, skillKey, type NodeData } from "./catalog-tree.js";
 import { theme } from "./theme.js";
 import { useTreeNavigation } from "./tree-navigation.js";
+import { invalidateRetention, type ViewRetention } from "./view-retention.js";
 import { useLoadingSince, useMarks, useMounted, type ViewMessage } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
@@ -53,9 +54,11 @@ export interface CatalogViewProps {
   readonly environment?: TuiEnvironment;
   /** Rows the list may use; defaults to what the terminal leaves. Injectable for tests. */
   readonly listHeight?: number;
+  /** Last loaded data kept above the view; a revisit shows it while the catalog reloads. */
+  readonly retention?: ViewRetention;
 }
 
-export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight }: CatalogViewProps) {
+export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight, retention }: CatalogViewProps) {
   const { columns, rows: terminalRows } = useWindowSize();
   const env = environment ?? NO_ENVIRONMENT;
   const [all, setAll] = useState(sourceId === undefined);
@@ -68,12 +71,12 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   // Mirrors the action mode synchronously, like the filter, so later keystrokes and the shell never see stale state.
   const actionRef = useRef<ActionMode>(BROWSE);
   const filter = useCatalogFilter(actionRef, onCapturingChange);
-  const state = useCatalogSkills(operations, sourceId, all, env, reloadKey);
+  const state = useCatalogSkills(operations, sourceId, all, env, reloadKey, retention);
   const packages = useMemo(() => packageOperationsOf(env), [env]);
   const apps = useMemo(() => createAppOperations({ homeDirectory: env.homeDirectory, ...env.appEnvironment }), [env]);
-  const appCatalogState = useCatalogApps(apps);
+  const appCatalogState = useCatalogApps(apps, retention);
   const appCatalog = appCatalogState.state;
-  const { installed, installedReady, reloadInstalled } = useInstalledSkills(operations, env, mounted);
+  const { installed, installedReady, installedStale, reloadInstalled } = useInstalledSkills(operations, env, mounted, retention);
   const [appMode, setAppMode] = useState<AppMode>();
   const appModeRef = useRef<AppMode | undefined>(undefined);
   const setAppAction = (mode: AppMode | undefined) => {
@@ -127,6 +130,8 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     }
   }, [loading]);
   const loadingSince = useLoadingSince(loading, runningSince ?? resumedSince);
+  const refreshing = !loading && ((state.status === "ready" && state.stale === true) || (appCatalog.status === "ready" && appCatalog.stale === true) || installedStale);
+  const refreshingSince = useLoadingSince(refreshing);
 
   const flow: CatalogFlowContext = {
     operations,
@@ -136,6 +141,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     isMounted: () => mounted.current,
     keepMarked: marks.setMarked,
     finish: async (result) => {
+      invalidateRetention(retention);
       await reloadInstalled();
       if (!mounted.current) return;
       setMessage(result);
@@ -149,6 +155,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     isMounted: () => mounted.current,
     unmark: ids => marks.setMarked(new Set([...marks.markedRef.current].filter(id => !ids.includes(id)))),
     finish: async result => {
+      invalidateRetention(retention);
       await reloadInstalled();
       if (!mounted.current) return;
       await appCatalogState.reload();
@@ -163,6 +170,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     setMessage,
     isMounted: () => mounted.current,
     finish: async (result) => {
+      invalidateRetention(retention);
       await reloadInstalled();
       if (!mounted.current) return;
       const running = actionRef.current;
@@ -211,6 +219,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
 
   return (
     <Box flexDirection="column">
+      {refreshing ? <Working label="Refreshing catalog (last data shown)…" since={refreshingSince} /> : null}
       {state.warnings.map((warning) => <Text key={warning} color={theme.warning}>{warning}</Text>)}
       {appCatalog.status === "ready" && appCatalog.error ? <Text color={theme.error}>Apps unavailable: {appCatalog.error}</Text> : null}
       <CatalogHeader scope={scope} listed={visible.length} installable={installable.length} total={skills.length} appCount={visibleApps.length} filter={filter.filter} />
