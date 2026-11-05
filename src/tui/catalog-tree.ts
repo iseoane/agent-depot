@@ -22,7 +22,7 @@ export type NodeData =
   | { readonly kind: "source"; readonly sourceId: string; readonly label: string; readonly count: number }
   | { readonly kind: "group"; readonly label: string }
   | { readonly kind: "bundle"; readonly entry: BundleEntry }
-  | { readonly kind: "skill"; readonly skill: SkillCandidate; readonly ownedBy?: BundleDescriptor; /** Another Skill of the Source has the same name, so the row names its path. */ readonly sharesName?: boolean }
+  | { readonly kind: "skill"; readonly skill: SkillCandidate; readonly ownedBy?: BundleDescriptor; /** A variant of a same-named group, so the row names its path. */ readonly variant?: boolean }
   | { readonly kind: "app"; readonly row: CatalogAppRow };
 
 export type CatalogNode = TreeNode<NodeData>;
@@ -73,8 +73,8 @@ export function buildTree(
   const sourcesTree = [...new Set([...bySource.keys(), ...bundlesBySource.keys()])].map((sourceId): CatalogNode => {
     const members = bySource.get(sourceId) ?? [];
     const sourceBundles = bundlesBySource.get(sourceId) ?? [];
-    const nameCounts = new Map<string, number>();
-    for (const skill of members) nameCounts.set(skill.name, (nameCounts.get(skill.name) ?? 0) + 1);
+    const variants = new Map<string, SkillCandidate[]>();
+    for (const skill of members) variants.set(skill.name, [...(variants.get(skill.name) ?? []), skill]);
     const owned = packageOwnedSkillMatcher(sourceBundles.map((entry) => entry.descriptor).filter((descriptor) => active.has(descriptor)));
     return {
       id: `source:${sourceId}`,
@@ -85,12 +85,16 @@ export function buildTree(
           data: { kind: "group" as const, label: `Packages (${sourceBundles.length})` },
           children: sourceBundles.map((entry): CatalogNode => ({ id: bundleKey(entry), data: { kind: "bundle", entry } })),
         }]),
-        ...members.map((skill): CatalogNode => {
-          const ownedBy = owned(skill.path);
-          return {
-            id: skillKey(skill),
-            data: { kind: "skill", skill, ...(ownedBy === undefined ? {} : { ownedBy }), ...((nameCounts.get(skill.name) ?? 0) > 1 ? { sharesName: true } : {}) },
-          };
+        ...[...variants.values()].map((group): CatalogNode => {
+          const variant = group.length > 1;
+          const nodes = group.map((skill): CatalogNode => {
+            const ownedBy = owned(skill.path);
+            return { id: skillKey(skill), data: { kind: "skill", skill, ...(ownedBy === undefined ? {} : { ownedBy }), ...(variant ? { variant } : {}) } };
+          });
+          // Same-named Skills of one Source differ in content, so each stays its own installable row under one group.
+          return variant
+            ? { id: `variants:${sourceId}:${group[0]!.name}`, data: { kind: "group", label: `${group[0]!.name} (${group.length} variants)` }, children: nodes }
+            : nodes[0]!;
         }),
       ],
     };
@@ -128,17 +132,26 @@ export function describeRow(row: VisibleRow<NodeData>): string {
     return `Package ${data.entry.descriptor.name} (${data.entry.descriptor.host})  ${packageVersionLabel(data.entry.descriptor.version)}`;
   }
   if (data.kind === "app") return `App ${data.row.entry.recipe?.name ?? data.row.entry.file}  ${data.row.inspection.status}`;
-  return `${data.skill.name}  ${truncateDescription(data.skill.description)}${data.sharesName === true ? `  (${data.skill.path})` : ""}`;
+  return `${data.skill.name}  ${truncateDescription(data.skill.description)}${data.variant === true ? `  (${data.skill.path})` : ""}`;
+}
+
+/** Skill nodes directly under a Source or inside one of its variant groups. */
+function skillNodesOf(roots: readonly CatalogNode[]): readonly (CatalogNode & { readonly data: Extract<NodeData, { kind: "skill" }> })[] {
+  const found: (CatalogNode & { readonly data: Extract<NodeData, { kind: "skill" }> })[] = [];
+  const visit = (node: CatalogNode) => {
+    if (node.data.kind === "skill") found.push(node as CatalogNode & { readonly data: Extract<NodeData, { kind: "skill" }> });
+    else if (node.id.startsWith("variants:")) node.children?.forEach(visit);
+  };
+  for (const root of roots) root.children?.forEach(visit);
+  return found;
 }
 
 /** The Skills under the tree's Sources, in display order. */
 export function leavesOf(roots: readonly CatalogNode[]): readonly SkillCandidate[] {
-  return roots.flatMap((root) => (root.children ?? []).flatMap((child) => child.data.kind === "skill" ? [child.data.skill] : []));
+  return skillNodesOf(roots).map((node) => node.data.skill);
 }
 
 /** Skills that can still be installed as loose Skills, excluding active Package-owned rows. */
 export function looseLeavesOf(roots: readonly CatalogNode[]): readonly SkillCandidate[] {
-  return roots.flatMap((root) => (root.children ?? []).flatMap((child) =>
-    child.data.kind === "skill" && child.data.ownedBy === undefined ? [child.data.skill] : [],
-  ));
+  return skillNodesOf(roots).filter((node) => node.data.ownedBy === undefined).map((node) => node.data.skill);
 }
