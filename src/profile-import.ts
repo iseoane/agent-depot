@@ -77,11 +77,16 @@ function hostChange(existing: unknown, incoming: unknown): string {
   return [added.length ? `would add ${added.join(", ")}` : "", missing.length ? `profile lacks ${missing.join(", ")}` : ""]
     .filter(Boolean).join("; ");
 }
+function isVersionPolicy(value: unknown): value is VersionPolicy {
+  if (typeof value !== "object" || value === null || !("policy" in value)) return false;
+  return value.policy === "latest" || (value.policy === "fixed" && "version" in value && typeof value.version === "string");
+}
 function shortReason(existing: object, incoming: object): string {
   return fieldChanges(existing, incoming).map(change => {
     if (change.key === "hosts") return `hosts: ${hostChange(change.existing, change.incoming)}`;
     if (change.key === "version") {
-      return `version: installed ${formatVersionPolicy(change.existing as VersionPolicy)}, profile ${formatVersionPolicy(change.incoming as VersionPolicy)}`;
+      return isVersionPolicy(change.existing) && isVersionPolicy(change.incoming)
+        ? `version: installed ${formatVersionPolicy(change.existing)}, profile ${formatVersionPolicy(change.incoming)}` : "version differs";
     }
     return `${change.key} differ`;
   }).join("; ");
