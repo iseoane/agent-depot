@@ -496,3 +496,57 @@ test("registered Source URL spelling does not produce an unregistered-fetch warn
   assert.equal(registering.items[0]!.status, "add");
   assert.doesNotMatch(registering.preview.join("\n"), /will be fetched but not registered/);
 });
+
+/** The plain-language fields the import plan is expected to carry. */
+interface Plain { readonly block: string; readonly status: string; readonly summary?: string; readonly group?: string; readonly reason?: string }
+
+test("import items carry a plain-language summary, a Source group and one short conflict reason", async t => {
+  const { operations, apps } = await fixture(t);
+  await operations.addGitSource("https://example.com/same.git");
+  const skill = { ...selection, source: { kind: "external", url: "https://github.com/example/skills.git" }, path: "skills/engineering/ask-matt" };
+  await operations.addUserGlobalInstallation!({ ...parseProfile({ ...profile, skills: [{ ...selection, hosts: ["claude", "pi"] }] }).skills[0]!,
+    installation: { path: ".agents/skills/doctor-md-agents", adopted: false } });
+  await mkdir(apps.directory);
+  await writeFile(path.join(apps.directory, "existing-tool.json"), JSON.stringify({ ...recipe, install: { manual: "Other" } }));
+  const input = parseProfile({ ...profile, sources: [{ url: "https://example.com/same.git", included: true },
+    { url: "https://example.com/new.git", included: true }],
+  skills: [skill, { ...selection, hosts: ["claude", "codex", "opencode", "pi"] }], apps: [recipe, { ...recipe, name: "fresh" }],
+  packages: [piPackage] });
+  const plan = await buildProfileImport(input, operations, apps, {}, fakePackageOperations({}).operations);
+  const byBlock = (block: string) => ([...plan.items, ...plan.packages] as readonly Plain[]).filter(item => item.block === block);
+  assert.deepEqual(byBlock("sources").map(item => [item.status, item.summary, item.group]), [
+    ["add", "Add Source https://example.com/new.git", "https://example.com/new.git"],
+    ["same", "Source https://example.com/same.git — already identical", "https://example.com/same.git"],
+  ]);
+  assert.deepEqual(byBlock("skills").map(item => [item.status, item.summary, item.group, item.reason]), [
+    ["conflict", "Skill doctor-md-agents — hosts: would add codex, opencode", "Agent Depot (built-in Source)",
+      "hosts: would add codex, opencode"],
+    ["add", "Add Skill ask-matt", "https://github.com/example/skills.git", undefined],
+  ]);
+  assert.deepEqual(byBlock("apps").map(item => [item.status, item.summary, item.group, item.reason]), [
+    ["add", "Add App recipe fresh (windows) — not approved, not installed", undefined, undefined],
+    ["conflict", "App recipe tool (windows) — existing recipe existing-tool.json differs in install", undefined,
+      "existing recipe existing-tool.json differs in install"],
+  ]);
+  assert.deepEqual(byBlock("packages").map(item => [item.status, item.summary, item.group]), [
+    ["add", "Select Package pi plugins/demo from https://example.test/demo.git (latest)", "https://example.test/demo.git"],
+  ]);
+});
+
+test("a Skill name that is ambiguous within one Source is shown with its path", async t => {
+  const { operations, apps } = await fixture(t);
+  const source = { kind: "external", url: "https://github.com/example/skills.git" };
+  const input = parseProfile({ ...profile, sources: [], apps: [], skills: [
+    { ...selection, source, path: "a/shared" }, { ...selection, source, path: "b/shared" },
+    { ...selection, source, path: "c/unique" }] });
+  const plan = await buildProfileImport(input, operations, apps);
+  assert.deepEqual((plan.items as readonly Plain[]).map(item => item.summary), ["Add Skill a/shared", "Add Skill b/shared", "Add Skill unique"]);
+});
+
+test("a recipe label says recipes are written but never approved or installed", async t => {
+  const { operations, apps } = await fixture(t);
+  const plan = await buildProfileImport(profile, operations, apps);
+  const label = plan.items.find(item => item.block === "apps")!.label;
+  assert.equal(label, "App recipe tool (windows; not approved, not installed)");
+  assert.doesNotMatch(plan.preview.join("\n"), /unapproved; Apps are not installed/);
+});

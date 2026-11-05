@@ -71,6 +71,24 @@ async function browse(view: ReturnType<typeof render>): Promise<string> {
     !frame.includes("Enter submit") && !frame.includes("Apply Profile") && !frame.includes("Save/Export Profile"));
 }
 
+/** Move the cursor of the import checklist onto the group header that shows `name` and open it if collapsed. */
+async function openImportGroup(view: ReturnType<typeof render>, name: string): Promise<string> {
+  let frame = view.lastFrame() ?? "";
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const line = frame.split("\n").find(candidate => candidate.includes(">") && candidate.includes(name) && /[▸▾]/u.test(candidate));
+    if (line) {
+      if (line.includes("▸")) {
+        view.stdin.write("\r");
+        frame = await waitForFrame(view.lastFrame, next => next !== frame);
+      }
+      return frame;
+    }
+    view.stdin.write("j");
+    frame = await waitForFrame(view.lastFrame, next => next !== frame);
+  }
+  assert.fail(`Import group ${name} was not reachable:\n${frame}`);
+}
+
 /** Move the picker cursor onto the row that shows `name`; assumes the row appears below the cursor. */
 async function selectPickerEntry(view: ReturnType<typeof render>, name: string): Promise<string> {
   let frame = await waitForFrame(view.lastFrame, candidate => candidate.includes(name));
@@ -163,7 +181,9 @@ test("import warns on newer producers, skips conflicts and adds recipes unapprov
   await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "99.0.0",
     sources: [], skills: [], apps: [recipe, { ...recipe, name: "second" }] }));
   const checklist = await importFile(f.view, file);
-  assert.match(checklist.replaceAll("│", ""), /conflict: App recipe demo[\s\S]*not\s+selectable/);
+  assert.match(checklist, /▾ Conflicts \(1\)/);
+  assert.match(squash(checklist), /Apprecipedemo\(allplatforms\)—existingrecipedemo\.jsondiffersininstall/);
+  assert.doesNotMatch(checklist, /conflict: |not selectable/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /newer than running/);
   f.view.stdin.write("y");
@@ -403,7 +423,7 @@ test("Packages appear in the export checklist and import previews the recorded s
   const importing = render(<ProfileView operations={operations} environment={{ homeDirectory: home, startDirectory: picker, packages: importer }} />);
   t.after(() => importing.unmount());
   await importFile(importing, input);
-  await waitForFrame(importing.lastFrame, /add: Package pi plugins\/demo/);
+  await waitForFrame(importing.lastFrame, /Select Package pi plugins\/demo/);
   importing.stdin.write("\r");
   const preview = await waitForFrame(importing.lastFrame, /Apply Profile/);
   assert.match(preview, /select records the choice; it runs no host command/);
@@ -454,10 +474,9 @@ test("v2 replica intent is preview-only and follows the selected import resource
   assert.deepEqual(await createAppOperations({ recipesDirectory }).load(), []);
 
   await importFile(view, file);
-  view.stdin.write("j");
-  await waitForFrame(view.lastFrame, /add: Package pi plugins\/pstack/);
+  await waitForFrame(view.lastFrame, /> \[x\].*Select Package pi plugins\/pstack/);
   view.stdin.write(" ");
-  await waitForFrame(view.lastFrame, /\[ \].*add: Package pi plugins\/pstack/);
+  await waitForFrame(view.lastFrame, /\[ \].*Select Package pi plugins\/pstack/);
   view.stdin.write("\r");
   preview = await waitForFrame(view.lastFrame, /Apply Profile/);
   assert.match(preview, /Origin replica intent: Installed App gentle-shell \(linux\)/);
@@ -656,14 +675,18 @@ test("import shows same reasons, keeps them unselectable, and reports Sources an
   await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
     sources: [{ url: existing.url, included: false }, { url: "https://example.com/new.git", included: true }],
     skills: [skill, { ...skill, path: "missing-skill" }], apps: [] }));
-  const same = await importFile(f.view, file);
-  assert.match(same.replaceAll("│", "").replace(/\s+/g, " "), /included: existing true -> incoming false/);
-  assert.match(same, /discovery inclusion is not imported/);
-  assert.match(same, /not selectable/);
+  const first = await importFile(f.view, file);
+  assert.match(first, /▸ Unchanged \(1\)/);
+  assert.doesNotMatch(first, /already identical/);
+  const same = await openImportGroup(f.view, "Unchanged");
+  assert.match(same, /▾ Unchanged \(1\)/);
+  f.view.stdin.write("j");
+  const sameRow = await waitForFrame(f.view.lastFrame, /> .*Source https:\/\/example.com\/existing.git/);
+  assert.match(squash(sameRow), /—alreadyidentical\(discoveryinclusionisnotimported\)/);
+  assert.doesNotMatch(sameRow, /\[[ x]\] \d+ Source https:\/\/example.com\/existing/);
   f.view.stdin.write(" ");
-  // Cursor begins on the same Source: space must not mark it.
-  const stillSame = await waitForFrame(f.view.lastFrame, /\[ \].*same: Source/);
-  assert.doesNotMatch(stillSame, /\[x\].*same: Source/);
+  // Space on an unchanged row must not mark it.
+  assert.match(await waitForFrame(f.view.lastFrame, /3 selected/), /3 selected/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Apply Profile/);
   f.view.stdin.write("y");
@@ -673,8 +696,10 @@ test("import shows same reasons, keeps them unselectable, and reports Sources an
   assert.match(results, /added: Skill doctor-md-agents/);
   assert.deepEqual((await f.operations.listUserGlobalInstallations!()).map(skill => skill.path), ["doctor-md-agents"]);
   await importFile(f.view, file);
-  const repeated = await waitForFrame(f.view.lastFrame, /same: Skill doctor-md-agents/);
-  assert.match(repeated, /\[ \].*same: Skill doctor-md-agents.*not selectable/);
+  await waitForFrame(f.view.lastFrame, /▸ Unchanged \(\d+\)/);
+  const repeated = await openImportGroup(f.view, "Unchanged");
+  assert.match(squash(repeated), /Skilldoctor-md-agents—alreadyidentical/);
+  assert.doesNotMatch(repeated, /\[[ x]\] \d+ Skill doctor-md-agents/);
 });
 
 test("import can deselect every addition and confirm an empty plan without adding recipes", async t => {
@@ -683,13 +708,13 @@ test("import can deselect every addition and confirm an empty plan without addin
   await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
     sources: [], skills: [], apps: [recipe] }));
   await importFile(f.view, file);
-  await waitForFrame(f.view.lastFrame, /\[x\].*add: App recipe demo/);
+  await waitForFrame(f.view.lastFrame, /\[x\].*Add App recipe demo/);
   f.view.stdin.write(" ");
-  await waitForFrame(f.view.lastFrame, /\[ \].*add: App recipe demo/);
+  await waitForFrame(f.view.lastFrame, /\[ \].*Add App recipe demo/);
   f.view.stdin.write("a");
-  await waitForFrame(f.view.lastFrame, /\[x\].*add: App recipe demo/);
+  await waitForFrame(f.view.lastFrame, /\[x\].*Add App recipe demo/);
   f.view.stdin.write("a");
-  await waitForFrame(f.view.lastFrame, /\[ \].*add: App recipe demo/);
+  await waitForFrame(f.view.lastFrame, /\[ \].*Add App recipe demo/);
   f.view.stdin.write("\r");
   const preview = await waitForFrame(f.view.lastFrame, /Apply Profile/);
   assert.doesNotMatch(preview, /add: App recipe demo/);
@@ -717,7 +742,7 @@ test("busy import ignores view, quit, cancel, toggle and action keys until the r
     skills: [{ source: { kind: "external", url: "https://example.com/busy.git" }, path: "demo",
       version: { policy: "latest" }, hosts: ["pi"] }], apps: [recipe] }));
   await importFile(f.view, file);
-  await waitForFrame(f.view.lastFrame, /add: App recipe demo/);
+  await waitForFrame(f.view.lastFrame, /Add App recipe demo/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Apply Profile/);
   f.view.stdin.write("y");
@@ -847,4 +872,62 @@ test("the Enter that chooses the export folder is not also submitted to the name
   const settled = view.lastFrame()!;
   assert.match(settled, /Export file name/);
   assert.doesNotMatch(settled, /Save\/Export Profile|Apply Profile/);
+});
+
+test("import groups additions by Source, collapses unchanged items and explains conflicts in plain words", async t => {
+  const f = await fixture(t);
+  const existing = await f.operations.addGitSource("https://example.com/existing.git");
+  await f.operations.addUserGlobalInstallation!({
+    source: { kind: "builtin", id: "builtin:agent-depot" }, path: "doctor-md-agents",
+    version: { policy: "latest" }, hosts: ["claude", "pi"],
+    installation: { path: ".agents/skills/doctor-md-agents", adopted: false },
+  });
+  const sameRecipe = { ...recipe, name: "tool", platform: "windows" };
+  await writeFile(path.join(f.directory, "tool.json"), JSON.stringify(sameRecipe));
+  const file = path.join(f.picker, "grouped.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [{ url: existing.url, included: true }, { url: "https://example.com/new.git", included: true }],
+    skills: [
+      { source: { kind: "external", url: "https://example.com/new.git" }, path: "skills/ask-matt", version: { policy: "latest" }, hosts: ["pi"] },
+      { source: { kind: "builtin", id: "builtin:agent-depot" }, path: "doctor-md-agents", version: { policy: "latest" },
+        hosts: ["claude", "codex", "opencode", "pi"] }],
+    apps: [{ ...recipe, name: "fresh" }, sameRecipe] }));
+  const checklist = await importFile(f.view, file);
+  assert.match(checklist, /3 selected/);
+  assert.match(checklist, /▾ To import \(3\)/);
+  assert.match(checklist, /▾ https:\/\/example\.com\/new\.git \(2\)/);
+  assert.match(checklist, /> \[x\] 2 Add Source https:\/\/example\.com\/new\.git/);
+  assert.match(checklist, /\[x\] 4 Add Skill ask-matt/);
+  assert.match(checklist, /▾ App recipes \(1\)/);
+  assert.match(squash(checklist), /\[x\]5AddApprecipefresh\(allplatforms\)—notapproved,notinstalled/);
+  assert.match(checklist, /▸ Unchanged \(2\)/);
+  assert.doesNotMatch(checklist, /already identical/);
+  assert.match(checklist, /▾ Conflicts \(1\)/);
+  assert.match(squash(checklist), /Skilldoctor-md-agents—hosts:wouldaddcodex,opencode/);
+  assert.doesNotMatch(checklist, /existing \[|→|\(not selectable\)|conflict: |add: |same: /);
+
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, /0 selected/);
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, /3 selected/);
+  await openImportGroup(f.view, "Unchanged");
+  const unchanged = await waitForFrame(f.view.lastFrame, /already identical/);
+  assert.match(unchanged, /▾ Unchanged \(2\)/);
+  assert.match(squash(unchanged), /Apprecipetool\(windows\)—alreadyidentical/);
+
+  f.view.stdin.write("\r");
+  const collapsed = await waitForFrame(f.view.lastFrame, /▸ Unchanged \(2\)/);
+  assert.doesNotMatch(collapsed, /already identical/);
+
+  for (let attempt = 0; attempt < 12 && !/> \[x\] 2 Add Source/.test(f.view.lastFrame() ?? ""); attempt++) {
+    const before = f.view.lastFrame();
+    f.view.stdin.write("k");
+    await waitForFrame(f.view.lastFrame, next => next !== before);
+  }
+  f.view.stdin.write("\r");
+  const preview = await waitForFrame(f.view.lastFrame, /Apply Profile/);
+  assert.match(preview, /add: Source https:\/\/example\.com\/new\.git/);
+  assert.match(squash(preview), /add:Apprecipefresh/);
+  f.view.stdin.write("n");
+  await waitForFrame(f.view.lastFrame, frame => frame.includes("Import Profile") && !frame.includes("Apply Profile"));
 });
