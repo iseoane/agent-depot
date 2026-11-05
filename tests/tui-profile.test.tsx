@@ -183,7 +183,7 @@ test("import warns on newer producers, skips conflicts and adds recipes unapprov
   const checklist = await importFile(f.view, file);
   assert.match(checklist, /▾ Conflicts \(1\)/);
   assert.match(squash(checklist), /Apprecipedemo\(allplatforms\)—existingrecipedemo\.jsondiffersininstall/);
-  assert.doesNotMatch(checklist, /conflict: |not selectable/);
+  assert.doesNotMatch(checklist, /conflict: |\(not selectable\)/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /newer than running/);
   f.view.stdin.write("y");

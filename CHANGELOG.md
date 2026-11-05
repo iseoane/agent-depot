@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Profile import list in the TUI is grouped: additions by Source (App recipes
+  in their own group), then Unchanged items (collapsed) and Conflicts. Rows say
+  what importing does (`Add Skill ask-matt`, `Select Package ...`) and a conflict
+  gives one short reason such as `hosts: would add codex, opencode` instead of raw
+  JSON. Selection, preview and confirmation are unchanged. The App recipe label
+  now says imported recipes are written but not approved and not installed.
+
 ## [0.6.9] - 2026-11-04
 
 ### Fixed

@@ -47,6 +47,9 @@ interface Row {
   readonly ordinal?: number;
   readonly label: string;
   readonly selectable: boolean;
+  /** Import rows only: how the plan classified the item and the Source it groups under. */
+  readonly status?: "add" | "same" | "conflict";
+  readonly source?: string;
 }
 
 interface GroupRow {
@@ -91,13 +94,17 @@ function rowsFromExport(plan: ProfileExportPlan): readonly Row[] {
   ];
 }
 
+/** A group header, followed by its children while the group is open; an empty group is not shown. */
+function section(expanded: ReadonlySet<string>, id: string, label: string, depth: number, children: readonly DisplayRow[]): DisplayRow[] {
+  if (!children.length) return [];
+  const header: GroupRow = { kind: "group", id, label, depth };
+  return expanded.has(id) ? [header, ...children] : [header];
+}
+
 function exportDisplayRows(rows: readonly Row[], expanded: ReadonlySet<string>): readonly DisplayRow[] {
   const choices = (block: Row["block"]) => rows.filter(row => row.block === block);
-  const group = (id: string, label: string, depth: number, children: readonly DisplayRow[]): DisplayRow[] => {
-    if (!children.length) return [];
-    const header: GroupRow = { kind: "group", id, label, depth };
-    return expanded.has(id) ? [header, ...children] : [header];
-  };
+  const group = (id: string, label: string, depth: number, children: readonly DisplayRow[]) =>
+    section(expanded, id, label, depth, children);
   const sourceChildren = [
     ...group("group:sources", `Source choices (${choices("sources").length})`, 1, choices("sources")),
     ...group("group:skills", `Skills (${choices("skills").length})`, 1, choices("skills")),
@@ -109,6 +116,34 @@ function exportDisplayRows(rows: readonly Row[], expanded: ReadonlySet<string>):
     ...group("group:replicas", `Installed replicas (${choices("replicas").length})`, 0, choices("replicas")),
     ...group("group:excluded", `Export notes (${choices("excluded").length})`, 0, choices("excluded")),
   ];
+}
+
+const IMPORT_ADD = "import:add";
+const IMPORT_APPS = "import:apps";
+const importRepoId = (repo: string) => `import:add:${repo}`;
+
+/** Additions by Source and App recipes, then what is already there, then what conflicts. */
+function importDisplayRows(rows: readonly Row[], expanded: ReadonlySet<string>): readonly DisplayRow[] {
+  const added = rows.filter(row => row.status === "add");
+  const recipes = added.filter(row => row.block === "apps");
+  const repos = [...new Set(added.filter(row => row.block !== "apps").map(row => row.source ?? ""))];
+  const sources = repos.flatMap(repo => {
+    const children = added.filter(row => row.block !== "apps" && (row.source ?? "") === repo);
+    return section(expanded, importRepoId(repo), `${repo} (${children.length})`, 1, children);
+  });
+  const unchanged = rows.filter(row => row.status === "same"), conflicts = rows.filter(row => row.status === "conflict");
+  return [
+    ...section(expanded, IMPORT_ADD, `To import (${added.length})`, 0,
+      [...sources, ...section(expanded, IMPORT_APPS, `App recipes (${recipes.length})`, 1, recipes)]),
+    ...section(expanded, "import:same", `Unchanged (${unchanged.length})`, 0, unchanged),
+    ...section(expanded, "import:conflict", `Conflicts (${conflicts.length}) — not selectable`, 0, conflicts),
+  ];
+}
+
+/** Additions and conflicts are open to read; the unchanged items are what the person already has. */
+function importOpenGroups(rows: readonly Row[]): ReadonlySet<string> {
+  const repos = rows.filter(row => row.status === "add" && row.block !== "apps").map(row => importRepoId(row.source ?? ""));
+  return new Set([IMPORT_ADD, IMPORT_APPS, "import:conflict", ...repos]);
 }
 
 interface PhysicalListWindow {
@@ -191,9 +226,9 @@ function planEntries(plan: ProfileImportPlan): readonly ProfileImportEntry[] {
 }
 
 function rowsFromPlan(plan: ProfileImportPlan): readonly Row[] {
-  return planEntries(plan).map((item, index) => ({
+  return planEntries(plan).map((item, index): Row => ({
     id: `${item.block}:${index}`, block: item.block, index, ordinal: index + 1,
-    label: `${item.status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`,
+    label: item.summary, status: item.status, ...(item.group === undefined ? {} : { source: item.group }),
     selectable: item.status === "add",
   }));
 }
@@ -222,6 +257,12 @@ function selectedImportProfile(profile: Profile, entries: readonly ProfileImport
   });
   return parseProfile({ ...profile, format: replicas.length ? PROFILE_FORMAT_V2 : PROFILE_FORMAT,
     sources, skills, apps, packages, replicas });
+}
+
+/** The rows a list stage shows: the grouped export or import tree, otherwise the flat rows. */
+function listRows(mode: Mode, rows: readonly Row[], expanded: ReadonlySet<string>): readonly DisplayRow[] {
+  if (mode === "export-list") return exportDisplayRows(rows, expanded);
+  return mode === "import-list" ? importDisplayRows(rows, expanded) : rows;
 }
 
 /** Collect choices, display shared-core previews and confirm portable Profile transfers. */
@@ -265,14 +306,14 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const diagnostics = useRef<readonly ProfileExportDiagnostic[]>([]);
   const { rows: terminalRows, columns: terminalColumns } = useWindowSize();
   const panelWidth = Math.max((terminalColumns || 80) - 4, 1);
-  const hintCursorRow = (mode === "export-list" ? exportDisplayRows(rows, expandedGroupsRef.current) : rows)[cursorRef.current];
+  const hintCursorRow = listRows(mode, rows, expandedGroupsRef.current)[cursorRef.current];
   const enterHint = hintCursorRow === undefined ? undefined
     : "kind" in hintCursorRow ? "Enter open"
       : hintCursorRow.block === "excluded" ? "Enter note" : undefined;
   const groupHint = hintCursorRow !== undefined && "kind" in hintCursorRow ? " · ←/→ group" : "";
   const listingHint = mode === "export-list"
     ? `j/k move${groupHint}${enterHint === undefined ? "" : ` · ${enterHint}`} · space toggle · a all · e export · Esc back to menu`
-    : "j/k move · space toggle · a all · Enter preview · Esc back to menu";
+    : `j/k move${groupHint} · space toggle · a all · ${hintCursorRow !== undefined && "kind" in hintCursorRow ? "Enter open" : "Enter preview"} · Esc back to menu`;
   const hintText = `${selected.length} selected · ${listingHint}`;
   const titleRows = Math.max(Math.ceil(stringWidth("Export Profile") / panelWidth), 1);
   const hintRows = Math.max(Math.ceil(stringWidth(hintText) / panelWidth), 1);
@@ -305,11 +346,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const loadRows = (next: readonly Row[], nextMode: Mode) => {
     setRows(next);
     select(next.filter(row => row.selectable));
-    const open = new Set<string>();
+    const open = nextMode === "import-list" ? importOpenGroups(next) : new Set<string>();
     setExpandedGroups(open);
-    const firstChoice = nextMode === "export-list"
-      ? exportDisplayRows(next, open).findIndex(row => !("kind" in row) && row.selectable)
-      : 0;
+    const firstChoice = listRows(nextMode, next, open).findIndex(row => !("kind" in row) && row.selectable);
     cursorTo(Math.max(firstChoice, 0));
     setMode(nextMode);
   };
@@ -488,9 +527,9 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     }
     if (key.escape) { setMode("browse"); return; }
     // export-list and import-list
-    const visibleRows = current === "export-list" ? exportDisplayRows(rows, expandedGroupsRef.current) : rows;
-    const currentRow = visibleRows[cursorRef.current];
-    const next = moveCursor(cursorRef.current, visibleRows.length, input, key);
+    const shownRows = listRows(current, rows, expandedGroupsRef.current);
+    const currentRow = shownRows[cursorRef.current];
+    const next = moveCursor(cursorRef.current, shownRows.length, input, key);
     if (next !== undefined) { cursorTo(Math.max(0, next)); return; }
     if (input === " ") {
       if (currentRow && !("kind" in currentRow) && currentRow.selectable) select(toggleChoice(rows, selectedRef.current, currentRow));
@@ -518,13 +557,11 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     if (key.return && current === "import-list") { previewImport(); return; }
   });
   const listing = mode === "export-list" || mode === "import-list";
-  const displayRows: readonly DisplayRow[] = mode === "export-list" ? exportDisplayRows(rows, expandedGroups) : rows;
+  const displayRows: readonly DisplayRow[] = listRows(mode, rows, expandedGroups);
   const rowHeights = displayRows.map(row => {
     const prefixWidth = "kind" in row ? stringWidth(`> ${" ".repeat(row.depth * 2)}▸ `) : row.block === "excluded" ? 2
       : stringWidth(`> [ ] ${row.ordinal ?? row.index + 1} `);
-    const label = !("kind" in row) && row.block !== "excluded" && !row.selectable
-      ? `${row.label} (not selectable)` : row.label;
-    return wrapText(label, Math.max(panelWidth - prefixWidth, 1)).length;
+    return wrapText(row.label, Math.max(panelWidth - prefixWidth, 1)).length;
   });
   const listWindow = physicalListWindow(displayRows, rowHeights, cursor, height);
   const window = listing ? listWindow : computeWindow(lines.length, cursor, height);
@@ -553,13 +590,15 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       remainingRows -= label.split("\n").length;
       return <Text key={row.id} color={theme.value}>{marker}{label}</Text>;
     }
-    const prefix = `${marker}[${selected.some(choice => choice.id === row.id) ? "x" : " "}] ${row.ordinal ?? row.index + 1} `;
-    const value = `${row.label}${row.selectable ? "" : " (not selectable)"}`;
+    // A row the import never changes has no checkbox: unchanged items rest, conflicts warn.
+    const box = row.selectable ? `[${selected.some(choice => choice.id === row.id) ? "x" : " "}]` : "   ";
+    const prefix = `${marker}${box} ${row.ordinal ?? row.index + 1} `;
     const width = Math.max(panelWidth - stringWidth(prefix), 1);
-    const label = fitLines(wrapText(value, width), remainingRows, width)
+    const label = fitLines(wrapText(row.label, width), remainingRows, width)
       .join(`\n${" ".repeat(stringWidth(prefix))}`);
     remainingRows -= label.split("\n").length;
-    return <Text key={row.id}><Text color={theme.field}>{prefix}</Text><Text color={theme.value}>{label}</Text></Text>;
+    const color = row.status === "conflict" ? theme.warning : row.status === "same" ? theme.muted : theme.value;
+    return <Text key={row.id}><Text color={theme.field}>{prefix}</Text><Text color={color}>{label}</Text></Text>;
   });
   const nameOutcome = resolveExportFileName(text);
   const liveDestination = nameOutcome.kind === "ok"

@@ -5,10 +5,10 @@ import path from "node:path";
 import type { AppOperations } from "./app-flow.js";
 import { compareAppVersions } from "./app-version.js";
 import { canonicalizeGitSourceUrl, sourceIdForUrl } from "./git-source.js";
-import { selectionKey, type InstalledPackage, type PackageSelection } from "./package-model.js";
-import { describeProfilePackage, describeProfileReplica, packageFilterNames, selectProfileItems, type ProfileFilters } from "./profile-export.js";
+import { describeCoordinates, selectionKey, type InstalledPackage, type PackageSelection } from "./package-model.js";
+import { describeProfilePackage, describeProfileReplica, packageFilterNames, profileSourceIdentity, selectProfileItems, type ProfileFilters } from "./profile-export.js";
 import { parseProfile, PROFILE_FORMAT, type Profile, type ProfilePackageOperations } from "./profile.js";
-import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection, type ProjectSource } from "./project-manifest.js";
+import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection, type ProjectSource, type VersionPolicy } from "./project-manifest.js";
 import { defaultProjectSkillTreeAccess, executeSingleInstall, formatVersionPolicy, outputSingleInstallPreview, planSingleInstall,
   type InstallEnvironment } from "./skill-install.js";
 import { resolveProjectSource, type Source, type SourceOperations } from "./sources.js";
@@ -17,6 +17,12 @@ interface ProfileImportStatus {
   readonly status: "add" | "same" | "conflict";
   readonly label: string;
   readonly difference?: string;
+  /** What importing the item does, in plain words, for frontends that list it. */
+  readonly summary: string;
+  /** The Source the item belongs to, so a frontend can group by it. Absent for App recipes. */
+  readonly group?: string;
+  /** One short human reason for a conflict; `difference` keeps the exact comparison. */
+  readonly reason?: string;
 }
 
 export type ProfileImportItem = (
@@ -55,16 +61,47 @@ function skillChoices(skill: ProjectSkillSelection) {
 function recipeIdentity(recipe: Profile["apps"][number]): string {
   return canonical([recipe.name, recipe.platform]);
 }
-function fieldDifferences(existing: object, incoming: object): string[] {
+function fieldChanges(existing: object, incoming: object): { key: string; existing: unknown; incoming: unknown }[] {
   const left = new Map(Object.entries(existing)), right = new Map(Object.entries(incoming));
   return [...new Set([...left.keys(), ...right.keys()])].sort().flatMap(key =>
-    canonical(left.get(key)) === canonical(right.get(key)) ? []
-      : [`${key}: existing ${canonical(left.get(key))} -> incoming ${canonical(right.get(key))}`]);
+    canonical(left.get(key)) === canonical(right.get(key)) ? [] : [{ key, existing: left.get(key), incoming: right.get(key) }]);
+}
+function fieldDifferences(existing: object, incoming: object): string[] {
+  return fieldChanges(existing, incoming).map(change =>
+    `${change.key}: existing ${canonical(change.existing)} -> incoming ${canonical(change.incoming)}`);
+}
+/** The Hosts the profile would add and the ones it lacks, instead of two raw arrays. */
+function hostChange(existing: unknown, incoming: unknown): string {
+  const before = Array.isArray(existing) ? existing.map(String) : [], after = Array.isArray(incoming) ? incoming.map(String) : [];
+  const added = after.filter(host => !before.includes(host)), missing = before.filter(host => !after.includes(host));
+  return [added.length ? `would add ${added.join(", ")}` : "", missing.length ? `profile lacks ${missing.join(", ")}` : ""]
+    .filter(Boolean).join("; ");
+}
+function shortReason(existing: object, incoming: object): string {
+  return fieldChanges(existing, incoming).map(change => {
+    if (change.key === "hosts") return `hosts: ${hostChange(change.existing, change.incoming)}`;
+    if (change.key === "version") {
+      return `version: installed ${formatVersionPolicy(change.existing as VersionPolicy)}, profile ${formatVersionPolicy(change.incoming as VersionPolicy)}`;
+    }
+    return `${change.key} differ`;
+  }).join("; ");
 }
 function comparison(existing: object | undefined, incoming: object) {
   if (existing === undefined) return { status: "add" as const };
   const differences = fieldDifferences(existing, incoming);
-  return differences.length ? { status: "conflict" as const, difference: differences.join("; ") } : { status: "same" as const };
+  return differences.length
+    ? { status: "conflict" as const, difference: differences.join("; "), reason: shortReason(existing, incoming) }
+    : { status: "same" as const };
+}
+/** The row text: the effect of importing an addition, or why an existing one is left alone. */
+function summarize(status: ProfileImportStatus["status"], thing: string, addition: string, reason?: string, note?: string): string {
+  if (status === "add") return addition;
+  if (status === "same") return `${thing} — already identical${note ? ` (${note})` : ""}`;
+  return `${thing} — ${reason}`;
+}
+/** Skills, Packages and Sources group under one key whichever way their URL was written. */
+function groupOf(source: ProjectSource): string {
+  return "url" in source ? canonicalizeGitSourceUrl(source.url) : profileSourceIdentity(source);
 }
 
 async function loadImportRecipes(apps: AppOperations) {
@@ -94,29 +131,51 @@ async function loadImportRecipes(apps: AppOperations) {
 
 function classifySource(value: Profile["sources"][number], sources: readonly Source[]): ProfileImportItem {
   const exists = sources.some(source => source.kind === "git" && canonicalizeGitSourceUrl(source.url) === value.url);
-  return { block: "sources", value, label: `Source ${value.url} (included: ${value.included})`, status: exists ? "same" : "add",
+  const status = exists ? "same" : "add";
+  const note = exists && !value.included ? "discovery inclusion is not imported" : undefined;
+  return { block: "sources", value, label: `Source ${value.url} (included: ${value.included})`, status, group: canonicalizeGitSourceUrl(value.url),
+    summary: summarize(status, `Source ${value.url}`, `Add Source ${value.url}`, undefined, note),
     ...(exists && !value.included ? { difference: "included: existing true -> incoming false (discovery inclusion is not imported)" } : {}) };
 }
-function classifySkill(value: Profile["skills"][number], skills: readonly ProjectSkillSelection[]): ProfileImportItem {
+/** A Skill shows its name; `showPath` marks a name two Skills of one Source share. */
+function classifySkill(value: Profile["skills"][number], skills: readonly ProjectSkillSelection[], showPath = false): ProfileImportItem {
   const existing = skills.find(skill => skillIdentity(skill) === skillIdentity(value));
-  return { block: "skills", value, label: `Skill ${value.path}`, ...comparison(existing && skillChoices(existing), skillChoices(value)) };
+  const result = comparison(existing && skillChoices(existing), skillChoices(value));
+  const thing = `Skill ${showPath ? value.path : path.posix.basename(value.path)}`;
+  return { block: "skills", value, label: `Skill ${value.path}`, group: groupOf(value.source), ...result,
+    summary: summarize(result.status, thing, `Add ${thing}`, "reason" in result ? result.reason : undefined) };
 }
 /** Identity is the Source and coordinates; only the version policy is a portable choice. */
 function classifyPackage(value: Profile["packages"][number], recorded: readonly InstalledPackage[]): ProfileImportPackageItem {
   const existing = recorded.find(record => selectionKey(record.selection) === selectionKey(value));
-  return { block: "packages", value, label: describeProfilePackage(value),
-    ...comparison(existing === undefined ? undefined : { version: existing.selection.version }, { version: value.version }) };
+  const result = comparison(existing === undefined ? undefined : { version: existing.selection.version }, { version: value.version });
+  const thing = `Package ${describeCoordinates(value)} from ${profileSourceIdentity(value.source)} (${formatVersionPolicy(value.version)})`;
+  return { block: "packages", value, label: describeProfilePackage(value), group: groupOf(value.source), ...result,
+    summary: summarize(result.status, thing, `Select ${thing}`, "reason" in result ? result.reason : undefined) };
+}
+/** Why a same-name recipe file blocks the import, naming the file and what differs. */
+function recipeConflictReason(existing: readonly Awaited<ReturnType<typeof loadImportRecipes>>[number][], value: Profile["apps"][number]): string {
+  const files = existing.map(entry => path.basename(entry.file)).join(", ");
+  if (existing.some(entry => entry.error)) return `existing recipe ${files} is invalid but keeps this name`;
+  const keys = [...new Set(existing.flatMap(entry => fieldChanges(entry.content ?? {}, value).map(change => change.key)))];
+  return keys.length ? `existing recipe ${files} differs in ${keys.join(", ")}` : `existing recipe ${files} already has this name`;
 }
 function classifyRecipe(value: Profile["apps"][number], recipes: Awaited<ReturnType<typeof loadImportRecipes>>): ProfileImportItem {
   const existing = recipes.filter(entry => entry.name === value.name &&
     (entry.platform === undefined || value.platform === undefined || entry.platform === value.platform));
+  const platform = value.platform ?? "all platforms";
+  // A recipe is written as a file on import; it is never approved and the App is never installed.
+  const label = `App recipe ${value.name} (${platform}; not approved, not installed)`;
+  const thing = `App recipe ${value.name} (${platform})`;
+  const addition = `Add ${thing} — not approved, not installed`;
   if (existing.length === 1 && !existing[0]!.error &&
     existing[0]!.platform === value.platform &&
     fieldDifferences(existing[0]!.content ?? {}, value).length === 0) {
-    return { block: "apps", value, label: `App recipe ${value.name} (${value.platform ?? "all platforms"}; unapproved; Apps are not installed)`, status: "same" };
+    return { block: "apps", value, label, status: "same", summary: summarize("same", thing, addition) };
   }
-  return { block: "apps", value, label: `App recipe ${value.name} (${value.platform ?? "all platforms"}; unapproved; Apps are not installed)`,
-    status: existing.length ? "conflict" : "add",
+  const reason = existing.length ? recipeConflictReason(existing, value) : undefined;
+  return { block: "apps", value, label, summary: summarize(existing.length ? "conflict" : "add", thing, addition, reason),
+    status: existing.length ? "conflict" : "add", ...(reason === undefined ? {} : { reason }),
     ...(existing.length ? { difference: existing.map(entry => `${entry.file}: name ${JSON.stringify(value.name)} already present with overlapping platforms; ${
       fieldDifferences(entry.content ?? {}, value).join("; ") || "content identical"}`).join("; ") } : {}) };
 }
@@ -169,8 +228,13 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   const items: ProfileImportItem[] = [];
   for (const value of selectProfileItems(profile.sources, filters.sources, filters.noSources,
     source => [source.url, sourceIdForUrl(source.url)], "sources")) items.push(classifySource(value, sources));
-  for (const value of selectProfileItems(profile.skills, filters.skills, filters.noSkills,
-    skill => [skill.path, path.posix.basename(skill.path)], "skills")) items.push(classifySkill(value, skills));
+  const chosenSkills = selectProfileItems(profile.skills, filters.skills, filters.noSkills,
+    skill => [skill.path, path.posix.basename(skill.path)], "skills");
+  const nameOf = (skill: Profile["skills"][number]) => `${groupOf(skill.source)}\n${path.posix.basename(skill.path)}`;
+  for (const value of chosenSkills) {
+    const shared = chosenSkills.filter(other => nameOf(other) === nameOf(value)).length > 1;
+    items.push(classifySkill(value, skills, shared));
+  }
   for (const value of selectProfileItems(profile.apps, filters.apps, filters.noApps, recipe => [recipe.name], "apps")) {
     items.push(classifyRecipe(value, recipes));
   }

@@ -497,9 +497,6 @@ test("registered Source URL spelling does not produce an unregistered-fetch warn
   assert.doesNotMatch(registering.preview.join("\n"), /will be fetched but not registered/);
 });
 
-/** The plain-language fields the import plan is expected to carry. */
-interface Plain { readonly block: string; readonly status: string; readonly summary?: string; readonly group?: string; readonly reason?: string }
-
 test("import items carry a plain-language summary, a Source group and one short conflict reason", async t => {
   const { operations, apps } = await fixture(t);
   await operations.addGitSource("https://example.com/same.git");
@@ -513,7 +510,7 @@ test("import items carry a plain-language summary, a Source group and one short 
   skills: [skill, { ...selection, hosts: ["claude", "codex", "opencode", "pi"] }], apps: [recipe, { ...recipe, name: "fresh" }],
   packages: [piPackage] });
   const plan = await buildProfileImport(input, operations, apps, {}, fakePackageOperations({}).operations);
-  const byBlock = (block: string) => ([...plan.items, ...plan.packages] as readonly Plain[]).filter(item => item.block === block);
+  const byBlock = (block: string) => [...plan.items, ...plan.packages].filter(item => item.block === block);
   assert.deepEqual(byBlock("sources").map(item => [item.status, item.summary, item.group]), [
     ["add", "Add Source https://example.com/new.git", "https://example.com/new.git"],
     ["same", "Source https://example.com/same.git — already identical", "https://example.com/same.git"],
@@ -540,7 +537,7 @@ test("a Skill name that is ambiguous within one Source is shown with its path", 
     { ...selection, source, path: "a/shared" }, { ...selection, source, path: "b/shared" },
     { ...selection, source, path: "c/unique" }] });
   const plan = await buildProfileImport(input, operations, apps);
-  assert.deepEqual((plan.items as readonly Plain[]).map(item => item.summary), ["Add Skill a/shared", "Add Skill b/shared", "Add Skill unique"]);
+  assert.deepEqual(plan.items.map(item => item.summary), ["Add Skill a/shared", "Add Skill b/shared", "Add Skill unique"]);
 });
 
 test("a recipe label says recipes are written but never approved or installed", async t => {
