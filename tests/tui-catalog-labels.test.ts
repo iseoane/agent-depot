@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { sourceIdForUrl } from "../src/git-source.js";
 import { packageSelectionFor, type BundleDescriptor } from "../src/package-model.js";
 import { BUILT_IN_SOURCE, projectSourceOf } from "../src/sources.js";
-import { buildTree, describeRow, sourceLabel, type BundleEntry } from "../src/tui/catalog-tree.js";
+import { buildTree, describeRow, leavesOf, looseLeavesOf, sourceLabel, type BundleEntry } from "../src/tui/catalog-tree.js";
 import { flattenVisible, toggleNode, type Expanded } from "../src/tui/tree.js";
 
 const gitSource = (url: string) => ({ id: sourceIdForUrl(url), kind: "git" as const, url });
@@ -94,10 +94,22 @@ test("Catalog bundle ids stay unique when two descriptors share coordinates, and
   assert.deepEqual(counts, [0, 1, 0, 1]);
 });
 
-test("a Catalog Skill row names its path when another Skill of the Source shares its name", () => {
+test("same-named Skills of a Source group into one expandable row whose children are the variants", () => {
   const source = gitSource("https://github.com/example/skills");
   const mk = (path: string, name = "impeccable") => ({ sourceId: source.id, path, name, description: "d" });
-  const tree = buildTree([mk("a/impeccable"), mk("b/impeccable"), mk("c/solo", "solo")], [source]);
-  const rows = flattenVisible(tree, new Set([`source:${source.id}`])).filter((row) => row.node.data.kind === "skill").map(describeRow);
-  assert.deepEqual(rows, ["impeccable  d  (a/impeccable)", "impeccable  d  (b/impeccable)", "solo  d"]);
+  const skills = [mk("a/impeccable"), mk("b/impeccable"), mk("c/solo", "solo")];
+  const tree = buildTree(skills, [source]);
+  const sourceId = `source:${source.id}`;
+  const group = `variants:${source.id}:impeccable`;
+  const collapsed = flattenVisible(tree, new Set([sourceId])).slice(1).map(describeRow);
+  assert.deepEqual(collapsed, ["▸ impeccable (2 variants)", "solo  d"]);
+  const open = flattenVisible(tree, new Set([sourceId, group])).slice(1).map(describeRow);
+  assert.deepEqual(open, ["▾ impeccable (2 variants)", "impeccable  d  (a/impeccable)", "impeccable  d  (b/impeccable)", "solo  d"]);
+  assert.deepEqual(leavesOf(tree).map((skill) => skill.path), ["a/impeccable", "b/impeccable", "c/solo"]);
+  assert.deepEqual(looseLeavesOf(tree).map((skill) => skill.path), ["a/impeccable", "b/impeccable", "c/solo"]);
+  const ids = flattenVisible(tree, new Set([sourceId, group])).map((row) => row.node.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal((tree[0]!.data as { count: number }).count, 3);
+  const single = flattenVisible(buildTree([mk("a/impeccable")], [source]), new Set([sourceId])).slice(1).map(describeRow);
+  assert.deepEqual(single, ["impeccable  d"]);
 });
