@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gives one short reason such as `hosts: would add codex, opencode` instead of raw
   JSON. Selection, preview and confirmation are unchanged. The App recipe label
   now says imported recipes are written but not approved and not installed.
+- `agent-depot import` preview and skipped-result conflict lines show the same
+  short reason instead of raw existing/incoming values, and version conflicts say
+  `existing` rather than `installed`. Unchanged and conflicting Skills whose name
+  appears in several Sources name their Source, and in the TUI Enter previews the
+  plan even when nothing is importable.
 
 ## [0.6.9] - 2026-11-04
 
