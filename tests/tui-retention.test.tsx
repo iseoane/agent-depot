@@ -59,11 +59,12 @@ test("revisiting Catalog shows the last catalog at once, marked as refreshing, t
   const { home, state, environment } = await directories(t);
   const discovery = gate();
   const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
+  let skills: readonly SkillCandidate[] = [demo];
   const operations: SourceOperations = {
     ...real,
     discoverSkills: async () => {
       await discovery.wait();
-      return [demo];
+      return skills;
     },
   };
   const view = render(<App operations={operations} environment={environment} />);
@@ -80,15 +81,17 @@ test("revisiting Catalog shows the last catalog at once, marked as refreshing, t
   await waitForFrame(view.lastFrame, /▶ \[3\] Installations/);
   await waitForSettled(view.lastFrame);
 
+  // The next discovery finds one more Skill, so the retained list and the fresh one differ.
+  skills = [demo, { ...demo, path: "portable/other", name: "other" }];
   discovery.hold();
   view.stdin.write("2");
   const revisit = await waitForFrame(view.lastFrame, /▶ \[2\] Catalog/);
   assert.match(revisit, /Scope: all sources {2}1 of 1 Skills/, "the retained catalog is shown without waiting");
-  assert.match(revisit, /Refreshing catalog/);
+  assert.match(revisit, /Refreshing catalog \(last data shown\)/);
   assert.doesNotMatch(revisit, /Loading catalog/);
   discovery.release();
   const fresh = await waitForFrame(view.lastFrame, frame => /Scope: all sources/.test(frame) && !/Refreshing catalog/.test(frame));
-  assert.match(fresh, /1 of 1 Skills/);
+  assert.match(fresh, /2 of 2 Skills/);
 });
 
 test("revisiting Installations shows the last list at once, marked as refreshing, then the fresh one", async t => {
@@ -136,7 +139,11 @@ interface AppsFixture {
 }
 
 /** Two approved, installed Apps (`alpha`, `beta`); `failing` Apps fail their uninstall. */
-async function appsFixture(t: TestContext, failing: readonly string[] = []): Promise<AppsFixture> {
+async function appsFixture(
+  t: TestContext,
+  failing: readonly string[] = [],
+  wrap: (operations: SourceOperations) => SourceOperations = operations => operations,
+): Promise<AppsFixture> {
   const { home, state, environment } = await directories(t);
   const recipes = path.join(state, "apps");
   await mkdir(recipes, { recursive: true });
@@ -181,7 +188,7 @@ async function appsFixture(t: TestContext, failing: readonly string[] = []): Pro
     await apps.approve(entry);
     await apps.executeLifecycle(await apps.planLifecycle(entry, "install"), true);
   }
-  const operations = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
+  const operations = wrap(createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home }));
   const view = render(<App operations={operations} environment={{ ...environment, appEnvironment }} />);
   t.after(async () => {
     try {
@@ -278,4 +285,137 @@ test("a change made in Sources drops the retained Installations, so the revisit 
   assert.match(revisit, /Loading installations/);
   listing.release();
   await waitForFrame(view.lastFrame, /Managed \(user-global\)/);
+});
+
+test("revisiting Installations shows the retained rows with the stale label while the list reloads", async t => {
+  const listing = gate();
+  const fixture = await appsFixture(t, [], real => ({
+    ...real,
+    listUserGlobalInstallations: async () => {
+      await listing.wait();
+      return real.listUserGlobalInstallations!();
+    },
+  }));
+  fixture.view.stdin.write("3");
+  await waitForFrame(fixture.view.lastFrame, /Apps \(user-global\) \(2\)/);
+  fixture.view.stdin.write("2");
+  await waitForFrame(fixture.view.lastFrame, /▶ \[2\] Catalog/);
+  await waitForSettled(fixture.view.lastFrame);
+
+  listing.hold();
+  fixture.view.stdin.write("3");
+  const revisit = await waitForFrame(fixture.view.lastFrame, /▶ \[3\] Installations/);
+  assert.match(revisit, /Apps \(user-global\) \(2\)/, "the retained group is listed");
+  assert.match(revisit, /Refreshing installations \(last data shown\)/);
+  assert.doesNotMatch(revisit, /Loading installations/);
+  listing.release();
+  const fresh = await waitForFrame(fixture.view.lastFrame, frame => /Apps \(user-global\) \(2\)/.test(frame) && !/Refreshing installations/.test(frame));
+  assert.doesNotMatch(fresh, /last data shown/);
+});
+
+test("an App uninstall in Installations drops the retained rows, so the revisit does not show them", async t => {
+  const listing = gate();
+  let failReload = false;
+  const fixture = await appsFixture(t, [], real => ({
+    ...real,
+    listUserGlobalInstallations: async () => {
+      if (failReload) throw new Error("reload failed");
+      await listing.wait();
+      return real.listUserGlobalInstallations!();
+    },
+  }));
+  await markBothApps(fixture.view);
+  fixture.view.stdin.write("u");
+  await waitForFrame(fixture.view.lastFrame, /uninstall alpha\? y\/n/);
+  fixture.view.stdin.write("y");
+  await waitForFrame(fixture.view.lastFrame, /uninstall beta\? y\/n/);
+  // The reload that follows the action fails, so nothing fresh replaces what the action invalidated.
+  failReload = true;
+  fixture.view.stdin.write("y");
+  await waitForFrame(fixture.view.lastFrame, /Result · |Error:/);
+  failReload = false;
+  fixture.view.stdin.write("2");
+  await waitForFrame(fixture.view.lastFrame, /▶ \[2\] Catalog/);
+  await waitForSettled(fixture.view.lastFrame);
+
+  listing.hold();
+  fixture.view.stdin.write("3");
+  const revisit = await waitForFrame(fixture.view.lastFrame, /▶ \[3\] Installations/);
+  assert.match(revisit, /Loading installations/);
+  assert.doesNotMatch(revisit, /alpha|Apps \(user-global\)/);
+  listing.release();
+  await waitForFrame(fixture.view.lastFrame, frame => !/Loading installations/.test(frame) && /▶ \[3\] Installations/.test(frame));
+});
+
+test("an App install in Catalog drops the retained catalog, so the revisit does not show it", async t => {
+  const { home, state, environment } = await directories(t);
+  const discovery = gate();
+  const recipes = path.join(state, "apps");
+  await mkdir(recipes, { recursive: true });
+  await writeFile(path.join(recipes, "gentle.json"), JSON.stringify({
+    name: "gentle",
+    platform: "linux",
+    install: { argv: ["npm", "install", "-g", "gentle"] },
+    update: { argv: ["npm", "update", "-g", "gentle"] },
+    uninstall: { argv: ["npm", "uninstall", "-g", "gentle"] },
+    version: { argv: ["gentle", "--version"], pattern: "(\\d+\\.\\d+\\.\\d+)" },
+  }));
+  let installed = false;
+  const appEnvironment: AppEnvironment = {
+    homeDirectory: home,
+    recipesDirectory: recipes,
+    platform: "linux",
+    resolveExecutable: async name => name === "npm" || (name === "gentle" && installed) ? `/fake-bin/${name}` : undefined,
+    runner: async (executable, args) => {
+      if (executable.endsWith("/npm") && args[0] === "install") installed = true;
+      const version = executable.endsWith("/gentle");
+      return {
+        code: 0, signal: null, stdout: Buffer.from(version ? "1.0.0" : "done"), stderr: "", outputTooLarge: false,
+      };
+    },
+  };
+  const apps = createAppOperations(appEnvironment);
+  for (const entry of await apps.load()) await apps.approve(entry);
+  const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
+  const operations: SourceOperations = {
+    ...real,
+    discoverSkills: async () => {
+      await discovery.wait();
+      return [demo];
+    },
+  };
+  const view = render(<App operations={operations} environment={{ ...environment, appEnvironment }} />);
+  t.after(async () => {
+    try {
+      await waitForSettled(view.lastFrame);
+    } finally {
+      view.unmount();
+    }
+  });
+  view.stdin.write("2");
+  let frame = await waitForFrame(view.lastFrame, /Scope: all sources {2}1 of 1 Skills {2}· {2}1 Apps/);
+  for (let moves = 0; moves < 10 && !/^>\s+App gentle/m.test(frame); moves += 1) {
+    const before = frame;
+    view.stdin.write("j");
+    frame = await waitForFrame(view.lastFrame, next => next !== before);
+    if (/^> ▸ Apps/m.test(frame)) {
+      view.stdin.write("\r");
+      frame = await waitForFrame(view.lastFrame, /App gentle/);
+    }
+  }
+  view.stdin.write("i");
+  await waitForFrame(view.lastFrame, /install gentle\? y\/n/);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /gentle: installed/);
+  view.stdin.write("3");
+  await waitForFrame(view.lastFrame, /▶ \[3\] Installations/);
+  await waitForSettled(view.lastFrame);
+
+  discovery.hold();
+  view.stdin.write("2");
+  const revisit = await waitForFrame(view.lastFrame, /▶ \[2\] Catalog/);
+  assert.match(revisit, /Loading catalog/);
+  assert.doesNotMatch(revisit, /Scope: all sources/);
+  discovery.release();
+  await waitForFrame(view.lastFrame, /Scope: all sources/);
 });

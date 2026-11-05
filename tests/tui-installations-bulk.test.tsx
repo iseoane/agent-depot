@@ -600,3 +600,42 @@ test("an external record change between items fails the remaining host additions
   assert.equal(Object.values(current).filter((hosts) => hosts.includes("claude")).length, 1);
   view.unmount();
 });
+
+test("a bulk uninstall names each item with its position and counts the finished ones", async (t) => {
+  const f = await fixture(t);
+  await install(f, "alpha", ["pi"]);
+  await install(f, "beta", ["pi"]);
+  let holding = false;
+  let release = () => {};
+  let opened = Promise.resolve();
+  const hold = () => {
+    holding = true;
+    opened = new Promise<void>((resolve) => { release = () => { holding = false; resolve(); }; });
+  };
+  // Each item rechecks the records before it runs, so holding that read holds the item.
+  const operations: SourceOperations = {
+    ...f.operations,
+    listUserGlobalInstallations: async () => {
+      if (holding) await opened;
+      return f.operations.listUserGlobalInstallations!();
+    },
+  };
+  const view = await mount({ ...f, operations });
+  await open(view, [/builtin:agent-depot \(2\)/]);
+  await mark(view, /portable\/alpha/);
+  await mark(view, /portable\/beta/);
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /Uninstall 2 items\? y\/n/);
+  hold();
+  view.stdin.write("y");
+  const first = await waitForFrame(view.lastFrame, /Removing portable\/alpha \(1\/2\)…/);
+  assert.doesNotMatch(first, /finished/);
+  const releaseFirst = release;
+  hold();
+  releaseFirst();
+  const second = await waitForFrame(view.lastFrame, /Removing portable\/beta \(2\/2\)…/);
+  assert.match(second, /1 finished/);
+  release();
+  await waitForFrame(view.lastFrame, /Removed portable\/beta/);
+  view.unmount();
+});
