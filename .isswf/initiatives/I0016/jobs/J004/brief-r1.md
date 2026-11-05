@@ -1,0 +1,13 @@
+# J004 r1 — Agent Depot patch release 0.6.7
+
+## Authorization and scope
+Operator explicitly requests genera release patch. Prepare patch-version metadata and notes including existing I0016 J002/J003 fixes. Preserve unrelated .pi/.scratch/package-lock and raw native snapshots; no changes to installed CLI or user skills. Coordinator owns release Git/remote operations, but must preserve review/CI release gates; request procedural exception only where operator alone can resolve it. No new model actors or reset of exhausted implementation budgets.
+
+## Identity and release contract
+Version before 0.6.6, latest GitHub release v0.6.6 observed through gh. Version target 0.6.7. Repo iseoane/agent-depot, feature branch fix/missing-managed-skill-recovery, base 4f535c8274a36bd7f2c3315db6e102f10b1c995b. Release workflow .github/workflows/publish.yml dispatch only on main, version must match package and changelog; full Linux checks/e2e/pack/audit, npm trusted artifact publication, integrity/latest verification, then immutable tag and GitHub release. Do not npm publish manually or bypass workflow. Feature-branch PR/checks before integration, risk medium from persisted-state ownership. No current exact-head CI pass or approved global Standards gate.
+
+## Acceptance and evidence
+package.json 0.6.7; CHANGELOG section dated2026-11-03 records Windows junction fix and explicit missing-record recovery. pnpm typecheck/lint/build passed on release metadata candidate. Initial release-artifact tests failed because Git GNU tar interprets Windows C: as remote; scoped command PATH=/c/Windows/System32:$PATH selects native Windows tar without persistent configuration. Rerun nine release-artifact/release-notes tests pass; compiled isolated version tests 8/8 pass; diff --check pass. Release notes generated locally as .isswf/initiatives/I0016/release-notes-0.6.7.md.
+
+## Blocker and next boundary
+J002/J003 Spec pass but Standards/aggregate inconclusive: required external code-review supporting procedure unavailable. Operator previously accepted limitations ONLY for controlled local recovery/install, not for public release. Full repository suite/platform gates remain for release CI; prior local Windows EPERM/timeouts not proven unrelated. Do not silently extend local exception to publication. Need operator exception to missing supporting procedure for this release OR supplied procedure and separately authorized verification budget. After procedural resolution, prepare scoped commits/PR (review slicing required >400 changed lines), verify exact-head Linux+Windows CI and applicable release checks before integration/workflow publication. No release tag, npm publication or GitHub release created yet.

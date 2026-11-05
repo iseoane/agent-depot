@@ -1,0 +1,36 @@
+# Loading performance: findings and proposed work
+
+## Scope and provenance
+Read-only diagnosis requested by operator; no implementation, refresh, installation, approval, network publication or Host-state edits. Installed Agent Depot0.6.8 production modules, Windowsx64 Node26.12.1. Projectsource62723ef has released productionlogic. User observed CatálogoTUI41s and repeated41s after re-entry. Private probe results below are coordinator observations, each expensive workload sampledONCE (diagnostic, not statistical benchmark). No profiler/paint/realPTY trace or speedup claim. HTTP blocked; unexpected/mutating subprocesses refused, Gitoptional locks disabled process-only. No sourcecache refresh. Outputcounts confirm workcompleted; deniedempty on validprobes. Avoid conflating Git(local) and GitHub(network).
+
+## Measurements
+- Sources.listSources3samples16/4/5ms,4Sources,0subprocesses.
+- Sourcesrecipe loading/approval3samples32/32/20ms,5recipes2applicable,0subprocesses. BothWindowsrecipes approved byuser at observation; investigator did notapprove.
+- IsolatedSkills+PackagescachedGit discovery summed27.9s,31/31/67Skills from3GitSources plus3builtin, repeatedGit snapshotreads288processes. Not fullview.
+- CombinedCatalogloadingarms29.779s,444processes:416gitshow,13revparse,9lstree,2config,2status,1node-npmlist,1engramversion. Results132skills5bundles2active,3global0project18unmanaged,2Appsinstalled. Concurrentarms: skills/packages/ownership29.779s, installedinventory15.727s, Apps2.942s. NoHTTPattempts/errors. Reconstructs actualhookoperationsequence/concurrency, NOT Reactpaint/eventtiming. User41s not independentlyreproducedexactly.
+- Installationsactualexportedfull loader24.583s,237processes including209gitshow,13revparse,5lstree,3config,3status,2mergebase,1node,1engram. Results2Apps2Packages3global0project18unmanaged,noloaderrors/ownershipwarnings. Appsinspect0.193s/2.325s (parallel); Packageinspect4.322s/4.377s(parallel). Remaining~17.8s includes managedSkillinspection+inventory, not separatelyattributed.
+- Initial300processbudget made a final standalonePackageinspection unknown; intentionallyexclude thatphase, not use as actualinstalledstatus or timing. Subsequent700processfullInstallations and800processcombinedCatalog probes completedwithin90seconds andwithoutdenials.
+
+## Supported bottlenecks
+1. src/git-source.ts365–400 readSnapshot: resolvecommit+lstree, then awaits a newgitshow for EVERYselectedfile. Hundreds ofprocess startup/read costs dominate even localcachedSources.
+2. src/tui/catalog-state.ts29–99 readsSkills snapshots, separatelydiscoversPackages perSource; useInstalledSkills concurrently calls loadInstalledSkills. src/tui/catalog-installs.ts66–83 inventorycalls scanUserGlobalSkillInventory, whichcalls loadPackageOwnedSkillFilter (src/user-global-skill-inventory.ts148), independentlyrereadingSource snapshots. Multipleconsumerstraverse samecachedimmutablecommit.
+3. src/tui/installations.ts155+ serialbarriers Apps->Packages->managedSkills->inventory->Sources; packageinspection derivesbundles/snapshots, inventoryownership readsSourcesagain. Probedfull result24.6s not network.
+4. src/tui/app.tsx93–130 conditionalviews unmounton tabs. Cataloghooks rerun onnewmount; no retained readmodel acrossnavigation. Sourcecatalogeffect cancellation flag onlypreventsstateupdates after awaitedwork, not underlyingI/O. Continuedbackgroundwork afterleaving may contribute to perceivedSourcesdelay, but NOTmeasured/proven.
+5. Sourcesown list+recipeapproval fast inisolation. CannotjustifySourcecachingasitsrootcause yet. NoevidenceSourcesinitialload contactsGitHub. Measurecoldstartup/render and switchingduringunfinishedCatalog before assignsource-specificrootcause.
+
+## Proposed order (not implementation authorization)
+A. Fix shared immutableSource readowner: bounded binary gitcat-file --batch byobjectIDs fromexistinglstree, not onegitshow/file. Resolveonecommit, preserve pathscope/lifecycleexclusions/symlinkrefusal and listing/perfile/totalbytes limits; failclosed truncated/protocolinvalid/errors. ExistingrunProcessstdinEOF means batchingrequires explicitboundedinput/protocolwork, not merelyreplacecommandstring. Avoidnewdependencies/unboundedspawnparallelism.
+B. Reuse one in-flight/source snapshot result forSkills+Packages+ownership in sameview-load/readcontext; key by canonicalSourceidentity+scope+resolvedcommit, notURLonly. Sharefailuresemantics, evictrejectedpromises forvalidretry, handleSource removal/refchange. PackageHostownership ismutable: do NOTcacheactualHostinstalledstatus/approvals solelybySourcecommit. Invalidationonrefresh/Sourcechange and anyaffectedoperations. Whole-directorypermanentcache unsafe.
+C. Preserve sessionreadmodel across tab navigation, withloading/ready/stale/error and lastvaliddata onrevisit; key byprojectroot,Sourcefilter/configgeneration. InvalidateafterSource refresh/add/remove, recipe/approvalchange, install/update/uninstall/adoption/Hostchanges. Cache displayonly; mutationpreview/confirmation retainfreshstate/fullrevalidation. Oldmountrequests shoulddedupe/cancel safely rather thancompete onreentry. No inventedtime-basedsecuritywaiver.
+D. InstallationsreuseSourcework andseparate renderablegroups so slowApps/Packages do notholdSources/Skillslist; boundedconcurrency onlyaftermeasuring, retain deterministicorder/pergroupwarnings and inspectionmeaning. Exposependingmodified/ownershipdetails explicitly rather than inventclean/notowned/installedstatuses. Baselinefulltreeverificationstays required fordestructiveactions.
+E. Sourcesonly targetedUX/coremeasurement: firstvisibleframe vs listresolve vs recipeapproval; coldstart vs idle-revisit vs leaveunfinishedCatalog andopenSources. No newremotequeries. Do notslowfastpath withprofilingoverhead or claimfullfixfrombackendtimings.
+
+## Verification required for implementation
+- Sameinstalledartifactconditions/workload: actualrecorded132skills/5bundles/2active,3global/18unmanaged/2Apps; compareexactoutputs/ownership/warnings, notonlycount. Stablecachecommits, samecwd/Node/config; retainindividual cold/warm/reentrysamples >=3 percandidate, interleave wherefeasible. No guaranteedtarget seconds until measured.
+- CountGitprocesses/commands, readbytes/failures, rejectmutating/networkaccess forordinaryviewread, ensure sourcecache/Hoststateunchanged.
+- Unitregressionbatch boundariesbinaryutf8/newlines/oversize/truncation/symlinks/scopedSources/stalecommit/errors; deterministic dedup singleflight/rejection/invalidation acrosssourceandproject.
+- IsolatedTUIjourneys firstload->switchtab->reentry, invalidationafterexplicitrefresh/lifecycle usingfixtures; result mustnotindefinitelyloading/falseclean. FreshmutationpreviewrevalidateschangedHost/receipt/files.
+- RepresentativeactualTUIpaint/keyboardresponsive evidence plusdata-loader measurements; reportremainingSourcesunknown. IndependentStandards/Spec review forsemanticcache/safetychanges, then featurebranchPR/CIundernewboundedimplementationstart. No releaseorrealPackageoperations inferred.
+
+## Evidence files
+.scratch/measure-view-loads.mjs, view-load-measurements.json; measure-installations.mjs, installations-measurements.json, installations-subtimings.json; measure-catalog-combined.mjs, catalog-combined-measurements.json. No unrelated untracked files removed.

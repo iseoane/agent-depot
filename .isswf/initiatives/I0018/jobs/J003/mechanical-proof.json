@@ -1,0 +1,12 @@
+{
+  "status": "pass",
+  "base": "e9bac638e0925278f2cf5485cee0e75323c643a0",
+  "head": "affccab863325910cf86241ed6e931ecf8f29fda",
+  "files": [
+    "CHANGELOG.md",
+    "package.json"
+  ],
+  "onlyVersionChangedInPackage": true,
+  "releaseEntryPreserved": true,
+  "reviewedRuntimeUnchanged": true
+}
