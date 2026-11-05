@@ -85,17 +85,21 @@ export function buildTree(
           data: { kind: "group" as const, label: `Packages (${sourceBundles.length})` },
           children: sourceBundles.map((entry): CatalogNode => ({ id: bundleKey(entry), data: { kind: "bundle", entry } })),
         }]),
-        ...[...variants.values()].map((group): CatalogNode => {
-          const variant = group.length > 1;
-          const nodes = group.map((skill): CatalogNode => {
-            const ownedBy = owned(skill.path);
-            return { id: skillKey(skill), data: { kind: "skill", skill, ...(ownedBy === undefined ? {} : { ownedBy }), ...(variant ? { variant } : {}) } };
-          });
-          // Same-named Skills of one Source differ in content, so each stays its own installable row under one group.
-          return variant
-            ? { id: `variants:${sourceId}:${group[0]!.name}`, data: { kind: "group", label: `${group[0]!.name} (${group.length} variants)` }, children: nodes }
-            : nodes[0]!;
-        }),
+        ...(members.length === 0 ? [] : [{
+          id: `skills:${sourceId}`,
+          data: { kind: "group" as const, label: `Skills (${members.length})` },
+          children: [...variants.values()].map((group): CatalogNode => {
+            const variant = group.length > 1;
+            const nodes = group.map((skill): CatalogNode => {
+              const ownedBy = owned(skill.path);
+              return { id: skillKey(skill), data: { kind: "skill", skill, ...(ownedBy === undefined ? {} : { ownedBy }), ...(variant ? { variant } : {}) } };
+            });
+            // Same-named Skills of one Source differ in content, so each stays its own installable row under one group.
+            return variant
+              ? { id: `variants:${sourceId}:${group[0]!.name}`, data: { kind: "group", label: `${group[0]!.name} (${group.length} variants)` }, children: nodes }
+              : nodes[0]!;
+          }),
+        }]),
       ],
     };
   });
@@ -135,14 +139,16 @@ export function describeRow(row: VisibleRow<NodeData>): string {
   return `${data.skill.name}  ${truncateDescription(data.skill.description)}${data.variant === true ? `  (${data.skill.path})` : ""}`;
 }
 
-/** Skill nodes directly under a Source or inside one of its variant groups. */
+/** Skill nodes inside a Source's Skills group, directly or within one of its variant groups. */
 function skillNodesOf(roots: readonly CatalogNode[]): readonly (CatalogNode & { readonly data: Extract<NodeData, { kind: "skill" }> })[] {
   const found: (CatalogNode & { readonly data: Extract<NodeData, { kind: "skill" }> })[] = [];
   const visit = (node: CatalogNode) => {
     if (node.data.kind === "skill") found.push(node as CatalogNode & { readonly data: Extract<NodeData, { kind: "skill" }> });
     else if (node.id.startsWith("variants:")) node.children?.forEach(visit);
   };
-  for (const root of roots) root.children?.forEach(visit);
+  for (const root of roots) {
+    for (const group of root.children ?? []) if (group.id.startsWith("skills:")) group.children?.forEach(visit);
+  }
   return found;
 }
 

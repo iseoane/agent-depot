@@ -284,7 +284,7 @@ test("keys sent in one burst move and mark against the latest state", async (t) 
   const f = await fixture(t);
   const view = await mount(f);
   await waitForFrame(view.lastFrame, /alpha skill/);
-  for (const data of ["j", "j", " ", "j", " "]) view.stdin.write(data);
+  for (const data of ["j", "j", "j", " ", "j", " "]) view.stdin.write(data);
   const frame = await waitForFrame(view.lastFrame, /2 selected/);
   assert.match(frame, /\[x\] beta/);
   assert.match(frame, /\[x\] gamma/);
@@ -309,7 +309,7 @@ test("several keys delivered in a single write are handled one by one", async (t
   const f = await fixture(t);
   const view = await mount(f);
   await waitForFrame(view.lastFrame, /alpha skill/);
-  view.stdin.write("jj ");
+  view.stdin.write("jjj ");
   const frame = await waitForFrame(view.lastFrame, /1 selected/);
   assert.match(frame, /\[x\] beta/);
   view.unmount();

@@ -166,6 +166,18 @@ async function moveDownTo(lastFrame: () => string | undefined, stdin: Stdin, pat
   assert.fail("selection never reached the Package bundle row");
 }
 
+/** The Skills group sits between the bundle row and its loose Skills, so one `k` no longer reaches the bundle. */
+async function moveUpTo(lastFrame: () => string | undefined, stdin: Stdin, pattern: RegExp): Promise<void> {
+  for (let moves = 0; moves < 20; moves += 1) {
+    const line = (lastFrame() ?? "").split("\n").find((candidate) => candidate.startsWith("> ")) ?? "";
+    if (line.match(pattern)) return;
+    const before = lastFrame();
+    stdin.write("k");
+    await waitForFrame(lastFrame, (next) => next !== before);
+  }
+  assert.fail("selection never moved up to the Package bundle row");
+}
+
 test("i on a Catalog bundle previews the frozen plan, approves the missing receipt, then runs it", async (t) => {
   const f = await fixture(t);
   await revealBundle(f.view);
@@ -280,6 +292,7 @@ test("pressing i on a bundle installs the Package even when loose skills are mar
   const before = f.view.lastFrame();
   f.view.stdin.write("k");
   await waitForFrame(f.view.lastFrame, (next) => next !== before);
+  await moveUpTo(f.view.lastFrame, f.view.stdin, /> .*Package pstack \(pi\)/);
   f.view.stdin.write("i");
   await waitForFrame(f.view.lastFrame, /Approve this declaration and continue\? y\/n/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install"]);

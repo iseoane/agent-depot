@@ -8,7 +8,7 @@ import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
-import { useSourcesRecipes, type RecipeRow } from "./sources-recipes.js";
+import { groupRecipeRows, useSourcesRecipes, type RecipeGroup } from "./sources-recipes.js";
 import { BorderPanel, DecisionPrompt, FieldLine, PreviewLines, Working } from "./panel-parts.js";
 import { previewViewport } from "./preview-window.js";
 import { movePreviewCursor } from "./mode-keys.js";
@@ -33,7 +33,7 @@ type LoadState =
 
 type SourceRow =
   | { readonly id: string; readonly kind: "skills"; readonly source: GitSource }
-  | { readonly id: string; readonly kind: "app"; readonly recipe: RecipeRow };
+  | { readonly id: string; readonly kind: "app"; readonly group: RecipeGroup };
 
 type Selection = { readonly id?: string; readonly index: number };
 
@@ -163,14 +163,14 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
     highlightedFile: () => {
       const rows = rowsRef.current;
       const row = rows[resolveIndex(rows, selectionRef.current)];
-      return row?.kind === "app" ? row.recipe.entry.file : undefined;
+      return row?.kind === "app" ? row.group.primary.entry.file : undefined;
     },
     terminalRows: terminalRows || 24,
     terminalColumns: columns || 80,
   });
   const rows: readonly SourceRow[] = [
     ...sources.map((source): SourceRow => ({ id: source.id, kind: "skills", source })),
-    ...recipes.rows.map((recipe): SourceRow => ({ id: `recipe:${recipe.entry.file}`, kind: "app", recipe })),
+    ...groupRecipeRows(recipes.rows).map((group): SourceRow => ({ id: `recipe:${group.primary.entry.file}`, kind: "app", group })),
   ];
   rowsRef.current = rows;
   const selected = resolveIndex(rows, selection);
@@ -349,7 +349,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       {rows.length === 0 && recipes.loadingSince === undefined ? <Text>No sources or App recipes · n to add</Text> : null}
       {rows.slice(window.start, window.end).map((row, offset) => {
         const index = window.start + offset;
-        const id = row.kind === "skills" ? row.source.id : row.recipe.entry.recipe?.name ?? row.recipe.entry.file.split(/[\\/]/u).pop();
+        const id = row.kind === "skills" ? row.source.id : row.group.primary.entry.recipe?.name ?? row.group.primary.entry.file.split(/[\\/]/u).pop();
         return (
           <Text key={row.id} {...rowStyle(index === selected)}>
             {index === selected ? "> " : "  "}
@@ -358,8 +358,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
             <Text color={theme.field}>{row.kind}</Text><Text color={theme.legend}>  </Text>
             {row.kind === "skills"
               ? <Text color={theme.value}>{row.source.url}</Text>
-              : <><Text color={theme.value}>{row.recipe.entry.file}</Text><Text color={theme.legend}> · </Text>
-                  <Text color={row.recipe.status === "approved" ? theme.success : theme.warning}>{row.recipe.status}</Text></>}
+              : <RecipeStatus group={row.group} />}
           </Text>
         );
       })}
@@ -375,6 +374,21 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
         </BorderPanel>
       ) : null}
     </Box>
+  );
+}
+
+/** Status of the recipe that applies here, led by its platform when it names one; other platforms follow, muted. */
+function RecipeStatus({ group }: { readonly group: RecipeGroup }) {
+  const { primary, members } = group;
+  const platform = primary.entry.recipe?.platform;
+  return (
+    <>
+      {platform === undefined || !primary.entry.applicable ? null : <><Text color={theme.value}>{platform}</Text><Text color={theme.legend}> · </Text></>}
+      <Text color={primary.status === "approved" ? theme.success : theme.warning}>{primary.status}</Text>
+      {members.slice(1).map(other => (
+        <Text key={other.entry.file} color={theme.muted}>{"    "}{other.entry.recipe?.platform ?? "all platforms"} (other platform)</Text>
+      ))}
+    </>
   );
 }
 

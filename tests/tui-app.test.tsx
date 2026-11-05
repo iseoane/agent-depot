@@ -109,6 +109,9 @@ test("App switches views with 1 and 2 and shows the active view", async () => {
   stdin.write("2");
   await waitForFrame(lastFrame, (frame) => /▶ \[2\] Catalog/.test(frame) && /▸ builtin:agent-depot/.test(frame));
   stdin.write("\r");
+  await waitForFrame(lastFrame, /▸ Skills \(1\)/);
+  stdin.write("j");
+  stdin.write("\r");
   await waitForFrame(lastFrame, /skill-of-builtin/);
   stdin.write("1");
   await waitForFrame(lastFrame, /▶ \[1\] Sources/);
@@ -122,6 +125,9 @@ test("App opens the catalog of the highlighted source with Enter", async () => {
   await waitForFrame(lastFrame, (frame) => /> (\[.\] )?git:1234567890abcdef12345678/.test(frame));
   stdin.write("\r");
   await waitForFrame(lastFrame, /▸ example\/skills/);
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /▸ Skills \(1\)/);
+  stdin.write("j");
   stdin.write("\r");
   const frame = await waitForFrame(lastFrame, /skill-of-git:1234567890abcdef12345678/);
   assert.match(frame, /▶ \[2\] Catalog/);
@@ -276,6 +282,9 @@ test("Tab directions stay inside an active Skills checklist", async () => {
   stdin.write("2");
   await waitForFrame(lastFrame, /▶ \[2\] Catalog/);
   await waitForFrame(lastFrame, /▸ builtin:agent-depot/);
+  stdin.write("\r");
+  await waitForFrame(lastFrame, /▸ Skills \(1\)/);
+  stdin.write("j");
   stdin.write("\r");
   await waitForFrame(lastFrame, /skill-of-builtin/);
   stdin.write("j");
