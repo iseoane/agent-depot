@@ -421,3 +421,32 @@ test("discovery keeps same-named Skills whose content differs, and never collaps
   ]));
   assert.equal((await discoverSkillsFromSources([external, other], access)).length, 2);
 });
+
+test("discovery keeps same-named Skills with identical SKILL.md but different supporting files in the snapshot", async () => {
+  const same = skillMd("tool", "same\n");
+  assert.deepEqual(await discoverPaths([
+    { path: "a/tool/SKILL.md", content: same },
+    { path: "a/tool/scripts/x", content: "one" },
+    { path: "b/tool/SKILL.md", content: same },
+    { path: "b/tool/scripts/x", content: "two" },
+  ]), ["a/tool", "b/tool"]);
+  assert.deepEqual(await discoverPaths([
+    { path: ".claude/skills/tool/SKILL.md", content: same },
+    { path: ".claude/skills/tool/scripts/x", content: "one" },
+    { path: "plugin/skills/tool/SKILL.md", content: same },
+    { path: "plugin/skills/tool/scripts/x", content: "one" },
+  ]), ["plugin/skills/tool"]);
+});
+
+test("discovery compares whole Skill trees read from the Source when the snapshot carries only SKILL.md", async () => {
+  const same = skillMd("tool", "same\n");
+  const trees = new Map<string, string>([["a/tool", "one"], ["b/tool", "two"], ["c/tool", "one"]]);
+  class TreeAccess extends FakeContentAccess {
+    readSkillTree = async (_source: Source, skillPath: string) => [
+      { path: `${skillPath}/SKILL.md`, content: new TextEncoder().encode(same), executable: false },
+      { path: `${skillPath}/scripts/x`, content: new TextEncoder().encode(trees.get(skillPath)!), executable: false },
+    ];
+  }
+  const access = new TreeAccess(new Map([[external.id, ["a", "b", "c"].map((dir) => ({ path: `${dir}/tool/SKILL.md`, content: same }))]]));
+  assert.deepEqual((await discoverSkillsFromSources([external], access)).map((candidate) => candidate.path), ["a/tool", "b/tool"]);
+});
