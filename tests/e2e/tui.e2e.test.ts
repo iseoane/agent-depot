@@ -1203,8 +1203,8 @@ test("the Profile tab exports choices and imports them into a fresh HOME", { tim
     await importing.send("i", /profile\.json/u);
     await importing.send("j", />\s+profile\.json/u);
     const plan = await importing.send("\r", /Enter preview/u);
-    assert.match(plan, /add: Source/u);
-    assert.match(plan, /add: Skill skills\/alpha/u);
+    assert.match(plan, /Add Source/u);
+    assert.match(plan, /Add Skill alpha/u);
     assert.match(plan, /App recipe fixture-app \(windows/u);
     await importing.send("\r", /Apply Profile\? \(y\/n\)/u);
     await assert.rejects(readFile(path.join(b.home, ".agents/skills/alpha/SKILL.md")), { code: "ENOENT" });

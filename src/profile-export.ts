@@ -86,7 +86,7 @@ export function describeProfileReplica(replica: ProfileReplica): string {
   }
 }
 
-function profileSourceIdentity(source: Profile["skills"][number]["source"]): string {
+export function profileSourceIdentity(source: Profile["skills"][number]["source"]): string {
   if (source.kind === "builtin") return "Agent Depot (built-in Source)";
   if ("url" in source) return source.url;
   return source.path;
