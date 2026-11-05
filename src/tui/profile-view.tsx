@@ -311,9 +311,12 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     : "kind" in hintCursorRow ? "Enter open"
       : hintCursorRow.block === "excluded" ? "Enter note" : undefined;
   const groupHint = hintCursorRow !== undefined && "kind" in hintCursorRow ? " · ←/→ group" : "";
+  // With nothing to choose, a header has no item row to move to, so Enter previews instead of opening it.
+  const nothingToImport = !rows.some(row => row.selectable);
+  const importEnter = hintCursorRow !== undefined && "kind" in hintCursorRow && !nothingToImport ? "Enter open" : "Enter preview";
   const listingHint = mode === "export-list"
     ? `j/k move${groupHint}${enterHint === undefined ? "" : ` · ${enterHint}`} · space toggle · a all · e export · Esc back to menu`
-    : `j/k move${groupHint} · space toggle · a all · ${hintCursorRow !== undefined && "kind" in hintCursorRow ? "Enter open" : "Enter preview"} · Esc back to menu`;
+    : `j/k move${groupHint} · space toggle · a all · ${importEnter} · Esc back to menu`;
   const hintText = `${selected.length} selected · ${listingHint}`;
   const titleRows = Math.max(Math.ceil(stringWidth("Export Profile") / panelWidth), 1);
   const hintRows = Math.max(Math.ceil(stringWidth(hintText) / panelWidth), 1);
@@ -537,6 +540,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     }
     if (input === "a") { select(selectedRef.current.length ? [] : rows.filter(row => row.selectable)); return; }
     if (current === "export-list" && input === "e") { beginExport(); return; }
+    if (key.return && current === "import-list" && nothingToImport) { previewImport(); return; }
     if (currentRow && "kind" in currentRow && currentRow.kind === "group") {
       if (key.return || key.rightArrow || key.leftArrow) {
         const open = new Set(expandedGroupsRef.current);

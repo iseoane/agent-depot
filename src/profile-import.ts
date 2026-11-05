@@ -86,7 +86,7 @@ function shortReason(existing: object, incoming: object): string {
     if (change.key === "hosts") return `hosts: ${hostChange(change.existing, change.incoming)}`;
     if (change.key === "version") {
       return isVersionPolicy(change.existing) && isVersionPolicy(change.incoming)
-        ? `version: installed ${formatVersionPolicy(change.existing)}, profile ${formatVersionPolicy(change.incoming)}` : "version differs";
+        ? `version: existing ${formatVersionPolicy(change.existing)}, profile ${formatVersionPolicy(change.incoming)}` : "version differs";
     }
     return `${change.key} differ`;
   }).join("; ");
@@ -142,11 +142,14 @@ function classifySource(value: Profile["sources"][number], sources: readonly Sou
     summary: summarize(status, `Source ${value.url}`, `Add Source ${value.url}`, undefined, note),
     ...(exists && !value.included ? { difference: "included: existing true -> incoming false (discovery inclusion is not imported)" } : {}) };
 }
-/** A Skill shows its name; `showPath` marks a name two Skills of one Source share. */
-function classifySkill(value: Profile["skills"][number], skills: readonly ProjectSkillSelection[], showPath = false): ProfileImportItem {
+/** A Skill shows its name; `showPath` marks a name two Skills of one Source share, `showSource` one that several Sources share. */
+function classifySkill(value: Profile["skills"][number], skills: readonly ProjectSkillSelection[],
+  { showPath = false, showSource = false } = {}): ProfileImportItem {
   const existing = skills.find(skill => skillIdentity(skill) === skillIdentity(value));
   const result = comparison(existing && skillChoices(existing), skillChoices(value));
-  const thing = `Skill ${showPath ? value.path : path.posix.basename(value.path)}`;
+  const name = `Skill ${showPath ? value.path : path.posix.basename(value.path)}`;
+  // An addition sits under its Source header; the flat Unchanged and Conflicts sections have no such context.
+  const thing = showSource && result.status !== "add" ? `${name} from ${groupOf(value.source)}` : name;
   return { block: "skills", value, label: `Skill ${value.path}`, group: groupOf(value.source), ...result,
     summary: summarize(result.status, thing, `Add ${thing}`, "reason" in result ? result.reason : undefined) };
 }
@@ -157,6 +160,10 @@ function classifyPackage(value: Profile["packages"][number], recorded: readonly 
   const thing = `Package ${describeCoordinates(value)} from ${profileSourceIdentity(value.source)} (${formatVersionPolicy(value.version)})`;
   return { block: "packages", value, label: describeProfilePackage(value), group: groupOf(value.source), ...result,
     summary: summarize(result.status, thing, `Select ${thing}`, "reason" in result ? result.reason : undefined) };
+}
+/** The plain reason for a conflict, otherwise the exact comparison. */
+function differenceText(item: ProfileImportStatus): string {
+  return item.reason ?? item.difference ?? "";
 }
 /** Why a same-name recipe file blocks the import, naming the file and what differs. */
 function recipeConflictReason(existing: readonly Awaited<ReturnType<typeof loadImportRecipes>>[number][], value: Profile["apps"][number]): string {
@@ -235,10 +242,12 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
     source => [source.url, sourceIdForUrl(source.url)], "sources")) items.push(classifySource(value, sources));
   const chosenSkills = selectProfileItems(profile.skills, filters.skills, filters.noSkills,
     skill => [skill.path, path.posix.basename(skill.path)], "skills");
-  const nameOf = (skill: Profile["skills"][number]) => `${groupOf(skill.source)}\n${path.posix.basename(skill.path)}`;
+  const baseName = (skill: Profile["skills"][number]) => path.posix.basename(skill.path);
+  const nameOf = (skill: Profile["skills"][number]) => `${groupOf(skill.source)}\n${baseName(skill)}`;
   for (const value of chosenSkills) {
-    const shared = chosenSkills.filter(other => nameOf(other) === nameOf(value)).length > 1;
-    items.push(classifySkill(value, skills, shared));
+    const sameName = chosenSkills.filter(other => baseName(other) === baseName(value));
+    items.push(classifySkill(value, skills, { showPath: sameName.filter(other => nameOf(other) === nameOf(value)).length > 1,
+      showSource: new Set(sameName.map(other => groupOf(other.source))).size > 1 }));
   }
   for (const value of selectProfileItems(profile.apps, filters.apps, filters.noApps, recipe => [recipe.name], "apps")) {
     items.push(classifyRecipe(value, recipes));
@@ -248,7 +257,8 @@ export async function buildProfileImport(input: unknown, operations: SourceOpera
   const preview = ["Preview: import portable user-global profile", ...entries.flatMap(item => {
     const status = item.block === "sources" && item.status === "same" && !item.value.included
       ? "same (discovery inclusion is not imported)" : item.status;
-    const lines = [`${status}: ${item.label}${item.difference ? `; ${item.difference}` : ""}`];
+    const text = differenceText(item);
+    const lines = [`${status}: ${item.label}${text ? `; ${text}` : ""}`];
     if (item.block === "skills" && item.status === "add") {
       const skill = item.value;
       lines.push(`  Source ${canonical(skill.source)}`,
@@ -327,7 +337,8 @@ export async function applyProfileImport(plan: ProfileImportPlan, operations: So
         classify ??= await loadImportClassifier(group.block, operations, apps, packageOperations);
         const recheck = classify(item);
         if (recheck.status !== "add") {
-          results.push({ item, status: "skipped", detail: `${recheck.status}: ${recheck.label}${recheck.difference ? `; ${recheck.difference}` : ""}` }); continue;
+          const text = differenceText(recheck);
+          results.push({ item, status: "skipped", detail: `${recheck.status}: ${recheck.label}${text ? `; ${text}` : ""}` }); continue;
         }
         // Even a failing install method can persist state or change recipe files.
         classify = undefined;

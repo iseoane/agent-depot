@@ -956,3 +956,18 @@ test("import list in a narrow terminal keeps its title, clips group headers to o
   assert.doesNotMatch(frame, /^│\s+gment\//m);
   assert.match(squash(frame), />\[x\]\d+AddSkilldemo/);
 });
+
+test("with nothing to import Enter on a group header previews instead of only toggling the group", async t => {
+  const f = await fixture(t);
+  const sameRecipe = { ...recipe, name: "tool", platform: "windows" };
+  await writeFile(path.join(f.directory, "tool.json"), JSON.stringify(sameRecipe));
+  const file = path.join(f.picker, "nothing-new.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [], skills: [], apps: [sameRecipe] }));
+  const checklist = await importFile(f.view, file);
+  assert.match(checklist, /> ▸ Unchanged \(1\)/);
+  assert.match(checklist, /0 selected.*Enter preview/);
+  f.view.stdin.write("\r");
+  const preview = await waitForFrame(f.view.lastFrame, /Apply Profile/);
+  assert.match(squash(preview), /same:Apprecipetool/);
+});
