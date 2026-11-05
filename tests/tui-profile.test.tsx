@@ -931,3 +931,28 @@ test("import groups additions by Source, collapses unchanged items and explains 
   f.view.stdin.write("n");
   await waitForFrame(f.view.lastFrame, frame => frame.includes("Import Profile") && !frame.includes("Apply Profile"));
 });
+
+test("import list in a narrow terminal keeps its title, clips group headers to one row and never blanks a row", async t => {
+  const f = await fixture(t);
+  const url = `https://example.test/${"source-segment/".repeat(14)}skills.git`;
+  const file = path.join(f.picker, "w.json");
+  await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
+    sources: [{ url, included: true }],
+    skills: [{ source: { kind: "external", url }, path: `skills/${"long-directory/".repeat(14)}demo`,
+      hosts: ["claude", "codex", "pi"], version: { policy: "latest" } }], apps: [] }));
+  const rows = 17;
+  Object.defineProperty(f.view.stdout, "rows", { configurable: true, value: rows });
+  Object.defineProperty(f.view.stdout, "columns", { configurable: true, value: 40 });
+  f.view.stdout.emit("resize");
+  const first = await importFile(f.view, file);
+  f.view.stdin.write("j");
+  const frame = await waitForFrame(f.view.lastFrame, next => next !== first && next.includes("Import Profile"));
+  assert.ok(frame.split("\n").length <= rows, frame);
+  assert.match(frame, /Import Profile/);
+  const lines = frame.split("\n");
+  const header = lines.filter(line => line.includes("▾ https://example.test/"));
+  assert.equal(header.length, 1, frame);
+  assert.match(header[0]!, /…/);
+  assert.doesNotMatch(frame, /^│\s+gment\//m);
+  assert.match(squash(frame), />\[x\]\d+AddSkilldemo/);
+});
