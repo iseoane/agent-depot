@@ -132,6 +132,11 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
         </Text>
       );
     case "busy":
-      return <Working label={mode.label} since={mode.startedAt} />;
+      return (
+        <Box flexDirection="column">
+          <Working label={mode.label} since={mode.startedAt} />
+          {(mode.done ?? []).length > 0 ? <Text color={theme.muted}>{mode.done!.length} finished</Text> : null}
+        </Box>
+      );
   }
 }

@@ -236,8 +236,46 @@ for (const failing of [[], ["alpha"]] as const) {
     const running = await waitForFrame(fixture.view.lastFrame, /Running App step: beta \(2\/2\)…/);
     assert.match(running, failing.length ? /alpha: failed/ : /alpha: \w+/);
     releaseBeta();
-    const done = await waitForFrame(fixture.view.lastFrame, frame => !/App step/.test(frame) && /beta: \w+/.test(frame));
+    const done = await waitForFrame(fixture.view.lastFrame, frame => /Result · /.test(frame) && !/(?:Running|Preparing) App step/.test(frame));
     assert.match(done, /alpha: /);
     assert.deepEqual(fixture.runs, ["alpha uninstall", "beta uninstall"]);
   });
 }
+
+test("a change made in Sources drops the retained Installations, so the revisit loads from scratch", async t => {
+  const { home, state, environment } = await directories(t);
+  const listing = gate();
+  const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
+  const operations: SourceOperations = {
+    ...real,
+    listUserGlobalInstallations: async () => {
+      await listing.wait();
+      return real.listUserGlobalInstallations!();
+    },
+  };
+  const view = render(<App operations={operations} environment={environment} />);
+  t.after(async () => {
+    try {
+      await waitForSettled(view.lastFrame);
+    } finally {
+      view.unmount();
+    }
+  });
+  view.stdin.write("3");
+  await waitForFrame(view.lastFrame, /Managed \(user-global\)/);
+  view.stdin.write("1");
+  await waitForFrame(view.lastFrame, /▶ \[1\] Sources/);
+  await waitForSettled(view.lastFrame);
+  // Adding a Source captures keys: from here on Sources may change what Installations describes.
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, frame => /Add/i.test(frame) && !/q quit/.test(frame));
+  view.stdin.write("\u001b");
+  await waitForFrame(view.lastFrame, /q quit|n add/);
+
+  listing.hold();
+  view.stdin.write("3");
+  const revisit = await waitForFrame(view.lastFrame, /▶ \[3\] Installations/);
+  assert.match(revisit, /Loading installations/);
+  listing.release();
+  await waitForFrame(view.lastFrame, /Managed \(user-global\)/);
+});

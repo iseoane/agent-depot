@@ -7,6 +7,9 @@ export interface BatchOutcome<T> {
   readonly line: string;
 }
 
+/** Called before each item runs: its 1-based position, the batch size and the outcomes so far. */
+export type BatchStart<T> = (item: T, position: number, total: number, finished: readonly BatchOutcome<T>[]) => void;
+
 /**
  * Applies the items one after another. A failure is reported for that item and
  * the rest still run, so the outcomes always cover every item in order.
@@ -15,9 +18,11 @@ export async function runBatch<T>(
   items: readonly T[],
   run: (item: T) => Promise<string>,
   describeFailure: (item: T, error: unknown) => string,
+  onStart?: BatchStart<T>,
 ): Promise<readonly BatchOutcome<T>[]> {
   const outcomes: BatchOutcome<T>[] = [];
   for (const item of items) {
+    onStart?.(item, outcomes.length + 1, items.length, outcomes);
     try {
       outcomes.push({ item, ok: true, line: await run(item) });
     } catch (error) {

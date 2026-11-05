@@ -7,7 +7,11 @@ import type { ManageContext } from "./manage-actions.js";
 import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
 import { BorderPanel, HostChecklist, PreviewConfirm, Working } from "./panel-parts.js";
 import { previewViewport, type PreviewChrome } from "./preview-window.js";
+import { theme } from "./theme.js";
 import { operationStart } from "./working-model.js";
+
+/** Finished items shown under a running batch; older ones are counted. */
+const MAX_DONE_LINES = 3;
 
 interface Request {
   readonly entry: AppEntry;
@@ -17,7 +21,13 @@ interface Request {
 
 /** App interaction modes capture keys inside the existing Installations view. */
 export type AppMode =
-  | { readonly kind: "app-busy"; readonly label: string; readonly startedAt: number }
+  | {
+      readonly kind: "app-busy";
+      readonly label: string;
+      readonly startedAt: number;
+      /** Result lines of the batch items finished so far. */
+      readonly done?: readonly string[];
+    }
   | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number }
   | {
       readonly kind: "app-hosts";
@@ -117,8 +127,13 @@ function appPreviewLines(mode: Extract<AppMode, { kind: "app-approve" | "app-con
 }
 
 /** The busy mode of an App step; `previous` is the busy mode this step continues, so the clock keeps running. */
-function appBusy(label: string, previous?: AppMode): AppMode {
-  return { kind: "app-busy", label, startedAt: operationStart(previous) };
+function appBusy(label: string, previous?: AppMode, done?: readonly string[]): AppMode {
+  return { kind: "app-busy", label, startedAt: operationStart(previous), ...(done?.length ? { done } : {}) };
+}
+
+/** `Running App step: name (2/5)…`; the position is left out for a batch of one. */
+function stepLabel(verb: string, entry: AppEntry, finished: number, total: number): string {
+  return `${verb} App step: ${appName(entry)}${total > 1 ? ` (${finished + 1}/${total})` : ""}…`;
 }
 
 async function prepareNext(
@@ -129,10 +144,15 @@ async function prepareNext(
   previous?: AppMode,
 ): Promise<void> {
   const { manage, apps } = context;
-  const running = appBusy("Preparing App step…", previous);
-  manage.setMode(running);
   // Independent planning failures never stop the remaining marked Apps.
   const [request, ...remaining] = requests;
+  const running = appBusy(
+    request ? stepLabel("Preparing", request.entry, results.length, results.length + requests.length) : "Finishing App steps…",
+    previous,
+    // Once the batch is over its results are the Result panel, not a busy line.
+    request ? results : undefined,
+  );
+  manage.setMode(running);
   if (!request) {
     await manage.finish({ kind: failures > 0 ? "error" : "ok", text: results.join("\n") });
     return;
@@ -183,7 +203,11 @@ export async function startAppAction(context: AppContext, entries: readonly AppE
 
 async function execute(context: AppContext, mode: Extract<AppMode, { kind: "app-confirm" | "app-manual" }>): Promise<void> {
   const { manage, apps } = context;
-  const running = appBusy("Running App step…");
+  const running = appBusy(
+    stepLabel("Running", mode.plan.entry, mode.results.length, mode.results.length + 1 + mode.remaining.length),
+    undefined,
+    mode.results,
+  );
   manage.setMode(running);
   let manualRequired = false;
   const [outcome] = await runBatch([mode.plan], async plan => {
@@ -254,7 +278,16 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
 /** Renders App prompts using the existing checklist and preview-confirm panels. */
 export function AppPanel({ mode }: { readonly mode: AppMode }) {
   const { rows, columns } = useWindowSize();
-  if (mode.kind === "app-busy") return <BorderPanel title="App lifecycle"><Working label={mode.label} since={mode.startedAt} /></BorderPanel>;
+  if (mode.kind === "app-busy") {
+    const done = mode.done ?? [];
+    return (
+      <BorderPanel title="App lifecycle">
+        <Working label={mode.label} since={mode.startedAt} />
+        {done.length > MAX_DONE_LINES ? <Text color={theme.muted}>{done.length - MAX_DONE_LINES} earlier finished</Text> : null}
+        {done.slice(-MAX_DONE_LINES).map((line, index) => <Text key={index} color={theme.muted}>{line}</Text>)}
+      </BorderPanel>
+    );
+  }
   if (mode.kind === "app-hosts") {
     return (
       <BorderPanel title="App Host steps">
