@@ -547,3 +547,51 @@ test("a recipe label says recipes are written but never approved or installed", 
   assert.equal(label, "App recipe tool (windows; not approved, not installed)");
   assert.doesNotMatch(plan.preview.join("\n"), /unapproved; Apps are not installed/);
 });
+
+test("a Skill name shared by two Sources names its Source on rows that are not additions", async t => {
+  const { operations, apps } = await fixture(t);
+  const external = { kind: "external", url: "https://github.com/example/skills.git" };
+  const record = (source: object, installationPath: string, hosts: string[]) => operations.addUserGlobalInstallation!({
+    ...parseProfile({ ...profile, skills: [{ ...selection, source, hosts }] }).skills[0]!,
+    installation: { path: installationPath, adopted: false } });
+  await record(selection.source, ".agents/skills/doctor-md-agents", ["pi"]);
+  await record(external, ".claude/skills/doctor-md-agents", ["claude"]);
+  const input = parseProfile({ ...profile, sources: [], apps: [], skills: [
+    selection, { ...selection, source: external, hosts: ["claude", "codex"] },
+    { ...selection, source: external, path: "unique", hosts: ["pi"] }] });
+  const plan = await buildProfileImport(input, operations, apps);
+  assert.deepEqual(plan.items.map(item => [item.status, item.summary]), [
+    ["same", "Skill doctor-md-agents from Agent Depot (built-in Source) — already identical"],
+    ["conflict", "Skill doctor-md-agents from https://github.com/example/skills.git — hosts: would add codex"],
+    ["add", "Add Skill unique"],
+  ]);
+});
+
+test("a version conflict reason says existing, not installed, for Packages and Skills", async t => {
+  const { operations, apps } = await fixture(t);
+  await operations.addUserGlobalInstallation!({ ...parseProfile(profile).skills[0]!,
+    installation: { path: ".agents/skills/doctor-md-agents", adopted: false } });
+  const input = parseProfile({ ...profile, sources: [], apps: [], skills: [{ ...selection, version: { policy: "fixed", version: "0.3.0" } }],
+    packages: [piPackage] });
+  const recorded: readonly InstalledPackage[] = [{ ...installedPackage, selection: { ...piPackage, version: { policy: "fixed", version: "0.4.0" } } }];
+  const plan = await buildProfileImport(input, operations, apps, {}, fakePackageOperations({ recorded }).operations);
+  assert.equal(plan.packages[0]!.reason, "version: existing fixed:0.4.0, profile latest");
+  assert.equal(plan.items[0]!.reason, "version: existing latest, profile fixed:0.3.0");
+});
+
+test("CLI import preview names a conflict by its plain reason instead of raw JSON", async t => {
+  const { home, operations, apps } = await fixture(t);
+  await operations.addUserGlobalInstallation!({ ...parseProfile({ ...profile, skills: [{ ...selection, hosts: ["claude"] }] }).skills[0]!,
+    installation: { path: ".agents/skills/doctor-md-agents", adopted: false } });
+  await mkdir(apps.directory);
+  await writeFile(path.join(apps.directory, "existing-tool.json"), JSON.stringify({ ...recipe, install: { manual: "Other" } }));
+  const file = path.join(home, "conflicts.json");
+  await writeFile(file, serializeProfile(parseProfile({ ...profile, sources: [], skills: [{ ...selection, hosts: ["claude", "pi"] }] })));
+  const lines: string[] = [];
+  assert.equal(await runCli(["import", file], { homeDirectory: home, operations, appOperations: apps,
+    stdout: line => lines.push(line), stderr: line => assert.fail(line) }), 0);
+  const output = lines.join("\n");
+  assert.match(output, /^conflict: Skill doctor-md-agents; hosts: would add pi$/m);
+  assert.match(output, /^conflict: App recipe tool \(windows; not approved, not installed\); existing recipe existing-tool\.json differs in install$/m);
+  assert.doesNotMatch(output, /existing \[|-> incoming|incoming \[/);
+});
