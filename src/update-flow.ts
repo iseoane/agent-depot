@@ -11,6 +11,7 @@ import {
   type ProjectSkillSelection,
   type ProjectSource,
 } from "./project-manifest.js";
+import { describeProjectTarget } from "./project-target.js";
 import { defaultProjectSkillTreeAccess } from "./skill-install.js";
 import {
   applyUpdateBatch,
@@ -46,6 +47,8 @@ export interface LoadedUpdates {
   readonly installed: readonly ProjectSkillSelection[];
   /** Shared options for preview and apply; the assessment snapshots are never reread. */
   readonly context: SkillUpdateApplicationOptions;
+  /** Project root and warnings every project-scope output starts with; empty for user-global. */
+  readonly projectTarget: readonly string[];
 }
 
 /** Where the scope's installations live: its root and, for the project scope, its manifest store. */
@@ -83,7 +86,8 @@ export async function loadUpdates(input: UpdateScopeInput): Promise<LoadedUpdate
     ...(manifestStore === undefined ? {} : { projectManifestStore: manifestStore }),
     ...(input.installationFileSystem === undefined ? {} : { installationFileSystem: input.installationFileSystem }),
   };
-  return { assessment, installed, context };
+  const projectTarget = manifestStore === undefined ? [] : await describeProjectTarget(projectRoot, manifestStore.path);
+  return { assessment, installed, context, projectTarget };
 }
 
 async function requireUserGlobalInstallations(operations: SourceOperations): Promise<readonly ProjectSkillSelection[]> {

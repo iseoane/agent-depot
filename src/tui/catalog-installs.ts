@@ -159,6 +159,7 @@ export async function prepareInstall(
       root: path.resolve(environment.projectRoot ?? process.cwd()),
       existing: (await manifestStore.load()).skills,
       recordedIn: manifestStore.path,
+      manifestPath: manifestStore.path,
     });
   }
   const lines: string[] = [];

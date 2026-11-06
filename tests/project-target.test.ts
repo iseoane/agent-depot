@@ -53,6 +53,7 @@ const projectWarnings = (output: readonly string[]) => output.filter((line) => /
 test("a project install preview starts with the absolute project root", async () => {
   const root = await tempDirectory("target-first");
   try {
+    await mkdir(path.join(root, ".pi"));
     const { code, output } = await run(installArguments, { projectRoot: root });
     assert.equal(code, 1);
     assert.equal(output[0], `Project: ${root}`);

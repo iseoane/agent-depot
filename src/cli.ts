@@ -91,6 +91,7 @@ import {
   type ResolvedManifestSelection,
 } from "./skill-install.js";
 import type { TuiEnvironment } from "./tui/environment.js";
+import { describeProjectTarget, resolveProjectRootOption } from "./project-target.js";
 import { CliUsageError } from "./usage-error.js";
 import { createSelfUpdateOperations, type SelfUpdateOperations } from "./self-update.js";
 import { selectionWithInstallation } from "./skill-update.js";
@@ -140,10 +141,11 @@ const USAGE = [
   "  agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]",
   "  agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]",
   "  agent-depot discover <source-id> [source-id...]",
-  "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host]",
-  "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host]",
-  "  agent-depot update check --scope <project|user-global> [--package <selection>...]",
-  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>... | --app <name>... | --package <selection>...) [--yes] [--confirm-path <relative-path>...]",
+  "  agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--yes] [--confirm-additional-host] [--project <path>]",
+  "  agent-depot install --scope project --manifest --portable-v1 [--yes] [--confirm-additional-host] [--project <path>]",
+  "  agent-depot update check --scope <project|user-global> [--package <selection>...] [--project <path>]",
+  "  agent-depot update apply --scope <project|user-global> (--all | --skill <id|path>... | --app <name>... | --package <selection>...) [--yes] [--confirm-path <relative-path>...] [--project <path>]",
+  "    --project <path> picks the project directory for --scope project (default: the current directory).",
   "    Apps and Packages run after Skills; --all --scope project skips Apps and Packages.",
   "  agent-depot self update [--yes] (npm global installations only; otherwise prints manual guidance)",
   "  agent-depot skill remove <id|path>... [--yes]",
@@ -170,7 +172,7 @@ const USAGE = [
   "  --verbose  stream the full child output (npm, pi, git, App commands) to stderr line by line as it runs,",
   "             instead of a spinner and the last few lines; stdout is unchanged.",
 ].join("\n");
-const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host]";
+const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host] [--project <path>]";
 const DISCOVER_USAGE = "Usage: agent-depot discover <source-id> [source-id...]\nSelect at least one Source ID explicitly; run `agent-depot source list` to see registered Sources";
 const REMOVE_SOURCE_USAGE = "Usage: agent-depot source remove <id> [--skill <id|path>...] [--all] [--yes]";
 const MIGRATE_SOURCE_USAGE = "Usage: agent-depot source migrate <old-id> <new-id> (--skill <path>... | --all) [--yes]";
@@ -1012,6 +1014,8 @@ interface UpdateOptions {
   readonly confirmed: boolean;
   /** Exact relative non-canonical project paths the user confirmed with --confirm-path. */
   readonly confirmedPaths: readonly string[];
+  /** The `--project` value, project scope only. */
+  readonly project?: string;
 }
 
 function selfUpdateOperationsFor(dependencies: CliDependencies): SelfUpdateOperations {
@@ -1076,6 +1080,7 @@ async function runUpdate(
   progress: Progress,
 ): Promise<number> {
   const options = parseUpdateOptions(argv);
+  const projectRoot = options.project === undefined ? dependencies.projectRoot : await resolveProjectRootOption(options.project);
   const apps = dependencies.appOperations ?? createAppOperations({ homeDirectory: dependencies.homeDirectory });
   const packages = packageOperationsFor(dependencies, operations);
   const requestedPackages = options.scope === "user-global" && options.requestedPackages.length > 0
@@ -1106,7 +1111,7 @@ async function runUpdate(
       scope: options.scope,
       operations,
       ...(dependencies.homeDirectory === undefined ? {} : { homeDirectory: dependencies.homeDirectory }),
-      ...(dependencies.projectRoot === undefined ? {} : { projectRoot: dependencies.projectRoot }),
+      ...(projectRoot === undefined ? {} : { projectRoot }),
       ...(dependencies.sourceAccess === undefined ? {} : { sourceAccess: dependencies.sourceAccess }),
       ...(dependencies.projectManifestStore === undefined ? {} : { projectManifestStore: dependencies.projectManifestStore }),
       ...(dependencies.installationOptions?.fileSystem === undefined ? {} : { installationFileSystem: dependencies.installationOptions.fileSystem }),
@@ -1115,7 +1120,8 @@ async function runUpdate(
     output(`Error (Skills, ${options.scope}): ${error instanceof Error ? error.message : String(error)}`);
   }
   if (loaded) {
-    const { assessment, installed, context } = loaded;
+    const { assessment, installed, context, projectTarget } = loaded;
+    for (const line of projectTarget) output(line);
     const userGlobalInventory = options.action === "check" && options.scope === "user-global"
       ? await scanUserGlobalSkillInventory({ homeDirectory: context.projectRoot, managedInstallations: installed, reportWarning: output })
       : undefined;
@@ -1132,7 +1138,7 @@ async function runUpdate(
   if (options.action === "check") {
     return appCheckFailed || packageCheckFailed ? 1 : 0;
   }
-  const { assessment, context } = loaded;
+  const { assessment, context, projectTarget } = loaded;
   const selectedApps = options.all ? appUpdates.filter(item => item.status === "update available")
     : options.requestedApps.map(name => {
       const matches = appUpdates.filter(item => item.entry.recipe?.name === name);
@@ -1181,6 +1187,8 @@ async function runUpdate(
   const { plans, failures: previewFailures, nonCanonicalPaths } = selected.length === 0
     ? await previewUpdateCandidates(selected, context)
     : await progress.run("Previewing Skill updates", () => previewUpdateCandidates(selected, context));
+  // The assessment output above can be long, so the previews restate the target.
+  if (selected.length > 0) for (const line of projectTarget) output(line);
   // Successes and failures are reported in candidate order, as the preview runs.
   const failedIds = new Set(previewFailures.map(({ item }) => item.id));
   const plansById = new Map(plans.map((plan) => [plan.item.id, plan]));
@@ -1310,6 +1318,7 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
   }
 
   let scope: string | undefined;
+  let project: string | undefined;
   let all = false;
   let confirmed = false;
   const requested: string[] = [];
@@ -1320,6 +1329,9 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
     switch (argv[index]) {
       case "--scope":
         scope = requireOptionValue(argv, ++index, "--scope");
+        break;
+      case "--project":
+        project = requireOptionValue(argv, ++index, "--project");
         break;
       case "--confirm-path":
         confirmedPaths.push(normalizeConfirmedPath(requireOptionValue(argv, ++index, "--confirm-path")));
@@ -1347,6 +1359,7 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
   if (scope !== "project" && scope !== "user-global") {
     throw new CliUsageError("Update scope must be explicit: use --scope project or --scope user-global");
   }
+  if (project !== undefined && scope !== "project") throw new CliUsageError("--project only applies to --scope project");
   if (action === "check" && (all || requested.length > 0 || requestedApps.length > 0 || confirmed || confirmedPaths.length > 0)) {
     throw new CliUsageError("update check only accepts --scope and optional --package filters; use update apply to select and apply updates");
   }
@@ -1369,6 +1382,7 @@ function parseUpdateOptions(argv: readonly string[]): UpdateOptions {
     requestedPackages: Object.freeze(requestedPackages),
     confirmed,
     confirmedPaths: Object.freeze(confirmedPaths),
+    ...(project === undefined ? {} : { project }),
   };
 }
 
@@ -1440,7 +1454,9 @@ async function runInstall(
     return;
   }
 
-  const projectRoot = path.resolve(dependencies.projectRoot ?? process.cwd());
+  const projectRoot = options.project === undefined
+    ? path.resolve(dependencies.projectRoot ?? process.cwd())
+    : await resolveProjectRootOption(options.project);
   const manifestStore = dependencies.projectManifestStore ?? new ProjectManifestStore(defaultProjectManifestPath(projectRoot));
 
   const context: ProjectInstallContext = { options, operations, dependencies, sourceAccess, output, progress, projectRoot, manifestStore };
@@ -1499,6 +1515,7 @@ async function runManifestInstall(context: ProjectInstallContext): Promise<void>
   // Two different manifest selections can have different Source/path
   // identities while still resolving to the same basename directory.
   const inspections = await inspectManifestInstallations(resolved, projectRoot, sourceAccess, dependencies);
+  for (const line of await describeProjectTarget(projectRoot, manifestStore.path)) output(line);
   for (let index = 0; index < resolved.length; index += 1) {
     const item = resolved[index]!;
     outputInstallPreview(item.selection, item.source, projectRoot, output, item.files, item.method, "project", inspections[index], false, options.confirmed);
@@ -1559,7 +1576,7 @@ async function runSingleProjectInstall(context: ProjectInstallContext): Promise<
   const request = { ...options, scope: "project" as const, sourceId: options.sourceId, skillPath: options.skillPath, version: options.version };
   const plan = await progress.run(`Resolving ${options.skillPath}`, () => planSingleInstall(
     request,
-    { operations, sourceAccess, environment: dependencies, root: projectRoot, existing: existing.skills, recordedIn: manifestStore.path },
+    { operations, sourceAccess, environment: dependencies, root: projectRoot, existing: existing.skills, recordedIn: manifestStore.path, manifestPath: manifestStore.path },
   ), { mayPrompt: refreshesSource(options) });
   outputSingleInstallPreview(plan, output);
   requireConfirmation(options.confirmed, "Installation not confirmed; rerun with --yes to continue");
@@ -1616,9 +1633,12 @@ interface InstallOptions {
   readonly confirmed: boolean;
   readonly overwrite: boolean;
   readonly confirmAdditionalHostExposure: boolean;
+  /** The `--project` value, project scope only. */
+  readonly project?: string;
 }
 interface InstallDraft {
   scope?: string;
+  project?: string;
   sourceId?: string;
   skillPath?: string;
   versionValue?: string;
@@ -1644,6 +1664,7 @@ function collectHosts(hosts: ProjectHost[], value: string): void {
 
 const INSTALL_VALUE_OPTIONS = new Map<string, (draft: InstallDraft, value: string) => void>([
   ["--scope", (draft, value) => { draft.scope = value; }],
+  ["--project", (draft, value) => { draft.project = value; }],
   ["--source", (draft, value) => { draft.sourceId = value; }],
   ["--skill", (draft, value) => { draft.skillPath = value; }],
   ["--host", (draft, value) => { collectHosts(draft.hosts, value); }],
@@ -1689,6 +1710,9 @@ function finalizeInstallOptions(draft: InstallDraft): InstallOptions {
   if (scope !== "project" && scope !== "user-global") {
     throw new CliUsageError("Installation scope must be explicit: use --scope project or --scope user-global");
   }
+  if (draft.project !== undefined && scope !== "project") {
+    throw new CliUsageError("--project only applies to --scope project");
+  }
   const selectsSkill = sourceId !== undefined || skillPath !== undefined || ref !== undefined || hosts.length > 0;
   if (fromManifest) {
     if (scope !== "project") {
@@ -1713,6 +1737,7 @@ function finalizeInstallOptions(draft: InstallDraft): InstallOptions {
     confirmed: draft.confirmed,
     overwrite,
     confirmAdditionalHostExposure: draft.confirmAdditionalHostExposure,
+    ...(draft.project === undefined ? {} : { project: draft.project }),
   };
 }
 
