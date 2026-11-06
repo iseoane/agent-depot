@@ -351,7 +351,7 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     assert.ok(session.terminalOutput.includes(`\u001b[1m${ansiColor(158, 206, 106, "y")}`), "App approval yes uses bold Xeo success green");
     assert.ok(session.terminalOutput.includes(ansiColor(247, 118, 142, "n")), "App approval no uses Xeo red");
     await session.send("y", /approved/u);
-    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "approved")), "approved recipe status uses the success color");
+    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "✓ approved")), "approved recipe status uses the success color");
     await session.send("2", /Apps \(user-global\)/u);
     await session.send("j", /Apps \(user-global\)/u);
     const catalog = await session.send("\r", /fixture-app/u);
