@@ -202,15 +202,7 @@ test("reports unsafe links and malformed Skill files instead of making them remo
   try {
     await mkdir(path.join(home, ".agents", "skills"), { recursive: true });
     await makeSkill(outside, ".agents", "outside");
-    try {
-      await directoryLink(path.join(outside, ".agents", "skills", "outside"), path.join(home, ".agents", "skills", "unsafe"));
-    } catch (error) {
-      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
-        t.skip("symbolic links are unavailable in this environment");
-        return;
-      }
-      throw error;
-    }
+    await directoryLink(path.join(outside, ".agents", "skills", "outside"), path.join(home, ".agents", "skills", "unsafe"));
     if (await skipWithoutFileSymlinks(t)) return;
     await mkdir(path.join(home, ".agents", "skills", "linked-skill"), { recursive: true });
     await symlink("missing-skill.md", path.join(home, ".agents", "skills", "linked-skill", "SKILL.md"));

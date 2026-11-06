@@ -132,7 +132,7 @@ test("a hostile manifest aimed at a directory without a matching SKILL.md is rej
   }
 });
 
-test("unsafe non-canonical targets are each rejected even with a valid SKILL.md and confirmation", async (t) => {
+test("unsafe non-canonical targets are each rejected even with a valid SKILL.md and confirmation", async () => {
   const root = await makeRoot();
   const outside = await makeRoot();
   try {
@@ -143,7 +143,7 @@ test("unsafe non-canonical targets are each rejected even with a valid SKILL.md 
     await writeSkill(root, "packages/renamed", "demo");
     await writeSkill(root, "packages/wrong-name/demo", "not-demo");
     await writeSkill(outside, "demo");
-    const symlinkCreated = await directoryLink(outside, path.join(root, "linked")).then(() => true, () => false);
+    await directoryLink(outside, path.join(root, "linked"));
     // The root itself carries a valid Skill: a root-level path must never be accepted.
     await writeFile(path.join(root, "SKILL.md"), skillMd("demo", "old"));
 
@@ -154,7 +154,7 @@ test("unsafe non-canonical targets are each rejected even with a valid SKILL.md 
       { label: "basename mismatch", installationPath: "packages/other" },
       { label: "basename mismatch with matching frontmatter", installationPath: "packages/renamed" },
       { label: "SKILL.md name mismatch", installationPath: "packages/wrong-name/demo" },
-      ...(symlinkCreated ? [{ label: "symlinked component", installationPath: "linked/demo" }] : []),
+      { label: "symlinked component", installationPath: "linked/demo" },
     ];
     for (const { label, installationPath, extra } of cases) {
       const selection = selectionAt(installationPath);
@@ -164,7 +164,6 @@ test("unsafe non-canonical targets are each rejected even with a valid SKILL.md 
       await assert.rejects(inspectProjectSkillRemoval(selection, confirmed), (): boolean => true, `inspect removal: ${label}`);
       await assert.rejects(updateProjectSkillTransaction(updateRequest(selection), confirmed), (): boolean => true, `update: ${label}`);
     }
-    if (!symlinkCreated) t.diagnostic("symbolic links unavailable; symlinked-component case skipped");
     assert.equal(await content(path.join(root, ".git", "hooks", "demo")), skillMd("demo", "old"));
     assert.equal(await content(path.join(root, "tools", "demo")), skillMd("demo", "old"));
     assert.equal(await content(path.join(outside, "demo")), skillMd("demo", "old"));

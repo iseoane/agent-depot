@@ -176,14 +176,7 @@ test("rejects cache symlinks instead of following them", async () => {
     };
     await mkdir(cachePath, { recursive: true });
     const destination = path.join(cachePath, source.id.slice(4));
-    try {
-      await directoryLink("/tmp", destination);
-    } catch (error) {
-      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
-        return;
-      }
-      throw error;
-    }
+    await directoryLink("/tmp", destination);
 
     await assert.rejects(
       new GitSourceAccessAdapter({ cachePath, runner }).refresh(source),

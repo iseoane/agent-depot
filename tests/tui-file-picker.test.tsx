@@ -200,6 +200,7 @@ test("a symlink to a directory is classified as a directory and navigated into",
   t.after(() => view.unmount());
   const frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("dir-link/"));
   assert.match(frame, /dir-link\//);
+  if (!fileLinked) t.diagnostic("file symlinks unavailable (EPERM); file-link assertions skipped");
   if (fileLinked) {
     assert.match(frame, /file-link\.json(?!\.)/);
     assert.doesNotMatch(frame.replace(/dir-link\//g, ""), /file-link\.json\//);
