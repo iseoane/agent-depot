@@ -23,6 +23,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -77,7 +78,7 @@ async function fixture(t: TestContext): Promise<Fixture> {
   const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-upd-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-upd-project-"));
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-upd-state-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map((directory) => rm(directory, { recursive: true, force: true })));
   });
   const readCalls: string[] = [];
@@ -342,7 +343,7 @@ test("the elapsed time of a check keeps running when it moves from refreshing to
   // The elapsed time only shows while animating, which the test environment turns off.
   const previous = process.env.AGENT_DEPOT_NO_ANIMATION;
   process.env.AGENT_DEPOT_NO_ANIMATION = "0";
-  t.after(() => {
+  deferCleanup(t, () => {
     if (previous === undefined) delete process.env.AGENT_DEPOT_NO_ANIMATION;
     else process.env.AGENT_DEPOT_NO_ANIMATION = previous;
   });
@@ -350,7 +351,7 @@ test("the elapsed time of a check keeps running when it moves from refreshing to
   const base = 1_000_000;
   let clock = base;
   const { lastFrame, unmount } = mount(f, { now: () => clock });
-  t.after(unmount);
+  deferCleanup(t, unmount);
   await waitForFrame(lastFrame, /Refreshing sources…/);
   clock = base + 4500;
   await waitForFrame(lastFrame, /Refreshing sources… 4s/);
@@ -966,7 +967,7 @@ test("mixed Skills and Apps continue after App failure with a combined summary",
   const apps = createAppOperations(appEnvironment);
   for (const entry of await apps.load()) await apps.approve(entry);
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, appEnvironment }} />);
-  t.after(() => { view.unmount(); view.cleanup(); });
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   await waitForFrame(view.lastFrame, frame => frame.includes("App: good") && frame.includes("portable/one"));
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
@@ -986,7 +987,7 @@ test("App inventory failure leaves user-global Skill updates available", async t
   const recipesDirectory = path.join(f.home, "not-a-directory");
   await writeFile(recipesDirectory, "invalid directory");
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, appEnvironment: { recipesDirectory } }} />);
-  t.after(() => { view.unmount(); view.cleanup(); });
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const frame = await waitForFrame(view.lastFrame, frame => frame.includes("Error (Apps)") && frame.includes("portable/one"));
   assert.ok(!frame.includes("Error (user-global)"));
   view.stdin.write("a");
@@ -1070,7 +1071,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
     },
   });
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
-  t.after(() => { view.unmount(); view.cleanup(); });
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
   assert.match(listed, /1\.0\.0 -> abcdef1/);
   press(view.stdin, "a");
@@ -1097,7 +1098,7 @@ test("Package Updates shows observed host version and commit rather than the rem
     availableCommit: "b".repeat(40),
   }] });
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
-  t.after(() => { view.unmount(); view.cleanup(); });
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
   assert.match(listed, /1\.6\.1 \(aaaaaaa\) -> 1\.6\.1 \(bbbbbbb\)/);
   assert.doesNotMatch(listed, /1\.0\.0/);
@@ -1114,7 +1115,7 @@ test("an unchanged Claude cache version explains source changes without offering
     reason: "The Source commit differs, but Claude caches plugin version 1.6.1; the publisher must change the declared plugin version to deliver those changes.",
   }] });
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
-  t.after(() => { view.unmount(); view.cleanup(); });
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const listed = await waitForFrame(view.lastFrame, /publisher must change/);
   assert.match(listed, /Claude caches plugin version 1\.6\.1/);
   assert.doesNotMatch(listed, /\[ \] Package:/);
@@ -1135,7 +1136,7 @@ test("an unknown Package is folded with its reason and is never offered as an up
     },
   });
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
-  t.after(() => { view.unmount(); view.cleanup(); });
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const folded = await waitForFrame(view.lastFrame, /1 cannot be checked/);
   assert.match(folded, /Package update comparison unavailable because the checkout has local\s+changes/);
   assert.ok(!folded.includes("Package: pi plugins/pstack"), "an unknown Package is never offered as an update");

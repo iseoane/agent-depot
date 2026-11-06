@@ -13,6 +13,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const demo: SkillCandidate = { sourceId: BUILT_IN_SOURCE.id, path: "portable/demo", name: "demo", description: "Demo skill" };
 
@@ -44,7 +45,7 @@ async function directories(t: TestContext) {
   const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-retention-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-retention-project-"));
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-retention-state-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true })));
   });
   const environment: TuiEnvironment = {
@@ -68,7 +69,7 @@ test("revisiting Catalog shows the last catalog at once, marked as refreshing, t
     },
   };
   const view = render(<App operations={operations} environment={environment} />);
-  t.after(async () => {
+  deferCleanup(t, async () => {
     try {
       await waitForSettled(view.lastFrame);
     } finally {
@@ -106,7 +107,7 @@ test("revisiting Installations shows the last list at once, marked as refreshing
     },
   };
   const view = render(<App operations={operations} environment={environment} />);
-  t.after(async () => {
+  deferCleanup(t, async () => {
     try {
       await waitForSettled(view.lastFrame);
     } finally {
@@ -190,7 +191,7 @@ async function appsFixture(
   }
   const operations = wrap(createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home }));
   const view = render(<App operations={operations} environment={{ ...environment, appEnvironment }} />);
-  t.after(async () => {
+  deferCleanup(t, async () => {
     try {
       await waitForSettled(view.lastFrame);
     } finally {
@@ -261,7 +262,7 @@ test("a change made in Sources drops the retained Installations, so the revisit 
     },
   };
   const view = render(<App operations={operations} environment={environment} />);
-  t.after(async () => {
+  deferCleanup(t, async () => {
     try {
       await waitForSettled(view.lastFrame);
     } finally {
@@ -385,7 +386,7 @@ test("an App install in Catalog drops the retained catalog, so the revisit does 
     },
   };
   const view = render(<App operations={operations} environment={{ ...environment, appEnvironment }} />);
-  t.after(async () => {
+  deferCleanup(t, async () => {
     try {
       await waitForSettled(view.lastFrame);
     } finally {

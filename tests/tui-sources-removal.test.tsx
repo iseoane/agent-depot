@@ -10,6 +10,7 @@ import { createSourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 async function fixture(t: TestContext, installed = false, failUninstall = false, manual = false) {
   const home = await mkdtemp(path.join(tmpdir(), "sources-removal-"));
@@ -36,7 +37,7 @@ async function fixture(t: TestContext, installed = false, failUninstall = false,
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
   const environment = { homeDirectory: home, projectRoot: home, appEnvironment };
   const view = render(<SourcesView operations={operations} environment={environment} />);
-  t.after(async () => { view.unmount(); await rm(home, { recursive: true, force: true }); });
+  deferCleanup(t, async () => { view.unmount(); await rm(home, { recursive: true, force: true }); });
   await waitForFrame(view.lastFrame, /approved/);
   return { view, file, commands, apps, operations, environment, markUninstalled: () => { installed = false; } };
 }
@@ -120,7 +121,7 @@ test("Sources footer follows a single cursor and hides unsupported recipe mark a
   await f.operations.addGitSource("https://github.com/example/skills.git");
   f.view.unmount();
   const view = render(<App operations={f.operations} environment={f.environment} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   await waitForFrame(view.lastFrame, text => text.includes("approved") && text.includes("Enter catalog"));
   view.stdin.write("j");
   const appFrame = await waitForFrame(view.lastFrame, /Enter preview\/approve/);

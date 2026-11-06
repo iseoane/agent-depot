@@ -14,6 +14,7 @@ import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const ENTER = "\r";
 const NAMES = ["alpha", "beta", "gamma"] as const;
@@ -42,7 +43,7 @@ async function fixture(t: TestContext, failRead: readonly string[] = []): Promis
   const home = await mkdtemp(path.join(tmpdir(), "ad-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "ad-proj-"));
   const state = await mkdtemp(path.join(tmpdir(), "ad-state-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map((directory) => rm(directory, { recursive: true, force: true })));
   });
   const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
@@ -100,7 +101,7 @@ test("marks a skill that has an unmanaged copy on disk and keeps it installable"
   await mkdir(path.join(f.home, ".agents", "skills", "alpha"), { recursive: true });
   await writeFile(path.join(f.home, ".agents", "skills", "alpha", "SKILL.md"), "---\nname: alpha\ndescription: Alpha\n---\n", "utf8");
   const dev = await mkdtemp(path.join(tmpdir(), "ad-dev-"));
-  t.after(() => rm(dev, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(dev, { recursive: true, force: true }));
   await writeFile(path.join(dev, "SKILL.md"), "---\nname: beta\ndescription: Beta\n---\n", "utf8");
   await mkdir(path.join(f.home, ".claude", "skills"), { recursive: true });
   await directoryLink(dev, path.join(f.home, ".claude", "skills", "beta"));

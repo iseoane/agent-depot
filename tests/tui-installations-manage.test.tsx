@@ -22,6 +22,7 @@ import { animatedClock } from "./animated-clock.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -47,7 +48,7 @@ async function fixture(t: TestContext, hosts: readonly ProjectHost[], withApps =
   const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-manage-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-manage-project-"));
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-manage-state-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map((directory) => rm(directory, { recursive: true, force: true })));
   });
   const operations = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
@@ -188,7 +189,7 @@ test("the reload after an action says it is refreshing and keeps a single indica
   // Only the view's reload lists Packages, so holding that call holds the reload and nothing of the removal.
   const packages = fakePackageOperations({ list: async () => { if (gateOpen) await gate; return []; } });
   const view = await mount({ ...f, environment: { ...f.environment, packages } });
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   await revealSkill(view);
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
@@ -219,7 +220,7 @@ test("the refresh after an action keeps counting the action's elapsed time", asy
   };
   const packages = fakePackageOperations({ list: async () => { if (reloadHeld) await reloadGate; return []; } });
   const view = await mount({ ...f, operations, environment: { ...f.environment, packages } });
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   await revealSkill(view);
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
@@ -358,7 +359,7 @@ test("u and h ignore group rows and project installations stay read-only", async
 test("unapproved App recipes do not appear as Installations alongside managed Skills", async t => {
   const f = await fixture(t, ["pi"], true);
   const view = await mount(f);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   await revealSkill(view);
   assert.doesNotMatch(view.lastFrame()!, /Apps \(user-global\)/);
   assert.match(view.lastFrame()!, /portable\/demo/);

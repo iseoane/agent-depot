@@ -21,6 +21,7 @@ import { renderExpanded } from "./render-expanded.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const SKILL_MD = "---\nname: demo\ndescription: Demo skill\n---\n\nBody\n";
 const tree: readonly SkillTreeFile[] = [
@@ -39,7 +40,7 @@ async function fixture(t: TestContext, hosts: readonly ("pi" | "claude")[]): Pro
   const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-instapp-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-instapp-project-"));
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-instapp-state-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map((directory) => rm(directory, { recursive: true, force: true })));
   });
   const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
@@ -137,7 +138,7 @@ async function appFixture(
   await beforeRender?.(apps, recipeFile, home);
   const operations = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
   const view = await renderExpanded(<InstallationsView operations={operations} environment={{ homeDirectory: home, projectRoot: project, appEnvironment }} />);
-  t.after(async () => {
+  deferCleanup(t, async () => {
     // Status checks and package-state reads started by the view lock files under these directories.
     try {
       await waitForSettled(view.lastFrame);
@@ -451,7 +452,7 @@ test("an approved recipe without a verified installation record is not listed as
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-uninstalled-app-state-"));
   const recipes = path.join(state, "apps");
   await mkdir(recipes, { recursive: true });
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true })));
   });
   await writeFile(path.join(recipes, "gentle-shell-linux.json"), JSON.stringify({

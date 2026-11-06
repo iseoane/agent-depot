@@ -9,6 +9,7 @@ import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const base = { install: { argv: ["x", "install"] }, update: { manual: "update x" }, uninstall: { argv: ["x", "remove"] },
   version: { argv: ["x", "version"], pattern: "(.*)" } };
@@ -27,7 +28,7 @@ async function fixture(t: TestContext, platform: NodeJS.Platform, files: Record<
   for (const entry of await apps.load()) if (approve.includes(path.basename(entry.file))) await apps.approve(entry);
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") });
   const view = render(<SourcesView operations={operations} environment={{ homeDirectory: home, projectRoot: home, appEnvironment }} />);
-  t.after(async () => {
+  deferCleanup(t, async () => {
     try { await waitForSettled(view.lastFrame); } finally { view.unmount(); await rm(home, { recursive: true, force: true }); }
   });
   return { view, directory, home };

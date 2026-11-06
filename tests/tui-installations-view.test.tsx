@@ -20,6 +20,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import { InstallationsView } from "../src/tui/installations-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -51,7 +52,7 @@ async function fixture(t: TestContext, discover: SkillCandidate[] = [demo]): Pro
   const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-inst-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-inst-project-"));
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-inst-state-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map((directory) => rm(directory, { recursive: true, force: true })));
   });
   const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });

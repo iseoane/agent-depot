@@ -11,6 +11,7 @@ import {
 import { FilePicker } from "../src/tui/file-picker.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { directoryLink, fileSymlinksSupported } from "./link-helpers.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 test("export file names gain .json only when they have no extension, and unsafe names are refused", () => {
   assert.deepEqual(resolveExportFileName("agent-depot-profile"), { kind: "ok", fileName: "agent-depot-profile.json", appendedExtension: true });
@@ -54,13 +55,13 @@ test("file purpose hides non-JSON files until showAllFiles", () => {
 
 test("the directory picker selects the current folder and descends into a subfolder", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const sub = path.join(root, "sub");
   await mkdir(sub);
   await writeFile(path.join(root, "a.json"), "{}");
   const chosen: PickerSelection[] = [];
   const view = render(<FilePicker purpose="directory" startDirectory={root} onCancel={() => {}} onChoose={selection => chosen.push(selection)} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   const first = await waitForFrame(view.lastFrame, frame => frame.includes(`Use this folder: ${root}`));
   assert.match(first, /> Use this folder/);
   view.stdin.write("\r");
@@ -79,11 +80,11 @@ test("the directory picker selects the current folder and descends into a subfol
 
 test("the file picker hides non-JSON files until f and toggles back", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, "a.json"), "{}");
   await writeFile(path.join(root, "b.txt"), "text");
   const view = render(<FilePicker purpose="file" startDirectory={root} onCancel={() => {}} onChoose={() => {}} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   const filtered = await waitForFrame(view.lastFrame, frame => frame.includes("a.json"));
   assert.doesNotMatch(filtered, /b\.txt/);
   assert.match(filtered, /f all files/);
@@ -96,10 +97,10 @@ test("the file picker hides non-JSON files until f and toggles back", async t =>
 
 test("the picker cancel key calls back while the notice stays inline", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   let cancelled = 0;
   const view = render(<FilePicker purpose="file" startDirectory={root} notice="Error: invalid JSON" onCancel={() => { cancelled++; }} onChoose={() => {}} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   const frame = await waitForFrame(view.lastFrame, frame => frame.includes("Error: invalid JSON"));
   assert.match(frame, /Choose import file/);
   view.stdin.write("\u001b");
@@ -109,7 +110,7 @@ test("the picker cancel key calls back while the notice stays inline", async t =
 
 test("a slow earlier read never replaces a newer directory", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const slow = path.join(root, "slow");
   const fast = path.join(root, "fast");
   await mkdir(slow);
@@ -120,7 +121,7 @@ test("a slow earlier read never replaces a newer directory", async t => {
     return { directory, parent: root, entries: [{ name: path.basename(directory), kind: "directory" }] };
   };
   const view = render(<FilePicker purpose="directory" startDirectory={slow} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   view.rerender(<FilePicker purpose="directory" startDirectory={fast} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
   await waitForFrame(view.lastFrame, frame => frame.includes(`Directory: ${fast}`));
   await new Promise(resolve => setTimeout(resolve, 200));
@@ -130,11 +131,11 @@ test("a slow earlier read never replaces a newer directory", async t => {
 
 test("a directory read error is shown in the picker and Esc leaves it", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const missing = path.join(root, "missing");
   let cancelled = 0;
   const view = render(<FilePicker purpose="directory" startDirectory={missing} onCancel={() => { cancelled++; }} onChoose={() => {}} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   const frame = await waitForFrame(view.lastFrame, frame => /Error:.*ENOENT/.test(frame));
   assert.match(frame, /Choose export folder/);
   view.stdin.write("\u001b");
@@ -144,13 +145,13 @@ test("a directory read error is shown in the picker and Esc leaves it", async t 
 
 test("the picker stays inside a narrow terminal at its default list height with a long real path", async t => {
   const base = await mkdtemp(path.join(tmpdir(), "picker-narrow-"));
-  t.after(() => rm(base, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(base, { recursive: true, force: true }));
   // A long real directory wraps the path onto several rows, which the picker must budget for itself.
   const root = path.join(base, "a-long-parent-folder-name-that-wraps", "another-long-folder-name-to-wrap");
   await mkdir(path.join(root, "a-very-long-directory-name-that-wraps-at-narrow-widths"), { recursive: true });
   for (let index = 0; index < 8; index++) await mkdir(path.join(root, `folder-${index}`));
   const view = render(<FilePicker purpose="directory" startDirectory={root} onCancel={() => {}} onChoose={() => {}} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   Object.defineProperty(view.stdout, "rows", { configurable: true, value: 12 });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: 30 });
   view.stdout.emit("resize");
@@ -169,7 +170,7 @@ test("the picker stays inside a narrow terminal at its default list height with 
 
 test("pathExists reports ENOENT as absent, exists as present, and propagates permission errors", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-exists-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const file = path.join(root, "file.json");
   await writeFile(file, "{}");
   assert.equal(await pathExists(file), true);
@@ -189,7 +190,7 @@ test("pathExists reports ENOENT as absent, exists as present, and propagates per
 
 test("a symlink to a directory is classified as a directory and navigated into", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-link-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const real = path.join(root, "real");
   await mkdir(path.join(real, "inside"), { recursive: true });
   await writeFile(path.join(root, "file.json"), "{}");
@@ -197,7 +198,7 @@ test("a symlink to a directory is classified as a directory and navigated into",
   const fileLinked = await fileSymlinksSupported();
   if (fileLinked) await symlink(path.join(root, "file.json"), path.join(root, "file-link.json"));
   const view = render(<FilePicker purpose="file" startDirectory={root} onCancel={() => {}} onChoose={() => {}} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   const frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("dir-link/"));
   assert.match(frame, /dir-link\//);
   if (!fileLinked) t.diagnostic("file symlinks unavailable (EPERM); file-link assertions skipped");
@@ -214,11 +215,11 @@ test("a symlink to a directory is classified as a directory and navigated into",
 
 test("a failed read recovers through parent navigation, and loading allows leaving a slow directory", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-recover-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, "sub"));
   const failing = path.join(root, "missing");
   const failingView = render(<FilePicker purpose="directory" startDirectory={failing} onCancel={() => {}} onChoose={() => {}} />);
-  t.after(() => failingView.unmount());
+  deferCleanup(t, () => failingView.unmount());
   const error = await waitForFrame(failingView.lastFrame, candidate => /Error:.*ENOENT/.test(candidate));
   assert.match(error, /Loading|Error/);
   failingView.stdin.write("\u001b[D");
@@ -235,7 +236,7 @@ test("a failed read recovers through parent navigation, and loading allows leavi
     return { directory, parent: path.dirname(directory) === directory ? undefined : path.dirname(directory), entries };
   };
   const slowView = render(<FilePicker purpose="directory" startDirectory={blocked} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
-  t.after(() => slowView.unmount());
+  deferCleanup(t, () => slowView.unmount());
   await waitForFrame(slowView.lastFrame, candidate => candidate.includes("Loading"));
   slowView.stdin.write("\u001b[D");
   const left = await waitForFrame(slowView.lastFrame, candidate => candidate.includes(`Use this folder: ${root}`));
@@ -247,13 +248,13 @@ test("a failed read recovers through parent navigation, and loading allows leavi
 
 test("the picker fits a wrapped long directory, many entries and its footer without a list height override", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "picker-fit-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(root, { recursive: true, force: true }));
   const deep = path.join(root, ...Array.from({ length: 6 }, (_, index) => `very-long-directory-name-${index}`));
   await mkdir(deep, { recursive: true });
   for (let index = 0; index < 30; index++) await writeFile(path.join(deep, `entry-${index}.json`), "{}");
   await writeFile(path.join(deep, "notes.txt"), "text");
   const view = render(<FilePicker purpose="file" startDirectory={deep} onCancel={() => {}} onChoose={() => {}} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   Object.defineProperty(view.stdout, "rows", { configurable: true, value: 16 });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: 30 });
   view.stdout.emit("resize");
