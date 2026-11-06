@@ -111,6 +111,9 @@ export interface InstallChoice {
 export interface PreparedInstall {
   readonly plan: SingleInstallPlan;
   readonly manifestStore?: ProjectManifestStore;
+  /** Project root and warnings shared by every item of a batch; the view shows them once. Empty for user-global. */
+  readonly projectTarget: readonly string[];
+  /** The preview without {@link projectTarget}. */
   readonly preview: readonly string[];
   readonly runsExternalCommand: boolean;
   /** Adopting an identical existing Skill needs a missing Host location added; needs its own confirmation. */
@@ -159,19 +162,20 @@ export async function prepareInstall(
       root: path.resolve(environment.projectRoot ?? process.cwd()),
       existing: (await manifestStore.load()).skills,
       recordedIn: manifestStore.path,
+      manifestPath: manifestStore.path,
     });
   }
   const lines: string[] = [];
   outputSingleInstallPreview(plan, (line) => lines.push(line));
   // The TUI confirms interactively, so the CLI's --yes wording does not apply.
-  const preview = lines.filter((line) => !line.startsWith("  confirmation:"));
+  const preview = lines.filter((line) => !plan.projectTarget.includes(line) && !line.startsWith("  confirmation:"));
   const additionalHostExposure = needsAdditionalHostExposure(plan.inspection, choice.hosts);
   if (additionalHostExposure) {
     preview.push(
       "  ADDITIONAL HOST EXPOSURE: an identical Skill already exists; installing adds the missing Host location (equivalent to --confirm-additional-host) and needs a separate confirmation",
     );
   }
-  return { plan, manifestStore, preview, runsExternalCommand: plan.resolved.method !== undefined, additionalHostExposure };
+  return { plan, manifestStore, projectTarget: plan.projectTarget, preview, runsExternalCommand: plan.resolved.method !== undefined, additionalHostExposure };
 }
 
 /** Execute step: installs and persists the record; returns the result lines. */

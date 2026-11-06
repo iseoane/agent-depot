@@ -8,6 +8,7 @@ import {
 } from "./package-owned-skills.js";
 
 import { pathsOverlap } from "./path-safety.js";
+import { describeProjectTarget } from "./project-target.js";
 import {
   inspectProjectSkillInstallation,
   installProjectSkillTransaction,
@@ -20,6 +21,7 @@ import {
 } from "./project-installation.js";
 import {
   AGENT_DEPOT_PACKAGE_VERSION,
+  defaultProjectManifestPath,
   parseProjectManifest,
   type ProjectHost,
   type ProjectSkillSelection,
@@ -45,7 +47,7 @@ import { CliUsageError } from "./usage-error.js";
  * resolve, inspect, preview, then execute. Used by the CLI and the TUI.
  */
 
-const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host]";
+const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host] [--project <path>]";
 
 /** Installation options that are not part of the Skill selection. */
 export interface InstallOptionsSubset {
@@ -487,6 +489,8 @@ export interface SingleInstallContext {
   readonly existing: readonly ProjectSkillSelection[];
   /** Where those records live, used in the duplicate error message. */
   readonly recordedIn: string;
+  /** Project manifest checked for the project-root warnings; project scope only, defaults to the root's own. */
+  readonly manifestPath?: string;
 }
 
 export interface SingleInstallPlan {
@@ -497,6 +501,8 @@ export interface SingleInstallPlan {
   readonly resolvedSource: Source;
   readonly resolved: ResolvedManifestSelection;
   readonly inspection: ProjectSkillInstallationInspection;
+  /** Project root and warnings the preview starts with; empty for user-global. */
+  readonly projectTarget: readonly string[];
 }
 
 /** Plan step: select, reject duplicates, resolve and inspect. Changes nothing. */
@@ -512,13 +518,17 @@ export async function planSingleInstall(
     selection, source, projectSource, context.root, request, context.operations, context.environment, context.sourceAccess,
   );
   await assertInstallNotAppOwned(request, context, installationInspection);
-  await assertInstallNotPackageOwned(selection, resolvedSource, context);
-  return { request, context, selection, source, resolvedSource, resolved, inspection: installationInspection };
+  await assertInstallNotPackageOwned(request, selection, resolvedSource, context);
+  const projectTarget = request.scope === "project"
+    ? await describeProjectTarget(context.root, context.manifestPath ?? defaultProjectManifestPath(context.root))
+    : [];
+  return { request, context, selection, source, resolvedSource, resolved, inspection: installationInspection, projectTarget };
 }
 
 /** Prints the preview the user confirms before {@link executeSingleInstall}. */
 export function outputSingleInstallPreview(plan: SingleInstallPlan, output: (line: string) => void): void {
-  const { request, context, selection, source, resolved, inspection } = plan;
+  const { request, context, selection, source, resolved, inspection, projectTarget } = plan;
+  for (const line of projectTarget) output(line);
   outputInstallPreview(selection, source, context.root, output, resolved.files, resolved.method, request.scope, inspection, request.overwrite, request.confirmed);
 }
 
@@ -533,7 +543,7 @@ export async function executeSingleInstall(
 ): Promise<void> {
   const { request, context, selection, resolvedSource, resolved, inspection } = plan;
   await assertInstallNotAppOwned(request, context, inspection);
-  await assertInstallNotPackageOwned(selection, resolvedSource, context);
+  await assertInstallNotPackageOwned(request, selection, resolvedSource, context);
   const protectedPaths = assertNoManagedInstallationOverlap(context.existing, selection, inspection, context.root, request.overwrite);
   rejectInstallationCollision(inspection, request.overwrite);
   const transaction = await installOne(
@@ -597,10 +607,15 @@ async function assertInstallNotAppOwned(
   }
 }
 
-/** Reloads bundle ownership from the selected Source and refuses its own Skill paths. */
+/**
+ * Reloads bundle ownership from the selected Source and refuses its own Skill paths.
+ * Package state lives under the user's home, so a project install has nothing to
+ * check and must not read or lock state derived from the project root.
+ */
 async function assertInstallNotPackageOwned(
-  selection: ProjectSkillSelection, source: Source, context: SingleInstallContext,
+  request: SingleInstallRequest, selection: ProjectSkillSelection, source: Source, context: SingleInstallContext,
 ): Promise<void> {
+  if (request.scope !== "user-global") return;
   const owned = await loadPackageOwnedSkillFilter({
     sources: [source],
     homeDirectory: context.root,

@@ -17,7 +17,7 @@ import {
 import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
 import type { BundleDescriptor, InstalledPackage, PackageLifecyclePlan, PackageSelection } from "../src/package-model.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
-import { formatAgo, loadUpdateRows, prepareUpdates, runUpdates } from "../src/tui/updates.js";
+import { formatAgo, loadUpdateRows, prepareUpdates, previewLineText, runUpdates } from "../src/tui/updates.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
@@ -746,6 +746,21 @@ test("a non-canonical path is confirmed per scope and path: the other scope's co
   const confirmed = await runUpdates(prepared, [{ scope: "project", path: "tools/skills/one" }]);
   assert.equal(confirmed.failed, 0);
   assert.equal(await f.read(f.project, "tools/skills/one"), newText("one"));
+});
+
+test("the project-scope update preview starts with the project root and the user-global one does not", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }]);
+  await seedGlobal(f, { name: "two", state: "outdated" });
+  const data = await loadUpdateRows(f.operations, f.environment, { refresh: false });
+  const lineTexts = async (scope: "project" | "user-global") => {
+    const prepared = await prepareUpdates(data, data.rows.filter((row) => row.kind !== "app" && row.kind !== "package" && row.scope === scope));
+    return prepared.lines.map(previewLineText);
+  };
+  const project = await lineTexts("project");
+  assert.equal(project[0], `Project: ${f.project}`);
+  assert.ok(project.some((line) => line.startsWith("Preview: update Skill")));
+  assert.ok(!(await lineTexts("user-global")).some((line) => line.startsWith("Project:")));
 });
 
 test("the confirm-paths panel labels each path with its scope", async (t) => {

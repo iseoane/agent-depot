@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { runCli } from "../src/cli.js";
 
-const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host]";
+const INSTALL_USAGE = "Usage: agent-depot install --scope <project|user-global> --source <id> --skill <path> --host <host>... --version <latest|version> [--ref <git-ref>] [--method <json>] --portable-v1 [--overwrite --yes] [--confirm-additional-host] [--project <path>]";
 
 async function failure(argv: readonly string[]): Promise<string> {
   const errors: string[] = [];

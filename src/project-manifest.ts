@@ -15,6 +15,14 @@ export const AGENT_DEPOT_PACKAGE_NAME = readAgentDepotPackageField("name");
 export const PROJECT_HOSTS = Object.freeze(["pi", "claude", "codex", "opencode"] as const);
 export type ProjectHost = (typeof PROJECT_HOSTS)[number];
 
+/** Where each Host keeps project-level configuration, relative to the project root. */
+export const HOST_PROJECT_DIRECTORIES: Readonly<Record<ProjectHost, string>> = Object.freeze({
+  pi: ".pi",
+  claude: ".claude",
+  codex: ".codex",
+  opencode: ".opencode",
+});
+
 export interface BuiltInProjectSource {
   readonly kind: "builtin";
   readonly id: "builtin:agent-depot";

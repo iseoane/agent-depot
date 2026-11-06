@@ -359,6 +359,7 @@ export async function prepareUpdates(
     if (!loaded || items.length === 0) continue;
     const { context } = loaded;
     const outcome = await previewUpdateCandidates(items, context);
+    lines.push(...loaded.projectTarget.map(previewText));
     lines.push(...outcome.plans.flatMap((plan) => describeUpdatePreview(plan, scope, context.projectRoot, "prompt").map(previewText)));
     failures.push(...outcome.failures);
     groups.push({

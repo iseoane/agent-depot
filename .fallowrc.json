@@ -43,6 +43,7 @@
           "src/skill-removal.ts",
           "src/unmanaged-removal.ts",
           "src/update-flow.ts",
+          "src/project-target.ts",
           "src/app-cli.ts",
           "src/package-cli.ts",
           "src/app-flow.ts",
