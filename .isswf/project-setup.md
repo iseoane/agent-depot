@@ -1,6 +1,6 @@
 # isSWF project setup
 
-Host: Claude Code 2.1.318 (Windows 11), host-native delegation; plugin isswf 1.7.0. No legacy runtime, pin or factory store.
+Host: Claude Code 2.1.318 (Windows 11), host-native delegation; plugin isswf 1.8.0. No legacy runtime, pin or factory store.
 
 ## Tracking
 
@@ -33,7 +33,7 @@ Only for parallel writers or on explicit request. Root configured locally in
 `git config --local isswf.worktreeRoot` (sibling of the project, one directory per feature).
 Do not use Claude Code's automatic `.claude/worktrees/` isolation for isSWF assignments.
 
-Model selection follows the isSWF 1.7.0 portable preset (approved 2026-11-05);
+Model selection follows the isSWF portable preset (approved 2026-11-05 with 1.7.0; unchanged in 1.8.0);
 the coordinator runs on the session model (`opus`).
 
 ## Parallel writers

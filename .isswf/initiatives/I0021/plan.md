@@ -1,6 +1,6 @@
 # I0021: Group App recipes by platform and Skills in Catalog
 
-Type: improvement
+Type: enhancement
 
 ## J001
 - Status: completed

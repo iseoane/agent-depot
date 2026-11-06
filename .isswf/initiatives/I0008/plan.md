@@ -3,5 +3,6 @@
 Type: enhancement (CI). Operator accepted runner cost 2026-10-29. Next: #47 depends on this.
 
 ## J001
-- Status: merged (PR #60, merge 0fac8b8; PR CI green on d92317f incl. windows)
+- Status: completed
+- Closed: 2026-11-06 by operator instruction; prior record: merged (PR #60, merge 0fac8b8; PR CI green on d92317f incl. windows)
 - Brief: jobs/J001/brief-r1.md

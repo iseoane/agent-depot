@@ -3,5 +3,6 @@
 Type: bug (tests). Queue from I0003: #54 → #52 → #58.
 
 ## J001
-- Status: merged (PR #64, merge 80c3041; PR CI green incl. windows on 2c02aef); branch removed
+- Status: completed
+- Closed: 2026-11-06 by operator instruction; prior record: merged (PR #64, merge 80c3041; PR CI green incl. windows on 2c02aef); branch removed
 - Brief: jobs/J001/brief-r1.md

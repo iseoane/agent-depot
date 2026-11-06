@@ -6,7 +6,8 @@ This coordinator-owned plan records reported progress, not execution permission 
 
 ## J001
 
-- Status: done (PR merged)
+- Status: completed
+- Closed: 2026-11-06 by operator instruction; prior record: done (PR merged)
 - Objective: Every TUI wait shows an animated spinner, a specific label and elapsed time from 1s
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md) (pending until prepared)
@@ -35,7 +36,8 @@ This coordinator-owned plan records reported progress, not execution permission 
 
 ## J002
 
-- Status: done (PR merged)
+- Status: completed
+- Closed: 2026-11-06 by operator instruction; prior record: done (PR merged)
 - Objective: A real-PTY e2e journey proves the indicator animates, shows elapsed time and clears, with animation on
 - Depends on: J001
 - Brief: [brief-r1.md](jobs/J002/brief-r1.md) (pending until prepared)

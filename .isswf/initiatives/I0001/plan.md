@@ -6,7 +6,8 @@ This coordinator-owned plan records reported progress, not execution permission 
 
 ## J001
 
-- Status: done (PR merged)
+- Status: completed
+- Closed: 2026-11-06 by operator instruction; prior record: done (PR merged)
 - Objective: Package installs on Windows run npm-installed host CLIs (e.g. pi) instead of failing with spawn ENOENT
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md) (pending until prepared)

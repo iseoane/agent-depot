@@ -2,6 +2,8 @@
 
 Type: triage. Labels pending operator confirmation.
 
+Status: completed — closed 2026-11-06 by operator instruction; its queue (#50, #45, #48, #44) was delivered by I0004–I0007.
+
 | Issue | Proposed | Evidence checked |
 |---|---|---|
 | #50 Pi lock `bin` rejected | ready-for-agent (bug, priority 1) | allowlist at src/package-host-state.ts:449 lacks `bin`; ADR 0009 constraints stated in issue |

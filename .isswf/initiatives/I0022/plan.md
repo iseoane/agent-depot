@@ -1,6 +1,6 @@
 # I0022: Make Profile import readable and grouped
 
-Type: improvement
+Type: enhancement
 
 ## J001
 - Status: completed
