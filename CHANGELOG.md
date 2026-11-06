@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Project-scope `install` and `update` previews start with `Project: <absolute path>`,
+  in the CLI and the TUI, and warn without blocking when the directory is inside a Git
+  repository but not its top level, or has no manifest and no Host directory. The new
+  `--project <path>` option selects the project directory instead of the current one.
 - The Profile import list in the TUI is grouped: additions by Source (App recipes
   in their own group), then Unchanged items (collapsed) and Conflicts. Rows say
   what importing does (`Add Skill ask-matt`, `Select Package ...`) and a conflict
