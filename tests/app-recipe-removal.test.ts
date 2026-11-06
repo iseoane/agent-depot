@@ -110,3 +110,36 @@ test("removing a symlink recipe leaves its target intact", async (t) => {
     await assert.rejects(readFile(f.file), { code: "ENOENT" });
   } finally { await rm(f.home, { recursive: true, force: true }); }
 });
+
+test("a recipe for another platform stays removable while the same-named App is tracked from this platform's recipe", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-recipe-removal-other-platform-"));
+  try {
+    const directory = path.join(home, "apps");
+    await mkdir(directory);
+    const base = { name: "demo", install: { argv: ["demo", "install"] }, update: { argv: ["demo", "update"] },
+      uninstall: { argv: ["demo", "uninstall"] }, version: { argv: ["demo", "version"], pattern: "(1\.2\.3)" } };
+    const windowsFile = path.join(directory, "demo.windows.json");
+    const linuxFile = path.join(directory, "demo.linux.json");
+    await writeFile(windowsFile, JSON.stringify({ ...base, platform: "windows" }));
+    await writeFile(linuxFile, JSON.stringify({ ...base, platform: "linux" }));
+    let installed = false;
+    const apps = createAppOperations({ homeDirectory: home, recipesDirectory: directory, platform: "win32",
+      resolveExecutable: async () => "/bin/demo", runner: async (_command, args) => {
+        if (args[0] === "install") installed = true;
+        return { code: args[0] === "version" && !installed ? 1 : 0, stdout: Buffer.from(installed ? "1.2.3" : ""), stderr: "", signal: null, outputTooLarge: false };
+      },
+    });
+    const entries = await apps.load();
+    const windowsEntry = entries.find((entry) => entry.file === windowsFile)!;
+    const linuxEntry = entries.find((entry) => entry.file === linuxFile)!;
+    await apps.approve(windowsEntry);
+    await apps.executeLifecycle(await apps.planLifecycle(windowsEntry, "install"), true);
+    assert.equal((await apps.trackedApps()).length, 1);
+
+    const plan = await planAppRecipeRemoval(apps, linuxEntry);
+    assert.equal(plan.installed, false);
+    await removeAppRecipe(apps, plan, true);
+    await assert.rejects(readFile(linuxFile), { code: "ENOENT" });
+    assert.equal((await planAppRecipeRemoval(apps, windowsEntry)).installed, true);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
