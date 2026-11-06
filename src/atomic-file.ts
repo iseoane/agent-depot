@@ -8,23 +8,34 @@ interface AtomicWriteOptions {
   readonly allowLockedReplaceFallback?: boolean;
 }
 
-const WINDOWS_RENAME_ATTEMPTS = 20;
+export const WINDOWS_RENAME_ATTEMPTS = 20;
 const WINDOWS_RENAME_RETRY_MS = 5;
+
+interface RenameRetryDeps {
+  readonly rename: (from: string, to: string) => Promise<void>;
+  readonly platform: NodeJS.Platform;
+  readonly delay: (milliseconds: number) => Promise<unknown>;
+}
 
 /**
  * Windows reports EPERM, EACCES or EBUSY when a rename targets a file another rename or reader is
  * still releasing, so concurrent writers to one destination must retry briefly instead of failing.
+ * The dependencies are injectable only so tests can force the Windows branch on any OS.
  */
-async function renameWithWindowsRetry(from: string, to: string): Promise<void> {
+export async function renameWithWindowsRetry(
+  from: string,
+  to: string,
+  deps: RenameRetryDeps = { rename, platform: process.platform, delay },
+): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      await rename(from, to);
+      await deps.rename(from, to);
       return;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      const transient = process.platform === "win32" && ["EPERM", "EACCES", "EBUSY"].includes(code ?? "");
+      const transient = deps.platform === "win32" && ["EPERM", "EACCES", "EBUSY"].includes(code ?? "");
       if (!transient || attempt >= WINDOWS_RENAME_ATTEMPTS) throw error;
-      await delay(WINDOWS_RENAME_RETRY_MS * attempt);
+      await deps.delay(WINDOWS_RENAME_RETRY_MS * attempt);
     }
   }
 }
