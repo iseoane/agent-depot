@@ -315,3 +315,27 @@ test("several keys delivered in a single write are handled one by one", async (t
   assert.match(frame, /\[x\] beta/);
   view.unmount();
 });
+
+test("a project batch preview shows the project root and its warnings once, a user-global one never", async (t) => {
+  const f = await fixture(t);
+  const view = await mount(f);
+  await highlight(view, "alpha");
+  view.stdin.write("a");
+  await waitForFrame(view.lastFrame, /3 selected/);
+  view.stdin.write("i");
+  await choose(view, ["3"], "1", "1");
+  const preview = await waitForFrame(view.lastFrame, /Install 3 skills\? y\/n/);
+  assert.equal(preview.split(`Project: ${f.project}`).length - 1, 1, preview);
+  assert.equal(preview.split("WARNING: this directory has no project manifest").length - 1, 1, preview);
+  view.unmount();
+
+  const global = await mount(f);
+  await highlight(global, "alpha");
+  global.stdin.write("a");
+  await waitForFrame(global.lastFrame, /3 selected/);
+  global.stdin.write("i");
+  await choose(global, ["1"], "2", "1");
+  const globalPreview = await waitForFrame(global.lastFrame, /Install 3 skills\? y\/n/);
+  assert.ok(!globalPreview.includes("Project:"), globalPreview);
+  global.unmount();
+});

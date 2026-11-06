@@ -7,8 +7,11 @@ import { test } from "node:test";
 import { runCli } from "../src/cli.js";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
+import { planSingleInstall } from "../src/skill-install.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { prepareInstall } from "../src/tui/catalog-installs.js";
+import type { TuiEnvironment } from "../src/tui/environment.js";
+import { directoryLink } from "./link-helpers.js";
 
 const operations: SourceOperations = {
   async addGitSource() { throw new Error("unexpected"); },
@@ -253,5 +256,77 @@ test("the TUI install preview shows the project root and the user-global one doe
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("--project rejects a path that goes through a directory link and names the linked path", async () => {
+  const parent = await tempDirectory("target-link");
+  try {
+    const real = path.join(parent, "real");
+    const link = path.join(parent, "link");
+    await mkdir(real);
+    await directoryLink(real, link);
+    const { code, errors } = await run([...installArguments, "--project", link, "--yes"]);
+    assert.equal(code, 1);
+    assert.match(errors.join("\n"), /^Error: --project ".*link.*" contains a symbolic link: .*link$/mu);
+    assert.deepEqual(await readdir(real), [], "nothing is written through the link");
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+async function runTui(argv: readonly string[]) {
+  const rendered: Array<TuiEnvironment | undefined> = [];
+  const errors: string[] = [];
+  const code = await runCli(["tui", ...argv], {
+    operations,
+    isInteractive: () => true,
+    renderTui: async (_operations, environment) => { rendered.push(environment); },
+    stderr: (line) => errors.push(line),
+  });
+  return { code, rendered, errors };
+}
+
+test("tui --project gives the resolved project root to the TUI", async () => {
+  const root = await tempDirectory("target-tui-option");
+  try {
+    const { code, rendered } = await runTui(["--project", root]);
+    assert.equal(code, 0);
+    assert.equal(rendered[0]?.projectRoot, root);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("tui --project rejects a missing path and unknown options before rendering", async () => {
+  const root = await tempDirectory("target-tui-invalid");
+  try {
+    const missing = await runTui(["--project", path.join(root, "missing")]);
+    assert.equal(missing.code, 1);
+    assert.match(missing.errors.join("\n"), /--project .* does not exist/u);
+    assert.deepEqual(missing.rendered, []);
+
+    const unknown = await runTui(["--bogus"]);
+    assert.equal(unknown.code, 1);
+    assert.deepEqual(unknown.rendered, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a project-scope plan never reads or locks Package state, so it creates nothing under the project", async () => {
+  const root = await tempDirectory("target-package-state");
+  const state = await tempDirectory("target-package-state-dir");
+  try {
+    const stateDirectory = path.join(state, "package-state");
+    await planSingleInstall(
+      { scope: "project", sourceId: BUILT_IN_SOURCE.id, skillPath: "portable/demo", hosts: ["pi"], version: { policy: "latest" }, portableV1: true, confirmed: false, overwrite: false, confirmAdditionalHostExposure: false },
+      { operations, sourceAccess: sourceAccess(demoTree), environment: { stateDirectory }, root, existing: [], recordedIn: "manifest" },
+    );
+    assert.deepEqual(await readdir(state), [], "Package state is user-global and is not consulted for a project install");
+    assert.deepEqual(await readdir(root), [], "the project root is untouched");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(state, { recursive: true, force: true });
   }
 });
