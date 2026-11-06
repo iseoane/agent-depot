@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { Stats } from "node:fs";
-import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -12,6 +12,7 @@ import {
   scanUserGlobalSkillInventory,
   type UserGlobalSkillFileSystem,
 } from "../src/user-global-skill-inventory.js";
+import { directoryLink } from "./link-helpers.js";
 
 const SKILL_MD = "---\nname: dev\ndescription: Dev skill\n---\n\nBody\n";
 
@@ -36,7 +37,7 @@ async function fixture(t: TestContext): Promise<Fixture> {
 async function link(home: string, root: ".agents" | ".claude", name: string, target: string): Promise<string> {
   const linkPath = path.join(home, root, "skills", name);
   await mkdir(path.dirname(linkPath), { recursive: true });
-  await symlink(target, linkPath, "dir");
+  await directoryLink(target, linkPath);
   return linkPath;
 }
 
@@ -101,7 +102,7 @@ test("does not remove a link that was replaced or retargeted after the inspectio
   const inspection = await inspectUserGlobalSymlinkRemoval(linkPath, options);
 
   await rm(linkPath);
-  await symlink(path.join(home, ".agents"), linkPath, "dir");
+  await directoryLink(path.join(home, ".agents"), linkPath);
 
   await assert.rejects(removeUserGlobalSymlink(inspection, options), /changed before deletion/);
   assert.ok((await lstat(linkPath)).isSymbolicLink());

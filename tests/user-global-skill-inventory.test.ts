@@ -14,6 +14,7 @@ import {
 } from "../src/user-global-skill-inventory.js";
 import type { ProjectSkillSelection } from "../src/project-manifest.js";
 import { isolateUserState } from "./state-home.js";
+import { directoryLink, skipWithoutFileSymlinks } from "./link-helpers.js";
 
 async function makeHome(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "agent-depot-global-inventory-"));
@@ -67,7 +68,7 @@ test("deduplicates a managed Claude exposure without hiding a separate real dupl
     const canonical = await makeSkill(home, ".agents", "demo");
     await mkdir(path.join(home, ".claude", "skills"), { recursive: true });
     try {
-      await symlink(path.relative(path.join(home, ".claude", "skills"), canonical), path.join(home, ".claude", "skills", "demo"), "dir");
+      await directoryLink(path.relative(path.join(home, ".claude", "skills"), canonical), path.join(home, ".claude", "skills", "demo"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -92,7 +93,7 @@ test("deduplicates a managed Claude exposure without hiding a separate real dupl
 async function linkOrSkip(t: { skip: (message: string) => void }, target: string, linkPath: string): Promise<boolean> {
   await mkdir(path.dirname(linkPath), { recursive: true });
   try {
-    await symlink(target, linkPath, "dir");
+    await directoryLink(target, linkPath);
     return true;
   } catch (error) {
     if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
@@ -202,7 +203,7 @@ test("reports unsafe links and malformed Skill files instead of making them remo
     await mkdir(path.join(home, ".agents", "skills"), { recursive: true });
     await makeSkill(outside, ".agents", "outside");
     try {
-      await symlink(path.join(outside, ".agents", "skills", "outside"), path.join(home, ".agents", "skills", "unsafe"), "dir");
+      await directoryLink(path.join(outside, ".agents", "skills", "outside"), path.join(home, ".agents", "skills", "unsafe"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -210,10 +211,11 @@ test("reports unsafe links and malformed Skill files instead of making them remo
       }
       throw error;
     }
+    if (await skipWithoutFileSymlinks(t)) return;
     await mkdir(path.join(home, ".agents", "skills", "linked-skill"), { recursive: true });
     await symlink("missing-skill.md", path.join(home, ".agents", "skills", "linked-skill", "SKILL.md"));
     const nestedLink = await makeSkill(home, ".agents", "nested-link");
-    await symlink(path.join(outside, ".agents", "skills", "outside"), path.join(nestedLink, "references-link"), "dir");
+    await directoryLink(path.join(outside, ".agents", "skills", "outside"), path.join(nestedLink, "references-link"));
     const malformed = await makeSkill(home, ".agents", "malformed", "not frontmatter\n");
 
     const inventory = await scan(home);
@@ -364,7 +366,7 @@ test("rejects a symlinked global root ancestor before scanning or removal", asyn
   try {
     await makeSkill(outside, ".agents", "outside");
     try {
-      await symlink(path.join(outside, ".agents"), path.join(home, ".agents"), "dir");
+      await directoryLink(path.join(outside, ".agents"), path.join(home, ".agents"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -392,7 +394,7 @@ test("reports a symlinked global root as unsafe and does not scan through it", a
     await makeSkill(outside, ".agents", "outside");
     await mkdir(path.join(home, ".agents"), { recursive: true });
     try {
-      await symlink(path.join(outside, ".agents", "skills"), path.join(home, ".agents", "skills"), "dir");
+      await directoryLink(path.join(outside, ".agents", "skills"), path.join(home, ".agents", "skills"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import { assertNoSymlinkPath, pathsOverlap } from "../src/path-safety.js";
+import { directoryLink } from "./link-helpers.js";
 
 test("pathsOverlap reports equal, nested and reverse-nested paths but not siblings", () => {
   const base = path.resolve("/tmp/overlap");
@@ -19,7 +20,7 @@ test("assertNoSymlinkPath accepts real and missing paths and names the symlinked
   const root = await mkdtemp(path.join(tmpdir(), "agent-depot-path-safety-"));
   try {
     await mkdir(path.join(root, "real"));
-    await symlink(path.join(root, "real"), path.join(root, "link"), "dir");
+    await directoryLink(path.join(root, "real"), path.join(root, "link"));
     await assertNoSymlinkPath(path.join(root, "real"), "test path");
     await assertNoSymlinkPath(path.join(root, "missing", "deeper"), "test path");
     await assert.rejects(
@@ -45,7 +46,7 @@ test("assertNoSymlinkPath normalizes traversal and resolves relative candidates"
   const root = await mkdtemp(path.join(tmpdir(), "agent-depot-path-safety-"));
   try {
     await mkdir(path.join(root, "real", "nested"), { recursive: true });
-    await symlink(path.join(root, "real"), path.join(root, "link"), "dir");
+    await directoryLink(path.join(root, "real"), path.join(root, "link"));
     // A ".." segment collapses before any component is inspected, so the link is never walked.
     await assertNoSymlinkPath(path.join(root, "link", "..", "real", "nested"), "test path");
     const previous = process.cwd();
@@ -68,8 +69,8 @@ test("assertNoSymlinkPath rejects a symlinked leaf, a dangling link and the firs
   const root = await mkdtemp(path.join(tmpdir(), "agent-depot-path-safety-"));
   try {
     await mkdir(path.join(root, "real"));
-    await symlink(path.join(root, "real"), path.join(root, "outer"), "dir");
-    await symlink(path.join(root, "missing-target"), path.join(root, "dangling"));
+    await directoryLink(path.join(root, "real"), path.join(root, "outer"));
+    await directoryLink(path.join(root, "missing-target"), path.join(root, "dangling"));
     await assert.rejects(
       assertNoSymlinkPath(path.join(root, "outer"), "leaf"),
       new Error(`leaf contains a symbolic link: ${path.join(root, "outer")}`),
@@ -78,7 +79,7 @@ test("assertNoSymlinkPath rejects a symlinked leaf, a dangling link and the firs
       assertNoSymlinkPath(path.join(root, "dangling", "child"), "dangling"),
       new Error(`dangling contains a symbolic link: ${path.join(root, "dangling")}`),
     );
-    await symlink(path.join(root, "outer"), path.join(root, "real", "inner"), "dir");
+    await directoryLink(path.join(root, "outer"), path.join(root, "real", "inner"));
     await assert.rejects(
       assertNoSymlinkPath(path.join(root, "outer", "inner", "x"), "chain"),
       new Error(`chain contains a symbolic link: ${path.join(root, "outer")}`),

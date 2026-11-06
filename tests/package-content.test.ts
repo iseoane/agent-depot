@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -14,6 +14,7 @@ import {
 import { createNodePackageContentAccess, sourceBundleScope, type HostFacingOrigin } from "../src/package-content.js";
 import { runProcess } from "../src/process-runner.js";
 import { BUILT_IN_SOURCE, type Source } from "../src/sources.js";
+import { directoryLink } from "./link-helpers.js";
 
 const builtIn: Source = {
   id: "builtin:agent-depot",
@@ -209,7 +210,7 @@ test("listFiles and readFile reject a symlinked mirror path", async () => {
     await mkdir(cachePath, { recursive: true });
     await mkdir(path.join(root, "real"), { recursive: true });
     try {
-      await symlink(path.join(root, "real"), destination, "dir");
+      await directoryLink(path.join(root, "real"), destination);
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         return;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -15,6 +15,7 @@ import {
 } from "../src/project-installation.js";
 import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
+import { directoryLink } from "./link-helpers.js";
 
 // Project-scope installation paths come from a committed, hostile-capable
 // manifest. Only the canonical layout is trusted; an adopted Skill at another
@@ -142,7 +143,7 @@ test("unsafe non-canonical targets are each rejected even with a valid SKILL.md 
     await writeSkill(root, "packages/renamed", "demo");
     await writeSkill(root, "packages/wrong-name/demo", "not-demo");
     await writeSkill(outside, "demo");
-    const symlinkCreated = await symlink(outside, path.join(root, "linked"), "dir").then(() => true, () => false);
+    const symlinkCreated = await directoryLink(outside, path.join(root, "linked")).then(() => true, () => false);
     // The root itself carries a valid Skill: a root-level path must never be accepted.
     await writeFile(path.join(root, "SKILL.md"), skillMd("demo", "old"));
 

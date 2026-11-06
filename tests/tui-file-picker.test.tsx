@@ -10,6 +10,7 @@ import {
 } from "../src/tui/file-picker-model.js";
 import { FilePicker } from "../src/tui/file-picker.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { directoryLink, fileSymlinksSupported } from "./link-helpers.js";
 
 test("export file names gain .json only when they have no extension, and unsafe names are refused", () => {
   assert.deepEqual(resolveExportFileName("agent-depot-profile"), { kind: "ok", fileName: "agent-depot-profile.json", appendedExtension: true });
@@ -192,14 +193,17 @@ test("a symlink to a directory is classified as a directory and navigated into",
   const real = path.join(root, "real");
   await mkdir(path.join(real, "inside"), { recursive: true });
   await writeFile(path.join(root, "file.json"), "{}");
-  await symlink(real, path.join(root, "dir-link"));
-  await symlink(path.join(root, "file.json"), path.join(root, "file-link.json"));
+  await directoryLink(real, path.join(root, "dir-link"));
+  const fileLinked = await fileSymlinksSupported();
+  if (fileLinked) await symlink(path.join(root, "file.json"), path.join(root, "file-link.json"));
   const view = render(<FilePicker purpose="file" startDirectory={root} onCancel={() => {}} onChoose={() => {}} />);
   t.after(() => view.unmount());
   const frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("dir-link/"));
   assert.match(frame, /dir-link\//);
-  assert.match(frame, /file-link\.json(?!\.)/);
-  assert.doesNotMatch(frame.replace(/dir-link\//g, ""), /file-link\.json\//);
+  if (fileLinked) {
+    assert.match(frame, /file-link\.json(?!\.)/);
+    assert.doesNotMatch(frame.replace(/dir-link\//g, ""), /file-link\.json\//);
+  }
   view.stdin.write("j");
   await waitForFrame(view.lastFrame, candidate => candidate.split("\n").some(line => line.includes("> ") && line.includes("dir-link/")));
   view.stdin.write("\r");

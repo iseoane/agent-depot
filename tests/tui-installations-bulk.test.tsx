@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -19,6 +19,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
+import { directoryLink } from "./link-helpers.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -55,7 +56,7 @@ async function install(f: Fixture, name: string, hosts: readonly ProjectHost[]):
   await writeFile(path.join(agentsDir(f.home, name), "SKILL.md"), content, "utf8");
   if (hosts.includes("claude")) {
     await mkdir(path.dirname(claudeDir(f.home, name)), { recursive: true });
-    await symlink(path.join("..", "..", ".agents", "skills", name), claudeDir(f.home, name), "dir");
+    await directoryLink(path.join("..", "..", ".agents", "skills", name), claudeDir(f.home, name));
   }
   await f.operations.addUserGlobalInstallation!(parseProjectManifest({
     version: 1,
