@@ -250,9 +250,10 @@ test("the TUI install preview shows the project root and the user-global one doe
     const skill = { sourceId: BUILT_IN_SOURCE.id, path: "portable/demo" } as Parameters<typeof prepareInstall>[2];
     const choice = { hosts: ["pi" as const], version: { policy: "latest" as const } };
     const project = await prepareInstall({ ...operations, async listUserGlobalInstallations() { return []; } }, environment, skill, { ...choice, scope: "project" });
-    assert.equal(project.preview[0], `Project: ${root}`);
+    assert.equal(project.projectTarget[0], `Project: ${root}`);
+    assert.ok(!project.preview.some((line) => line.startsWith("Project:")), "the shared target block is not repeated per item");
     const global = await prepareInstall({ ...operations, async listUserGlobalInstallations() { return []; }, async addUserGlobalInstallation() {} }, environment, skill, { ...choice, scope: "user-global" });
-    assert.ok(!global.preview.some((line) => line.startsWith("Project:")));
+    assert.deepEqual(global.projectTarget, []);
   } finally {
     await rm(root, { recursive: true, force: true });
     await rm(home, { recursive: true, force: true });

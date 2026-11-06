@@ -10,6 +10,9 @@ export function pathsOverlap(left: string, right: string): boolean {
     (!reverse.startsWith(`..${path.sep}`) && !path.isAbsolute(reverse));
 }
 
+/** A path component that is a symbolic link or junction; the message names it. */
+export class SymlinkPathError extends Error {}
+
 /** Walks every existing component of a path and rejects the first symbolic link. */
 export async function assertNoSymlinkPath(candidate: string, label: string): Promise<void> {
   const absolute = path.resolve(candidate);
@@ -20,7 +23,7 @@ export async function assertNoSymlinkPath(candidate: string, label: string): Pro
     current = path.join(current, segment);
     try {
       if ((await lstat(current)).isSymbolicLink()) {
-        throw new Error(`${label} contains a symbolic link: ${current}`);
+        throw new SymlinkPathError(`${label} contains a symbolic link: ${current}`);
       }
     } catch (error) {
       if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {

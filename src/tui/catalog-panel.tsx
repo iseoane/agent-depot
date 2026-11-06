@@ -97,8 +97,10 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
     case "confirm-install": {
       const ready = mode.items.filter((item) => item.prepared !== undefined);
       const single = mode.items.length === 1;
+      const projectTarget = ready[0]?.prepared?.projectTarget ?? [];
       return (
         <BorderPanel title={`Skill install preview · ${ready.length} ready`}>
+          {projectTarget.length === 0 ? null : <PreviewLines lines={projectTarget} />}
           {mode.items.map(({ skill, prepared, error }) =>
             prepared === undefined ? (
               <Text key={skillKey(skill)} color={theme.error}>Cannot install {skill.name}: {error}</Text>

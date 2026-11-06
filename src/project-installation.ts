@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import path from "node:path";
 
-import type { ProjectHost, ProjectSkillSelection } from "./project-manifest.js";
+import { HOST_PROJECT_DIRECTORIES, type ProjectHost, type ProjectSkillSelection } from "./project-manifest.js";
 import { compareSkillTrees, readExistingSkillTree } from "./skill-adoption.js";
 import type { SkillTreeComparisonReason, SkillTreeFileSystem } from "./skill-adoption.js";
 import { pathsOverlap } from "./path-safety.js";
@@ -2096,7 +2096,7 @@ function isPortableV1Tree(files: readonly ValidatedTreeFile[]): boolean {
 }
 
 function portableV1ExcludedDirectory(relativePath: string): boolean {
-  const excludedTopLevelDirectories = new Set([".claude", ".codex", ".opencode", ".pi", "extensions", "plugins", "mcp"]);
+  const excludedTopLevelDirectories = new Set([...Object.values(HOST_PROJECT_DIRECTORIES), "extensions", "plugins", "mcp"]);
   const firstSegment = relativePath.split("/", 1)[0];
   return excludedTopLevelDirectories.has(firstSegment ?? "");
 }

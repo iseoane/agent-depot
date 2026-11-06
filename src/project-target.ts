@@ -1,20 +1,11 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
 
-import { assertNoSymlinkPath } from "./path-safety.js";
-import type { ProjectHost } from "./project-manifest.js";
+import { assertNoSymlinkPath, SymlinkPathError } from "./path-safety.js";
+import { HOST_PROJECT_DIRECTORIES } from "./project-manifest.js";
 import { CliUsageError } from "./usage-error.js";
 
-/**
- * Where each Host keeps project-level configuration. `.agents` is the canonical
- * Skill location the Hosts share, so it also marks a project that already uses Skills.
- */
-const HOST_PROJECT_DIRECTORIES: Readonly<Record<ProjectHost, string>> = {
-  pi: ".pi",
-  claude: ".claude",
-  codex: ".codex",
-  opencode: ".opencode",
-};
+/** `.agents` is the canonical Skill location the Hosts share, so it also marks a project that already uses Skills. */
 const PROJECT_DIRECTORIES: readonly string[] = [".agents", ...Object.values(HOST_PROJECT_DIRECTORIES)];
 
 /** The warnings are advisory, so an entry that cannot be read counts as absent. */
@@ -63,6 +54,8 @@ export async function resolveProjectRootOption(value: string): Promise<string> {
     throw error;
   });
   if (!information.isDirectory()) throw new CliUsageError(`--project ${JSON.stringify(value)} is not a directory`);
-  await assertNoSymlinkPath(root, "--project");
+  await assertNoSymlinkPath(root, `--project ${JSON.stringify(value)}`).catch((error: unknown) => {
+    throw error instanceof SymlinkPathError ? new CliUsageError(error.message) : error;
+  });
   return root;
 }

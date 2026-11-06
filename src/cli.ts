@@ -165,7 +165,7 @@ const USAGE = [
   "  agent-depot package forget <selection> --host <host> --yes",
   `  ${EXPORT_USAGE}`,
   `  ${IMPORT_USAGE}`,
-  "  agent-depot tui",
+  "  agent-depot tui [--project <path>]",
   "  agent-depot --version",
   "",
   "Options for every command, anywhere on the line:",
@@ -267,16 +267,17 @@ const COMMANDS = new Map<string, CommandHandler>([
     }
     return 0;
   }],
-  ["tui", async (_values, { operations, dependencies }) => {
+  ["tui", async (values, { operations, dependencies }) => {
     const isInteractive = dependencies.isInteractive ?? (() => process.stdin.isTTY === true);
     if (!isInteractive()) {
       throw new Error("agent-depot tui requires an interactive terminal");
     }
+    const projectRoot = await parseTuiProjectRoot(values, dependencies);
     // Loaded lazily so non-interactive commands never import Ink/React.
     const renderTui = dependencies.renderTui ?? (await import("./tui/render.js")).renderTui;
     await renderTui(operations, {
       homeDirectory: dependencies.homeDirectory,
-      projectRoot: dependencies.projectRoot,
+      projectRoot,
       sourceAccess: dependencies.sourceAccess,
       installationOptions: dependencies.installationOptions,
       projectManifestStore: dependencies.projectManifestStore,
@@ -292,6 +293,13 @@ const COMMANDS = new Map<string, CommandHandler>([
     return 0;
   }],
 ]);
+
+/** `tui [--project <path>]`: the project directory the TUI acts on; also where its file browser opens. */
+async function parseTuiProjectRoot(values: readonly string[], dependencies: CliDependencies): Promise<string | undefined> {
+  if (values.length === 0) return dependencies.projectRoot;
+  if (values.length !== 2 || values[0] !== "--project") throw new CliUsageError(USAGE);
+  return resolveProjectRootOption(requireOptionValue(values, 1, "--project"));
+}
 
 async function runSourceRefresh(
   values: readonly string[],

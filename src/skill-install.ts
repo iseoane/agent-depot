@@ -518,7 +518,7 @@ export async function planSingleInstall(
     selection, source, projectSource, context.root, request, context.operations, context.environment, context.sourceAccess,
   );
   await assertInstallNotAppOwned(request, context, installationInspection);
-  await assertInstallNotPackageOwned(selection, resolvedSource, context);
+  await assertInstallNotPackageOwned(request, selection, resolvedSource, context);
   const projectTarget = request.scope === "project"
     ? await describeProjectTarget(context.root, context.manifestPath ?? defaultProjectManifestPath(context.root))
     : [];
@@ -543,7 +543,7 @@ export async function executeSingleInstall(
 ): Promise<void> {
   const { request, context, selection, resolvedSource, resolved, inspection } = plan;
   await assertInstallNotAppOwned(request, context, inspection);
-  await assertInstallNotPackageOwned(selection, resolvedSource, context);
+  await assertInstallNotPackageOwned(request, selection, resolvedSource, context);
   const protectedPaths = assertNoManagedInstallationOverlap(context.existing, selection, inspection, context.root, request.overwrite);
   rejectInstallationCollision(inspection, request.overwrite);
   const transaction = await installOne(
@@ -607,10 +607,15 @@ async function assertInstallNotAppOwned(
   }
 }
 
-/** Reloads bundle ownership from the selected Source and refuses its own Skill paths. */
+/**
+ * Reloads bundle ownership from the selected Source and refuses its own Skill paths.
+ * Package state lives under the user's home, so a project install has nothing to
+ * check and must not read or lock state derived from the project root.
+ */
 async function assertInstallNotPackageOwned(
-  selection: ProjectSkillSelection, source: Source, context: SingleInstallContext,
+  request: SingleInstallRequest, selection: ProjectSkillSelection, source: Source, context: SingleInstallContext,
 ): Promise<void> {
+  if (request.scope !== "user-global") return;
   const owned = await loadPackageOwnedSkillFilter({
     sources: [source],
     homeDirectory: context.root,
