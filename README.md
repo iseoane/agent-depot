@@ -343,7 +343,7 @@ the install method; update execution is not part of this lifecycle.
 ## Project installation
 
 Project scope acts on one project directory, the current directory unless you pass
-`--project <path>` (`install` and `update`). The path must be an existing directory
+`--project <path>` (`install`, `update` and `tui`). The path must be an existing directory
 without symbolic links in it, and a relative path is resolved against the current
 directory. Every project-scope preview, in the CLI and the TUI, starts with
 `Project: <absolute path>`, so you can see where Skills will be written before
@@ -352,6 +352,8 @@ it is inside a Git repository but is not its top level (the warning names the to
 level), or it has no `agent-depot.json` and none of `.agents`, `.claude`, `.codex`,
 `.opencode` or `.pi`. A brand-new project still installs after the warning. Project
 removal does not exist, so this applies to install and update only.
+`agent-depot tui --project <path>` opens the TUI on that directory; a TUI batch
+install shows the project line and warnings once for the whole batch.
 
 ```
 agent-depot install --scope project --project ../other-repo --source builtin:agent-depot --skill agent-depot-apprecipe --host pi --version latest --portable-v1
