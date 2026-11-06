@@ -8,6 +8,7 @@ import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 async function fixture(t: TestContext, manual: boolean | "spawn" = false, brokenSkills = false) {
   const home = await mkdtemp(path.join(tmpdir(), "updates-apps-"));
@@ -37,7 +38,7 @@ async function fixture(t: TestContext, manual: boolean | "spawn" = false, broken
   if (brokenSkills) await writeFile(path.join(home, "state", "sources.json"), "{}");
   const view = render(<UpdatesView operations={createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") })}
     environment={{ homeDirectory: home, projectRoot: home, appEnvironment }} />);
-  t.after(async () => { view.unmount(); view.cleanup(); await rm(home, { recursive: true, force: true }); });
+  deferCleanup(t, async () => { view.unmount(); view.cleanup(); await rm(home, { recursive: true, force: true }); });
   return { view, apps, commands, home, recipesDirectory, latestCalls: () => latestCalls, setVersion: (next: string) => { version = next; } };
 }
 

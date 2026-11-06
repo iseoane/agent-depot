@@ -20,6 +20,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -41,7 +42,7 @@ async function fixture(t: TestContext): Promise<Fixture> {
   const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-bulk-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-bulk-project-"));
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-bulk-state-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map((directory) => rm(directory, { recursive: true, force: true })));
   });
   const operations = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });

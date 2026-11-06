@@ -9,6 +9,7 @@ import { createSourceOperations } from "../src/sources.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { renderExpanded } from "./render-expanded.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 async function fixture(t: TestContext, options: { readonly approved?: boolean; readonly installed?: boolean; readonly unknown?: boolean } = {}) {
   const home = await mkdtemp(path.join(tmpdir(), "tui-apps-"));
@@ -48,7 +49,7 @@ async function fixture(t: TestContext, options: { readonly approved?: boolean; r
       listHeight={20}
     />,
   );
-  t.after(async () => {
+  deferCleanup(t, async () => {
     try {
       await waitForSettled(view.lastFrame);
     } finally {

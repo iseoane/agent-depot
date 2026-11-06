@@ -11,6 +11,7 @@ import { createSourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const RECIPE = {
   name: "gentle-shell",
@@ -28,7 +29,7 @@ for (const outcome of ["resolver", "spawn", "signal", "pattern"] as const) {
     const state = await mkdtemp(path.join(tmpdir(), "agent-depot-catalog-unknown-state-"));
     const recipesDirectory = path.join(state, "apps");
     await mkdir(recipesDirectory, { recursive: true });
-    t.after(async () => Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true }))));
+    deferCleanup(t, async () => Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true }))));
     const commands: string[] = [];
     const appEnvironment: AppEnvironment = {
       homeDirectory: home,
@@ -62,7 +63,7 @@ for (const outcome of ["resolver", "spawn", "signal", "pattern"] as const) {
     await apps.approve(entry!);
     const operations = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
     const view = await renderExpanded(<CatalogView operations={operations} environment={{ homeDirectory: home, projectRoot: project, appEnvironment }} />);
-    t.after(() => view.unmount());
+    deferCleanup(t, () => view.unmount());
     const frame = await waitForFrame(view.lastFrame, /0 Apps/);
     assert.doesNotMatch(frame, /App unknown-app/);
     assert.ok(!commands.some(command => command.startsWith("npm install")));
@@ -75,7 +76,7 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-catalog-app-state-"));
   const recipesDirectory = path.join(state, "apps");
   await mkdir(recipesDirectory, { recursive: true });
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map(directory => rm(directory, { recursive: true, force: true })));
   });
 

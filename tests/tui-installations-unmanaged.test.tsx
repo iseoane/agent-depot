@@ -14,6 +14,7 @@ import type { UnmanagedGroup } from "../src/tui/installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval } from "../src/tui/unmanaged-actions.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -32,7 +33,7 @@ async function fixture(t: TestContext): Promise<Fixture> {
   const project = await mkdtemp(path.join(tmpdir(), "ad-proj-"));
   const state = await mkdtemp(path.join(tmpdir(), "ad-state-"));
   const dev = await mkdtemp(path.join(tmpdir(), "ad-dev-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state, dev].map((directory) => rm(directory, { recursive: true, force: true })));
   });
   const operations = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });

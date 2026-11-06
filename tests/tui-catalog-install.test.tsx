@@ -19,6 +19,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -55,7 +56,7 @@ async function fixture(t: TestContext, withStateOperations = true): Promise<Fixt
   const home = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-home-"));
   const project = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-project-"));
   const state = await mkdtemp(path.join(tmpdir(), "agent-depot-tui-state-"));
-  t.after(async () => {
+  deferCleanup(t, async () => {
     await Promise.all([home, project, state].map((directory) => rm(directory, { recursive: true, force: true })));
   });
   const real = createSourceOperations({ statePath: path.join(state, "sources.json"), homeDirectory: home });
@@ -365,7 +366,7 @@ test("a slow install preparation shows a specific progress label until the previ
     },
   };
   const { lastFrame, stdin, unmount } = await mount({ ...f, environment: slow });
-  t.after(unmount);
+  deferCleanup(t, unmount);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, [" "], "2", "1");
   const busy = await waitForFrame(lastFrame, /Refreshing source and preparing install of demo…/);

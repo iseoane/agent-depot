@@ -14,6 +14,7 @@ import { pagedRows, pageToEnd } from "./package-panel.js";
 import { fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { skipWithoutFileSymlinks } from "./link-helpers.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
@@ -52,7 +53,7 @@ async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = 
     runner: async () => { throw new Error("Recipes must not execute"); } } };
   let exits = 0;
   const view = render(<App operations={operations} environment={environment} onExit={() => { exits++; }} />);
-  t.after(async () => {
+  deferCleanup(t, async () => {
     // A test can end right after switching tabs; the mounted view then still reads state under `home`.
     try {
       await waitForSettled(view.lastFrame);
@@ -226,7 +227,7 @@ test("a directory read error stays recoverable and long export lists are windowe
   const f = await fixture(t);
   const errorView = render(<ProfileView operations={f.operations} listHeight={8}
     environment={{ ...f.environment, startDirectory: path.join(f.home, "missing") }} />);
-  t.after(() => errorView.unmount());
+  deferCleanup(t, () => errorView.unmount());
   errorView.stdin.write("i");
   const error = await waitForFrame(errorView.lastFrame, /Error:.*ENOENT/);
   assert.match(error, /Choose import file/);
@@ -235,7 +236,7 @@ test("a directory read error stays recoverable and long export lists are windowe
 
   for (let index = 0; index < 20; index++) await writeFile(path.join(f.directory, `${index}.json`), JSON.stringify({ ...recipe, name: `demo-${index}` }));
   const view = render(<ProfileView operations={f.operations} environment={f.environment} listHeight={3} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   view.stdin.write("e");
   await waitForFrame(view.lastFrame, /▸ Sources/);
   await expandExportGroup(view, "Apps");
@@ -369,7 +370,7 @@ test("export group selection and numbering survive scrolling, collapse, expansio
     installation: { path: `.agents/skills/skill-${index}`, adopted: false },
   });
   const view = render(<ProfileView operations={f.operations} environment={f.environment} listHeight={4} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   view.stdin.write("e");
   await waitForFrame(view.lastFrame, /▸ Sources/);
   await expandExportGroup(view, "Skills");
@@ -399,13 +400,13 @@ test("export group selection and numbering survive scrolling, collapse, expansio
 
 test("Packages appear in the export checklist and import previews the recorded selection", async t => {
   const home = await mkdtemp(path.join(tmpdir(), "profile-tui-packages-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(home, { recursive: true, force: true }));
   const picker = path.join(home, "picker");
   await mkdir(picker);
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
   const { operations: exporter } = fakePackageOperations({ recorded: [installedPackage] });
   const view = render(<ProfileView operations={operations} environment={{ homeDirectory: home, startDirectory: picker, packages: exporter }} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   view.stdin.write("e");
   await waitForFrame(view.lastFrame, /▸ Sources/);
   await expandExportGroup(view, "Packages");
@@ -422,7 +423,7 @@ test("Packages appear in the export checklist and import previews the recorded s
   await writeFile(input, JSON.stringify({ ...exported, sources: [], skills: [], apps: [] }));
   const { operations: importer, evidence } = fakePackageOperations({});
   const importing = render(<ProfileView operations={operations} environment={{ homeDirectory: home, startDirectory: picker, packages: importer }} />);
-  t.after(() => importing.unmount());
+  deferCleanup(t, () => importing.unmount());
   await importFile(importing, input);
   await waitForFrame(importing.lastFrame, /Select Package pi plugins\/demo/);
   importing.stdin.write("\r");
@@ -437,7 +438,7 @@ test("Packages appear in the export checklist and import previews the recorded s
 
 test("v2 replica intent is preview-only and follows the selected import resources", async t => {
   const home = await mkdtemp(path.join(tmpdir(), "profile-tui-replica-import-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(home, { recursive: true, force: true }));
   const picker = path.join(home, "picker");
   await mkdir(picker);
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json") });
@@ -456,7 +457,7 @@ test("v2 replica intent is preview-only and follows the selected import resource
   const { operations: packages, evidence } = fakePackageOperations({});
   const view = render(<ProfileView operations={operations} environment={{ homeDirectory: home, startDirectory: picker,
     appEnvironment: { recipesDirectory, runner: async () => { throw new Error("recipe commands must not run"); } }, packages }} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
 
   await importFile(view, file);
   view.stdin.write("\r");
@@ -736,7 +737,7 @@ test("busy import ignores view, quit, cancel, toggle and action keys until the r
       await gate;
       throw new Error("intentional clone failure");
     } } });
-  t.after(() => { release(); return rm(gitAccess.cachePath, { recursive: true, force: true }); });
+  deferCleanup(t, () => { release(); return rm(gitAccess.cachePath, { recursive: true, force: true }); });
   const f = await fixture(t, { gitAccess });
   const file = path.join(f.picker, "busy.json");
   await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0",
@@ -784,7 +785,7 @@ test("export keeps notes separate from resource selection", async t => {
 
 async function nameStageFixture(t: TestContext, existsCheck: (target: string) => Promise<boolean>) {
   const home = await mkdtemp(path.join(tmpdir(), "profile-name-stage-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  deferCleanup(t, () => rm(home, { recursive: true, force: true }));
   const picker = path.join(home, "picker");
   const directory = path.join(home, "apps");
   await mkdir(picker);
@@ -794,7 +795,7 @@ async function nameStageFixture(t: TestContext, existsCheck: (target: string) =>
   const view = render(<ProfileView operations={operations} existsCheck={existsCheck}
     environment={{ homeDirectory: home, startDirectory: picker,
       appEnvironment: { recipesDirectory: directory, runner: async () => { throw new Error("Recipes must not execute"); } } }} />);
-  t.after(() => view.unmount());
+  deferCleanup(t, () => view.unmount());
   view.stdin.write("e");
   await waitForFrame(view.lastFrame, /▸ Sources/);
   view.stdin.write("e");

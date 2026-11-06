@@ -1,6 +1,6 @@
 import type { TestContext } from "node:test";
 
-type Cleanup = () => void | Promise<void>;
+type Cleanup = () => unknown;
 
 const stacks = new WeakMap<TestContext, Cleanup[]>();
 

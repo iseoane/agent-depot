@@ -21,6 +21,7 @@ import { InstallationsView } from "../src/tui/installations-view.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
 import { pagedRows, pageToEnd } from "./package-panel.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
+import { deferCleanup } from "./test-cleanup.js";
 
 const ENTER = "\r";
 const ESC = "\u001B";
@@ -146,7 +147,7 @@ async function fixture(t: TestContext, overrides: Partial<PackageOperations> = {
   const view = render(
     <InstallationsView operations={operations} environment={{ homeDirectory: home, projectRoot: home, packages }} listHeight={24} />,
   );
-  t.after(async () => {
+  deferCleanup(t, async () => {
     view.unmount();
     await rm(home, { recursive: true, force: true });
   });
