@@ -338,7 +338,7 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     await session.send("n", /LOCATION \/ STATUS/u);
     assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "skills")), "Sources resource types use Xeo blue");
     assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "app")), "App recipe type uses Xeo blue");
-    // A long recipe path wraps the status onto its own rows, so each word may carry the color separately.
+    // A narrow terminal can wrap a multi-word status onto its own rows, so each word may carry the color separately.
     const warning = (text: string) => session.terminalOutput.includes(ansiColor(224, 175, 104, text));
     assert.ok(warning("needs approval") || (warning("needs") && warning("approval")), "unapproved recipe status uses the warning color");
     assert.equal(execFileSync(process.execPath, [CLI, "source", "list"], { cwd: projectRoot, env: { ...process.env, ...environment }, encoding: "utf8" }).includes(url), true);
@@ -351,7 +351,7 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     assert.ok(session.terminalOutput.includes(`\u001b[1m${ansiColor(158, 206, 106, "y")}`), "App approval yes uses bold Xeo success green");
     assert.ok(session.terminalOutput.includes(ansiColor(247, 118, 142, "n")), "App approval no uses Xeo red");
     await session.send("y", /approved/u);
-    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "approved")), "approved recipe status uses the success color");
+    assert.ok(session.terminalOutput.includes(ansiColor(158, 206, 106, "✓ approved")), "approved recipe status uses the success color");
     await session.send("2", /Apps \(user-global\)/u);
     await session.send("j", /Apps \(user-global\)/u);
     const catalog = await session.send("\r", /fixture-app/u);

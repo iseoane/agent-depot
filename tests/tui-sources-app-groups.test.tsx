@@ -39,7 +39,7 @@ test("a Windows machine lists one row per App with its platform and status, othe
   const f = await fixture(t, "win32", TWO, ["codegraph.windows.json"]);
   const frame = await waitForFrame(f.view.lastFrame, /other platform/);
   const flat = squash(frame);
-  assert.match(flat, /codegraphappwindows·approvedlinux\(otherplatform\)/);
+  assert.match(flat, /codegraphappwindows·✓approvedlinux\(otherplatform\)/);
   assert.equal(frame.split("\n").filter(line => line.includes("codegraph")).length >= 1, true);
   assert.equal([...flat.matchAll(/codegraphapp/g)].length, 1, frame);
   assert.ok(!flat.includes("codegraph.windows.json") && !flat.includes("profile-aa-bb"), "list rows hide recipe paths");
@@ -48,13 +48,13 @@ test("a Windows machine lists one row per App with its platform and status, othe
 test("the same recipes on Linux put linux first", async t => {
   const f = await fixture(t, "linux", TWO, ["profile-aa-bb.json"]);
   const frame = await waitForFrame(f.view.lastFrame, /other platform/);
-  assert.match(squash(frame), /codegraphapplinux·approvedwindows\(otherplatform\)/);
+  assert.match(squash(frame), /codegraphapplinux·✓approvedwindows\(otherplatform\)/);
 });
 
 test("a recipe without a platform is one row showing its status and no path", async t => {
   const f = await fixture(t, "linux", { "solo.json": recipe("solo") }, ["solo.json"]);
   const frame = await waitForFrame(f.view.lastFrame, /solo/);
-  assert.match(squash(frame), /soloappapproved/);
+  assert.match(squash(frame), /soloapp✓approved/);
   assert.ok(!squash(frame).includes("solo.json"));
 });
 
@@ -88,4 +88,40 @@ test("d on a grouped row asks which recipe file, and removes only the one chosen
   await waitForFrame(f.view.lastFrame, /Removed App recipe/);
   await assert.rejects(access(path.join(f.directory, "profile-aa-bb.json")));
   await access(path.join(f.directory, "codegraph.windows.json"));
+});
+
+test("clashing duplicate recipes show their own file name and the error names every file to repair", async t => {
+  const f = await fixture(t, "linux", { "a.json": recipe("dup"), "b.json": recipe("dup") });
+  const flat = squash(await waitForFrame(f.view.lastFrame, /Duplicate/));
+  assert.ok(flat.includes("a.json·") && flat.includes("b.json·"), flat);
+  assert.ok(flat.includes("(repaira.json,b.json)"), flat);
+});
+
+test("when no recipe of a name applies here, the row leads with the primary recipe's platform", async t => {
+  const f = await fixture(t, "win32", { "only-linux.json": recipe("tool", "linux") });
+  const frame = await waitForFrame(f.view.lastFrame, /not applicable here/);
+  assert.match(squash(frame), /toolapplinux·notapplicablehere/);
+});
+
+test("the removal picker cancels with n and Esc, ignores an out-of-range digit and starts removal of the applicable recipe when it is picked", async t => {
+  const f = await fixture(t, "win32", TWO, ["codegraph.windows.json"]);
+  await waitForFrame(f.view.lastFrame, /other platform/);
+  f.view.stdin.write("d");
+  await waitForFrame(f.view.lastFrame, /Remove which recipe/);
+  f.view.stdin.write("n");
+  await waitForFrame(f.view.lastFrame, frame => /other platform/.test(frame) && !/Remove which recipe/.test(frame));
+  f.view.stdin.write("d");
+  await waitForFrame(f.view.lastFrame, /Remove which recipe/);
+  f.view.stdin.write("\u001b");
+  await waitForFrame(f.view.lastFrame, frame => /other platform/.test(frame) && !/Remove which recipe/.test(frame));
+  f.view.stdin.write("d");
+  await waitForFrame(f.view.lastFrame, /Remove which recipe/);
+  f.view.stdin.write("9");
+  await waitForSettled(f.view.lastFrame);
+  assert.match(f.view.lastFrame() ?? "", /Remove which recipe/);
+  // The fixture runner refuses every command, so entering the removal flow for the applicable recipe stops at its version check.
+  f.view.stdin.write("1");
+  await waitForFrame(f.view.lastFrame, /Cannot verify App state/);
+  await access(path.join(f.directory, "codegraph.windows.json"));
+  await access(path.join(f.directory, "profile-aa-bb.json"));
 });

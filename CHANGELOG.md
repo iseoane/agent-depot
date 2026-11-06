@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A recipe for another platform can be removed even when an App with the same
+  name is tracked on this machine; recipes that apply here keep their
+  protection.
+- In Sources, clashing App recipes show their own file names and the duplicate
+  error names the files to repair; a recipe that does not apply here shows its
+  platform before its status, and approved recipes read `✓ approved`.
 - On Windows, concurrent writes to the same state file (for example two App
   approvals at once) no longer fail with `EPERM` on rename: the atomic write
   retries briefly before giving up.

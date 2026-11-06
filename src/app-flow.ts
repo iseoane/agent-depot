@@ -131,15 +131,15 @@ export function createAppOperations(environment: AppEnvironment = {}) {
   }
 
   function rejectDuplicates(entries: AppEntry[]): AppEntry[] {
-    const names = new Map<string, number>();
+    const names = new Map<string, string[]>();
     for (const entry of entries) {
       if (entry.applicable && entry.recipe) {
-        names.set(entry.recipe.name, (names.get(entry.recipe.name) ?? 0) + 1);
+        names.set(entry.recipe.name, [...(names.get(entry.recipe.name) ?? []), path.basename(entry.file)]);
       }
     }
     return entries.map((entry) => (
-      entry.applicable && entry.recipe && names.get(entry.recipe.name)! > 1
-        ? { ...entry, error: `Duplicate applicable App name: ${entry.recipe.name}` }
+      entry.applicable && entry.recipe && names.get(entry.recipe.name)!.length > 1
+        ? { ...entry, error: `Duplicate applicable App name: ${entry.recipe.name} (repair ${names.get(entry.recipe.name)!.join(", ")})` }
         : entry
     ));
   }
