@@ -62,10 +62,10 @@ test("Sources lists every recipe status by name, without paths, running commands
   await writeFile(path.join(f.directory, "invalid.json"), "{}");
   const view = f.mount();
   const frame = await waitForFrame(view.lastFrame, /other platform/);
-  assert.match(squash(frame), /demoappapproved/);
+  assert.match(squash(frame), /demoapp✓approved/);
   assert.match(squash(frame), /newappneedsapproval/);
   assert.match(frame, /invalid\.json\s+app\s+invalid\s+recipe:/);
-  assert.match(squash(frame), /demoappapproved.*windows\(otherplatform\)/);
+  assert.match(squash(frame), /demoapp✓approved.*windows\(otherplatform\)/);
   assert.ok(!squash(frame).includes(squash(f.directory)), frame);
   assert.match(frame, /builtin:agent-depot/);
   assert.deepEqual(f.commands, []);

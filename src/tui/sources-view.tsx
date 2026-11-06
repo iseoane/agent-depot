@@ -1,4 +1,5 @@
 import { Box, Text, useWindowSize } from "ink";
+import path from "node:path";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { GitSource } from "../git-source.js";
@@ -383,8 +384,9 @@ function RecipeStatus({ group }: { readonly group: RecipeGroup }) {
   const platform = primary.entry.recipe?.platform;
   return (
     <>
-      {platform === undefined || !primary.entry.applicable ? null : <><Text color={theme.value}>{platform}</Text><Text color={theme.legend}> · </Text></>}
-      <Text color={primary.status === "approved" ? theme.success : theme.warning}>{primary.status}</Text>
+      {platform === undefined ? null : <><Text color={theme.value}>{platform}</Text><Text color={theme.legend}> · </Text></>}
+      {primary.entry.error === undefined || primary.entry.recipe === undefined ? null : <><Text color={theme.value}>{path.basename(primary.entry.file)}</Text><Text color={theme.legend}> · </Text></>}
+      <Text color={primary.status === "approved" ? theme.success : theme.warning}>{primary.status === "approved" ? "✓ approved" : primary.status}</Text>
       {members.slice(1).map(other => (
         <Text key={other.entry.file} color={theme.muted}>{"    "}{other.entry.recipe?.platform ?? "all platforms"} (other platform)</Text>
       ))}

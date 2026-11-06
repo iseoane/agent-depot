@@ -47,7 +47,7 @@ export function groupRecipeRows(rows: readonly RecipeRow[]): readonly RecipeGrou
 }
 
 /** `windows · approved · <file> (used here)`, one line per recipe of a grouped App. */
-export function recipeMemberLine(row: RecipeRow): string {
+function recipeMemberLine(row: RecipeRow): string {
   return `${row.entry.recipe?.platform ?? "all platforms"} · ${row.status} · ${row.entry.file}${row.entry.applicable ? " (used here)" : ""}`;
 }
 

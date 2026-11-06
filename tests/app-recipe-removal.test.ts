@@ -117,7 +117,7 @@ test("a recipe for another platform stays removable while the same-named App is 
     const directory = path.join(home, "apps");
     await mkdir(directory);
     const base = { name: "demo", install: { argv: ["demo", "install"] }, update: { argv: ["demo", "update"] },
-      uninstall: { argv: ["demo", "uninstall"] }, version: { argv: ["demo", "version"], pattern: "(1\.2\.3)" } };
+      uninstall: { argv: ["demo", "uninstall"] }, version: { argv: ["demo", "version"], pattern: "(1\\.2\\.3)" } };
     const windowsFile = path.join(directory, "demo.windows.json");
     const linuxFile = path.join(directory, "demo.linux.json");
     await writeFile(windowsFile, JSON.stringify({ ...base, platform: "windows" }));
