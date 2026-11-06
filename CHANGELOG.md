@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appears in several Sources name their Source, and in the TUI Enter previews the
   plan even when nothing is importable.
 
+### Fixed
+
+- On Windows, concurrent writes to the same state file (for example two App
+  approvals at once) no longer fail with `EPERM` on rename: the atomic write
+  retries briefly before giving up.
+
 ## [0.6.9] - 2026-11-04
 
 ### Fixed
