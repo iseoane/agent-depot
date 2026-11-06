@@ -43,7 +43,9 @@ export async function planAppRecipeRemoval(apps: AppOperations, entry: AppEntry)
   const [current] = await apps.load([file]);
   if (current.error || !current.recipe) throw new Error(`Cannot verify App state: ${current.error ?? "invalid recipe"}. Repair the recipe before removing it.`);
   if (current.hash !== entry.hash || current.canonicalFile !== entry.canonicalFile) throw new Error("App recipe changed; review it again");
-  const tracked = (await apps.trackedApps()).find((record) => record.name === current.recipe!.name);
+  // A recipe for another platform owns no installation here, so a same-named record counts only when it points at this very file.
+  const tracked = (await apps.trackedApps()).find((record) => record.name === current.recipe!.name
+    && (current.applicable || record.recipeFile === current.canonicalFile));
   const inspection = await apps.inspect(current);
   if (inspection.status !== "installed" && inspection.status !== "not installed" && inspection.status !== "not applicable here") {
     throw new Error(`Cannot verify App state (${inspection.status}); approve the recipe before removing it`);
