@@ -571,8 +571,10 @@ the application supplies another start directory.
    to the Profile view.
 2. The selected file is parsed and previewed. If it is invalid or cannot be
    read, an inline error appears and the picker stays open so you can choose
-   another file. The import list marks entries as **add**, **same** (skipped), or
-   **conflict** (skipped with differences). Only additions can be selected. Use
+   another file. The import list is grouped: additions by Source (App recipes in
+   their own group), then **Unchanged** entries (collapsed, skipped) and
+   **Conflicts** (skipped, each with a one-line reason). Each row says what
+   importing does, and only additions can be selected. Use
    `space` to toggle a row, `a` to select all additions or clear them, and
    `Enter` to preview the selected additions. Press `Esc` to return to the
    Profile view.
@@ -593,6 +595,9 @@ If the App is installed or tracked, the TUI offers the existing uninstall flow;
 uninstall (or when not installed), a separate preview confirms deletion of only
 the recipe file or symlink. App data and Host configuration are not implicitly
 deleted. Invalid recipes must be repaired before their App state can be checked.
+A recipe for another platform stays removable even when an App with the same
+name is tracked here; only a recipe that applies here, or the exact recipe file the
+App was installed from, is protected by tracked state.
 
 Safety model:
 
