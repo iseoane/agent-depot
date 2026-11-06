@@ -1,10 +1,32 @@
 import { randomUUID } from "node:crypto";
 import { rename, unlink, writeFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 
 interface AtomicWriteOptions {
   readonly mode?: number;
   /** Only locked state writers may use the legacy Windows replacement fallback. */
   readonly allowLockedReplaceFallback?: boolean;
+}
+
+const WINDOWS_RENAME_ATTEMPTS = 20;
+const WINDOWS_RENAME_RETRY_MS = 5;
+
+/**
+ * Windows reports EPERM, EACCES or EBUSY when a rename targets a file another rename or reader is
+ * still releasing, so concurrent writers to one destination must retry briefly instead of failing.
+ */
+async function renameWithWindowsRetry(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const transient = process.platform === "win32" && ["EPERM", "EACCES", "EBUSY"].includes(code ?? "");
+      if (!transient || attempt >= WINDOWS_RENAME_ATTEMPTS) throw error;
+      await delay(WINDOWS_RENAME_RETRY_MS * attempt);
+    }
+  }
 }
 
 /** Write a unique temporary sibling, then publish it with rename. */
@@ -17,7 +39,7 @@ export async function writeFileAtomically(
   try {
     await writeFile(temporaryPath, contents, { encoding: "utf8", flag: "wx", mode: options.mode });
     try {
-      await rename(temporaryPath, file);
+      await renameWithWindowsRetry(temporaryPath, file);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (!options.allowLockedReplaceFallback || !["EEXIST", "EPERM", "ENOTEMPTY"].includes(code ?? "")) {
