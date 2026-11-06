@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -32,6 +32,7 @@ import {
   removeUserGlobalSkill,
   scanUserGlobalSkillInventory,
 } from "../src/user-global-skill-inventory.js";
+import { directoryLink } from "./link-helpers.js";
 
 const PSTACK_FIXTURE = path.resolve("tests", "fixtures", "packages", "pstack");
 const BUNDLE_OWNED_PATH = "plugins/pstack/skills/poteto-mode";
@@ -274,7 +275,7 @@ test("removing a bundle-owned unmanaged Skill or link is refused and changes not
     await writeSkill(skill, "poteto-mode");
     const link = path.join(home, ".claude", "skills", "how");
     await mkdir(path.dirname(link), { recursive: true });
-    await symlink(path.join(home, "missing"), link, "dir");
+    await directoryLink(path.join(home, "missing"), link);
 
     const options = {
       homeDirectory: home,

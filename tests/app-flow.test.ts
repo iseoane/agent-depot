@@ -5,6 +5,7 @@ import { mkdtemp, writeFile, rm, mkdir, chmod, symlink, stat, readdir, realpath 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createAppOperations } from "../src/app-flow.js";
+import { skipWithoutFileSymlinks } from "./link-helpers.js";
 const recipe = {
   name: "example",
   install: { manual: "install" },
@@ -360,7 +361,8 @@ test("external validation is independent of apps-directory duplicates", async ()
   }
 });
 
-test("approval receipts use canonical file identity and private atomic storage", async () => {
+test("approval receipts use canonical file identity and private atomic storage", async (t) => {
+  if (await skipWithoutFileSymlinks(t)) return;
   const fixture = await mkdtemp(path.join(tmpdir(), "app-receipt-"));
   const root = path.join(fixture, "workspace");
   await mkdir(root);

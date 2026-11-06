@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { createAppOperations } from "../src/app-flow.js";
 import { planAppRecipeRemoval, removeAppRecipe } from "../src/app-recipe-removal.js";
+import { skipWithoutFileSymlinks } from "./link-helpers.js";
 
 async function fixture() {
   const home = await mkdtemp(path.join(tmpdir(), "app-recipe-removal-"));
@@ -93,7 +94,8 @@ test("a recipe whose version command cannot run is not removable", async () => {
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
-test("removing a symlink recipe leaves its target intact", async () => {
+test("removing a symlink recipe leaves its target intact", async (t) => {
+  if (await skipWithoutFileSymlinks(t)) return;
   const f = await fixture();
   try {
     const target = path.join(f.home, "original.json");

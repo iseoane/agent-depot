@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -20,6 +20,7 @@ import { InstallationsView } from "../src/tui/installations-view.js";
 import { renderExpanded } from "./render-expanded.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { directoryLink } from "./link-helpers.js";
 
 const SKILL_MD = "---\nname: demo\ndescription: Demo skill\n---\n\nBody\n";
 const tree: readonly SkillTreeFile[] = [
@@ -48,7 +49,7 @@ async function fixture(t: TestContext, hosts: readonly ("pi" | "claude")[]): Pro
   await writeFile(path.join(canonical, "SKILL.md"), SKILL_MD, "utf8");
   if (hosts.includes("claude")) {
     await mkdir(path.join(home, ".claude", "skills"), { recursive: true });
-    await symlink(path.join("..", "..", ".agents", "skills", "demo"), path.join(home, ".claude", "skills", "demo"), "dir");
+    await directoryLink(path.join("..", "..", ".agents", "skills", "demo"), path.join(home, ".claude", "skills", "demo"));
   }
   await operations.addUserGlobalInstallation!(parseProjectManifest({
     version: 1,

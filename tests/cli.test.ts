@@ -20,6 +20,7 @@ import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection } from "../src/
 import type { ProjectInstallationFileSystem } from "../src/project-installation.js";
 import { runCli } from "../src/cli.js";
 import { isInstalled, loadInstalledSkills } from "../src/tui/catalog-installs.js";
+import { directoryLink } from "./link-helpers.js";
 
 const external = {
   id: "git:1234567890abcdef12345678",
@@ -399,7 +400,7 @@ test("rejects duplicate, traversing, symlink, and managed unmanaged-skill select
     const linked = path.join(homeDirectory, ".claude", "skills", "linked");
     await mkdir(path.dirname(linked), { recursive: true });
     try {
-      await symlink(outside, linked, "dir");
+      await directoryLink(outside, linked);
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -700,7 +701,7 @@ test("refuses Source removal when a dependent Skill path is unsafe without mutat
   const errors: string[] = [];
   try {
     try {
-      await symlink(outsideDirectory, path.join(homeDirectory, ".agents"), "dir");
+      await directoryLink(outsideDirectory, path.join(homeDirectory, ".agents"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -1343,7 +1344,7 @@ test("previews and installs a user-global Skill in the injected home while shari
   const errors: string[] = [];
   try {
     try {
-      await symlink(path.join(homeDirectory, "missing-target"), path.join(homeDirectory, "link-check"), "dir");
+      await directoryLink(path.join(homeDirectory, "missing-target"), path.join(homeDirectory, "link-check"));
       await rm(path.join(homeDirectory, "link-check"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
@@ -2213,7 +2214,7 @@ test("rolls back a newly created Claude symlink while preserving an adopted cano
   const claudePath = path.join(projectRoot, ".claude", "skills", "demo");
   try {
     try {
-      await symlink(canonicalPath, path.join(projectRoot, "symlink-capability-check"), "dir");
+      await directoryLink(canonicalPath, path.join(projectRoot, "symlink-capability-check"));
       await rm(path.join(projectRoot, "symlink-capability-check"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
@@ -2331,7 +2332,7 @@ test("rejects a realpath cwd that escapes the project root", async (t) => {
   const outsideRoot = await mkdtemp(path.join(tmpdir(), "agent-depot-cli-outside-"));
   try {
     try {
-      await symlink(outsideRoot, path.join(projectRoot, "linked"), "dir");
+      await directoryLink(outsideRoot, path.join(projectRoot, "linked"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");

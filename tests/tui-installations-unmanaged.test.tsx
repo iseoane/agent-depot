@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -13,6 +13,7 @@ import { InstallationsView } from "../src/tui/installations-view.js";
 import type { UnmanagedGroup } from "../src/tui/installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval } from "../src/tui/unmanaged-actions.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
+import { directoryLink } from "./link-helpers.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -56,7 +57,7 @@ async function linkSkill(f: Fixture, name: string, roots: readonly (".agents" | 
   await writeFile(path.join(target, "SKILL.md"), SKILL_MD.replace("no-mistakes", name), "utf8");
   for (const root of roots) {
     await mkdir(path.dirname(location(f.home, root, name)), { recursive: true });
-    await symlink(target, location(f.home, root, name), "dir");
+    await directoryLink(target, location(f.home, root, name));
   }
   return target;
 }
@@ -207,7 +208,7 @@ test("a Claude link to an unmanaged canonical skill is removed together with it"
   const f = await fixture(t);
   const agents = await writeSkill(f.home, ".agents", "no-mistakes");
   await mkdir(path.dirname(location(f.home, ".claude", "no-mistakes")), { recursive: true });
-  await symlink(path.join("..", "..", ".agents", "skills", "no-mistakes"), location(f.home, ".claude", "no-mistakes"), "dir");
+  await directoryLink(path.join("..", "..", ".agents", "skills", "no-mistakes"), location(f.home, ".claude", "no-mistakes"));
   const view = mount(f);
   const opened = await openUnmanaged(view, /no-mistakes \[/);
   assert.match(opened, /no-mistakes \[claude, pi, codex, opencode\]/);
@@ -277,7 +278,7 @@ async function canonicalWithClaudeLink(f: Fixture): Promise<{ agents: string; cl
   const agents = await writeSkill(f.home, ".agents", "no-mistakes");
   const claude = location(f.home, ".claude", "no-mistakes");
   await mkdir(path.dirname(claude), { recursive: true });
-  await symlink(path.join("..", "..", ".agents", "skills", "no-mistakes"), claude, "dir");
+  await directoryLink(path.join("..", "..", ".agents", "skills", "no-mistakes"), claude);
   return { agents, claude };
 }
 
@@ -317,7 +318,7 @@ test("a directory is kept when a link that targets it could not be removed", asy
   const prepared = await prepareUnmanagedRemoval(f.operations, f.environment, full, [full.locations[0]!]);
   assert.ok(prepared.preview.some((line) => line.includes("also removes link")), prepared.preview.join("\n"));
   await rm(claude);
-  await symlink(f.dev, claude, "dir");
+  await directoryLink(f.dev, claude);
   const result = await runUnmanagedRemoval(prepared, f.operations, f.environment);
   assert.equal(result.kind, "error");
   assert.ok(result.text.includes(`Skipped ${agents}: link ${claude} could not be removed`), result.text);

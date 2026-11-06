@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { Stats } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, readdir, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import test from "node:test";
 import type { ProjectSkillSelection } from "../src/project-manifest.js";
 import { ProjectInstallationError, type ProjectInstallationFileSystem } from "../src/project-installation.js";
 import { planSkillRemoval, SkillSelectionError, selectUserGlobalSkills, userGlobalRemovalOptions } from "../src/skill-removal.js";
+import { directoryLink } from "./link-helpers.js";
 
 const record = (sourceId: string, skillPath: string, installationPath = ".agents/skills/demo"): ProjectSkillSelection => ({
   source: sourceId === "builtin" ? { kind: "builtin", id: "builtin:agent-depot" } : { kind: "external", url: sourceId },
@@ -30,7 +31,7 @@ function testFileSystem(lstatPath: (candidate: string) => Promise<Stats>): Proje
     mkdir: async (candidate) => { await mkdir(candidate); },
     writeFile: async (candidate, content) => { await writeFile(candidate, content); },
     chmod,
-    symlink: async (target, candidate) => { await symlink(target, candidate, "dir"); },
+    symlink: async (target, candidate) => { await directoryLink(target, candidate); },
     readlink,
     rm: async (candidate) => { await rm(candidate, { recursive: true, force: true }); },
     rmdir,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -21,6 +21,7 @@ import { InstallationsView } from "../src/tui/installations-view.js";
 import { animatedClock } from "./animated-clock.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { directoryLink } from "./link-helpers.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -54,7 +55,7 @@ async function fixture(t: TestContext, hosts: readonly ProjectHost[], withApps =
   await writeFile(path.join(canonical(home), "SKILL.md"), SKILL_MD, "utf8");
   if (hosts.includes("claude")) {
     await mkdir(path.dirname(claude(home)), { recursive: true });
-    await symlink(path.join("..", "..", ".agents", "skills", "demo"), claude(home), "dir");
+    await directoryLink(path.join("..", "..", ".agents", "skills", "demo"), claude(home));
   }
   await operations.addUserGlobalInstallation!(parseProjectManifest({
     version: 1,

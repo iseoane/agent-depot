@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -13,6 +13,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { directoryLink } from "./link-helpers.js";
 
 const ENTER = "\r";
 const NAMES = ["alpha", "beta", "gamma"] as const;
@@ -102,7 +103,7 @@ test("marks a skill that has an unmanaged copy on disk and keeps it installable"
   t.after(() => rm(dev, { recursive: true, force: true }));
   await writeFile(path.join(dev, "SKILL.md"), "---\nname: beta\ndescription: Beta\n---\n", "utf8");
   await mkdir(path.join(f.home, ".claude", "skills"), { recursive: true });
-  await symlink(dev, path.join(f.home, ".claude", "skills", "beta"), "dir");
+  await directoryLink(dev, path.join(f.home, ".claude", "skills", "beta"));
   const view = await mount(f);
   const frame = await waitForFrame(view.lastFrame, /alpha skill/);
   const line = (name: string) => frame.split("\n").find((candidate) => candidate.includes(`${name} skill`)) ?? "";

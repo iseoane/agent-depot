@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -16,6 +16,7 @@ import {
 import type { SkillTreeFile } from "../src/skill-discovery.js";
 import type { Source } from "../src/sources.js";
 import { inspectUserGlobalSkillRemoval } from "../src/user-global-skill-inventory.js";
+import { directoryLink } from "./link-helpers.js";
 
 // Adversarial regression tests for the path-containment triage: a hostile Source
 // or manifest must never make a write/delete flow leave its target directory.
@@ -52,7 +53,7 @@ async function snapshot(root: string): Promise<string> {
 
 async function trySymlink(target: string, link: string): Promise<boolean> {
   try {
-    await symlink(target, link, "dir");
+    await directoryLink(target, link);
     return true;
   } catch (error) {
     if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) return false;

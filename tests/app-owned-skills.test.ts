@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -8,6 +8,7 @@ import { runCli } from "../src/cli.js";
 import { createSourceOperations } from "../src/sources.js";
 import { isolateUserState } from "./state-home.js";
 import { inspectUserGlobalSymlinkRemoval, scanUserGlobalSkillInventory } from "../src/user-global-skill-inventory.js";
+import { directoryLink } from "./link-helpers.js";
 
 const declaration = {
   name: "owner", install: { manual: "install" }, update: { manual: "update" },
@@ -47,7 +48,7 @@ test("App-owned dangling symlinks are neither inspected nor removable", async t 
   await writeFile(path.join(apps, "owner.json"), JSON.stringify(declaration));
   const link = path.join(home, ".claude", "skills", "doctor-md-link");
   await mkdir(path.dirname(link), { recursive: true });
-  await symlink(path.join(home, "missing"), link, "dir");
+  await directoryLink(path.join(home, "missing"), link);
   const options = { homeDirectory: home, managedInstallations: [], appEnvironment: { recipesDirectory: apps } };
   const inventory = await scanUserGlobalSkillInventory(options);
   assert.deepEqual(inventory.symlinks, []);

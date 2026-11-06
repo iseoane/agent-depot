@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -21,6 +21,7 @@ import {
   type HostStateSection,
   type PiInstallRecord,
 } from "../src/package-host-state.js";
+import { directoryLink } from "./link-helpers.js";
 
 const HOME = path.join(tmpdir(), "agent-depot-host-state-home");
 
@@ -802,7 +803,7 @@ test("a Pi checkout symlink preserves installation membership but cannot provide
   try {
     const outside = path.join(fixture.root, "outside-checkout");
     await rename(fixture.checkoutPath, outside);
-    await symlink(outside, fixture.checkoutPath, "dir");
+    await directoryLink(outside, fixture.checkoutPath);
     const view = await readHostInstallView({
       homeDirectory: fixture.home,
       piAgentDirectory: fixture.agentDirectory,

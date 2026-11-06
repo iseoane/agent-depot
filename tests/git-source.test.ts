@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { clearTimeout as clearRealTimeout, setTimeout as setRealTimeout } from "node:timers";
@@ -19,6 +19,7 @@ import {
 } from "../src/git-source.js";
 
 import { runProcess } from "../src/process-runner.js";
+import { directoryLink } from "./link-helpers.js";
 
 class FakeSnapshotRunner {
   readonly calls: Array<{ command: string; args: readonly string[] }> = [];
@@ -175,14 +176,7 @@ test("rejects cache symlinks instead of following them", async () => {
     };
     await mkdir(cachePath, { recursive: true });
     const destination = path.join(cachePath, source.id.slice(4));
-    try {
-      await symlink("/tmp", destination, "dir");
-    } catch (error) {
-      if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
-        return;
-      }
-      throw error;
-    }
+    await directoryLink("/tmp", destination);
 
     await assert.rejects(
       new GitSourceAccessAdapter({ cachePath, runner }).refresh(source),

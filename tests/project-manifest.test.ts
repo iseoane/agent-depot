@@ -15,6 +15,7 @@ import {
   writeProjectManifest,
   type ProjectManifest,
 } from "../src/project-manifest.js";
+import { skipWithoutFileSymlinks } from "./link-helpers.js";
 
 function validManifest(): ProjectManifest {
   return parseProjectManifest({
@@ -382,7 +383,8 @@ test("treats a missing manifest as an empty validated selection set", async () =
   });
 });
 
-test("atomically replaces a manifest symlink without following its redirect", async () => {
+test("atomically replaces a manifest symlink without following its redirect", async (t) => {
+  if (await skipWithoutFileSymlinks(t)) return;
   await withManifestDirectory(async (directory) => {
     const manifestPath = defaultProjectManifestPath(directory);
     const redirectedPath = path.join(directory, "outside.json");

@@ -10,6 +10,7 @@ import { applySkillUpdate, applyUpdateBatch, previewSkillUpdate } from "../src/s
 import { assessUpdateBatch } from "../src/update-batch.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceInstallationContext, type SourceOperations } from "../src/sources.js";
 import type { SkillTreeFile } from "../src/skill-discovery.js";
+import { directoryLink } from "./link-helpers.js";
 
 const oldVersion = { kind: "builtin-package" as const, version: "0.1.0" };
 const newVersion = { kind: "builtin-package" as const, version: "0.2.0" };
@@ -322,7 +323,7 @@ test("rejects an external method cwd before replacing the managed tree", async (
   const outside = await mkdtemp(path.join(tmpdir(), "agent-depot-update-outside-"));
   try {
     try {
-      await symlink(outside, path.join(root, "tools"), "dir");
+      await directoryLink(outside, path.join(root, "tools"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");

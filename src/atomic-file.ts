@@ -1,10 +1,43 @@
 import { randomUUID } from "node:crypto";
 import { rename, unlink, writeFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 
 interface AtomicWriteOptions {
   readonly mode?: number;
   /** Only locked state writers may use the legacy Windows replacement fallback. */
   readonly allowLockedReplaceFallback?: boolean;
+}
+
+export const WINDOWS_RENAME_ATTEMPTS = 20;
+const WINDOWS_RENAME_RETRY_MS = 5;
+
+interface RenameRetryDeps {
+  readonly rename: (from: string, to: string) => Promise<void>;
+  readonly platform: NodeJS.Platform;
+  readonly delay: (milliseconds: number) => Promise<unknown>;
+}
+
+/**
+ * Windows reports EPERM, EACCES or EBUSY when a rename targets a file another rename or reader is
+ * still releasing, so concurrent writers to one destination must retry briefly instead of failing.
+ * The dependencies are injectable only so tests can force the Windows branch on any OS.
+ */
+export async function renameWithWindowsRetry(
+  from: string,
+  to: string,
+  deps: RenameRetryDeps = { rename, platform: process.platform, delay },
+): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await deps.rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const transient = deps.platform === "win32" && ["EPERM", "EACCES", "EBUSY"].includes(code ?? "");
+      if (!transient || attempt >= WINDOWS_RENAME_ATTEMPTS) throw error;
+      await deps.delay(WINDOWS_RENAME_RETRY_MS * attempt);
+    }
+  }
 }
 
 /** Write a unique temporary sibling, then publish it with rename. */
@@ -17,7 +50,7 @@ export async function writeFileAtomically(
   try {
     await writeFile(temporaryPath, contents, { encoding: "utf8", flag: "wx", mode: options.mode });
     try {
-      await rename(temporaryPath, file);
+      await renameWithWindowsRetry(temporaryPath, file);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (!options.allowLockedReplaceFallback || !["EEXIST", "EPERM", "ENOTEMPTY"].includes(code ?? "")) {

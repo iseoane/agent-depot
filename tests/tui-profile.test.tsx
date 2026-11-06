@@ -13,6 +13,7 @@ import { ProfileView } from "../src/tui/profile-view.js";
 import { pagedRows, pageToEnd } from "./package-panel.js";
 import { fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { skipWithoutFileSymlinks } from "./link-helpers.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
@@ -621,6 +622,7 @@ test("Esc cancels the export checklist and the import browser, and a fresh brows
 });
 
 test("export refuses an existing file and a dangling symlink at the name stage", async t => {
+  if (await skipWithoutFileSymlinks(t)) return;
   const f = await fixture(t);
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   const existing = path.join(f.picker, "taken.json");

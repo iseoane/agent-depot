@@ -13,6 +13,7 @@ import {
 } from "../src/skill-discovery.js";
 import { SKILL_TREE_LIMITS } from "../src/git-source.js";
 import type { Source } from "../src/sources.js";
+import { directoryLink } from "./link-helpers.js";
 
 const builtin: Source = {
   id: "builtin:agent-depot",
@@ -285,7 +286,7 @@ test("does not traverse symbolic links in a package-owned built-in root", async 
     await mkdir(path.join(directory, "real"));
     await writeFile(path.join(directory, "real", "SKILL.md"), "---\nname: Real\ndescription: Real\n---\n");
     try {
-      await symlink(path.join(directory, "real"), path.join(directory, "linked"), "dir");
+      await directoryLink(path.join(directory, "real"), path.join(directory, "linked"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");

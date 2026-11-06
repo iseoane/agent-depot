@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -8,6 +8,7 @@ import { runCli } from "../src/cli.js";
 import type { ProjectHost } from "../src/project-manifest.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { recordingProgress } from "./progress-fixtures.js";
+import { directoryLink } from "./link-helpers.js";
 
 interface Context {
   readonly home: string;
@@ -30,7 +31,7 @@ async function withSkill(hosts: readonly ProjectHost[], run: (context: Context) 
     await writeFile(path.join(canonical(home), "SKILL.md"), "one", "utf8");
     if (hosts.includes("claude")) {
       await mkdir(path.dirname(claude(home)), { recursive: true });
-      await symlink(path.join("..", "..", ".agents", "skills", "one"), claude(home), "dir");
+      await directoryLink(path.join("..", "..", ".agents", "skills", "one"), claude(home));
     }
     await operations.addUserGlobalInstallation!({
       source: { kind: "builtin", id: BUILT_IN_SOURCE.id },

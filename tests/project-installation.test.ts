@@ -17,6 +17,7 @@ import {
 } from "../src/project-installation.js";
 import type { SkillTreeFile } from "../src/skill-discovery.js";
 import type { Source } from "../src/sources.js";
+import { directoryLink } from "./link-helpers.js";
 
 const source: Source = {
   id: "builtin:agent-depot",
@@ -272,7 +273,7 @@ test("rejects a symlinked ancestor during update preview before reading the targ
     await mkdir(path.join(outsideRoot, "skills", "demo"), { recursive: true });
     await writeFile(path.join(outsideRoot, "skills", "demo", "SKILL.md"), "outside");
     try {
-      await symlink(outsideRoot, path.join(projectRoot, ".agents"), "dir");
+      await directoryLink(outsideRoot, path.join(projectRoot, ".agents"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -332,7 +333,7 @@ test("rejects a symlinked project subpath ancestor before writing outside the pr
   const outsideRoot = await makeProject();
   try {
     try {
-      await symlink(outsideRoot, path.join(projectRoot, ".agents"), "dir");
+      await directoryLink(outsideRoot, path.join(projectRoot, ".agents"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -362,7 +363,7 @@ test("rejects a symlinked project root ancestor before reading or writing outsid
     await mkdir(outsideProject);
     await writeFile(sentinel, "outside root remains unchanged");
     try {
-      await symlink(outsideRoot, path.join(projectContainer, "link"), "dir");
+      await directoryLink(outsideRoot, path.join(projectContainer, "link"));
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -1017,7 +1018,7 @@ test("refuses a symlink collision during read-only inspection", async (t) => {
   try {
     try {
       await mkdir(path.dirname(canonicalPath), { recursive: true });
-      await symlink(outsideRoot, canonicalPath, "dir");
+      await directoryLink(outsideRoot, canonicalPath);
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -1107,7 +1108,7 @@ test("adopts a canonical Skill and its Claude symlink on a repeat installation",
         await writeFile(destination, Buffer.from(file.content));
       }
       await mkdir(path.dirname(claudePath), { recursive: true });
-      await symlink(path.relative(path.dirname(claudePath), canonicalPath), claudePath, "dir");
+      await directoryLink(path.relative(path.dirname(claudePath), canonicalPath), claudePath);
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
@@ -1138,7 +1139,7 @@ test("rejects an unrelated Claude Skill symlink during adoption", async (t) => {
   try {
     try {
       await mkdir(path.dirname(claudePath), { recursive: true });
-      await symlink(unrelatedTarget, claudePath, "dir");
+      await directoryLink(unrelatedTarget, claudePath);
     } catch (error) {
       if (error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES")) {
         t.skip("symbolic links are unavailable in this environment");
