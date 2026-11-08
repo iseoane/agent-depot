@@ -191,6 +191,11 @@ export function describeBundleInSource(coordinates: PackageCoordinates): string 
     : `claude ${coordinates.pluginName}${coordinates.marketplaceRoot === "" ? "" : `@${coordinates.marketplaceRoot}`}`;
 }
 
+/** Host, root and Source in prose. Unlike `formatPackageSelection` it cannot be mistaken for a CLI token. */
+export function describePackageInSource(selection: PackageSelection): string {
+  return `${describeBundleInSource(selection)} from ${sourceToken(selection.source)}`;
+}
+
 /** The token the CLI prints for a Source: the built-in id, the URL or the local path. */
 export function sourceToken(source: ProjectSource): string {
   if (source.kind === "builtin") {
