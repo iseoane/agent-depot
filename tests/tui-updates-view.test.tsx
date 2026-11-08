@@ -1149,3 +1149,153 @@ test("an unknown Package is folded with its reason and is never offered as an up
   assert.ok(!open.includes("1 selected"));
   assert.deepEqual(calls, []);
 });
+
+const RIGHT = "\u001B[C";
+const LEFT = "\u001B[D";
+
+/** Expands every group by walking down the tree; right does nothing on a row, so extra steps are harmless. */
+function expandAll(stdin: Stdin, steps = 30) {
+  for (let step = 0; step < steps; step += 1) {
+    press(stdin, RIGHT);
+    press(stdin, "j");
+  }
+  for (let step = 0; step < steps; step += 1) press(stdin, "k");
+}
+
+const line = (frame: string, text: string) => frame.split("\n").find((candidate) => candidate.includes(text)) ?? "";
+
+test("Updates groups by Source with Skills below it, and every group starts collapsed", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "remote", state: "outdated", url: GIT_URL },
+  ]);
+  const { lastFrame, unmount } = mount(f);
+  const frame = await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
+  assert.match(frame, /▸ https:\/\/example\.com\/skills\.git \(1\)/);
+  assert.ok(!frame.includes("Skills ("), "subgroups are hidden under a collapsed Source");
+  assert.ok(!frame.includes("portable/one"), "rows are hidden under a collapsed Source");
+  assert.match(frame, /0 selected/);
+  unmount();
+});
+
+test("right expands a group, left collapses it, and left on a row selects its parent group", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(1\)/);
+  press(stdin, RIGHT);
+  const source = await waitForFrame(lastFrame, /▾ builtin:agent-depot \(1\)/);
+  assert.match(source, /▸ Skills \(1\)/);
+  press(stdin, "j");
+  press(stdin, RIGHT);
+  const rows = await waitForFrame(lastFrame, /portable\/one/);
+  assert.match(rows, /▾ Skills \(1\)/);
+  press(stdin, "j");
+  press(stdin, LEFT);
+  await waitForFrame(lastFrame, (frame) => /^> .*▾ Skills \(1\)/m.test(frame));
+  press(stdin, LEFT);
+  await waitForFrame(lastFrame, (frame) => /^> .*▸ Skills \(1\)/m.test(frame) && !frame.includes("portable/one"));
+  unmount();
+});
+
+test("Enter on a group expands it instead of previewing", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(1\)/);
+  press(stdin, ENTER);
+  const frame = await waitForFrame(lastFrame, /▾ builtin:agent-depot \(1\)/);
+  assert.ok(!frame.includes("Update batch preview"));
+  assert.ok(!frame.includes("Select at least one"));
+  unmount();
+});
+
+test("space on a collapsed group selects and unselects all its rows, showing [x], [-] and [ ]", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "remote", state: "outdated", url: GIT_URL },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
+  press(stdin, " ");
+  const all = await waitForFrame(lastFrame, /2 selected/);
+  assert.match(line(all, "builtin:agent-depot"), /\[x\]/);
+  assert.match(line(all, "example.com/skills.git"), /\[ \]/);
+  press(stdin, " ");
+  const none = await waitForFrame(lastFrame, /0 selected/);
+  assert.match(line(none, "builtin:agent-depot"), /\[ \]/);
+  press(stdin, RIGHT);
+  press(stdin, "j");
+  press(stdin, RIGHT);
+  press(stdin, "j");
+  press(stdin, " ");
+  const some = await waitForFrame(lastFrame, /1 selected/);
+  assert.match(line(some, "▾ builtin:agent-depot"), /\[-\]/);
+  assert.match(line(some, "portable/one"), /\[x\]/);
+  unmount();
+});
+
+test("rows selected under a collapsed group are exactly what the preview receives", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "remote", state: "outdated", url: GIT_URL },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
+  press(stdin, " ");
+  await waitForFrame(lastFrame, /2 selected/);
+  press(stdin, "u");
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
+  assert.match(preview, /portable\/one/);
+  assert.match(preview, /portable\/two/);
+  assert.ok(!preview.includes("portable/remote"));
+  unmount();
+});
+
+test("the scope filter hides groups that have no row left", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }]);
+  await seedGlobal(f, { name: "glob", state: "outdated", url: GIT_URL });
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ https:\/\/example\.com\/skills\.git \(1\)/);
+  press(stdin, "p");
+  const project = await waitForFrame(lastFrame, (frame) => /scope: project/.test(frame) && frame.includes("builtin:agent-depot"));
+  assert.ok(!project.includes("example.com/skills.git"));
+  unmount();
+});
+
+test("group headers take part in windowing", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, Array.from({ length: 4 }, (_, n): SkillSpec => ({ name: `s${n}`, state: "outdated", url: `https://example.com/r${n}.git` })));
+  const { lastFrame, unmount } = render(<UpdatesView operations={f.operations} environment={f.environment} listHeight={2} />);
+  const frame = await waitForFrame(lastFrame, /1–2 of 4/);
+  assert.equal(frame.split("\n").filter((candidate) => /▸ https:\/\/example\.com\/r\d\.git/.test(candidate)).length, 2);
+  unmount();
+});
+
+test("a root-level Package sits under its Source, named without a root", async t => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated", url: GIT_URL }]);
+  const packages = fakePackageOperations({ checkUpdates: async () => [{
+    installed: { ...packageRecord, selection: { host: "claude", marketplaceRoot: "", pluginName: "demo", source: { kind: "external", url: GIT_URL }, version: { policy: "latest" } } },
+    observed: { kind: "installed", version: "1.0.0" },
+    status: "update available",
+    available: { kind: "git-commit", commit: "abcdef1234567890" },
+  }] });
+  const { lastFrame, stdin, unmount } = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
+  deferCleanup(t, () => { unmount(); });
+  await waitForFrame(lastFrame, /▸ https:\/\/example\.com\/skills\.git \(2\)/);
+  expandAll(stdin);
+  const frame = await waitForFrame(lastFrame, /Package: demo/);
+  assert.match(frame, /▾ Packages \(1\)/);
+  assert.match(frame, /▾ Skills \(1\)/);
+  assert.ok(frame.indexOf("Packages (1)") < frame.indexOf("Skills (1)"));
+  assert.doesNotMatch(frame, /demo@\.|Package: \.|Package: demo {2}\./);
+  assert.ok(frame.indexOf("Package: demo") < frame.indexOf("portable/one"));
+});
