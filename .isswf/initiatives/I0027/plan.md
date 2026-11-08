@@ -8,7 +8,7 @@ Type: enhancement
 - Depends on: None
 - Brief: [brief-r3.md](jobs/J001/brief-r3.md)
 - Blocker: None
-- Next step: Correction cycle 1 (F1-F3), then re-review of the delta.
+- Next step: Push, PR, exact-head CI; low-risk merge.
 
 ### Acceptance
 - See the triage brief.
