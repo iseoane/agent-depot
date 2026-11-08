@@ -284,7 +284,7 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   j.view.stdin.write("4");
   await waitForFrame(j.view.lastFrame, /cannot be checked/u);
   j.view.stdin.write(ENTER);
-  const updates = await waitForFrame(j.view.lastFrame, /Package: .*::pi:/u);
+  const updates = await waitForFrame(j.view.lastFrame, /Package: .*::pi/u);
   assert.match(updates, /1 cannot be checked/u, "uncomparable host and manifest evidence stays unknown, not an invented update");
   assert.match(updates, /local modifications/u);
   assert.doesNotMatch(updates, /installed at commit b{40}/u);

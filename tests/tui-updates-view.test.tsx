@@ -1092,7 +1092,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   assert.match(preview, /This apply approves the declaration above\./);
   assert.deepEqual(calls, ["plan:update", "approval:update"]);
   press(view.stdin, "y");
-  await waitForFrame(view.lastFrame, /Updated Package: pstack \(pi\) from builtin:agent-depot::pi:plugins\/pstack: installed 1\.0\.0 -> installed 1\.1\.0/);
+  await waitForFrame(view.lastFrame, frame => squash(frame).includes("UpdatedPackage:pstack(pi)frombuiltin:agent-depot::pi:plugins/pstack:installed1.0.0->installed1.1.0"));
   assert.deepEqual(calls, ["plan:update", "approval:update", "approve:update", "execute:update"]);
 });
 

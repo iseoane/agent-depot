@@ -206,6 +206,21 @@ export function formatPackageCoordinates(source: ProjectSource, coordinates: Pac
   return `${sourceToken(source)}::${describeSelectionCoordinate(coordinates)}`;
 }
 
+/**
+ * The TUI spelling of coordinates: like the CLI's, but a bundle at the Source root omits its root
+ * segment instead of showing `.`. Display only; the CLI keeps `formatPackageCoordinates`.
+ */
+export function displayPackageCoordinates(source: ProjectSource, coordinates: PackageCoordinates): string {
+  const root = bundleRoot(coordinates);
+  const at = root === "" ? "" : `:${root}`;
+  return `${sourceToken(source)}::${coordinates.host === "pi" ? `pi${at}` : `claude${at}#${coordinates.pluginName}`}`;
+}
+
+/** The TUI spelling of a selection. */
+export function displayPackageSelection(selection: PackageSelection): string {
+  return displayPackageCoordinates(selection.source, selection);
+}
+
 /** The CLI spelling of a selection. */
 export function formatPackageSelection(selection: PackageSelection): string {
   return formatPackageCoordinates(selection.source, selection);
