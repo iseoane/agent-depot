@@ -24,7 +24,7 @@ import {
 } from "./package-owned-skills.js";
 import {
   bundleRoot,
-  describeCoordinates,
+  describePackageInSource,
   selectionKey,
   type BundleDescriptor,
   type InstalledBundleEvidence,
@@ -169,7 +169,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
     }
     if (sourceOperations.refreshProjectSource === undefined) {
       throw new PackagePlanError(
-        `Planning a Package lifecycle for ${describeCoordinates(selection)} requires a Source refresh, but this environment cannot refresh project Sources`,
+        `Planning a Package lifecycle for ${describePackageInSource(selection)} requires a Source refresh, but this environment cannot refresh project Sources`,
       );
     }
     return await sourceOperations.refreshProjectSource(selection.source);
@@ -190,7 +190,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
       .find((candidate) => sameCoordinates(candidate.coordinates, coordinates));
     if (descriptor === undefined) {
       throw new PackagePlanError(
-        `Source ${JSON.stringify(source.id)} no longer provides a ${selection.host} Package at ${JSON.stringify(bundleRoot(coordinates))}`,
+        `Source ${JSON.stringify(source.id)} no longer provides a ${selection.host} Package ${bundleRoot(coordinates) === "" ? "at its root" : `at ${JSON.stringify(bundleRoot(coordinates))}`}`,
       );
     }
     const resolvedCommit = await readResolvedCommit(source);
@@ -378,7 +378,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
     switch (context.action) {
       case "install": {
         if (observed.kind !== "installed") {
-          return { status: "failed", reason: `The host does not report ${describeCoordinates(context.selection)} installed (${describeEvidence(observed)})` };
+          return { status: "failed", reason: `The host does not report ${describePackageInSource(context.selection)} installed (${describeEvidence(observed)})` };
         }
         const contradiction = pinContradiction(context.selection, observed);
         if (contradiction !== undefined) {
@@ -389,7 +389,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
       }
       case "update": {
         if (observed.kind !== "installed") {
-          return { status: "failed", reason: `The update left no installed ${describeCoordinates(context.selection)} (${describeEvidence(observed)})` };
+          return { status: "failed", reason: `The update left no installed ${describePackageInSource(context.selection)} (${describeEvidence(observed)})` };
         }
         const contradiction = pinContradiction(context.selection, observed);
         if (contradiction !== undefined) {
@@ -418,7 +418,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
       }
       case "uninstall": {
         if (observed.kind !== "absent") {
-          return { status: "failed", reason: `The host still reports ${describeCoordinates(context.selection)} (${describeEvidence(observed)})` };
+          return { status: "failed", reason: `The host still reports ${describePackageInSource(context.selection)} (${describeEvidence(observed)})` };
         }
         await state.drop(context.selection);
         return Object.freeze({ status: "removed" });
@@ -523,7 +523,7 @@ export function createPackageOperations(environment: PackageEnvironment = {}): P
       }
       if (await state.approvalStatus(fresh.digest) !== "approved") {
         throw new PackagePlanError(
-          `The ${plan.action} plan for ${describeCoordinates(plan.selection)} is not approved; review it and approve the current declaration first`,
+          `The ${plan.action} plan for ${describePackageInSource(plan.selection)} is not approved; review it and approve the current declaration first`,
         );
       }
 
@@ -812,7 +812,7 @@ function pinContradiction(selection: PackageSelection, observed: InstalledBundle
   if (verdict.kind !== "contradicted") {
     return undefined;
   }
-  return `The host reports ${describeCoordinates(selection)} ${describeEvidence(observed)}, which contradicts the fixed pin ${JSON.stringify(verdict.pin)}`;
+  return `The host reports ${describePackageInSource(selection)} ${describeEvidence(observed)}, which contradicts the fixed pin ${JSON.stringify(verdict.pin)}`;
 }
 
 /**

@@ -8,7 +8,7 @@ import { runCli } from "../src/cli.js";
 import { test } from "node:test";
 import { createAppOperations } from "../src/app-flow.js";
 import type { InstalledPackage } from "../src/package-model.js";
-import { buildProfileExport } from "../src/profile-export.js";
+import { buildProfileExport, describeProfilePackage, describeProfileReplica } from "../src/profile-export.js";
 import { createSourceOperations } from "../src/sources.js";
 import { defaultSourceStatePath } from "../src/source-state.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
@@ -594,4 +594,24 @@ test("CLI import preview names a conflict by its plain reason instead of raw JSO
   assert.match(output, /^conflict: Skill doctor-md-agents; hosts: would add pi$/m);
   assert.match(output, /^conflict: App recipe tool \(windows; not approved, not installed\); existing recipe existing-tool\.json differs in install$/m);
   assert.doesNotMatch(output, /existing \[|-> incoming|incoming \[/);
+});
+
+test("a Package at the Source root is labelled without a bare dot, keeping the path otherwise", () => {
+  const source = { kind: "external", url: "https://example.test/demo.git" } as const;
+  const pi = { host: "pi", root: "", source, version: { policy: "latest" } } as const;
+  const claude = { host: "claude", marketplaceRoot: "", pluginName: "demo", source, version: { policy: "latest" } } as const;
+  assert.equal(describeProfilePackage(pi), "Package pi from https://example.test/demo.git (latest; saved selection)");
+  assert.equal(describeProfilePackage(claude), "Package claude demo from https://example.test/demo.git (latest; saved selection)");
+  assert.equal(describeProfileReplica({ kind: "package", selection: pi } as never), "Installed Package pi from https://example.test/demo.git");
+  assert.equal(describeProfilePackage({ ...claude, marketplaceRoot: "plugins/x" }), "Package claude demo@plugins/x from https://example.test/demo.git (latest; saved selection)");
+});
+
+test("import summaries name a Source-root Package without a bare dot", async t => {
+  const { operations, apps } = await fixture(t);
+  const source = { kind: "external", url: "https://example.test/demo.git" } as const;
+  const input = parseProfile({ ...profile, sources: [], skills: [], apps: [],
+    packages: [{ host: "pi", root: "", source, version: { policy: "latest" } }] });
+  const { operations: packageOperations } = fakePackageOperations({ recorded: [] });
+  const plan = await buildProfileImport(input, operations, apps, {}, packageOperations);
+  assert.equal(plan.packages[0]!.summary, "Select Package pi from https://example.test/demo.git (latest)");
 });

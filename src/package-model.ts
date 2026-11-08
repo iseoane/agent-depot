@@ -181,6 +181,21 @@ export function describeCoordinates(coordinates: PackageCoordinates): string {
     : `claude ${coordinates.pluginName}@${at(coordinates.marketplaceRoot)}`;
 }
 
+/**
+ * Like `describeCoordinates` for text that already names the Source: a bundle at the Source root
+ * omits its root instead of showing `.`. Display only; `--package` filters keep `describeCoordinates`.
+ */
+export function describeBundleInSource(coordinates: PackageCoordinates): string {
+  return coordinates.host === "pi"
+    ? `pi${coordinates.root === "" ? "" : ` ${coordinates.root}`}`
+    : `claude ${coordinates.pluginName}${coordinates.marketplaceRoot === "" ? "" : `@${coordinates.marketplaceRoot}`}`;
+}
+
+/** Host, root and Source in prose. Unlike `formatPackageSelection` it cannot be mistaken for a CLI token. */
+export function describePackageInSource(selection: PackageSelection): string {
+  return `${describeBundleInSource(selection)} from ${sourceToken(selection.source)}`;
+}
+
 /** The token the CLI prints for a Source: the built-in id, the URL or the local path. */
 export function sourceToken(source: ProjectSource): string {
   if (source.kind === "builtin") {
