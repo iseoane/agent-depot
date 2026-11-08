@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AppOperations } from "./app-flow.js";
 import { compareAppVersions } from "./app-version.js";
 import { canonicalizeGitSourceUrl, sourceIdForUrl } from "./git-source.js";
-import { describeCoordinates, selectionKey, type InstalledPackage, type PackageSelection } from "./package-model.js";
+import { describeBundleInSource, selectionKey, type InstalledPackage, type PackageSelection } from "./package-model.js";
 import { describeProfilePackage, describeProfileReplica, packageFilterNames, profileSourceIdentity, selectProfileItems, type ProfileFilters } from "./profile-export.js";
 import { parseProfile, PROFILE_FORMAT, type Profile, type ProfilePackageOperations } from "./profile.js";
 import { AGENT_DEPOT_PACKAGE_VERSION, type ProjectSkillSelection, type ProjectSource, type VersionPolicy } from "./project-manifest.js";
@@ -157,7 +157,7 @@ function classifySkill(value: Profile["skills"][number], skills: readonly Projec
 function classifyPackage(value: Profile["packages"][number], recorded: readonly InstalledPackage[]): ProfileImportPackageItem {
   const existing = recorded.find(record => selectionKey(record.selection) === selectionKey(value));
   const result = comparison(existing === undefined ? undefined : { version: existing.selection.version }, { version: value.version });
-  const thing = `Package ${describeCoordinates(value)} from ${profileSourceIdentity(value.source)} (${formatVersionPolicy(value.version)})`;
+  const thing = `Package ${describeBundleInSource(value)} from ${profileSourceIdentity(value.source)} (${formatVersionPolicy(value.version)})`;
   return { block: "packages", value, label: describeProfilePackage(value), group: groupOf(value.source), ...result,
     summary: summarize(result.status, thing, `Select ${thing}`, "reason" in result ? result.reason : undefined) };
 }

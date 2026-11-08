@@ -3,7 +3,7 @@ import path from "node:path";
 import type { AppOperations } from "./app-flow.js";
 import { loadAppOwnedSkillFilter } from "./app-owned-skills.js";
 import { sourceIdForUrl } from "./git-source.js";
-import { bundleRoot, describeCoordinates, type PackageSelection } from "./package-model.js";
+import { bundleRoot, describeBundleInSource, describeCoordinates, type PackageSelection } from "./package-model.js";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "./project-manifest.js";
 import { parseProfile, PROFILE_FORMAT, PROFILE_FORMAT_V2, serializeProfile, type Profile, type ProfilePackageOperations, type ProfileReplica } from "./profile.js";
 import { formatVersionPolicy } from "./skill-install.js";
@@ -71,7 +71,7 @@ export function packageFilterNames(selection: PackageSelection): readonly string
 
 /** One Package line, shared by the export preview and the import plan label. */
 export function describeProfilePackage(selection: PackageSelection): string {
-  return `Package ${describeCoordinates(selection)} from ${profileSourceIdentity(selection.source)} (${formatVersionPolicy(selection.version)}; saved selection)`;
+  return `Package ${describeBundleInSource(selection)} from ${profileSourceIdentity(selection.source)} (${formatVersionPolicy(selection.version)}; saved selection)`;
 }
 
 export function describeProfileSkill(skill: Profile["skills"][number]): string {
@@ -82,7 +82,7 @@ export function describeProfileReplica(replica: ProfileReplica): string {
   switch (replica.kind) {
     case "skill": return `Installed Skill ${replica.path} from ${profileSourceIdentity(replica.source)}`;
     case "app": return `Installed App ${replica.name} (${replica.platform ?? "all platforms"})`;
-    case "package": return `Installed Package ${describeCoordinates(replica.selection)} from ${profileSourceIdentity(replica.selection.source)}`;
+    case "package": return `Installed Package ${describeBundleInSource(replica.selection)} from ${profileSourceIdentity(replica.selection.source)}`;
   }
 }
 
