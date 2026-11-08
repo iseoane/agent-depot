@@ -3,15 +3,16 @@
 Type: enhancement
 
 ## J001
-- Status: pending
+- Status: in-progress
 - Objective: Show the Updates view as a collapsible tree by Source (Packages / Skills) plus an Apps group, with group selection, so Package rows name their Source instead of `.` (#93).
 - Depends on: None
-- Brief: [brief-r1.md](jobs/J001/brief-r1.md)
+- Brief: [brief-r2.md](jobs/J001/brief-r2.md)
 - Blocker: None
-- Next step: Triage prepared; awaiting an explicit operator start instruction.
+- Next step: Worker (sonnet/medium) on brief-r2, then reviewer, PR, CI.
 
 ### Acceptance
 - See the triage brief.
 
 ### Evidence
 - Operator 2026-11-07: «hazle ya el triage» on #93, with decisions recorded in its comments (group selection, top-level Apps group, implementer chooses reuse).
+- Operator 2026-11-08: «haz la I0027, solo esa, ya sabes si el riesgo sale bajo, la integras directamente». Feature-to-PR start; low-risk merge per project-setup. Budget: 1 planner, 1 worker, up to 3 review rounds / 2 correction cycles. Branch feat/93-updates-by-source from 74cd929 (sequential, primary checkout). Factory root: loaded plugin isswf 1.6.1 (setup record names 1.8.0, not present in cache).
