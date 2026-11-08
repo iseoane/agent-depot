@@ -283,6 +283,15 @@ test("planning a lifecycle write fails closed when an external Source cannot be 
   });
 });
 
+test("a Source-root Package is never named with a bare dot in a flow reason", async () => {
+  await withHarness({ refreshProjectSource: null }, async (harness) => {
+    await assert.rejects(
+      harness.operations.planLifecycle(piSelection(), "install"),
+      /for \S+::pi requires a Source refresh/u,
+    );
+  });
+});
+
 test("an unapproved declaration fails closed before any host command", async () => {
   await withHarness({}, async (harness) => {
     const selection = piSelection();
