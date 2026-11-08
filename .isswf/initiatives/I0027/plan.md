@@ -6,9 +6,9 @@ Type: enhancement
 - Status: in-progress
 - Objective: Show the Updates view as a collapsible tree by Source (Packages / Skills) plus an Apps group, with group selection, so Package rows name their Source instead of `.` (#93).
 - Depends on: None
-- Brief: [brief-r2.md](jobs/J001/brief-r2.md)
+- Brief: [brief-r3.md](jobs/J001/brief-r3.md)
 - Blocker: None
-- Next step: Worker (sonnet/medium) on brief-r2, then reviewer, PR, CI.
+- Next step: Independent review (opus/medium) of 37a0ce9..94b0917.
 
 ### Acceptance
 - See the triage brief.
