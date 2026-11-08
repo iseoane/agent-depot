@@ -1072,7 +1072,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   });
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
-  const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
+  const listed = await waitForFrame(view.lastFrame, /Package: builtin:agent-depot::pi:plugins\/pstack/);
   assert.match(listed, /1\.0\.0 -> abcdef1/);
   press(view.stdin, "a");
   await waitForFrame(view.lastFrame, /1 selected/);
@@ -1099,7 +1099,7 @@ test("Package Updates shows observed host version and commit rather than the rem
   }] });
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
-  const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
+  const listed = await waitForFrame(view.lastFrame, /Package: builtin:agent-depot::pi:plugins\/pstack/);
   assert.match(listed, /1\.6\.1 \(aaaaaaa\) -> 1\.6\.1 \(bbbbbbb\)/);
   assert.doesNotMatch(listed, /1\.0\.0/);
 });
@@ -1118,6 +1118,8 @@ test("an unchanged Claude cache version explains source changes without offering
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const listed = await waitForFrame(view.lastFrame, /publisher must change/);
   assert.match(listed, /Claude caches plugin version 1\.6\.1/);
+  assert.match(listed, /Package: builtin:agent-depot::claude:\.#demo: /);
+  assert.doesNotMatch(listed, /demo@\./);
   assert.doesNotMatch(listed, /\[ \] Package:/);
 });
 
@@ -1139,10 +1141,10 @@ test("an unknown Package is folded with its reason and is never offered as an up
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const folded = await waitForFrame(view.lastFrame, /1 cannot be checked/);
   assert.match(folded, /Package update comparison unavailable because the checkout has local\s+changes/);
-  assert.ok(!folded.includes("Package: pi plugins/pstack"), "an unknown Package is never offered as an update");
+  assert.ok(!folded.includes("Package: builtin:agent-depot::pi:plugins/pstack"), "an unknown Package is never offered as an update");
   press(view.stdin, ENTER);
   const open = await waitForFrame(view.lastFrame, /Update comparison unavailable: Pi reports this Package installed/);
-  assert.match(open, /Package: pi plugins\/pstack/);
+  assert.match(open, /Package: builtin:agent-depot::pi:plugins\/pstack/);
   assert.ok(!open.includes("1 selected"));
   assert.deepEqual(calls, []);
 });
