@@ -217,7 +217,7 @@ test("i previews the frozen install declaration, approves it, then confirms befo
   assert.match(preview, /Executable: \/usr\/bin\/pi/);
   assert.match(preview, /runs a host process/);
   assert.ok(squash(preview).includes("host-only:AgentDepotnevermanagesit"), "the host-only note is complete across the wrapped rows");
-  assert.match(preview, /Blast radius: pi plugins\/pstack/);
+  assert.match(preview, /Blast radius: builtin:agent-depot::pi:plugins\/pstack/);
   assert.match(preview, /Approval: needs approval/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install"]);
   f.view.stdin.write("y");

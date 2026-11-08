@@ -6,6 +6,7 @@ import { previewViewport } from "./preview-window.js";
 import { describeRefresh, describeUnknownReasons, type Entry, type UpdatesListView, type UpdatesMessage } from "./updates-model.js";
 import type { UpdatesMode } from "./updates-mode.js";
 import { formatAgo, previewLineText, type UpdatesData } from "./updates.js";
+import { groupCheckState, packageLeafLabel, type CheckState } from "./updates-tree.js";
 import { updateModePreviewChrome, updateModePreviewLines, updateModeQuestion } from "./updates-preview.js";
 
 function updateResultField(line: string, defaultOk: boolean): { readonly ok: boolean; readonly label: string | undefined; readonly value: string } {
@@ -41,11 +42,14 @@ export function CheckStatus({ data, now }: { readonly data: UpdatesData; readonl
   );
 }
 
+const BOX: Record<CheckState, string> = { all: "[x]", some: "[-]", none: "[ ]" };
+
 /** One line of the list: an update, the fold of unassessable items, or one of those when unfolded. */
 export function EntryLine({ entry, selected, checked, view, showUnknown }: {
   readonly entry: Entry;
   readonly selected: boolean;
-  readonly checked: boolean;
+  /** The selected row keys. */
+  readonly checked: readonly string[];
   readonly view: UpdatesListView;
   readonly showUnknown: boolean;
 }) {
@@ -54,6 +58,14 @@ export function EntryLine({ entry, selected, checked, view, showUnknown }: {
     return (
       <Text {...rowStyle(selected)} color={theme.inactive}>
         {cursor}{view.unknown.length} cannot be checked {showUnknown ? "▾" : "▸"}{describeUnknownReasons(view.unknown)}
+      </Text>
+    );
+  }
+  if (entry.kind === "group") {
+    const state = groupCheckState(entry.leafKeys, checked);
+    return (
+      <Text {...rowStyle(selected)}>
+        {cursor}{"  ".repeat(entry.line.depth)}{BOX[state]} <Text color={theme.field}>{entry.line.expanded ? "▾" : "▸"} {entry.label}</Text>
       </Text>
     );
   }
@@ -70,7 +82,7 @@ export function EntryLine({ entry, selected, checked, view, showUnknown }: {
   }
   return (
     <Text {...rowStyle(selected)}>
-      {cursor}{checked ? "[x]" : "[ ]"} <Text color={theme.field}>{row.path}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>{row.scope}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>{row.policy}</Text><Text color={theme.legend}>  </Text><Text color={theme.value}>{row.installed}</Text><Text color={theme.legend}> -&gt; </Text><Text color={theme.value}>{row.available}</Text>
+      {cursor}{"  ".repeat(entry.line.depth)}{BOX[checked.includes(row.key) ? "all" : "none"]} <Text color={theme.field}>{packageLeafLabel(row)}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>{row.scope}</Text><Text color={theme.legend}>  </Text><Text color={theme.field}>{row.policy}</Text><Text color={theme.legend}>  </Text><Text color={theme.value}>{row.installed}</Text><Text color={theme.legend}> -&gt; </Text><Text color={theme.value}>{row.available}</Text>
     </Text>
   );
 }

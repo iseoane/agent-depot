@@ -1050,7 +1050,10 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     assert.ok(continuousUninstallPreview.includes(homeDirectory.replace(/\s/gu, "")), `80x24 preview omitted the complete working directory:\n${uninstallPreview}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"uninstall"')), "preview must not run uninstall");
     await session.send("n", /fixture-app: cancelled/u);
-    const updates = await session.send("4", /App: fixture-app/u);
+    await session.send("4", /▸ Apps \(1\)/u);
+    // Groups start collapsed: Enter opens Apps, j moves to the App row.
+    await session.send("\r", /▾ Apps \(1\)/u);
+    const updates = await session.send("j", />\s+\[ \]\s+App: fixture-app/u);
     assert.match(updates, /1\.0\.0/u);
     assert.match(updates, /2\.0\.0/u);
     await session.send(" ", /1 selected/u);

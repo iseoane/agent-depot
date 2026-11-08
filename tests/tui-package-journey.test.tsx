@@ -15,6 +15,7 @@ import { createSourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { pagedRows, pageToEnd } from "./package-panel.js";
+import { expandList } from "./expand-updates.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
 
 const PORTABLE_URL = "https://example.test/packages/pstack.git";
@@ -209,7 +210,9 @@ test("a Claude install disappears from Catalog and shows a verified available up
   assert.match(installations, /update available/u);
 
   j.view.stdin.write("4");
-  const updates = await waitForFrame(j.view.lastFrame, /Package: claude/u);
+  // The Installations tree also has ▸ groups, so wait for the Updates view itself.
+  await waitForFrame(j.view.lastFrame, /scope: all[\s\S]*checked /u);
+  const updates = await expandList(j.view.lastFrame, j.view.stdin, /Package: pstack/u);
   assert.match(updates, /-> 0\.9\.69/u);
   assert.doesNotMatch(updates, /cannot be checked/u);
   j.view.stdin.write(" ");
@@ -281,7 +284,7 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   j.view.stdin.write("4");
   await waitForFrame(j.view.lastFrame, /cannot be checked/u);
   j.view.stdin.write(ENTER);
-  const updates = await waitForFrame(j.view.lastFrame, /Package: pi/u);
+  const updates = await waitForFrame(j.view.lastFrame, /Package: .*::pi/u);
   assert.match(updates, /1 cannot be checked/u, "uncomparable host and manifest evidence stays unknown, not an invented update");
   assert.match(updates, /local modifications/u);
   assert.doesNotMatch(updates, /installed at commit b{40}/u);

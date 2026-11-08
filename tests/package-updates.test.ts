@@ -7,9 +7,8 @@ import { test } from "node:test";
 import { createAppOperations } from "../src/app-flow.js";
 import { runCli } from "../src/cli.js";
 import { sourceIdForUrl } from "../src/git-source.js";
-import { formatPackageSelection } from "../src/package-cli.js";
 import type { PackageOperations } from "../src/package-flow.js";
-import type { BundleDescriptor, InstalledPackage, PackageLifecyclePlan, PackageSelection, PackageUpdateCheck } from "../src/package-model.js";
+import { formatPackageSelection, type BundleDescriptor, type InstalledPackage, type PackageLifecyclePlan, type PackageSelection, type PackageUpdateCheck } from "../src/package-model.js";
 import type { SourceOperations } from "../src/sources.js";
 
 const SOURCE = Object.freeze({ kind: "external" as const, url: "https://github.com/example/packages" });

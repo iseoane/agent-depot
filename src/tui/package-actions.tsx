@@ -1,6 +1,6 @@
 import type { Key } from "ink";
 
-import { describeCoordinates, type PackageAction, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection } from "../package-model.js";
+import { displayPackageSelection, type PackageAction, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection } from "../package-model.js";
 import type { PackageOperations } from "../package-flow.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { errorText } from "./batch.js";
@@ -79,7 +79,7 @@ export async function startPackageAction(context: Pick<PackageContext, "packages
           target,
           lines: [
             `Package: ${target.name} (${target.selection.host})`,
-            `Coordinates: ${describeCoordinates(target.selection)}`,
+            `Coordinates: ${displayPackageSelection(target.selection)}`,
             `Installed: ${installedEvidenceLabel(inspection.installed)}`,
             "Forgetting drops the Agent Depot selection record only; the host install is left as it is and no host command runs.",
           ],

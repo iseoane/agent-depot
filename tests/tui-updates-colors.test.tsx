@@ -15,8 +15,8 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
     const frame = element => { const view = render(element); const result = view.lastFrame() ?? ""; view.unmount(); return result; };
     const treeRow = data => ({ node: { id: data.kind, data }, depth: 0, expanded: false, expandable: false });
     const browse = frame(React.createElement(EntryLine, {
-      entry: { kind: "update", row: { path: "skills/demo", scope: "user-global", policy: "latest", installed: "1.0.0", available: "2.0.0" } },
-      selected: false, checked: false, view: { unknown: [] }, showUnknown: false,
+      entry: { kind: "update", line: treeRow({ kind: "update" }), row: { path: "skills/demo", scope: "user-global", policy: "latest", installed: "1.0.0", available: "2.0.0" } },
+      selected: false, checked: [], view: { unknown: [] }, showUnknown: false,
     }));
     const result = frame(React.createElement(UpdatesFooter, {
       indicator: undefined, upToDate: 0, updatableCount: 0, checkedCount: 0,

@@ -116,7 +116,7 @@ function projectRootOf(environment: TuiEnvironment): string {
   return path.resolve(environment.projectRoot ?? process.cwd());
 }
 
-function sourceLabel(source: ProjectSource): string {
+export function sourceLabel(source: ProjectSource): string {
   if (source.kind === "builtin") return source.id;
   return "url" in source ? `${source.url}${source.ref === undefined ? "" : `@${source.ref}`}` : source.path;
 }

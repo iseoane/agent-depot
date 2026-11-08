@@ -22,7 +22,8 @@ import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
-import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { expandList } from "./expand-updates.js";
+import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
@@ -171,6 +172,9 @@ async function seedProject(f: Fixture, specs: readonly SkillSpec[]) {
 
 type Stdin = { write(data: string): void };
 const press = (stdin: Stdin, data: string) => stdin.write(data);
+const RIGHT = "\u001B[C";
+const LEFT = "\u001B[D";
+
 
 async function reviewToEnd(lastFrame: () => string | undefined, stdin: Stdin, question: RegExp): Promise<string> {
   await waitForFrame(lastFrame, /Update batch preview/);
@@ -205,9 +209,9 @@ test("lists only updatable items, counts the up-to-date ones and folds the unass
     { name: "fresher", state: "current" },
     { name: "mystery", state: "unknown" },
   ]);
-  const { lastFrame, unmount } = mount(f);
+  const { lastFrame, stdin, unmount } = mount(f);
   assert.match(lastFrame() ?? "", /Refreshing sources|Checking for updates/);
-  const frame = await waitForFrame(lastFrame, /portable\/outdated/);
+  const frame = await expandList(lastFrame, stdin, /portable\/outdated/, 3);
   assert.match(frame, /scope: all/);
   const outdated = frame.split("\n").find((line) => line.includes("portable/outdated")) ?? "";
   assert.match(outdated, /latest/);
@@ -241,7 +245,7 @@ test("Enter on the cannot-be-checked line lists each item with its reason, and l
   press(stdin, "\u001B[D");
   await waitForFrame(lastFrame, (frame) => /cannot be checked ▸/.test(frame) && !frame.includes("portable/mystery"));
   press(stdin, "\u001B[C");
-  await waitForFrame(lastFrame, /portable\/mystery/);
+  await expandList(lastFrame, stdin, /portable\/mystery/);
   unmount();
 });
 
@@ -252,7 +256,7 @@ test("never offers a built-in Skill installed by a newer Agent Depot and says wh
     { name: "ahead", state: "newer" },
   ]);
   const { lastFrame, stdin, unmount } = mount(f);
-  const frame = await waitForFrame(lastFrame, /portable\/outdated/);
+  const frame = await expandList(lastFrame, stdin, /portable\/outdated/, 3);
   assert.ok(!frame.includes("portable/ahead"), "the newer-installed Skill is not offered");
   assert.match(frame, /1 cannot be checked ▸ \(1 installed by a newer Agent Depot\)/);
   press(stdin, "j");
@@ -284,8 +288,9 @@ test("the scope filter defaults to all and t, p and g switch it without checking
   await seedProject(f, [{ name: "projonly", state: "outdated" }]);
   await seedGlobal(f, { name: "globalonly", state: "outdated" });
   const { lastFrame, stdin, unmount } = mount(f);
-  const all = await waitForFrame(lastFrame, (frame) => frame.includes("portable/projonly") && frame.includes("portable/globalonly"));
+  const all = await expandList(lastFrame, stdin, /portable\/globalonly/);
   assert.match(all, /scope: all/);
+  assert.match(all, /portable\/projonly/);
   assert.match(all.split("\n").find((line) => line.includes("portable/globalonly")) ?? "", /user-global/);
   const reads = f.readCalls.length;
   press(stdin, "g");
@@ -306,7 +311,7 @@ test("a pasted prototype property name never changes the scope filter", async (t
   const f = await fixture(t);
   await seedProject(f, [{ name: "projonly", state: "outdated" }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/projonly/);
+  await expandList(lastFrame, stdin, /portable\/projonly/);
   // The pasted letters are split into keys, and its "r" starts a re-check;
   // wait until that check has finished before changing the scope.
   press(stdin, "constructor");
@@ -324,7 +329,7 @@ test("changing the scope filter drops selected items so nothing hidden is applie
   await seedProject(f, [{ name: "projonly", state: "outdated" }]);
   await seedGlobal(f, { name: "globalonly", state: "outdated" });
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /2 updates|portable\/globalonly/);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
   press(stdin, "a");
   await waitForFrame(lastFrame, /2 selected/);
   press(stdin, "g");
@@ -350,7 +355,7 @@ test("the elapsed time of a check keeps running when it moves from refreshing to
   // A clock unrelated to the wall clock: the check must start and read its elapsed time on the injected one.
   const base = 1_000_000;
   let clock = base;
-  const { lastFrame, unmount } = mount(f, { now: () => clock });
+  const { lastFrame, stdin, unmount } = mount(f, { now: () => clock });
   deferCleanup(t, unmount);
   await waitForFrame(lastFrame, /Refreshing sources…/);
   clock = base + 4500;
@@ -359,7 +364,7 @@ test("the elapsed time of a check keeps running when it moves from refreshing to
   const checking = await waitForFrame(lastFrame, /Checking for updates… 4s/);
   assert.equal(checking.match(/Checking for updates…/g)?.length, 1, "one indicator for the whole check");
   releaseRead();
-  await waitForFrame(lastFrame, /portable\/ext/);
+  await expandList(lastFrame, stdin, /portable\/ext/);
 });
 
 test("refreshes the Git sources involved before the assessment, showing a busy state and then when it checked", async (t) => {
@@ -370,11 +375,11 @@ test("refreshes the Git sources involved before the assessment, showing a busy s
   ]);
   let release!: () => void;
   f.gate.promise = new Promise<void>((resolve) => { release = resolve; });
-  const { lastFrame, unmount } = mount(f);
+  const { lastFrame, stdin, unmount } = mount(f);
   await waitForFrame(lastFrame, /Refreshing sources/);
   assert.deepEqual(f.readCalls, [], "nothing is assessed while sources refresh");
   release();
-  const frame = await waitForFrame(lastFrame, /portable\/ext/);
+  const frame = await expandList(lastFrame, stdin, /portable\/ext/);
   assert.match(frame, /checked just now · sources refreshed/);
   assert.deepEqual(f.events.filter((event) => event.startsWith("refresh:")), [`refresh:${GIT_URL}`], "the built-in source is skipped");
   assert.ok(f.events.indexOf(`refresh:${GIT_URL}`) < f.events.findIndex((event) => event.startsWith("read:")), "refresh precedes the assessment");
@@ -385,8 +390,8 @@ test("refreshes each distinct Git source once even when installed in both scopes
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated", url: GIT_URL }]);
   await seedGlobal(f, { name: "two", state: "outdated", url: GIT_URL });
-  const { lastFrame, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/two/);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await expandList(lastFrame, stdin, /portable\/two/);
   assert.deepEqual(f.events.filter((event) => event.startsWith("refresh:")), [`refresh:${GIT_URL}`]);
   unmount();
 });
@@ -395,7 +400,7 @@ test("u previews the selected batch and n cancels without running an update", as
   const f = await fixture(t);
   await seedProject(f, [{ name: "outdated", state: "outdated", method: ["update-fixture"] }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/outdated/);
+  await expandList(lastFrame, stdin, /portable\/outdated/);
   press(stdin, " ");
   await waitForFrame(lastFrame, /1 selected/);
   press(stdin, "u");
@@ -412,7 +417,7 @@ test("r refreshes the sources again and rechecks", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "ext", state: "outdated", url: GIT_URL }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/ext/);
+  await expandList(lastFrame, stdin, /portable\/ext/);
   const refreshes = () => f.events.filter((event) => event.startsWith("refresh:")).length;
   const reads = f.readCalls.length;
   assert.equal(refreshes(), 1);
@@ -430,8 +435,8 @@ test("a failed refresh is reported per source and the check still runs on the cu
     { name: "fine", state: "outdated", url: other },
   ]);
   f.failRefresh.add(GIT_URL);
-  const { lastFrame, unmount } = mount(f);
-  const frame = await waitForFrame(lastFrame, /portable\/fine/);
+  const { lastFrame, stdin, unmount } = mount(f);
+  const frame = await expandList(lastFrame, stdin, /portable\/fine/);
   assert.match(frame, /portable\/broken/, "the check still ran for the source that failed to refresh");
   assert.match(frame, new RegExp(`${GIT_URL.replace(/\./gu, "\\.")}.*network unreachable`));
   assert.match(frame, /1 of 2 sources could not be refreshed; their current data was used/);
@@ -442,8 +447,8 @@ test("a failed refresh is reported per source and the check still runs on the cu
 test("says so when there is no Git source to refresh", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "builtin", state: "outdated" }]);
-  const { lastFrame, unmount } = mount(f);
-  const frame = await waitForFrame(lastFrame, /portable\/builtin/);
+  const { lastFrame, stdin, unmount } = mount(f);
+  const frame = await expandList(lastFrame, stdin, /portable\/builtin/);
   assert.match(frame, /checked just now · no Git sources to refresh/);
   assert.deepEqual(f.events.filter((event) => event.startsWith("refresh:")), []);
   unmount();
@@ -479,14 +484,14 @@ test("space toggles updatable items only, a selects all of them, Enter needs a s
     { name: "fresh", state: "current" },
   ]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   press(stdin, ENTER);
   await waitForFrame(lastFrame, /Select at least one/);
   press(stdin, " ");
   await waitForFrame(lastFrame, /1 selected/);
   press(stdin, "a");
   const frame = await waitForFrame(lastFrame, /2 selected/);
-  assert.equal(frame.split("\n").filter((line) => line.includes("[x]")).length, 2);
+  assert.equal(frame.split("\n").filter((line) => line.includes("portable/") && line.includes("[x]")).length, 2);
   press(stdin, " ");
   await waitForFrame(lastFrame, /1 selected/);
   unmount();
@@ -496,7 +501,7 @@ test("previews the update, writes nothing before y, then reports and reloads wit
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated", url: GIT_URL }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   const checkReads = f.readCalls.length;
   press(stdin, "a");
   press(stdin, ENTER);
@@ -518,7 +523,7 @@ test("n cancels the preview and leaves the files untouched", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated" }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
   await waitForFrame(lastFrame, /y\/n/);
@@ -532,7 +537,7 @@ test("warns about local modifications in the preview", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated", diskContent: "edited by hand" }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
   await waitForFrame(lastFrame, /local modifications/);
@@ -545,7 +550,7 @@ test("previews the external command and runs it only after y", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated", method: ["node", "--fake-update"] }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
   // A long preview (long Windows paths wrap) needs paging to the end before y is accepted.
@@ -563,7 +568,7 @@ test("a non-canonical location needs a second confirmation naming the exact path
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated", installPath: "tools/skills/one" }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
   const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
@@ -595,7 +600,7 @@ test("continues after one item fails and reports the reason per item", async (t)
   ]);
   f.failMethodFor.add("portable/bad");
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/bad/);
+  await expandList(lastFrame, stdin, /portable\/bad/);
   press(stdin, "a");
   press(stdin, ENTER);
   await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
@@ -613,7 +618,7 @@ test("one preview and confirmation applies project and user-global updates toget
   await seedProject(f, [{ name: "proj", state: "outdated" }]);
   await seedGlobal(f, { name: "glob", state: "outdated" });
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, (frame) => frame.includes("portable/proj") && frame.includes("portable/glob"));
+  await expandList(lastFrame, stdin, /portable\/glob/);
   press(stdin, "a");
   press(stdin, ENTER);
   const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
@@ -633,6 +638,7 @@ test("the same Skill installed in both scopes is two separate selectable items",
   await seedProject(f, [{ name: "twin", state: "outdated" }]);
   await seedGlobal(f, { name: "twin", state: "outdated" });
   const { lastFrame, stdin, unmount } = mount(f);
+  await expandList(lastFrame, stdin, /portable\/twin/);
   await waitForFrame(lastFrame, (frame) => frame.split("\n").filter((line) => line.includes("portable/twin")).length === 2);
   press(stdin, " ");
   const frame = await waitForFrame(lastFrame, /1 selected/);
@@ -645,7 +651,7 @@ test("reports capturing while refreshing and previewing, and not while browsing"
   await seedProject(f, [{ name: "one", state: "outdated" }]);
   const states: boolean[] = [];
   const { lastFrame, stdin, unmount } = mount(f, { onCapturingChange: (value) => states.push(value) });
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   assert.equal(states.at(-1), false);
   press(stdin, "a");
   press(stdin, ENTER);
@@ -665,7 +671,7 @@ test("key 4 opens the Updates view; q and number keys are ignored while confirmi
   await waitForFrame(lastFrame, /▶ \[1\] Sources/);
   press(stdin, "4");
   await waitForFrame(lastFrame, /▶ \[4\] Updates/);
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
   await waitForFrame(lastFrame, /y\/n/);
@@ -704,12 +710,13 @@ test("windows a long list of updates around the highlight and pages with PgDn", 
   const { lastFrame, stdin, unmount } = render(
     <UpdatesView operations={f.operations} environment={f.environment} listHeight={4} />,
   );
-  const top = await waitForFrame(lastFrame, /1–4 of 12/);
-  assert.equal(top.split("\n").filter((line) => /skill\d\d/.test(line)).length, 4);
+  await waitForFrame(lastFrame, /1–4 of 14|▸ builtin:agent-depot \(12\)/);
+  expandAll(stdin);
+  const top = await waitForFrame(lastFrame, /1–4 of 14/);
+  assert.equal(top.split("\n").filter((line) => /skill\d\d/.test(line)).length, 2, "the two group headers use two of the four lines");
   press(stdin, "\u001B[6~");
-  const paged = await waitForFrame(lastFrame, (frame) => /> .*skill04/.test(frame));
-  assert.match(paged, /\d+–\d+ of 12/);
-  assert.ok(!paged.includes("skill00"));
+  const paged = await waitForFrame(lastFrame, (frame) => /> .*skill02/.test(frame));
+  assert.match(paged, /\d+–\d+ of 14/);
   unmount();
 });
 
@@ -726,7 +733,7 @@ test("a refresh phase that cannot read the installations says so instead of clai
     },
   } as unknown as ProjectManifestStore;
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, projectManifestStore: flaky }} />);
-  const frame = await waitForFrame(view.lastFrame, /portable\/one/);
+  const frame = await expandList(view.lastFrame, view.stdin, /portable\/one/);
   assert.match(frame, /could not refresh: manifest busy/);
   assert.ok(!frame.includes("no Git sources to refresh"), "a failed read is not an empty refresh");
   assert.deepEqual(f.events.filter((event) => event.startsWith("refresh:")), [], "nothing was fetched");
@@ -769,7 +776,7 @@ test("the confirm-paths panel labels each path with its scope", async (t) => {
   await seedProject(f, [{ name: "one", state: "outdated", installPath: "tools/skills/one" }]);
   await seedGlobal(f, { name: "two", state: "outdated" });
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, (frame) => frame.includes("portable/one") && frame.includes("portable/two"));
+  await expandList(lastFrame, stdin, /portable\/two/);
   press(stdin, "a");
   press(stdin, ENTER);
   await waitForFrame(lastFrame, /y\/n/);
@@ -787,7 +794,7 @@ test("a Skill that became locally modified after the preview is not overwritten"
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated" }, { name: "two", state: "outdated" }]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/one/);
+  await expandList(lastFrame, stdin, /portable\/one/);
   press(stdin, "a");
   press(stdin, ENTER);
   const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
@@ -813,7 +820,7 @@ test("an item whose preview failed is excluded from the apply and its files stay
     },
   };
   const { lastFrame, stdin, unmount } = render(<UpdatesView operations={operations} environment={f.environment} />);
-  await waitForFrame(lastFrame, /portable\/bad/);
+  await expandList(lastFrame, stdin, /portable\/bad/);
   press(stdin, "a");
   press(stdin, ENTER);
   const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
@@ -832,11 +839,12 @@ test("with a scope filter active, y applies only the visible items and leaves th
   await seedProject(f, [{ name: "proj", state: "outdated" }]);
   await seedGlobal(f, { name: "glob", state: "outdated" });
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, (frame) => frame.includes("portable/proj") && frame.includes("portable/glob"));
+  await expandList(lastFrame, stdin, /portable\/glob/);
   press(stdin, "g");
   await waitForFrame(lastFrame, (frame) => /scope: user-global/.test(frame) && !frame.includes("portable/proj"));
   press(stdin, "a");
-  press(stdin, ENTER);
+  // Enter on a group expands it, so the preview starts with u.
+  press(stdin, "u");
   await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   press(stdin, "y");
   await waitForFrame(lastFrame, /1 updated, 0 failed/);
@@ -850,7 +858,7 @@ test("after a failed refresh the apply works on the current data and the view sa
   await seedProject(f, [{ name: "ext", state: "outdated", url: GIT_URL }]);
   f.failRefresh.add(GIT_URL);
   const { lastFrame, stdin, unmount } = mount(f);
-  const listed = await waitForFrame(lastFrame, /portable\/ext/);
+  const listed = await expandList(lastFrame, stdin, /portable\/ext/);
   assert.match(listed, /1 of 1 sources could not be refreshed; their current data was used/);
   assert.match(listed, /network unreachable/);
   press(stdin, "a");
@@ -870,7 +878,7 @@ test("keys sent in one burst move and select against the latest state", async (t
     { name: "three", state: "outdated" },
   ]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/three/);
+  await expandList(lastFrame, stdin, /portable\/three/);
   for (const data of ["j", "j", " "]) press(stdin, data);
   const frame = await waitForFrame(lastFrame, /1 selected/);
   const line = (name: string) => frame.split("\n").find((candidate) => candidate.includes(`portable/${name}`)) ?? "";
@@ -888,7 +896,7 @@ test("j, j, space, Enter in one burst previews the item the highlight reached", 
     { name: "three", state: "outdated" },
   ]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/three/);
+  await expandList(lastFrame, stdin, /portable\/three/);
   for (const data of ["j", "j", " ", ENTER]) press(stdin, data);
   const frame = await waitForFrame(lastFrame, /Update batch preview/);
   assert.match(frame, /three/);
@@ -903,8 +911,8 @@ test("a scope key followed by navigation in one burst acts on the filtered list"
   ]);
   await seedGlobal(f, { name: "glob", state: "outdated" });
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/glob/);
-  for (const data of ["p", "j", " "]) press(stdin, data);
+  await expandList(lastFrame, stdin, /portable\/glob/);
+  for (const data of ["p", "j", "j", "j", " "]) press(stdin, data);
   const frame = await waitForFrame(lastFrame, /1 selected/);
   const line = (name: string) => frame.split("\n").find((candidate) => candidate.includes(`portable/${name}`)) ?? "";
   assert.match(line("two"), /\[x\]/);
@@ -935,7 +943,7 @@ test("several keys delivered in a single write are handled one by one", async (t
     { name: "three", state: "outdated" },
   ]);
   const { lastFrame, stdin, unmount } = mount(f);
-  await waitForFrame(lastFrame, /portable\/three/);
+  await expandList(lastFrame, stdin, /portable\/three/);
   press(stdin, "jj ");
   const frame = await waitForFrame(lastFrame, /1 selected/);
   assert.match(frame.split("\n").find((line) => line.includes("portable/three")) ?? "", /\[x\]/);
@@ -968,7 +976,7 @@ test("mixed Skills and Apps continue after App failure with a combined summary",
   for (const entry of await apps.load()) await apps.approve(entry);
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, appEnvironment }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
-  await waitForFrame(view.lastFrame, frame => frame.includes("App: good") && frame.includes("portable/one"));
+  await expandList(view.lastFrame, view.stdin, frame => frame.includes("App: good") && frame.includes("portable/one"));
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write(ENTER);
@@ -988,7 +996,7 @@ test("App inventory failure leaves user-global Skill updates available", async t
   await writeFile(recipesDirectory, "invalid directory");
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, appEnvironment: { recipesDirectory } }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
-  const frame = await waitForFrame(view.lastFrame, frame => frame.includes("Error (Apps)") && frame.includes("portable/one"));
+  const frame = await expandList(view.lastFrame, view.stdin, frame => frame.includes("Error (Apps)") && frame.includes("portable/one"));
   assert.ok(!frame.includes("Error (user-global)"));
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /1 selected/);
@@ -1072,7 +1080,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   });
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
-  const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
+  const listed = await expandList(view.lastFrame, view.stdin, /Package: pstack {2}plugins\/pstack/);
   assert.match(listed, /1\.0\.0 -> abcdef1/);
   press(view.stdin, "a");
   await waitForFrame(view.lastFrame, /1 selected/);
@@ -1084,7 +1092,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   assert.match(preview, /This apply approves the declaration above\./);
   assert.deepEqual(calls, ["plan:update", "approval:update"]);
   press(view.stdin, "y");
-  await waitForFrame(view.lastFrame, /Updated Package: pstack \(pi\): installed 1\.0\.0 -> installed 1\.1\.0/);
+  await waitForFrame(view.lastFrame, frame => squash(frame).includes("UpdatedPackage:pstack(pi)frombuiltin:agent-depot::pi:plugins/pstack:installed1.0.0->installed1.1.0"));
   assert.deepEqual(calls, ["plan:update", "approval:update", "approve:update", "execute:update"]);
 });
 
@@ -1099,8 +1107,8 @@ test("Package Updates shows observed host version and commit rather than the rem
   }] });
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
-  const listed = await waitForFrame(view.lastFrame, /Package: pi plugins\/pstack/);
-  assert.match(listed, /1\.6\.1 \(aaaaaaa\) -> 1\.6\.1 \(bbbbbbb\)/);
+  const listed = await expandList(view.lastFrame, view.stdin, /Package: pstack {2}plugins\/pstack/);
+  assert.ok(squash(listed).includes("1.6.1(aaaaaaa)->1.6.1(bbbbbbb)"));
   assert.doesNotMatch(listed, /1\.0\.0/);
 });
 
@@ -1117,7 +1125,11 @@ test("an unchanged Claude cache version explains source changes without offering
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const listed = await waitForFrame(view.lastFrame, /publisher must change/);
-  assert.match(listed, /Claude caches plugin version 1\.6\.1/);
+  const flat = squash(listed);
+  assert.ok(flat.includes("Claudecachespluginversion1.6.1"));
+  assert.ok(flat.includes("Package:builtin:agent-depot::claude#demo:"));
+  assert.doesNotMatch(listed, /:\.#|:\.\s/);
+  assert.doesNotMatch(listed, /demo@\./);
   assert.doesNotMatch(listed, /\[ \] Package:/);
 });
 
@@ -1139,10 +1151,195 @@ test("an unknown Package is folded with its reason and is never offered as an up
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const folded = await waitForFrame(view.lastFrame, /1 cannot be checked/);
   assert.match(folded, /Package update comparison unavailable because the checkout has local\s+changes/);
-  assert.ok(!folded.includes("Package: pi plugins/pstack"), "an unknown Package is never offered as an update");
+  assert.ok(!folded.includes("Package: builtin:agent-depot::pi:plugins/pstack"), "an unknown Package is never offered as an update");
   press(view.stdin, ENTER);
   const open = await waitForFrame(view.lastFrame, /Update comparison unavailable: Pi reports this Package installed/);
-  assert.match(open, /Package: pi plugins\/pstack/);
+  assert.match(open, /Package: builtin:agent-depot::pi:plugins\/pstack/);
   assert.ok(!open.includes("1 selected"));
   assert.deepEqual(calls, []);
+});
+
+
+/** Expands every group by walking down the tree; right does nothing on a row, so extra steps are harmless. */
+function expandAll(stdin: Stdin, steps = 30) {
+  for (let step = 0; step < steps; step += 1) {
+    press(stdin, RIGHT);
+    press(stdin, "j");
+  }
+  for (let step = 0; step < steps; step += 1) press(stdin, "k");
+}
+
+const line = (frame: string, text: string) => frame.split("\n").find((candidate) => candidate.includes(text)) ?? "";
+
+test("Updates groups by Source with Skills below it, and every group starts collapsed", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "remote", state: "outdated", url: GIT_URL },
+  ]);
+  const { lastFrame, unmount } = mount(f);
+  const frame = await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
+  assert.match(frame, /▸ https:\/\/example\.com\/skills\.git \(1\)/);
+  assert.ok(!frame.includes("Skills ("), "subgroups are hidden under a collapsed Source");
+  assert.ok(!frame.includes("portable/one"), "rows are hidden under a collapsed Source");
+  assert.match(frame, /0 selected/);
+  unmount();
+});
+
+test("right expands a group, left collapses it, and left on a row selects its parent group", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(1\)/);
+  press(stdin, RIGHT);
+  const source = await waitForFrame(lastFrame, /▾ builtin:agent-depot \(1\)/);
+  assert.match(source, /▸ Skills \(1\)/);
+  press(stdin, "j");
+  press(stdin, RIGHT);
+  const rows = await waitForFrame(lastFrame, /portable\/one/);
+  assert.match(rows, /▾ Skills \(1\)/);
+  press(stdin, "j");
+  press(stdin, LEFT);
+  await waitForFrame(lastFrame, (frame) => /^> .*▾ Skills \(1\)/m.test(frame));
+  press(stdin, LEFT);
+  await waitForFrame(lastFrame, (frame) => /^> .*▸ Skills \(1\)/m.test(frame) && !frame.includes("portable/one"));
+  unmount();
+});
+
+test("Enter on a group expands it instead of previewing", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(1\)/);
+  press(stdin, ENTER);
+  const frame = await waitForFrame(lastFrame, /▾ builtin:agent-depot \(1\)/);
+  assert.ok(!frame.includes("Update batch preview"));
+  assert.ok(!frame.includes("Select at least one"));
+  unmount();
+});
+
+test("space on a collapsed group selects and unselects all its rows, showing [x], [-] and [ ]", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "remote", state: "outdated", url: GIT_URL },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
+  press(stdin, " ");
+  const all = await waitForFrame(lastFrame, /2 selected/);
+  assert.match(line(all, "builtin:agent-depot"), /\[x\]/);
+  assert.match(line(all, "example.com/skills.git"), /\[ \]/);
+  press(stdin, " ");
+  const none = await waitForFrame(lastFrame, /0 selected/);
+  assert.match(line(none, "builtin:agent-depot"), /\[ \]/);
+  press(stdin, RIGHT);
+  press(stdin, "j");
+  press(stdin, RIGHT);
+  press(stdin, "j");
+  press(stdin, " ");
+  const some = await waitForFrame(lastFrame, /1 selected/);
+  assert.match(line(some, "▾ builtin:agent-depot"), /\[-\]/);
+  assert.match(line(some, "portable/one"), /\[x\]/);
+  unmount();
+});
+
+test("rows selected under a collapsed group are exactly what the preview receives", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+    { name: "remote", state: "outdated", url: GIT_URL },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
+  press(stdin, " ");
+  await waitForFrame(lastFrame, /2 selected/);
+  press(stdin, "u");
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
+  assert.match(preview, /portable\/one/);
+  assert.match(preview, /portable\/two/);
+  assert.ok(!preview.includes("portable/remote"));
+  unmount();
+});
+
+test("the scope filter hides groups that have no row left", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated" }]);
+  await seedGlobal(f, { name: "glob", state: "outdated", url: GIT_URL });
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ https:\/\/example\.com\/skills\.git \(1\)/);
+  press(stdin, "p");
+  const project = await waitForFrame(lastFrame, (frame) => /scope: project/.test(frame) && frame.includes("builtin:agent-depot"));
+  assert.ok(!project.includes("example.com/skills.git"));
+  unmount();
+});
+
+test("group headers take part in windowing", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, Array.from({ length: 4 }, (_, n): SkillSpec => ({ name: `s${n}`, state: "outdated", url: `https://example.com/r${n}.git` })));
+  const { lastFrame, unmount } = render(<UpdatesView operations={f.operations} environment={f.environment} listHeight={2} />);
+  const frame = await waitForFrame(lastFrame, /1–2 of 4/);
+  assert.equal(frame.split("\n").filter((candidate) => /▸ https:\/\/example\.com\/r\d\.git/.test(candidate)).length, 2);
+  unmount();
+});
+
+test("a root-level Package sits under its Source, named without a root", async t => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated", url: GIT_URL }]);
+  const packages = fakePackageOperations({ checkUpdates: async () => [{
+    installed: { ...packageRecord, selection: { host: "claude", marketplaceRoot: "", pluginName: "demo", source: { kind: "external", url: GIT_URL }, version: { policy: "latest" } } },
+    observed: { kind: "installed", version: "1.0.0" },
+    status: "update available",
+    available: { kind: "git-commit", commit: "abcdef1234567890" },
+  }] });
+  const { lastFrame, stdin, unmount } = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
+  deferCleanup(t, () => { unmount(); });
+  await waitForFrame(lastFrame, /▸ https:\/\/example\.com\/skills\.git \(2\)/);
+  expandAll(stdin);
+  const frame = await waitForFrame(lastFrame, /Package: demo/);
+  assert.match(frame, /▾ Packages \(1\)/);
+  assert.match(frame, /▾ Skills \(1\)/);
+  assert.ok(frame.indexOf("Packages (1)") < frame.indexOf("Skills (1)"));
+  assert.doesNotMatch(frame, /demo@\.|Package: \.|Package: demo {2}\./);
+  assert.ok(frame.indexOf("Package: demo") < frame.indexOf("portable/one"));
+});
+
+test("a then u at the default cursor on a collapsed group previews every row", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
+  press(stdin, "a");
+  await waitForFrame(lastFrame, /2 selected/);
+  press(stdin, "u");
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
+  assert.match(preview, /portable\/one/);
+  assert.match(preview, /portable\/two/);
+  unmount();
+});
+
+test("a root-level Package result names its Source without a root segment", async t => {
+  const f = await fixture(t);
+  const rootPlan: PackageLifecyclePlan = { ...packagePlan, selection: { ...packageSelection, host: "claude", marketplaceRoot: "", pluginName: "pstack" } as PackageSelection };
+  const packages = fakePackageOperations({
+    checkUpdates: async () => [{ installed: { ...packageRecord, selection: rootPlan.selection }, observed: { kind: "installed", version: "1.0.0" }, status: "update available", available: { kind: "git-commit", commit: "abcdef1234567890" } }],
+    planLifecycle: async () => rootPlan,
+    approvalStatus: async () => "approved",
+    executeLifecycle: async () => ({ status: "updated", previous: { kind: "installed", version: "1.0.0" }, verified: { kind: "installed", version: "1.1.0" } }),
+  });
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
+  await expandList(view.lastFrame, view.stdin, /Package: pstack/);
+  press(view.stdin, "a");
+  press(view.stdin, "u");
+  await reviewToEnd(view.lastFrame, view.stdin, /Apply 1 update\?/);
+  press(view.stdin, "y");
+  const done = await waitForFrame(view.lastFrame, /Updated Package: pstack/);
+  assert.ok(squash(done).includes("UpdatedPackage:pstack(claude)frombuiltin:agent-depot::claude#pstack:"));
 });

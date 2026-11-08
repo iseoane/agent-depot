@@ -33,7 +33,7 @@ function hintsOf(view: Exclude<ViewName, "sources">, catalogFocusedOnSource: boo
     case "profile":
       return "e export · i import · q quit";
     case "updates":
-      return "j/k move · space mark · a all · Enter preview · u update · r check again · q quit";
+      return "j/k move · space mark · a all · Enter expand · u update · r check again · q quit";
   }
 }
 

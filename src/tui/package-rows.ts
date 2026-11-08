@@ -1,6 +1,7 @@
 import { classifyUpdate } from "../package-host-plans.js";
 import {
-  describeCoordinates,
+  displayPackageCoordinates,
+  displayPackageSelection,
   type InstalledBundleEvidence,
   type InstalledPackage,
   type PackageComponent,
@@ -80,7 +81,7 @@ export interface PackageRow {
 export function packageRow(record: InstalledPackage, inspection: PackageInspection): PackageRow {
   return {
     selection: record.selection,
-    name: inspection.descriptor?.name ?? describeCoordinates(record.selection),
+    name: inspection.descriptor?.name ?? displayPackageSelection(record.selection),
     installed: installedEvidenceLabel(inspection.installed),
     ...(inspection.installed.kind === "installed" && inspection.installed.version !== undefined
       ? { installedVersion: versionWithCommit(inspection.installed.version, inspection.installed.commit) }
@@ -127,7 +128,7 @@ export function packagePlanLines(plan: PackageLifecyclePlan, approval: PackageAp
   return [
     `Environment: ${plan.environment}`,
     `Package: ${descriptor.name} (${selection.host}) ${plan.action}`,
-    `Coordinates: ${describeCoordinates(selection)}`,
+    `Coordinates: ${displayPackageSelection(selection)}`,
     `Origin: manifest ${plan.origin.manifestDigest.slice(0, 12)}${plan.origin.resolvedCommit === undefined ? "" : `  commit ${plan.origin.resolvedCommit.slice(0, 7)}`}`,
     `Available: ${packageVersionLabel(descriptor.version)}`,
     `Components (${descriptor.components.length}):`,
@@ -138,7 +139,7 @@ export function packagePlanLines(plan: PackageLifecyclePlan, approval: PackageAp
           `Step ${position + 1} (${command.purpose}): ${JSON.stringify([command.executable, ...command.args])}`,
           `Executable: ${command.resolvedPath ?? command.executable}`,
         ])),
-    `Blast radius: ${plan.affects.map(describeCoordinates).join(", ")}`,
+    `Blast radius: ${plan.affects.map((coordinates) => displayPackageCoordinates(selection.source, coordinates)).join(", ")}`,
     `Working directory: ${plan.cwd}`,
     `Approval: ${approval === "approved" ? "approved" : "needs approval"}`,
     ...plan.warnings.map((warning) => `Warning: ${warning}`),

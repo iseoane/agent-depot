@@ -7,6 +7,7 @@ import { render } from "ink-testing-library";
 import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
+import { expandList } from "./expand-updates.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -44,7 +45,7 @@ async function fixture(t: TestContext, manual: boolean | "spawn" = false, broken
 
 test("App updates preview the loaded check and apply verified versions", async t => {
   const f = await fixture(t);
-  await waitForFrame(f.view.lastFrame, frame => frame.includes("demo") && frame.includes("1.0.0 -> 2.0.0"));
+  await expandList(f.view.lastFrame, f.view.stdin, frame => frame.includes("demo") && frame.includes("1.0.0 -> 2.0.0"));
   f.view.stdin.write("a");
   await waitForFrame(f.view.lastFrame, frame => frame.includes("1 selected"));
   f.view.stdin.write("\r");
@@ -59,7 +60,7 @@ test("App updates preview the loaded check and apply verified versions", async t
 for (const version of ["v1.0.0+build", "1.5.0"]) {
   test(`manual App updates verify normalized version change: ${version}`, async t => {
     const f = await fixture(t, true);
-    await waitForFrame(f.view.lastFrame, frame => frame.includes("1.0.0 -> 2.0.0"));
+    await expandList(f.view.lastFrame, f.view.stdin, frame => frame.includes("1.0.0 -> 2.0.0"));
     f.view.stdin.write("a");
     await waitForFrame(f.view.lastFrame, frame => frame.includes("1 selected"));
     f.view.stdin.write("\r");
@@ -79,7 +80,7 @@ for (const version of ["v1.0.0+build", "1.5.0"]) {
 
 test("r rechecks installed Apps; an invalid recipe is excluded from Updates", async t => {
   const f = await fixture(t);
-  await waitForFrame(f.view.lastFrame, frame => frame.includes("1.0.0 -> 2.0.0"));
+  await expandList(f.view.lastFrame, f.view.stdin, frame => frame.includes("1.0.0 -> 2.0.0"));
   f.setVersion("2.0.0");
   f.view.stdin.write("r");
   await waitForFrame(f.view.lastFrame, frame => frame.includes("1 up to date"));
@@ -100,7 +101,7 @@ test("r rechecks installed Apps; an invalid recipe is excluded from Updates", as
 
 test("spawn failure guides manual completion and declining continues the batch", async t => {
   const f = await fixture(t, "spawn");
-  await waitForFrame(f.view.lastFrame, frame => frame.includes("1.0.0 -> 2.0.0"));
+  await expandList(f.view.lastFrame, f.view.stdin, frame => frame.includes("1.0.0 -> 2.0.0"));
   f.view.stdin.write("a");
   await waitForFrame(f.view.lastFrame, /1 selected/);
   f.view.stdin.write("\r");
@@ -115,13 +116,13 @@ test("spawn failure guides manual completion and declining continues the batch",
 
 test("Skill state failure does not hide App updates", async t => {
   const f = await fixture(t, false, true);
-  const frame = await waitForFrame(f.view.lastFrame, frame => frame.includes("Error (user-global)") && frame.includes("App: demo"));
+  const frame = await expandList(f.view.lastFrame, f.view.stdin, frame => frame.includes("Error (user-global)") && frame.includes("App: demo"));
   assert.match(frame, /1.0.0 -> 2.0.0/);
 });
 
 test("App directory failure has its own error without failing Skill scopes", async t => {
   const f = await fixture(t);
-  await waitForFrame(f.view.lastFrame, /App: demo/);
+  await expandList(f.view.lastFrame, f.view.stdin, /App: demo/);
   await rm(f.recipesDirectory, { recursive: true });
   await writeFile(f.recipesDirectory, "not a directory");
   f.view.stdin.write("r");
@@ -133,7 +134,7 @@ test("recipe changes after preview refuse execution and preserve tracking", asyn
   const f = await fixture(t);
   const [entry] = await f.apps.load();
   await f.apps.completeManual(await f.apps.planLifecycle(entry!, "install"), true);
-  await waitForFrame(f.view.lastFrame, /App: demo/);
+  await expandList(f.view.lastFrame, f.view.stdin, /App: demo/);
   f.view.stdin.write("a");
   await waitForFrame(f.view.lastFrame, /1 selected/);
   f.view.stdin.write("\r");
@@ -147,7 +148,7 @@ test("recipe changes after preview refuse execution and preserve tracking", asyn
 
 test("spawn fallback explains why the manual step is needed", async t => {
   const f = await fixture(t, "spawn");
-  await waitForFrame(f.view.lastFrame, /App: demo/);
+  await expandList(f.view.lastFrame, f.view.stdin, /App: demo/);
   f.view.stdin.write("a");
   await waitForFrame(f.view.lastFrame, /1 selected/);
   f.view.stdin.write("\r");
@@ -160,7 +161,7 @@ test("spawn fallback explains why the manual step is needed", async t => {
 
 test("unmount cancels pending manual evidence instead of leaving the batch waiting", async t => {
   const f = await fixture(t, true);
-  await waitForFrame(f.view.lastFrame, /App: demo/);
+  await expandList(f.view.lastFrame, f.view.stdin, /App: demo/);
   f.view.stdin.write("a");
   await waitForFrame(f.view.lastFrame, /1 selected/);
   f.view.stdin.write("\r");

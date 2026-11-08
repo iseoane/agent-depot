@@ -1,6 +1,6 @@
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck, type AppLifecyclePlan } from "../app-flow.js";
 import type { PackageOperations } from "../package-flow.js";
-import { describeCoordinates, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
+import { displayPackageSelection, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { formatVersionPolicy } from "../skill-install.js";
 import type { SourceOperations } from "../sources.js";
@@ -267,7 +267,7 @@ export async function loadUpdateRows(
       key: `package:${selectionKey(check.installed.selection)}`,
       scope: "user-global",
       check,
-      path: `Package: ${describeCoordinates(check.installed.selection)}`,
+      path: `Package: ${displayPackageSelection(check.installed.selection)}`,
       policy: formatVersionPolicy(check.installed.selection.version),
       installed: check.observed === undefined
         ? `${recordedVersionLabel(check.installed)} (recorded)`
@@ -466,7 +466,7 @@ export async function runUpdates(
     }
   }
   for (const { plan, approval } of prepared.packagePlans ?? []) {
-    const name = `Package: ${plan.descriptor.name} (${plan.selection.host})`;
+    const name = `Package: ${plan.descriptor.name} (${plan.selection.host}) from ${displayPackageSelection(plan.selection)}`;
     try {
       const packages = prepared.packages;
       if (!packages) throw new Error("Package operations unavailable; check again");

@@ -181,6 +181,51 @@ export function describeCoordinates(coordinates: PackageCoordinates): string {
     : `claude ${coordinates.pluginName}@${at(coordinates.marketplaceRoot)}`;
 }
 
+/** The token the CLI prints for a Source: the built-in id, the URL or the local path. */
+export function sourceToken(source: ProjectSource): string {
+  if (source.kind === "builtin") {
+    return source.id;
+  }
+  return "url" in source ? source.url : source.path;
+}
+
+/** A root-level bundle shows its root as `.`. */
+export function displayRoot(root: string): string {
+  return root === "" ? "." : root;
+}
+
+/** `pi:<root>` or `claude:<root>#<plugin>`. */
+export function describeSelectionCoordinate(coordinates: PackageCoordinates): string {
+  return coordinates.host === "pi"
+    ? `pi:${displayRoot(coordinates.root)}`
+    : `claude:${displayRoot(coordinates.marketplaceRoot)}#${coordinates.pluginName}`;
+}
+
+/** Coordinates qualified by the Source they live in, so equal roots of different Sources stay apart. */
+export function formatPackageCoordinates(source: ProjectSource, coordinates: PackageCoordinates): string {
+  return `${sourceToken(source)}::${describeSelectionCoordinate(coordinates)}`;
+}
+
+/**
+ * The TUI spelling of coordinates: like the CLI's, but a bundle at the Source root omits its root
+ * segment instead of showing `.`. Display only; the CLI keeps `formatPackageCoordinates`.
+ */
+export function displayPackageCoordinates(source: ProjectSource, coordinates: PackageCoordinates): string {
+  const root = bundleRoot(coordinates);
+  const at = root === "" ? "" : `:${root}`;
+  return `${sourceToken(source)}::${coordinates.host === "pi" ? `pi${at}` : `claude${at}#${coordinates.pluginName}`}`;
+}
+
+/** The TUI spelling of a selection. */
+export function displayPackageSelection(selection: PackageSelection): string {
+  return displayPackageCoordinates(selection.source, selection);
+}
+
+/** The CLI spelling of a selection. */
+export function formatPackageSelection(selection: PackageSelection): string {
+  return formatPackageCoordinates(selection.source, selection);
+}
+
 /**
  * The stable selection identity. Derived from the Source and the coordinates
  * only, so a bundle rename (its manifest name or version) does not move the
