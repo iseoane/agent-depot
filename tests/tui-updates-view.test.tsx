@@ -1092,7 +1092,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   assert.match(preview, /This apply approves the declaration above\./);
   assert.deepEqual(calls, ["plan:update", "approval:update"]);
   press(view.stdin, "y");
-  await waitForFrame(view.lastFrame, /Updated Package: pstack \(pi\): installed 1\.0\.0 -> installed 1\.1\.0/);
+  await waitForFrame(view.lastFrame, /Updated Package: pstack \(pi\) from builtin:agent-depot::pi:plugins\/pstack: installed 1\.0\.0 -> installed 1\.1\.0/);
   assert.deepEqual(calls, ["plan:update", "approval:update", "approve:update", "execute:update"]);
 });
 
@@ -1127,7 +1127,8 @@ test("an unchanged Claude cache version explains source changes without offering
   const listed = await waitForFrame(view.lastFrame, /publisher must change/);
   const flat = squash(listed);
   assert.ok(flat.includes("Claudecachespluginversion1.6.1"));
-  assert.ok(flat.includes("Package:builtin:agent-depot::claude:.#demo:"));
+  assert.ok(flat.includes("Package:builtin:agent-depot::claude#demo:"));
+  assert.doesNotMatch(listed, /:\.#|:\.\s/);
   assert.doesNotMatch(listed, /demo@\./);
   assert.doesNotMatch(listed, /\[ \] Package:/);
 });
@@ -1304,4 +1305,41 @@ test("a root-level Package sits under its Source, named without a root", async t
   assert.ok(frame.indexOf("Packages (1)") < frame.indexOf("Skills (1)"));
   assert.doesNotMatch(frame, /demo@\.|Package: \.|Package: demo {2}\./);
   assert.ok(frame.indexOf("Package: demo") < frame.indexOf("portable/one"));
+});
+
+test("a then u at the default cursor on a collapsed group previews every row", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated" },
+    { name: "two", state: "outdated" },
+  ]);
+  const { lastFrame, stdin, unmount } = mount(f);
+  await waitForFrame(lastFrame, /▸ builtin:agent-depot \(2\)/);
+  press(stdin, "a");
+  await waitForFrame(lastFrame, /2 selected/);
+  press(stdin, "u");
+  const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
+  assert.match(preview, /portable\/one/);
+  assert.match(preview, /portable\/two/);
+  unmount();
+});
+
+test("a root-level Package result names its Source without a root segment", async t => {
+  const f = await fixture(t);
+  const rootPlan: PackageLifecyclePlan = { ...packagePlan, selection: { ...packageSelection, host: "claude", marketplaceRoot: "", pluginName: "pstack" } as PackageSelection };
+  const packages = fakePackageOperations({
+    checkUpdates: async () => [{ installed: { ...packageRecord, selection: rootPlan.selection }, observed: { kind: "installed", version: "1.0.0" }, status: "update available", available: { kind: "git-commit", commit: "abcdef1234567890" } }],
+    planLifecycle: async () => rootPlan,
+    approvalStatus: async () => "approved",
+    executeLifecycle: async () => ({ status: "updated", previous: { kind: "installed", version: "1.0.0" }, verified: { kind: "installed", version: "1.1.0" } }),
+  });
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
+  await expandList(view.lastFrame, view.stdin, /Package: pstack/);
+  press(view.stdin, "a");
+  press(view.stdin, "u");
+  await reviewToEnd(view.lastFrame, view.stdin, /Apply 1 update\?/);
+  press(view.stdin, "y");
+  const done = await waitForFrame(view.lastFrame, /Updated Package: pstack/);
+  assert.ok(squash(done).includes("UpdatedPackage:pstack(claude)frombuiltin:agent-depot::claude#pstack:"));
 });
