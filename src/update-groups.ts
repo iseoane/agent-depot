@@ -25,8 +25,33 @@ export interface UpdateGroups<T> {
   readonly apps: readonly T[];
 }
 
+// Code-unit order, so Linux and Windows agree whatever the locale.
+const compare = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+
 /** Groups updates by Source, then by Packages and Skills, with Apps apart. */
 export function groupUpdates<T extends GroupableUpdate>(items: readonly T[]): UpdateGroups<T> {
-  void items;
-  return { sources: [], apps: [] };
+  const bySource = new Map<string, { source: SourceRef; packages: T[]; skills: T[] }>();
+  const apps: T[] = [];
+  for (const item of items) {
+    if (item.kind === "app") {
+      apps.push(item);
+      continue;
+    }
+    let group = bySource.get(item.source.id);
+    if (group === undefined) {
+      group = { source: item.source, packages: [], skills: [] };
+      bySource.set(item.source.id, group);
+    }
+    (item.kind === "package" ? group.packages : group.skills).push(item);
+  }
+  const sources = [...bySource.values()]
+    .sort((left, right) => compare(left.source.label, right.source.label) || compare(left.source.id, right.source.id))
+    .map(({ source, packages, skills }): SourceGroup<T> => ({
+      source,
+      subgroups: [
+        ...(packages.length > 0 ? [{ kind: "packages" as const, items: packages }] : []),
+        ...(skills.length > 0 ? [{ kind: "skills" as const, items: skills }] : []),
+      ],
+    }));
+  return { sources, apps };
 }
