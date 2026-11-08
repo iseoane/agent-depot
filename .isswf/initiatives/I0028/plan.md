@@ -3,12 +3,12 @@
 Type: bug
 
 ## J001
-- Status: in-progress
+- Status: completed
 - Objective: No user-facing Package text renders a Source-root Package as `.` or `name@.`: Profile export/import previews and Package flow failure reasons use a root-aware spelling; README documents Enter on the "cannot be checked" line.
 - Depends on: I0027 (merged e79dad6)
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: PR, exact-head CI, low-risk merge.
+- Next step: None. Initiative closed; ships with the next release.
 
 ### Acceptance
 - See brief.
