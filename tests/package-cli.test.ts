@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { PACKAGE_USAGE, formatPackageSelection, runPackageCommand } from "../src/package-cli.js";
+import { PACKAGE_USAGE, runPackageCommand } from "../src/package-cli.js";
 import type { PackageOperations } from "../src/package-flow.js";
 import { recordingProgress } from "./progress-fixtures.js";
-import type {
-  BundleDescriptor,
-  InstalledPackage,
-  PackageAction,
-  PackageInspection,
-  PackageLifecyclePlan,
-  PackageLifecycleResult,
-  PackageSelection,
+import {
+  formatPackageSelection,
+  type BundleDescriptor,
+  type InstalledPackage,
+  type PackageAction,
+  type PackageInspection,
+  type PackageLifecyclePlan,
+  type PackageLifecycleResult,
+  type PackageSelection,
 } from "../src/package-model.js";
 import type { Source, SourceOperations } from "../src/sources.js";
 

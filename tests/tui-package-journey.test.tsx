@@ -209,7 +209,7 @@ test("a Claude install disappears from Catalog and shows a verified available up
   assert.match(installations, /update available/u);
 
   j.view.stdin.write("4");
-  const updates = await waitForFrame(j.view.lastFrame, /Package: claude/u);
+  const updates = await waitForFrame(j.view.lastFrame, /Package: .*::claude:/u);
   assert.match(updates, /-> 0\.9\.69/u);
   assert.doesNotMatch(updates, /cannot be checked/u);
   j.view.stdin.write(" ");

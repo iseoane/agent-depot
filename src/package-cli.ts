@@ -1,5 +1,5 @@
 import { sourceIdForUrl } from "./git-source.js";
-import { PACKAGE_HOSTS, bundleRoot, describeCoordinates, selectionKey, type BundleDescriptor, type InstalledBundleEvidence, type InstalledPackage, type PackageAction, type PackageComponent, type PackageComponentEffect, type PackageCoordinates, type PackageHost, type PackageInspection, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection, type PackageUpdateCheck, type PackageVersionEvidence } from "./package-model.js";
+import { PACKAGE_HOSTS, bundleRoot, describeCoordinates, describeSelectionCoordinate, displayRoot, formatPackageSelection, selectionKey, sourceToken, type BundleDescriptor, type InstalledBundleEvidence, type InstalledPackage, type PackageAction, type PackageComponent, type PackageComponentEffect, type PackageHost, type PackageInspection, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection, type PackageUpdateCheck, type PackageVersionEvidence } from "./package-model.js";
 import type { PackageOperations } from "./package-flow.js";
 import { NO_PROGRESS, type Progress } from "./progress.js";
 import type { ProjectSource } from "./project-manifest.js";
@@ -115,10 +115,6 @@ export function planWithRefresh(
   progress: Progress,
 ): Promise<PackageLifecyclePlan> {
   return progress.run(`Refreshing Source for Package ${formatPackageSelection(selection)}`, () => packages.planLifecycle(selection, action), { mayPrompt: true });
-}
-
-export function formatPackageSelection(selection: PackageSelection): string {
-  return `${sourceToken(selection.source)}::${describeSelectionCoordinate(selection)}`;
 }
 
 /**
@@ -367,13 +363,6 @@ function sourceMatchesToken(source: Source, token: string): boolean {
   return source.kind === "git" && (source.url === token || sourceToken(projectSourceOf(source)) === token);
 }
 
-function sourceToken(source: ProjectSource): string {
-  if (source.kind === "builtin") {
-    return source.id;
-  }
-  return "url" in source ? source.url : source.path;
-}
-
 /** The registered Source id: derived for a Git Source, and its own token otherwise. */
 function sourceIdToken(source: ProjectSource): string {
   return "url" in source ? sourceIdForUrl(source.url) : sourceToken(source);
@@ -381,12 +370,6 @@ function sourceIdToken(source: ProjectSource): string {
 
 function formatDescriptorSelection(sourceId: string, descriptor: BundleDescriptor): string {
   return `${sourceId}::${describeSelectionCoordinate(descriptor.coordinates)}`;
-}
-
-function describeSelectionCoordinate(coordinates: PackageCoordinates): string {
-  return coordinates.host === "pi"
-    ? `pi:${displayRoot(coordinates.root)}`
-    : `claude:${displayRoot(coordinates.marketplaceRoot)}#${coordinates.pluginName}`;
 }
 
 function formatPackageRecord(record: InstalledPackage): string {
@@ -504,10 +487,6 @@ function describeEvidence(evidence: InstalledBundleEvidence): string {
 function packageResultSucceeded(result: PackageLifecycleResult): boolean {
   return result.status === "installed" || result.status === "updated" || result.status === "removed" ||
     result.status === "selected" || result.status === "forgotten";
-}
-
-function displayRoot(root: string): string {
-  return root === "" ? "." : root;
 }
 
 function requireOptionValue(args: readonly string[], index: number, option: string): string {

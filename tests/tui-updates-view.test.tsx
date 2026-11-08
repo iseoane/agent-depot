@@ -22,7 +22,7 @@ import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
-import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
@@ -1100,7 +1100,7 @@ test("Package Updates shows observed host version and commit rather than the rem
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const listed = await waitForFrame(view.lastFrame, /Package: builtin:agent-depot::pi:plugins\/pstack/);
-  assert.match(listed, /1\.6\.1 \(aaaaaaa\) -> 1\.6\.1 \(bbbbbbb\)/);
+  assert.ok(squash(listed).includes("1.6.1(aaaaaaa)->1.6.1(bbbbbbb)"));
   assert.doesNotMatch(listed, /1\.0\.0/);
 });
 
@@ -1117,8 +1117,9 @@ test("an unchanged Claude cache version explains source changes without offering
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const listed = await waitForFrame(view.lastFrame, /publisher must change/);
-  assert.match(listed, /Claude caches plugin version 1\.6\.1/);
-  assert.match(listed, /Package: builtin:agent-depot::claude:\.#demo: /);
+  const flat = squash(listed);
+  assert.ok(flat.includes("Claudecachespluginversion1.6.1"));
+  assert.ok(flat.includes("Package:builtin:agent-depot::claude:.#demo:"));
   assert.doesNotMatch(listed, /demo@\./);
   assert.doesNotMatch(listed, /\[ \] Package:/);
 });
