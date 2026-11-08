@@ -283,11 +283,11 @@ test("planning a lifecycle write fails closed when an external Source cannot be 
   });
 });
 
-test("a Source-root Package is never named with a bare dot in a flow reason", async () => {
+test("a Source-root Package is named by host and Source in a flow reason, never as a token or a dot", async () => {
   await withHarness({ refreshProjectSource: null }, async (harness) => {
     await assert.rejects(
       harness.operations.planLifecycle(piSelection(), "install"),
-      /for \S+::pi requires a Source refresh/u,
+      /for pi from \S+ requires a Source refresh/u,
     );
   });
 });
@@ -298,7 +298,10 @@ test("an unapproved declaration fails closed before any host command", async () 
     const plan = await harness.operations.planLifecycle(selection, "install");
     const notConfirmed = await harness.operations.executeLifecycle(plan, false);
     assert.equal(notConfirmed.status, "not confirmed");
-    await assert.rejects(harness.operations.executeLifecycle(plan, true), /not approved/);
+    await assert.rejects(
+      harness.operations.executeLifecycle(plan, true),
+      (error: Error) => error.message.startsWith(`The install plan for pi from ${PI_URL} is not approved;`),
+    );
     assert.equal(harness.calls.length, 0);
   });
 });
@@ -449,6 +452,8 @@ test("an install whose host state stays absent fails and writes no record", asyn
     const result = await harness.operations.executeLifecycle(plan, true);
     assert.equal(result.status, "failed");
     assert.match(result.reason, /does not report/);
+    assert.ok(result.reason.startsWith(`The host does not report pi from ${PI_URL} installed (`), result.reason);
+    assert.doesNotMatch(result.reason, /::/u);
     assert.equal((await harness.operations.list()).length, 0);
     assert.equal(harness.calls.length, 1);
   });
@@ -842,5 +847,14 @@ test("install plans normally when the portable installations belong to another S
     const plan = await harness.operations.planLifecycle(piSelection(), "install");
     assert.equal(plan.action, "install");
     assert.equal(harness.calls.length, 0);
+  });
+});
+
+test("a Source that no longer provides a root Package says so without empty quotes", async () => {
+  await withHarness({ files: [] }, async (harness) => {
+    await assert.rejects(
+      harness.operations.planLifecycle(piSelection(), "install"),
+      (error: Error) => error.message.endsWith("no longer provides a pi Package at its root") && !error.message.includes('""'),
+    );
   });
 });
