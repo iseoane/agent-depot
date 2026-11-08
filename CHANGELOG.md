@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-11-08
+
+### Changed
+
+- The TUI Updates view is grouped by Source, with Packages and Skills below each
+  Source and Apps last. Groups start collapsed; `Enter` or `→`/`←` expand and
+  collapse them, and `space` on a group marks or clears all its rows (`[x]`, `[-]`,
+  `[ ]`). `u`, or `Enter` on a row, previews exactly the marked rows. `Enter` also
+  folds the "cannot be checked" line.
+- TUI Package labels always name their Source and never show a Source-root Package
+  as `.` or `name@.` (for example `…demo.git::claude#demo`); update results name the
+  Package's Source. CLI selection tokens are unchanged.
+- Profile export and import previews name a Source-root Package as `Package pi from …`
+  instead of `Package pi . from …`, and Package flow failure and approval reasons say
+  `pi from <source>` instead of `pi .`. Profile `--package` filters still accept the
+  previous spelling.
+
 ## [0.6.10] - 2026-11-06
 
 ### Changed
