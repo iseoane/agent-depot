@@ -8,7 +8,7 @@ Type: bug
 - Depends on: I0027 (merged e79dad6)
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: Worker (sonnet/medium, isswf-tdd), reviewer (opus/medium), PR, CI, low-risk merge.
+- Next step: PR, exact-head CI, low-risk merge.
 
 ### Acceptance
 - See brief.
