@@ -7,10 +7,11 @@ import { theme } from "./theme.js";
 import { previewViewport } from "./preview-window.js";
 import { computeWindow, useListHeight } from "./window.js";
 import { BROWSE, type UpdatesMode } from "./updates-mode.js";
+import { defaultExpanded, type Expanded } from "./tree.js";
 import { useMirrored } from "./view-state.js";
 import { useUpdatesFlow } from "./updates-flow.js";
 import { handleUpdatesKey, type UpdatesKeyContext } from "./updates-keys.js";
-import { viewOf, type UpdatesMessage } from "./updates-model.js";
+import { entryId, viewOf, type UpdatesMessage } from "./updates-model.js";
 import { CheckStatus, EntryLine, ModePanel, UpdatesFooter } from "./updates-panel.js";
 import { previewLineText, type UpdateScopeFilter, type UpdatesData } from "./updates.js";
 import { updateModePreviewChrome, updateModePreviewLines } from "./updates-preview.js";
@@ -41,6 +42,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const [scope, scopeRef, setScope] = useMirrored<UpdateScopeFilter>("all");
   const [cursor, cursorRef, setCursor] = useMirrored(0);
   const [showUnknown, showUnknownRef, setShowUnknown] = useMirrored(false);
+  const [expanded, expandedRef, setExpanded] = useMirrored<Expanded>(defaultExpanded());
   const [checked, checkedRef, setChecked] = useMirrored<readonly string[]>([]);
   const [mode, setModeState] = useState<UpdatesMode>(BROWSE);
   // Mirrors the mode synchronously so later keystrokes and the shell never see stale state.
@@ -70,7 +72,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const dataRef = useRef<UpdatesData | undefined>(undefined);
   /** The list, the cursor and the fold as of the latest keystroke. */
   const latest = () => {
-    const view = viewOf(dataRef.current, scopeRef.current, showUnknownRef.current);
+    const view = viewOf(dataRef.current, scopeRef.current, showUnknownRef.current, expandedRef.current);
     return { ...view, data: dataRef.current, at: Math.min(cursorRef.current, Math.max(view.entries.length - 1, 0)) };
   };
 
@@ -99,7 +101,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   const data = state.status === "ready" ? state.data : undefined;
   dataRef.current = data;
-  const { shown, updatable, unknown, upToDate, entries } = viewOf(data, scope, showUnknown);
+  const { shown, updatable, unknown, upToDate, entries } = viewOf(data, scope, showUnknown, expanded);
   const index = Math.min(cursor, Math.max(entries.length - 1, 0));
 
   const previewGeometry = (current: UpdatesMode) => {
@@ -125,6 +127,8 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
     checked: () => checkedRef.current,
     setChecked,
     setCursor,
+    expanded: () => expandedRef.current,
+    setExpanded,
     unknownShown: () => showUnknownRef.current,
     setShowUnknown,
     changeScope,
@@ -156,10 +160,10 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
       {showingBrowse && data && !hasErrors && shown.length === 0 ? <Text>No installations</Text> : null}
       {showingBrowse ? entries.slice(window.start, window.end).map((entry, offset) => (
         <EntryLine
-          key={entry.kind === "summary" ? "summary" : entry.row.key}
+          key={entryId(entry)}
           entry={entry}
           selected={window.start + offset === index}
-          checked={entry.kind === "update" && checked.includes(entry.row.key)}
+          checked={checked}
           view={view}
           showUnknown={showUnknown}
         />

@@ -1,3 +1,5 @@
+import { buildUpdateTree, type UpdateNodeData } from "./updates-tree.js";
+import { flattenVisible, type Expanded, type VisibleRow } from "./tree.js";
 import type { UpdateRow, UpdateScopeFilter, UpdatesData, UpdatesPhase } from "./updates.js";
 
 export const REFRESHING = "Refreshing sources…";
@@ -15,11 +17,21 @@ export type LoadState =
   | { readonly status: "loading"; readonly label: string; readonly startedAt: number }
   | { readonly status: "ready"; readonly data: UpdatesData };
 
-/** A line the cursor can be on: an updatable item, the fold of unassessable ones, or one of those when unfolded. */
+/** A line the cursor can be on: a group, an updatable item, the fold of unassessable ones, or one of those when unfolded. */
 export type Entry =
-  | { readonly kind: "update"; readonly row: UpdateRow }
+  | { readonly kind: "group"; readonly line: VisibleRow<UpdateNodeData>; readonly label: string; readonly leafKeys: readonly string[] }
+  | { readonly kind: "update"; readonly line: VisibleRow<UpdateNodeData>; readonly row: UpdateRow }
   | { readonly kind: "summary" }
   | { readonly kind: "unknown"; readonly row: UpdateRow };
+
+/** A stable React key: tree lines use their node id, the others their own identity. */
+export function entryId(entry: Entry): string {
+  switch (entry.kind) {
+    case "summary": return "summary";
+    case "unknown": return `unknown:${entry.row.key}`;
+    default: return entry.line.node.id;
+  }
+}
 
 /** Names the reasons worth knowing before expanding the collapsed "cannot be checked" row. */
 export function describeUnknownReasons(rows: readonly UpdateRow[]): string {
@@ -36,14 +48,17 @@ export function describeUnknownReasons(rows: readonly UpdateRow[]): string {
 
 const matchesScope = (row: UpdateRow, filter: UpdateScopeFilter): boolean => filter === "all" || row.scope === filter;
 
-/** The rows the list shows for a scope filter and fold state, and the cursor positions they make up. */
-export function viewOf(data: UpdatesData | undefined, scope: UpdateScopeFilter, showUnknown: boolean) {
+/** The rows the list shows for a scope filter and fold states, and the cursor positions they make up. */
+export function viewOf(data: UpdatesData | undefined, scope: UpdateScopeFilter, showUnknown: boolean, expanded: Expanded) {
   const shown = (data?.rows ?? []).filter((row) => matchesScope(row, scope));
   const updatable = shown.filter((row) => row.status === "update available");
   const unknown = shown.filter((row) => row.status === "cannot assess");
   const upToDate = shown.filter((row) => row.status === "up to date").length;
   const entries: readonly Entry[] = [
-    ...updatable.map((row): Entry => ({ kind: "update", row })),
+    ...flattenVisible(buildUpdateTree(updatable), expanded).map((line): Entry =>
+      line.node.data.kind === "group"
+        ? { kind: "group", line, label: line.node.data.label, leafKeys: line.node.data.leafKeys }
+        : { kind: "update", line, row: line.node.data.row }),
     ...(unknown.length > 0 ? [{ kind: "summary" } as const] : []),
     ...(unknown.length > 0 && showUnknown ? unknown.map((row): Entry => ({ kind: "unknown", row })) : []),
   ];

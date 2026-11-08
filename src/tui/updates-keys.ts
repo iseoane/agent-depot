@@ -1,5 +1,7 @@
 import type { Key } from "ink";
 
+import { collapseOrParent, expandNode, toggleNode, type Expanded } from "./tree.js";
+import { toggleGroup } from "./updates-tree.js";
 import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
 import type { UpdatesListView } from "./updates-model.js";
 import type { UpdatesMode } from "./updates-mode.js";
@@ -24,6 +26,9 @@ export interface UpdatesKeyContext {
   checked(): readonly string[];
   setChecked(next: readonly string[]): void;
   setCursor(next: number): void;
+  /** The groups the user has expanded; every group starts collapsed. */
+  expanded(): Expanded;
+  setExpanded(next: Expanded): void;
   unknownShown(): boolean;
   setShowUnknown(next: boolean): void;
   changeScope(next: UpdateScopeFilter): void;
@@ -49,28 +54,41 @@ function moveCursorKey(context: UpdatesKeyContext, snapshot: UpdatesSnapshot, in
   return true;
 }
 
-/** Space toggles the highlighted update, `a` selects them all. */
+/** Space toggles the highlighted update or every update of the highlighted group, `a` selects them all. */
 function selectKey(context: UpdatesKeyContext, snapshot: UpdatesSnapshot, input: string): boolean {
   if (input === " ") {
     const entry = snapshot.entries[snapshot.at];
-    if (entry?.kind !== "update") return true;
-    const checked = context.checked();
-    context.setChecked(checked.includes(entry.row.key) ? checked.filter((id) => id !== entry.row.key) : [...checked, entry.row.key]);
+    if (entry?.kind === "group") context.setChecked(toggleGroup(context.checked(), entry.leafKeys));
+    else if (entry?.kind === "update") context.setChecked(toggleGroup(context.checked(), [entry.row.key]));
   } else if (input === "a") context.setChecked(snapshot.updatable.map((row) => row.key));
   else return false;
   return true;
 }
 
-/** Right/left unfold and fold the "cannot be checked" rows; Enter toggles the fold or previews the selection. */
+/** Moves to the group above the highlighted line, or stays when there is none. */
+function selectParent(context: UpdatesKeyContext, snapshot: UpdatesSnapshot, parentId: string | undefined): void {
+  const parent = snapshot.entries.findIndex((entry) => entry.kind !== "summary" && entry.kind !== "unknown" && entry.line.node.id === parentId);
+  if (parent >= 0) context.setCursor(parent);
+}
+
+/** Right/left expand and collapse groups and the "cannot be checked" rows; Enter does the same on a line that is not an update. */
 function foldKey(context: UpdatesKeyContext, snapshot: UpdatesSnapshot, key: Key): void {
   const entry = snapshot.entries[snapshot.at];
   if (key.rightArrow) {
-    if (entry?.kind === "summary") context.setShowUnknown(true);
+    if (entry?.kind === "group") context.setExpanded(expandNode(context.expanded(), entry.line));
+    else if (entry?.kind === "summary") context.setShowUnknown(true);
   } else if (key.leftArrow) {
-    if (entry?.kind === "unknown") context.setCursor(snapshot.updatable.length);
-    if (entry?.kind === "summary" || entry?.kind === "unknown") context.setShowUnknown(false);
+    if (entry?.kind === "group" || entry?.kind === "update") {
+      const next = collapseOrParent(context.expanded(), [entry.line], 0);
+      context.setExpanded(next.expanded);
+      if (next.selectedId !== entry.line.node.id) selectParent(context, snapshot, entry.line.parentId);
+    } else if (entry?.kind === "summary" || entry?.kind === "unknown") {
+      if (entry.kind === "unknown") context.setCursor(snapshot.entries.findIndex((candidate) => candidate.kind === "summary"));
+      context.setShowUnknown(false);
+    }
   } else if (key.return) {
-    if (entry?.kind === "summary") context.setShowUnknown(!context.unknownShown());
+    if (entry?.kind === "group") context.setExpanded(toggleNode(context.expanded(), entry.line));
+    else if (entry?.kind === "summary") context.setShowUnknown(!context.unknownShown());
     else if (entry?.kind !== "unknown" && snapshot.data) context.startPreview();
   }
 }
