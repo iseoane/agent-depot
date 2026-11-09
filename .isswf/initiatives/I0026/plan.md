@@ -17,18 +17,21 @@ Type: bug
 - Operator 2026-11-07: «coordinador haz el triage de las issues que agent-depot». Open issues: #90, #91, #92 (all needs-triage).
 
 ## J002
-- Status: pending
+- Status: in-review
 - Objective: Make `pnpm test:single` map `.ts`/`.tsx` test paths correctly on Windows (Git Bash, PowerShell) and Linux (#91).
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J002/brief-r1.md)
 - Blocker: None
-- Next step: Triage prepared; awaiting an explicit operator start instruction.
+- Next step: PR from fix/test-single-path-mapping; merge on green CI under the operator's standing low-risk merge grant.
 
 ### Acceptance
 - See the triage brief.
 
 ### Evidence
-- Same operator triage request.
+- Operator 2026-11-09: «coordinador, completemos el arreglo de self update y luego ataca la I0026» (start, feature-to-PR) and «si las PR son de riesgo bajo integra sin pedirme permiso» (standing low-risk merge grant). Budget: coordinator implements directly (small, mapped change), 0 workers; mechanical/empirical verification, no model review.
+- Reproduced 2026-11-09 under Git Bash: `pnpm test:single tests/self-update.test.ts` → "Could not find 'dist/tests/self-update.test.ts'" (the `.ts` → `.js` replace did not survive shell escaping).
+- Fix: mapping moved to `scripts/test-single.mjs` (`compiledTestPath`), unit test `scripts/test-single.test.mjs` (3 pass), wired into Linux and Windows CI jobs.
+- Local Windows: Git Bash `tests/atomic-file.test.ts` 4/4 pass; `tests/tui-profile.test.tsx` 31 pass, 1 pre-existing skip, 0 fail; PowerShell `testsatomic-file.test.ts` 4/4 pass, exit 0; missing file → clear message, exit 1. `pnpm typecheck` and `pnpm lint` clean.
 
 ## J003
 - Status: pending
