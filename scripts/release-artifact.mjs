@@ -10,7 +10,8 @@ const packageName = "@iseoane/agent-depot";
 const stableSemVer = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
 
 function readTarballManifest(tarball) {
-  return JSON.parse(execFileSync("tar", ["-xOzf", tarball, "package/package.json"], { encoding: "utf8" }));
+  // Relative path + cwd: GNU tar (Git for Windows) reads "C:..." as a remote host.
+  return JSON.parse(execFileSync("tar", ["-xOzf", path.basename(tarball), "package/package.json"], { cwd: path.dirname(tarball), encoding: "utf8" }));
 }
 
 function readPackReport(reportPath) {
