@@ -15,12 +15,19 @@
 //   change every frame and break tests that wait for `frame !== before`.
 // - FORCE_COLOR: `node --test` sets it for its child processes when run from a real terminal, which
 //   makes Ink render ANSI colors into the frames the TUI tests match (so `npm publish` failed in a TTY).
+// - COLUMNS and LINES: set to 80x24. ink-testing-library's stdout has no `rows`, so Ink asks
+//   `terminal-size` on every layout and render; without these variables it runs `tput cols` and
+//   `tput lines` synchronously (on Windows about 0.5 s per frame, more under load), which stalls the
+//   event loop and made frame waits time out (#90). On Linux it may instead read the developer's real
+//   terminal from /dev/tty. 80x24 is the size that lookup otherwise falls back to.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 process.env.AGENT_DEPOT_NO_ANIMATION = "1";
 delete process.env.FORCE_COLOR;
+process.env.COLUMNS = "80";
+process.env.LINES = "24";
 delete process.env.XDG_STATE_HOME;
 delete process.env.XDG_CACHE_HOME;
 delete process.env.XDG_CONFIG_HOME;
