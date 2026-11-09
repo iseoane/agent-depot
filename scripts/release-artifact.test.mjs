@@ -21,7 +21,7 @@ function fixture() {
   writeFileSync(path.join(tarRoot, "package.json"), JSON.stringify(manifest));
   const filename = "iseoane-agent-depot-0.5.2.tgz";
   const tarballPath = path.join(directory, filename);
-  execFileSync("tar", ["-czf", tarballPath, "-C", directory, "package"]);
+  execFileSync("tar", ["-czf", filename, "package"], { cwd: directory });
   const bytes = readFileSync(tarballPath);
   const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
   const reportPath = path.join(directory, "pack.json");

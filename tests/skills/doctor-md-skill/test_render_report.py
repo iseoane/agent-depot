@@ -17,10 +17,10 @@ from render_report import (
 class ReportRendererTests(unittest.TestCase):
     def test_skill_startup_contract_is_centralized(self):
         skill_root = Path(__file__).resolve().parents[3] / "skills" / "doctor-md-skill"
-        skill_text = (skill_root / "SKILL.md").read_text()
+        skill_text = (skill_root / "SKILL.md").read_text(encoding="utf-8")
         harness_text = (
             skill_root / "references" / "supported-harnesses.md"
-        ).read_text()
+        ).read_text(encoding="utf-8")
 
         self.assertIn(
             "$SKILL_ROOT/references/supported-harnesses.md",
@@ -182,7 +182,7 @@ class ReportRendererTests(unittest.TestCase):
 
     def test_skill_output_uses_report_path_only(self):
         skill_path = Path(__file__).resolve().parents[3] / "skills" / "doctor-md-skill" / "SKILL.md"
-        skill_text = skill_path.read_text()
+        skill_text = skill_path.read_text(encoding="utf-8")
 
         self.assertIn(
             'render_report.py" "$REPORT_DIR/report.json" --open',
@@ -197,7 +197,7 @@ class ReportRendererTests(unittest.TestCase):
 
     def test_skill_edits_only_use_failed_conversations(self):
         skill_path = Path(__file__).resolve().parents[3] / "skills" / "doctor-md-skill" / "SKILL.md"
-        skill_text = skill_path.read_text()
+        skill_text = skill_path.read_text(encoding="utf-8")
 
         self.assertIn(
             "`raw_efficiency` = mean of efficiency scores across all **verified** sessions",

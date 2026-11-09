@@ -490,7 +490,7 @@ class OnlyFlagTests(unittest.TestCase):
             explicit = Path(tmp) / "PROJECT.md"
             explicit.write_text("# Project\n\nSome bare rule.\n", encoding="utf-8")
             out_dir = Path(tmp) / "out"
-            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            with mock.patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)}):
                 main(["--out", str(out_dir), "--only", "--file", str(explicit)])
             data = json.loads((out_dir / "rules.json").read_text())
             labels = [f["label"] for f in data["files"]]
@@ -505,7 +505,7 @@ class OnlyFlagTests(unittest.TestCase):
             explicit = Path(tmp) / "PROJECT.md"
             explicit.write_text("# Project\n\nSome bare rule.\n", encoding="utf-8")
             out_dir = Path(tmp) / "out"
-            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            with mock.patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)}):
                 main(["--out", str(out_dir), "--file", str(explicit)])
             data = json.loads((out_dir / "rules.json").read_text())
             labels = [f["label"] for f in data["files"]]

@@ -45,7 +45,8 @@ try {
 
   const extractedDirectory = path.join(sandbox, "extracted");
   mkdirSync(extractedDirectory);
-  run("tar", ["-xzf", path.join(packDirectory, packed.filename), "-C", extractedDirectory]);
+  // Relative path + cwd: GNU tar (Git for Windows) reads "C:..." as a remote host.
+  run("tar", ["-xzf", path.relative(extractedDirectory, path.join(packDirectory, packed.filename))], { cwd: extractedDirectory });
   for (const skill of ["doctor-md-agents", "doctor-md-skill"]) {
     const source = path.join(root, "skills", skill);
     const packedSkill = path.join(extractedDirectory, "package", "skills", skill);
@@ -82,6 +83,9 @@ try {
     ...process.env, HOME: homeDirectory, USERPROFILE: homeDirectory,
     XDG_STATE_HOME: stateDirectory, XDG_CONFIG_HOME: configDirectory, XDG_CACHE_HOME: cacheDirectory,
     PI_CODING_AGENT_DIR: piDirectory,
+    // On Windows Agent Depot keeps its state under APPDATA; without this the smoke test would read
+    // and write the developer's real state.
+    APPDATA: path.join(homeDirectory, "AppData", "Roaming"), LOCALAPPDATA: path.join(homeDirectory, "AppData", "Local"),
   };
   const agentDepot = (...args) => {
     try {
@@ -120,7 +124,7 @@ try {
 
   // The TUI entry point must load with Ink/React resolved from the installed dependencies.
   const tuiEntry = path.join(installDirectory, "node_modules", ...manifest.name.split("/"), "dist", "src", "tui", "render.js");
-  run(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(`file://${tuiEntry.replaceAll("\\", "/")}`)})`], { cwd: installDirectory, env });
+  run(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(`file://${tuiEntry.replaceAll("\\", "/")}`)})`], { cwd: installDirectory, env, shell: false });
 
   console.log(`Pack smoke test passed for ${manifest.name}@${manifest.version}`);
 } finally {
