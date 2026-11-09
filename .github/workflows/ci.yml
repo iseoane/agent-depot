@@ -33,6 +33,7 @@ jobs:
       - run: pnpm test:e2e
       - run: node --test scripts/release-artifact.test.mjs
       - run: node --test scripts/release-notes.test.mjs
+      - run: node --test scripts/test-single.test.mjs
 
   windows:
     runs-on: windows-latest
@@ -56,6 +57,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: node --test scripts/test-single.test.mjs
 
   audit:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
