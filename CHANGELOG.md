@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-11-09
+
+### Changed
+
+- Development only; the published CLI is unchanged. `pnpm test:single` maps test
+  paths on every shell, including Git Bash on Windows (#91); TUI tests no longer time
+  out on Windows (#90); local `pnpm test:e2e` on Windows skips its PTY journeys with
+  an explicit reason, as local end-to-end tests are Linux-only (#92).
+
 ## [0.6.11] - 2026-11-08
 
 ### Changed
