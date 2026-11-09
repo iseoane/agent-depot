@@ -49,7 +49,10 @@ async function fixture(t: TestContext, sourceOptions: SourceOperationsOptions = 
   await mkdir(directory);
   await mkdir(picker);
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "sources.json"), ...sourceOptions });
+  // No recipe executable is installed; resolving it here keeps App status checks off the real PATH,
+  // whose size made each export load take seconds on Windows (#90).
   const environment = { homeDirectory: home, startDirectory: picker, appEnvironment: { recipesDirectory: directory,
+    resolveExecutable: async () => undefined,
     runner: async () => { throw new Error("Recipes must not execute"); } } };
   let exits = 0;
   const view = render(<App operations={operations} environment={environment} onExit={() => { exits++; }} />);
