@@ -3,12 +3,12 @@
 Type: bug
 
 ## J001
-- Status: in-review
+- Status: completed
 - Objective: Make the four TUI frame-timeout tests from #90 pass reliably on Windows without hiding real failures.
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: PR from fix/tui-frame-timeouts; merge on green CI under the standing low-risk grant.
+- Next step: None. Merged; ships with the next release.
 
 ### Acceptance
 - See the triage brief: diagnosis identifies why each test times out under load, then load-independent waits; two consecutive full local Windows runs show 0 of these failures.
