@@ -17,12 +17,12 @@ Type: bug
 - Operator 2026-11-07: «coordinador haz el triage de las issues que agent-depot». Open issues: #90, #91, #92 (all needs-triage).
 
 ## J002
-- Status: in-review
+- Status: completed
 - Objective: Make `pnpm test:single` map `.ts`/`.tsx` test paths correctly on Windows (Git Bash, PowerShell) and Linux (#91).
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J002/brief-r1.md)
 - Blocker: None
-- Next step: PR from fix/test-single-path-mapping; merge on green CI under the operator's standing low-risk merge grant.
+- Next step: None. Merged; ships with the next release.
 
 ### Acceptance
 - See the triage brief.
