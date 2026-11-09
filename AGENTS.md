@@ -10,7 +10,7 @@ Package manager: pnpm. Tests run from compiled output in `dist/`, so every test 
 - `pnpm typecheck` / `pnpm lint`
 - `pnpm test` — all unit/integration tests (`dist/tests/*.test.js`)
 - `pnpm test:single tests/skill-install.test.ts` — one test file (path is mapped to `dist/tests/*.js`)
-- `pnpm test:e2e` — TUI end-to-end tests in `tests/e2e/` (node-pty, 120 s timeout)
+- `pnpm test:e2e` — TUI end-to-end tests in `tests/e2e/` (node-pty, 120 s timeout; Linux-only, every PTY journey skips on Windows, see `tests/e2e/README.md`)
 - `pnpm test:skills` — validates the bundled `skills/`
 - `pnpm test:pack` — package smoke test
 - `pnpm audit:all` — fallow dead-code, duplicates and health (coverage >= 85)

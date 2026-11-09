@@ -3,6 +3,11 @@
 `tui.e2e.test.ts` drives the built CLI (`dist/src/cli.js tui`, and one non-TUI command) inside a real pseudo-terminal with an
 isolated HOME, XDG and Pi state. Run it with `pnpm test:e2e`. Every journey is named by its test title.
 
+The suite runs on Linux only (CI included). On Windows every PTY journey is skipped: ConPTY passes Ink's
+synchronized-update markers through as empty pairs and paints the frame after them, so the harness never sees a
+complete frame, and winpty drops those markers and the alternate screen (issue #92). This does not depend on the
+parent console (Git Bash, PowerShell or a new conhost window behave the same).
+
 Every test process starts from `tests/isolated-env.ts`, which sets `AGENT_DEPOT_NO_ANIMATION=1` so Working
 renders one static frame. A journey that needs the real spinner must set `AGENT_DEPOT_NO_ANIMATION: "0"`
 for its own session.

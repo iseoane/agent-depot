@@ -23,6 +23,10 @@ const CLI = fileURLToPath(new URL("../../src/cli.js", import.meta.url));
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\-_])/gu;
 const TIMEOUT_MS = 30_000;
+// Windows ConPTY forwards Ink's synchronized-update markers (`?2026h`/`?2026l`) as empty pairs and paints the
+// frame afterwards, so no complete frame is ever observed; winpty drops those markers and the alternate screen.
+const WINDOWS_PTY_SKIP = process.platform === "win32"
+  && "Windows ConPTY reorders synchronized-update frames and winpty drops them; local e2e is Linux-only (issue #92)";
 
 function ansiColor(red: number, green: number, blue: number, text: string): string {
   return `\u001b[38;2;${red};${green};${blue}m${text}`;
@@ -566,7 +570,7 @@ test("Sources refresh requires reviewing every selected Source at narrow and wid
   }
 });
 
-test("the TUI walks every view in a real terminal and quits cleanly", { timeout: 120_000 }, async () => {
+test("the TUI walks every view in a real terminal and quits cleanly", { timeout: 120_000, skip: WINDOWS_PTY_SKIP }, async () => {
   const session = new TuiSession();
   try {
     await session.waitFor(/AGENT DEPOT[\s\S]*n add ·/u);
