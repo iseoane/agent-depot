@@ -34,15 +34,16 @@ Type: bug
 - Local Windows: Git Bash `tests/atomic-file.test.ts` 4/4 pass; `tests/tui-profile.test.tsx` 31 pass, 1 pre-existing skip, 0 fail; PowerShell `testsatomic-file.test.ts` 4/4 pass, exit 0; missing file → clear message, exit 1. `pnpm typecheck` and `pnpm lint` clean.
 
 ## J003
-- Status: pending
+- Status: in-progress
 - Objective: Find why the local Windows e2e pty fails with AttachConsole, then make the first journey run or skip it explicitly on win32 (#92).
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J003/brief-r1.md)
 - Blocker: None
-- Next step: Triage prepared; awaiting an explicit operator start instruction.
+- Next step: Worker A001 diagnoses and fixes or explicitly skips on fix/e2e-windows-pty (base 9190372); then review as needed, PR, merge on green CI if low risk.
 
 ### Acceptance
 - See the triage brief.
 
 ### Evidence
 - Same operator triage request.
+- Operator 2026-11-09 start: «ataca la I0026»; standing low-risk merge grant. Budget: 1 worker; up to 3 independent review rounds and 2 correction cycles. Methodology: isswf-debug, bug-diagnosis, verification-principles. TDD not selected.
