@@ -34,12 +34,12 @@ Type: bug
 - Local Windows: Git Bash `tests/atomic-file.test.ts` 4/4 pass; `tests/tui-profile.test.tsx` 31 pass, 1 pre-existing skip, 0 fail; PowerShell `testsatomic-file.test.ts` 4/4 pass, exit 0; missing file → clear message, exit 1. `pnpm typecheck` and `pnpm lint` clean.
 
 ## J003
-- Status: in-progress
+- Status: in-review
 - Objective: Find why the local Windows e2e pty fails with AttachConsole, then make the first journey run or skip it explicitly on win32 (#92).
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J003/brief-r1.md)
 - Blocker: None
-- Next step: Worker A001 diagnoses and fixes or explicitly skips on fix/e2e-windows-pty (base 9190372); then review as needed, PR, merge on green CI if low risk.
+- Next step: PR from fix/e2e-windows-pty; merge on green CI (Linux e2e 16/16) under the standing low-risk grant.
 
 ### Acceptance
 - See the triage brief.
@@ -47,3 +47,6 @@ Type: bug
 ### Evidence
 - Same operator triage request.
 - Operator 2026-11-09 start: «ataca la I0026»; standing low-risk merge grant. Budget: 1 worker; up to 3 independent review rounds and 2 correction cycles. Methodology: isswf-debug, bug-diagnosis, verification-principles. TDD not selected.
+- Worker A001 (complete, commit 6fdde59): "AttachConsole failed" is node-pty's cleanup helper after the 30 s timeout, not the cause. ConPTY forwards Ink's synchronized-update markers (?2026h/?2026l) as empty pairs and paints the frame after them, so the harness never sees a complete frame; winpty drops the markers and the alternate screen. Same 3241-byte output from Git Bash, pwsh and a new conhost window; IDE terminals untested. Fix: the first journey skips on win32 with an explicit reason; tests/e2e/README.md and AGENTS.md say local e2e is Linux-only. Worker-observed: local `pnpm test:e2e` exit 0 in ~16 s (1 pass, 15 skipped, 0 fail); typecheck and lint clean.
+- Incident: before coordinator guidance arrived, the worker launched `cmd //c "start /wait ..."` from Git Bash (suggested by the coordinator brief), which opened a blocking "Windows no encuentra el archivo \\" dialog on the operator's desktop. Guidance sent; no further window launches.
+- Review selection: mechanical. The skip is `false` off win32 and the rest is documentation, so Linux CI e2e 16/16 is the deciding evidence; no independent model review. Budget spent: 1 worker, 0 review rounds, 0 corrections.
