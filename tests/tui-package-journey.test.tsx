@@ -220,7 +220,7 @@ test("a Claude install disappears from Catalog and shows a verified available up
   j.view.stdin.write(" ");
   j.view.stdin.write(ENTER);
   const updatePreview = await reviewToEnd(j.view.lastFrame, j.view.stdin, /Apply 1 update\?/u);
-  assert.match(updatePreview, /\["claude","plugin","update","pstack@pstack-claude"\]/u);
+  assert.match(updatePreview, /\$ claude plugin update pstack@pstack-claude/u);
   assert.match(updatePreview, /Apply 1 update\?/u);
 });
 

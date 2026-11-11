@@ -784,7 +784,7 @@ test("in a 40x17 terminal the update batch ignores y until its footer reads to t
     assert.match(session.screen, /read ✓/u);
     assert.ok(flat().includes("Apply1update?y/n") && flat().includes("[y]Apply1update"), `the final footer does not offer the update:\n${session.screen}`);
     assert.ok(`${reviewed}${flat()}`.includes("FINAL-BATCH-TERM"), "paging never showed the delegated update argument");
-    assert.ok(flat().includes(`Workingdirectory:${home}`.replace(/\s/gu, "")), `the last preview row is not on screen:\n${session.screen}`);
+    assert.ok(flat().includes(`·in${home}`.replace(/\s/gu, "")), `the last preview row is not on screen:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= rows, `the final preview exceeded the ${rows}-row PTY:\n${session.screen}`);
     session.press("y");
     await session.waitFor(/Update summary: 1 updated,/u);
@@ -1155,7 +1155,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     session.resize(80, 24);
     await session.send("j", /Review/u);
     const updateReview = await scrollPreviewToEnd(session, /Apply 1 update\? y\/n/u);
-    assert.ok(updateReview.includes("FINAL-UPDATE-EXECUTION-TERM"), `update preview omitted its final execution term:\n${updateReview}`);
+    assert.ok(updateReview.replace(/[│\s]/gu, "").includes("FINAL-UPDATE-EXECUTION-TERM"), `update preview omitted its final execution term:\n${updateReview}`);
     assert.ok(session.screen.split("\n").length <= 24, `resized update preview exceeded its PTY:\n${session.screen}`);
     assert.doesNotMatch(await readFile(fixture.log, "utf8"), /"update"/u, "reviewing the update preview does not execute the recipe");
     const progress = await session.send("y", /Updating App fixture-app…/u);

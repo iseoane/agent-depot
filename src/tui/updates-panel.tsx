@@ -5,7 +5,8 @@ import { BorderPanel, FieldLine, PagedPreview } from "./panel-parts.js";
 import { usePreviewGeometry } from "./preview-window.js";
 import { describeRefresh, describeUnknownReasons, type Entry, type UpdatesListView, type UpdatesMessage } from "./updates-model.js";
 import type { UpdatesMode } from "./updates-mode.js";
-import { formatAgo, previewLineText, type UpdatesData } from "./updates.js";
+import { formatAgo, type UpdatesData } from "./updates.js";
+import { lineText } from "./preview-render.js";
 import { groupCheckState, packageLeafLabel, type CheckState } from "./updates-tree.js";
 import { updateModePreviewChrome, updateModePreviewLines } from "./updates-preview.js";
 
@@ -116,9 +117,10 @@ export function UpdatesFooter({ indicator, upToDate, updatableCount, checkedCoun
 type CapturedUpdateMode = Extract<UpdatesMode, { readonly kind: "manual" | "preview" | "confirm-paths" }>;
 
 function CapturedUpdatePreview({ mode }: { readonly mode: CapturedUpdateMode }) {
-  const lines = updateModePreviewLines(mode).map(previewLineText);
+  const styled = updateModePreviewLines(mode);
+  const lines = styled.map(lineText);
   const chrome = updateModePreviewChrome(mode);
-  return <PagedPreview chrome={chrome} lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
+  return <PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
 }
 
 export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {

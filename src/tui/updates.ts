@@ -1,7 +1,7 @@
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck, type AppLifecyclePlan } from "../app-flow.js";
 import type { FlowProgress } from "../flow-progress.js";
 import type { PackageOperations } from "../package-flow.js";
-import { displayPackageSelection, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
+import { displayPackageCoordinates, displayPackageSelection, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { formatVersionPolicy } from "../skill-install.js";
 import { sourceIdForUrl } from "../git-source.js";
@@ -11,10 +11,10 @@ import type { UpdateBatchAssessmentItem } from "../update-batch.js";
 import type { ProjectSkillSelection, ProjectSource } from "../project-manifest.js";
 import {
   applyConfirmedUpdates,
-  describeUpdatePreview,
   loadUpdates,
   previewUpdateCandidates,
   readScopeInstallations,
+  skillUpdatePreviewItem,
   type LoadedUpdates,
   type UpdatePreviewFailure,
   type UpdateScope,
@@ -22,7 +22,8 @@ import {
 import type { TuiEnvironment } from "./environment.js";
 import { packageOperationsOf } from "./environment.js";
 import { formatVersionEvidence } from "./installations.js";
-import { installedEvidenceLabel, packagePlanLines, packageStatusLabel, packageVersionLabel, recordedVersionLabel } from "./package-rows.js";
+import { describePackageComponent, installedEvidenceLabel, packageStatusLabel, packageVersionLabel, recordedVersionLabel } from "./package-rows.js";
+import type { PreviewDocument, PreviewItem, PreviewRow } from "../preview-model.js";
 
 export type { UpdateScope };
 
@@ -321,18 +322,6 @@ export interface PreparedUpdateGroup {
   readonly overwriteShown: ReadonlySet<string>;
 }
 
-export type UpdatePreviewLine =
-  | { readonly kind: "field"; readonly label: string; readonly value: string }
-  | { readonly kind: "text"; readonly text: string };
-
-export function previewText(text: string): UpdatePreviewLine {
-  return { kind: "text", text };
-}
-
-export function previewLineText(line: UpdatePreviewLine): string {
-  return line.kind === "field" ? `${line.label} ${line.value}` : line.text;
-}
-
 /** An update plan for one recorded Package, with the receipt state the preview must show. */
 export interface PreparedPackagePlan {
   readonly plan: PackageLifecyclePlan;
@@ -352,13 +341,66 @@ export interface PreparedUpdates {
   /** Package update plans, each with the state of its action-specific receipt. */
   readonly packagePlans?: readonly PreparedPackagePlan[];
   readonly packageFailures: readonly string[];
-  /** The exact `update apply` preview of every candidate whose preview succeeded. */
-  readonly lines: readonly UpdatePreviewLine[];
+  /** What applying does, item by item, plus what could not be previewed. */
+  readonly document: PreviewDocument;
   /** Items whose preview succeeded, across scopes; only these are applied. */
   readonly applicable: readonly (UpdateBatchAssessmentItem | AppLifecyclePlan | PackageLifecyclePlan)[];
   readonly failures: readonly UpdatePreviewFailure[];
   /** Non-canonical locations, per scope, that need their own explicit confirmation. */
   readonly nonCanonicalPaths: readonly ScopedPath[];
+}
+
+const PROJECT_WARNING = /^ {2}WARNING: /u;
+
+function counted(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function appPreviewItem(plan: AppLifecyclePlan): PreviewItem {
+  const rows: PreviewRow[] = [];
+  if (plan.argv) {
+    rows.push({ kind: "command", argv: plan.argv, cwd: plan.cwd, ...(plan.executable === undefined ? {} : { executable: plan.executable }) });
+    if (plan.executable === undefined) rows.push({ kind: "warning", text: `${JSON.stringify(plan.argv[0])} not found in PATH` });
+  } else {
+    rows.push({ kind: "field", label: "Working directory", value: plan.cwd });
+  }
+  if (plan.manual) rows.push({ kind: "field", label: "Manual", value: plan.manual });
+  if (plan.warning) rows.push({ kind: "warning", text: plan.warning });
+  return {
+    title: plan.entry.recipe?.name ?? plan.entry.file,
+    version: { from: plan.previousVersion ?? "unknown", to: plan.latestVersion ?? "unknown" },
+    rows,
+  };
+}
+
+/** The frozen plan with every fact the approval covers: origin, inventory, commands, blast radius and approval state. */
+function packagePreviewItem(row: PackageUpdateRow, { plan, approval }: PreparedPackagePlan): PreviewItem {
+  const { descriptor, selection } = plan;
+  const rows: PreviewRow[] = [
+    { kind: "field", label: "Coordinates", value: displayPackageSelection(selection) },
+    { kind: "field", label: "Origin", value: `manifest ${plan.origin.manifestDigest.slice(0, 12)}${plan.origin.resolvedCommit === undefined ? "" : `  commit ${plan.origin.resolvedCommit.slice(0, 7)}`}` },
+    { kind: "field", label: `Components (${descriptor.components.length})`, value: "" },
+    ...descriptor.components.map((component): PreviewRow => ({ kind: "text", text: describePackageComponent(component), indent: 1 })),
+  ];
+  if (plan.commands.length === 0) {
+    rows.push({ kind: "text", text: "This action runs no host command." }, { kind: "field", label: "Working directory", value: plan.cwd });
+  }
+  plan.commands.forEach((command, position) => rows.push(
+    { kind: "field", label: `Step ${position + 1}`, value: command.purpose },
+    { kind: "command", argv: [command.executable, ...command.args], executable: command.resolvedPath ?? command.executable, cwd: plan.cwd },
+  ));
+  rows.push(
+    { kind: "field", label: "Blast radius", value: plan.affects.map((coordinates) => displayPackageCoordinates(selection.source, coordinates)).join(", ") },
+    { kind: "field", label: "Approval", value: approval },
+    ...plan.warnings.map((warning): PreviewRow => ({ kind: "warning", text: warning })),
+    ...(approval === "needs approval" ? [{ kind: "text" as const, text: "This apply approves the declaration above." }] : []),
+  );
+  return {
+    title: descriptor.name,
+    detail: selection.host,
+    version: { from: recordedVersionLabel(row.check.installed), to: packageVersionLabel(descriptor.version) },
+    rows,
+  };
 }
 
 /** Plan step: previews the selection from the assessed snapshots, scope by scope. Changes nothing. */
@@ -371,15 +413,25 @@ export async function prepareUpdates(
   const appFailures: string[] = [];
   const packagePlans: PreparedPackagePlan[] = [];
   const packageFailures: string[] = [];
-  const lines: UpdatePreviewLine[] = [];
   const failures: UpdatePreviewFailure[] = [];
+  const context: string[] = [];
+  const warnings: string[] = [];
+  const skillItems: PreviewItem[] = [];
+  const appItems: PreviewItem[] = [];
+  const packageItems: PreviewItem[] = [];
   for (const { scope, loaded } of data.results) {
-    const items = selected.filter((row): row is SkillUpdateRow => row.kind !== "app" && row.kind !== "package" && row.scope === scope).map((row) => row.item);
-    if (!loaded || items.length === 0) continue;
-    const { context } = loaded;
-    const outcome = await previewUpdateCandidates(items, context);
-    lines.push(...loaded.projectTarget.map(previewText));
-    lines.push(...outcome.plans.flatMap((plan) => describeUpdatePreview(plan, scope, context.projectRoot, "prompt").map(previewText)));
+    const rows = selected.filter((row): row is SkillUpdateRow => row.kind === "skill" && row.scope === scope);
+    if (!loaded || rows.length === 0) continue;
+    const outcome = await previewUpdateCandidates(rows.map((row) => row.item), loaded.context);
+    for (const line of loaded.projectTarget) {
+      if (PROJECT_WARNING.test(line)) warnings.push(line.replace(PROJECT_WARNING, ""));
+      else context.push(line);
+    }
+    for (const plan of outcome.plans) {
+      const row = rows.find((candidate) => candidate.item === plan.item);
+      const item = skillUpdatePreviewItem(plan, scope, loaded.context.projectRoot, "prompt");
+      skillItems.push(row === undefined ? item : { ...item, version: { from: row.installed, to: row.available } });
+    }
     failures.push(...outcome.failures);
     groups.push({
       scope,
@@ -394,18 +446,7 @@ export async function prepareUpdates(
     try {
       const plan = await data.apps.planLifecycle(row.check.entry, "update", undefined, row.check);
       appPlans.push(plan);
-      lines.push(
-        { kind: "field", label: "Environment:", value: plan.environment },
-        previewText(row.path),
-        { kind: "field", label: "Version:", value: `${plan.previousVersion} -> ${plan.latestVersion ?? "unknown"}` },
-        ...(plan.argv ? [
-          { kind: "field" as const, label: "argv:", value: JSON.stringify(plan.argv) },
-          { kind: "field" as const, label: "Executable:", value: plan.executable ?? `${JSON.stringify(plan.argv[0])} not found in PATH` },
-        ] : []),
-        ...(plan.manual ? [{ kind: "field" as const, label: "Manual:", value: plan.manual }] : []),
-        { kind: "field", label: "Working directory:", value: plan.cwd },
-        ...(plan.warning ? [previewText(plan.warning)] : []),
-      );
+      appItems.push(appPreviewItem(plan));
     } catch (error) {
       appFailures.push(`Failed ${row.path}: preview failed: ${errorText(error)}`);
     }
@@ -416,17 +457,34 @@ export async function prepareUpdates(
       const plan = await data.packages.planLifecycle(row.check.installed.selection, "update");
       const approval = await data.packages.approvalStatus(row.check.installed.selection, "update");
       packagePlans.push({ plan, approval });
-      lines.push(...packagePlanLines(plan, approval).map(previewText));
-      if (approval === "needs approval") lines.push(previewText("This apply approves the declaration above."));
+      packageItems.push(packagePreviewItem(row, { plan, approval }));
     } catch (error) {
       packageFailures.push(`Failed ${row.path}: preview failed: ${errorText(error)}`);
     }
   }
+  const applicable = [...groups.flatMap((group) => group.applicable), ...appPlans, ...packagePlans.map(({ plan }) => plan)];
+  const sections = [
+    { heading: "SKILLS", items: skillItems, noun: "Skill" },
+    { heading: "APPS", items: appItems, noun: "App" },
+    { heading: "PACKAGES", items: packageItems, noun: "Package" },
+  ].filter(({ items }) => items.length > 0);
+  const environments = new Set([...appPlans, ...packagePlans.map(({ plan }) => plan)].map((plan) => plan.environment));
   return {
     groups, apps: data.apps, appPlans, appFailures,
     packages: data.packages, packagePlans, packageFailures,
-    lines,
-    applicable: [...groups.flatMap((group) => group.applicable), ...appPlans, ...packagePlans.map(({ plan }) => plan)],
+    document: {
+      action: `Apply ${counted(applicable.length, "update")}`,
+      summary: sections.map(({ items, noun }) => counted(items.length, noun)).join(" · "),
+      context: [...context, ...[...environments].map((environment) => `Environment: ${environment}`)],
+      warnings,
+      sections: sections.map(({ heading, items }) => ({ heading, items })),
+      failures: [
+        ...failures.map(({ item, message }) => `${item.selection.path}: ${message}`),
+        ...appFailures,
+        ...packageFailures,
+      ],
+    },
+    applicable,
     failures,
     nonCanonicalPaths: groups.flatMap((group) => group.nonCanonicalPaths.map((location) => ({ scope: group.scope, path: location }))),
   };
