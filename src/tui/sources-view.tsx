@@ -11,7 +11,7 @@ import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
 import { groupRecipeRows, useSourcesRecipes, type RecipeGroup } from "./sources-recipes.js";
-import { BorderPanel, DecisionPrompt, FieldLine, PagedPreview, Working } from "./panel-parts.js";
+import { BorderPanel, PagedPreview, Working } from "./panel-parts.js";
 import { usePreviewGeometry, type PreviewChrome, type PreviewGeometry } from "./preview-window.js";
 import { movePreviewCursor } from "./mode-keys.js";
 import { formatAgo } from "./updates.js";
@@ -125,6 +125,23 @@ function refreshChrome(count: number): PreviewChrome {
   };
 }
 
+function removeSourcePreviewLines(source: GitSource): string[] {
+  return [`Source: remove Git Source ${source.id} from ${source.url}`];
+}
+
+const REMOVE_SOURCE_CHROME: PreviewChrome = {
+  title: "Remove Git Source",
+  action: "Remove Git Source",
+  consequence: "Remove this Source? y/n",
+};
+
+/** The lines and chrome of the open confirmation preview, shared by key handling and rendering. */
+function confirmPreview(mode: Extract<Mode, { kind: "confirm" }>): { readonly lines: string[]; readonly chrome: PreviewChrome } {
+  return mode.action === "refresh"
+    ? { lines: refreshPreviewLines(mode.sources), chrome: refreshChrome(mode.sources.length) }
+    : { lines: removeSourcePreviewLines(mode.source), chrome: REMOVE_SOURCE_CHROME };
+}
+
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange, refreshSession }: SourcesViewProps) {
   const refreshStates = useRefreshStates(refreshSession);
   const { rows: terminalRows } = useWindowSize();
@@ -215,8 +232,8 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   rowsRef.current = rows;
   const selected = resolveIndex(rows, selection);
   const selectedRow = rows[selected];
-  const hints = mode.kind === "confirm" && mode.action === "refresh"
-    ? "↑↓/Pg page · y refresh · n cancel"
+  const hints = mode.kind === "confirm"
+    ? `↑↓/Pg page · y ${mode.action} · n cancel`
     : sourceRowHints(selectedRow);
   useEffect(() => { onHintsChange?.(hints); }, [hints, onHintsChange]);
   const select = (index: number) => {
@@ -305,13 +322,11 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       return;
     }
     if (mode.kind === "confirm") {
-      if (mode.action === "refresh") {
-        const lines = refreshPreviewLines(mode.sources);
-        const viewport = previewGeometry(lines, mode.cursor, refreshChrome(mode.sources.length));
-        const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
-        if (cursor !== undefined) { dispatch({ type: "preview-cursor", cursor }); return; }
-        if (input === "y" && !viewport.reachedEnd) return;
-      }
+      const { lines, chrome } = confirmPreview(mode);
+      const viewport = previewGeometry(lines, mode.cursor, chrome);
+      const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
+      if (cursor !== undefined) { dispatch({ type: "preview-cursor", cursor }); return; }
+      if (input === "y" && !viewport.reachedEnd) return;
       if (input === "y") {
         if (mode.action === "refresh") {
           const { sources: targets } = mode;
@@ -441,20 +456,9 @@ function Prompt({ mode, previewGeometry }: { readonly mode: Mode; readonly previ
   if (mode.kind === "add-kind") return <Text>Add: 1 Git Source (skills + Packages) · 2 App recipe (Esc cancel)</Text>;
   if (mode.kind === "input") return <Text>URL: {mode.value}</Text>;
   if (mode.kind === "busy") return <BorderPanel title="Sources"><Working label={mode.label} since={mode.startedAt} /></BorderPanel>;
-  if (mode.kind === "confirm") {
-    if (mode.action === "refresh" && previewGeometry !== undefined) {
-      const lines = refreshPreviewLines(mode.sources);
-      const chrome = refreshChrome(mode.sources.length);
-      return <PagedPreview chrome={chrome} lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
-    }
-    if (mode.action === "remove") {
-      return (
-        <BorderPanel title="Remove Git Source">
-          <FieldLine label="Source" value={`remove Git Source ${mode.source.id} from ${mode.source.url}`} />
-          <DecisionPrompt>Remove this Source?</DecisionPrompt>
-        </BorderPanel>
-      );
-    }
+  if (mode.kind === "confirm" && previewGeometry !== undefined) {
+    const { lines, chrome } = confirmPreview(mode);
+    return <PagedPreview chrome={chrome} lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
   }
   return null;
 }
