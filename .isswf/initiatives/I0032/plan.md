@@ -9,8 +9,9 @@ Type: feature
 - Brief: [J001 brief-r1.md](jobs/J001/brief-r1.md)
 - Brief J002: [brief-r1.md](jobs/J002/brief-r1.md)
 - Brief J003a: [brief-r1.md](jobs/J003a/brief-r1.md)
+- Brief J003b: [brief-r1.md](jobs/J003b/brief-r1.md)
 - Blocker: None
-- Next step: J003a revisión de recetas (worker), luego J003b, J004a-c, J005 y release 0.6.14.
+- Next step: J003b (worker sonnet), luego J004a-c, J005, J006 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -30,3 +31,4 @@ Type: feature
 - Regla de tamaño S/M/L aplicada en .isswf/project-setup.md (f3ff0a1); propuesta a isSWF: https://github.com/iseoane/isSWF/issues/270 (needs-triage, enhancement). Desviación del coordinador: los dispatches de esta sesión no pasaron el modelo/esfuerzo por rol del setup (heredaron el de la sesión); a partir de J003b se aplica la tabla.
 - J003a worker f762165..ee1069f. Revisión V001 (opus, Agent-tool): inconclusive por checks no observados, 0 bloqueantes. Coordinador observó preview-model 2/0, preview-render 2/0, tui-sources-recipes 24/0 + CI. Seguimientos: espacios no ASCII (\p{Zs}) sin escapar en commandLine; ee1069f sin test; e2e de argv delegados sin fronteras exactas (fijar fila en vista ancha); pasos con nombres de campo de la receta.
 - Nuevo J006 (prioritario, antes de la release; preexistente, confirmado en f762165): texto libre de recetas/Sources (nombre, homepage, manual, declaraciones, cwd) llega al terminal sin escapar caracteres de control/ESC → puede redibujar sobre las líneas `$ …` y alterar la geometría de la compuerta y. Escapar una vez al renderizar líneas estilizadas; incluir \p{Zs} no ASCII en commandLine.
+- J003a entregado: PR #109 fusionado con CI verde (corrección de test frágil en Windows a89e9bc).
