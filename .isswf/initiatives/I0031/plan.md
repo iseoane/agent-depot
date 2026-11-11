@@ -6,7 +6,7 @@ Type: feature
 - Status: pending
 - Objective: En la vista Sources, marcar cada Source como sin refrescar/refrescando/refrescada; al arrancar la TUI refrescar en background y actualizar la marca por Source.
 - Depends on: None
-- Blocker: falta inicio explícito; revisar ADR 0004 (refresco antes de previews) y el refresco stale existente en catalog-view.
+- Blocker: en cola tras I0030.
 - Next step: research del estado de refresco actual (sources.ts, git-source.ts, catalog-view stale) y diseño de concurrencia/errores (fallo de red, Source lenta).
 
 ### Acceptance
