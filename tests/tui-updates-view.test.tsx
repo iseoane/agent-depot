@@ -1557,3 +1557,20 @@ test("the update batch preview lists the items it could not preview in their own
   assert.ok(failed > rows.findIndex(row => /^ *SKILLS$/u.test(row)), `failures follow the applicable items:\n${frame}`);
   assert.match(rows[failed + 1] ?? "", /portable\/bad: cannot read install metadata/u);
 });
+
+test("at 40x17 the batch footer still asks its question when several Skills lose local changes", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated", diskContent: "edited by hand" },
+    { name: "two", state: "outdated", diskContent: "edited by hand" },
+    { name: "three", state: "outdated", diskContent: "edited by hand" },
+  ]);
+  const view = mount(f);
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
+  await expandList(view.lastFrame, view.stdin, /portable\/three/);
+  resizeTerminal(view, { columns: 40, rows: 17 });
+  press(view.stdin, "a");
+  press(view.stdin, ENTER);
+  const end = await confirmAtEnd(view, 17, /\[y\] Apply 3 updates/, () => squash(view.lastFrame() ?? "").includes("3updated,0failed"));
+  assert.match(squash(end), /Apply3updates\?y\/n/u);
+});
