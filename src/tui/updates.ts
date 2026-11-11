@@ -95,6 +95,8 @@ export interface RefreshReport {
   readonly failed: readonly SourceRefreshFailure[];
   /** Scopes whose installations could not be read to find the sources to refresh; the check used the cached data. */
   readonly unreadable: readonly { readonly scope: UpdateScope; readonly reason: string }[];
+  /** When the oldest reused refresh finished, if a recent refresh stood in for a new one. */
+  readonly reusedAt?: number;
 }
 
 /** A non-canonical location together with the scope it belongs to: the same relative path can exist in both. */
