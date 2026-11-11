@@ -8,7 +8,7 @@ Type: feature
 - Depends on: None
 - Brief: [J001 brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: J001 pie de confirmación compartido + geometría única; J002 preview de lote; J003 revisión de recetas (secuenciales, un PR cada uno).
+- Next step: J001 en curso (worker en rama feat/preview-confirm-footer). Si se interrumpe: revisar `git log 88e3166..feat/preview-confirm-footer` y `git status`, conservar commits, relanzar worker con brief-r1 indicando el punto alcanzado; luego revisión independiente, PR y CI. Después J002, J003, J004 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
