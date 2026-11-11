@@ -190,3 +190,40 @@ test("stopping the session drops the queued background refreshes and lets the ru
   assert.equal(session.snapshot().get(two.id)?.status, "refreshed");
   assert.equal(session.snapshot().get(three.id), undefined);
 });
+
+test("a forced user refresh waits for a background refresh in flight and then refreshes in the foreground", { timeout: 5_000 }, async () => {
+  const skills = gitSource("skills");
+  const { operations, calls } = deferredOperations([skills]);
+  const session = createSourceRefreshSession(operations);
+
+  session.refreshInBackground([skills]);
+  await settle();
+  const forced = session.refresh(skills, { force: true });
+  const again = session.refresh(skills, { force: true });
+  await settle();
+  assert.equal(calls.length, 1, "nothing runs beside the background refresh");
+  calls[0]!.resolve();
+  await settle();
+  assert.deepEqual(calls.map((call) => call.background), [true, false], "concurrent user calls share one foreground refresh");
+  calls[1]!.resolve();
+  await Promise.all([forced, again]);
+});
+
+test("an unforced user refresh reuses a background refresh that succeeds and refreshes in the foreground after one that fails", { timeout: 5_000 }, async () => {
+  const [ok, broken] = [gitSource("ok"), gitSource("broken")];
+  const { operations, calls } = deferredOperations([ok, broken]);
+  const session = createSourceRefreshSession(operations);
+
+  session.refreshInBackground([ok, broken]);
+  await settle();
+  const reused = session.refresh(ok);
+  const retried = session.refresh(broken);
+  calls[0]!.resolve();
+  calls[1]!.reject(new Error("terminal prompts disabled"));
+  await reused;
+  await settle();
+  assert.deepEqual(calls.map((call) => [call.sourceId, call.background]), [[ok.id, true], [broken.id, true], [broken.id, false]]);
+  calls[2]!.resolve();
+  await retried;
+  assert.equal(session.snapshot().get(broken.id)?.status, "refreshed");
+});
