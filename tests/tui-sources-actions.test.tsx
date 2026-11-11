@@ -9,6 +9,7 @@ import { BUILT_IN_SOURCE, type Source, type SourceOperations } from "../src/sour
 import { App } from "../src/tui/app.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const external: GitSource = {
   id: "git:1234567890abcdef12345678",
@@ -353,3 +354,39 @@ test("no reload is issued after the view unmounts mid-action", async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(lists, before);
 });
+
+for (const size of PREVIEW_SIZES) {
+  test(`Source removal in the whole App accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async () => {
+    const h = harness();
+    const view = render(<App operations={h.operations} />);
+    resizeTerminal(view, size);
+    await waitForFrame(view.lastFrame, /builtin:agent-depot/);
+    view.stdin.write(DOWN);
+    await highlights(view.lastFrame, /git:1234/);
+    view.stdin.write("d");
+    await confirmAtEnd(view, size.rows, /\[y\] Remove Git Source/, () => h.calls.includes(`remove ${external.id}`));
+    await waitForFrame(view.lastFrame, /Removed Git Source: git:1234/);
+    view.unmount();
+  });
+}
+
+for (const [label, cancelKey] of [["n", "n"], ["Esc", ESC]] as const) {
+  test(`Source removal ignores y mid-read and ${label} cancels it`, async () => {
+    const h = harness();
+    const view = render(<SourcesView operations={h.operations} />);
+    resizeTerminal(view, { columns: 40, rows: 12 });
+    await waitForFrame(view.lastFrame, /builtin:agent-depot/);
+    view.stdin.write(DOWN);
+    await highlights(view.lastFrame, /git:1234/);
+    view.stdin.write("d");
+    const reading = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+    view.stdin.write("y");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.match(view.lastFrame() ?? "", /read [█░]* ?\d+%/u, reading);
+    assert.deepEqual(h.calls, []);
+    view.stdin.write(cancelKey);
+    await waitForFrame(view.lastFrame, (frame) => !/Remove Git Source|read [█░]* ?\d+%/u.test(frame));
+    assert.deepEqual(h.calls, []);
+    view.unmount();
+  });
+}

@@ -9,7 +9,7 @@ import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import { SourcesView } from "../src/tui/sources-view.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
@@ -223,4 +223,52 @@ test("a manual App uninstall before recipe removal shows its instruction in the 
     "   Manual: Uninstall demo in your terminal",
   ].map(row => row.trimEnd()));
   assert.equal(rows[start + 4]?.trimEnd(), `   in ${f.home} · on linux`);
+});
+
+for (const size of PREVIEW_SIZES) {
+  test(`recipe removal accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t);
+    resizeTerminal(f.view, size);
+    f.view.stdin.write("d");
+    await confirmAtEnd(f.view, size.rows, /\[y\] Remove the demo recipe/, () => /Removed App recipe:/.test(f.view.lastFrame() ?? ""));
+    await assert.rejects(readFile(f.file), { code: "ENOENT" });
+  });
+}
+
+for (const [label, cancelKey] of [["n", "n"], ["Esc", "\u001B"]] as const) {
+  test(`recipe removal ignores y mid-read and ${label} cancels it`, async t => {
+    const f = await fixture(t);
+    resizeTerminal(f.view, { columns: 40, rows: 12 });
+    f.view.stdin.write("d");
+    const reading = await waitForFrame(f.view.lastFrame, /read [█░]* ?\d+%/u);
+    f.view.stdin.write("y");
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.match(f.view.lastFrame() ?? "", /read [█░]* ?\d+%/u, reading);
+    assert.ok(await readFile(f.file));
+    f.view.stdin.write(cancelKey);
+    await waitForFrame(f.view.lastFrame, text => !/Recipe removal|read [█░]* ?\d+%/u.test(text));
+    assert.ok(await readFile(f.file));
+  });
+}
+
+test("the recipe removal preview stands alone: no earlier notice sits above it in the whole App", async t => {
+  const f = await fixture(t);
+  await writeFile(path.join(f.home, "apps", "other.json"), JSON.stringify({ name: "other", install: { argv: ["other", "install"] }, update: { manual: "update other" },
+    uninstall: { argv: ["other", "remove"] }, version: { argv: ["other", "version"], pattern: "(1\\.2\\.3)" } }));
+  for (const entry of await f.apps.load()) await f.apps.approve(entry);
+  f.view.unmount();
+  const view = render(<App operations={f.operations} environment={f.environment} />);
+  deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, { columns: 80, rows: 24 });
+  await waitForFrame(view.lastFrame, text => /demo/.test(text) && /other/.test(text));
+  view.stdin.write("d");
+  await waitForFrame(view.lastFrame, /Remove recipe for \w+\? y\/n/u);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Removed App recipe/);
+  await waitForSettled(view.lastFrame);
+  view.stdin.write("d");
+  const frame = await waitForFrame(view.lastFrame, /Delete recipe:/u);
+  assert.doesNotMatch(frame, /Removed App recipe/);
+  assert.match(frame, /read [█░]* ?\d+%|read ✓/u);
+  assert.ok(frame.split("\n").length <= 24, frame);
 });
