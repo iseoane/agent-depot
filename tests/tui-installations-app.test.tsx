@@ -577,15 +577,17 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
-test("a manual App Host step names its check in the shared footer", async t => {
-  const fixture = await appFixture(t, true);
-  await selectInstalledApp(fixture.view);
-  resizeTerminal(fixture.view, { columns: 40, rows: 17 });
-  fixture.view.stdin.write("h");
-  await waitForFrame(fixture.view.lastFrame, /Checked = setup/i);
-  fixture.view.stdin.write(" ");
-  await waitForFrame(fixture.view.lastFrame, /\[ \] 1 pi/);
-  fixture.view.stdin.write("\r");
-  await confirmAtEnd(fixture.view, 17, /\[y\] Check now/, () => /demo: completed/.test(fixture.view.lastFrame() ?? ""));
-  assert.ok(!fixture.commands.includes("teardown"));
-});
+for (const size of PREVIEW_SIZES) {
+  test(`a manual App Host step names its check in the shared footer at ${size.columns}x${size.rows}`, async t => {
+    const fixture = await appFixture(t, true);
+    await selectInstalledApp(fixture.view);
+    resizeTerminal(fixture.view, size);
+    fixture.view.stdin.write("h");
+    await waitForFrame(fixture.view.lastFrame, /Checked = setup/i);
+    fixture.view.stdin.write(" ");
+    await waitForFrame(fixture.view.lastFrame, /\[ \] 1 pi/);
+    fixture.view.stdin.write("\r");
+    await confirmAtEnd(fixture.view, size.rows, /\[y\] Check now/, () => /demo: completed/.test(fixture.view.lastFrame() ?? ""));
+    assert.ok(!fixture.commands.includes("teardown"));
+  });
+}

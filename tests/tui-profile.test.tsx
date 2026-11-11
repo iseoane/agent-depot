@@ -994,17 +994,23 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
-test("an export note opens in the shared footer with a close action and no y", async t => {
-  const f = await fixture(t);
-  await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
-  f.view.stdin.write("e");
-  await waitForFrame(f.view.lastFrame, /▸ Sources/);
-  await expandExportGroup(f.view, "Export notes");
-  f.view.stdin.write("j");
-  await waitForFrame(f.view.lastFrame, /> .*Not transferred|> .*Selected Skills/);
-  f.view.stdin.write("\r");
-  const detail = await waitForFrame(f.view.lastFrame, /│ Export note(?!s)/);
-  assert.match(detail, /read ✓/);
-  assert.match(detail, /\[Esc\] close/);
-  assert.doesNotMatch(detail, /\[y\]/);
-});
+for (const size of PREVIEW_SIZES) {
+  test(`an export note opens in the shared footer with a close action and no y at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t);
+    await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
+    resizeTerminal(f.view, size);
+    f.view.stdin.write("e");
+    await waitForFrame(f.view.lastFrame, /▸ Sources/);
+    await expandExportGroup(f.view, "Export notes");
+    f.view.stdin.write("j");
+    await waitForFrame(f.view.lastFrame, /> .*Not transferred|> .*Selected Skills/);
+    f.view.stdin.write("\r");
+    const detail = await waitForFrame(f.view.lastFrame, /│ Export note(?!s)/);
+    assert.match(detail, /read ✓/);
+    assert.match(detail, /\[Esc\] close/);
+    assert.doesNotMatch(detail, /\[y\]/);
+    assert.ok(detail.split("\n").length <= size.rows, detail);
+    f.view.stdin.write("\u001b");
+    await waitForFrame(f.view.lastFrame, /Export notes/);
+  });
+}

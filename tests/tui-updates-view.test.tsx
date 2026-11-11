@@ -1466,16 +1466,18 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
-test("replacing non-canonical paths waits for the end of their list in the shared footer", async (t) => {
-  const f = await fixture(t);
-  await seedProject(f, [{ name: "one", state: "outdated", installPath: "tools/skills/one" }]);
-  const view = mount(f);
-  await expandList(view.lastFrame, view.stdin, /portable\/one/);
-  resizeTerminal(view, { columns: 40, rows: 17 });
-  press(view.stdin, "a");
-  press(view.stdin, ENTER);
-  await confirmAtEnd(view, 17, /\[y\] Apply 1 update/, () => /Outside \.agents\/skills/.test(view.lastFrame() ?? ""));
-  await confirmAtEnd(view, 17, /\[y\] Replace these paths/, () => squash(view.lastFrame() ?? "").includes("1updated,0failed"));
-  assert.equal(await f.read(f.project, "tools/skills/one"), newText("one"));
-  view.unmount();
-});
+for (const size of PREVIEW_SIZES) {
+  test(`replacing non-canonical paths waits for the end of their list in the shared footer at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t);
+    await seedProject(f, [{ name: "one", state: "outdated", installPath: "tools/skills/one" }]);
+    const view = mount(f);
+    await expandList(view.lastFrame, view.stdin, /portable\/one/);
+    resizeTerminal(view, size);
+    press(view.stdin, "a");
+    press(view.stdin, ENTER);
+    await confirmAtEnd(view, size.rows, /\[y\] Apply 1 update/, () => /Outside \.agents\/skills/.test(view.lastFrame() ?? ""));
+    await confirmAtEnd(view, size.rows, /\[y\] Replace these paths/, () => squash(view.lastFrame() ?? "").includes("1updated,0failed"));
+    assert.equal(await f.read(f.project, "tools/skills/one"), newText("one"));
+    view.unmount();
+  });
+}

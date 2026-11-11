@@ -303,6 +303,20 @@ test("approval and forget panels page inside a short terminal, and y waits for t
 });
 
 for (const size of PREVIEW_SIZES) {
+  test(`Package approval and forget accept y exactly when their footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const longDirectory = path.join("/home/user", "a-long-working-directory-name".repeat(3), "agent-depot");
+    const f = await fixture(t, { planLifecycle: async (_selection, action) => ({ ...plan(action), cwd: longDirectory }) });
+    resizeTerminal(f.view, size);
+    await waitForFrame(f.view.lastFrame, /Packages \(user-global\)/);
+    await revealPackage(f.view);
+    f.view.stdin.write(ENTER);
+    await confirmAtEnd(f.view, size.rows, /\[y\] Approve the install declaration/, () => f.calls.includes("approve:install"));
+    await waitForFrame(f.view.lastFrame, frame => squash(frame).includes("Approvedtheinstalldeclarationofpstack"));
+    f.view.stdin.write("f");
+    await confirmAtEnd(f.view, size.rows, /\[y\] Forget the selection record/, () => f.calls.includes("forget"));
+    await waitForFrame(f.view.lastFrame, frame => squash(frame).includes("Forgotpstack;nohostcommandran"));
+  });
+
   test(`Package install confirmation accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
     const longDirectory = path.join("/home/user", "a-long-working-directory-name".repeat(3), "agent-depot");
     const f = await fixture(t, { planLifecycle: async (_selection, action) => {

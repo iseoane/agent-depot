@@ -170,12 +170,14 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
-test("manual App uninstall names its check in the shared footer", async t => {
-  const f = await fixture(t, true, false, true);
-  resizeTerminal(f.view, { columns: 40, rows: 17 });
-  f.view.stdin.write("d");
-  await waitForFrame(f.view.lastFrame, /Uninstall it before/);
-  f.view.stdin.write("y");
-  f.markUninstalled();
-  await confirmAtEnd(f.view, 17, /\[y\] Check the uninstall now/, () => /Remove recipe for demo\? y\/n/.test(f.view.lastFrame() ?? ""));
-});
+for (const size of PREVIEW_SIZES) {
+  test(`manual App uninstall names its check in the shared footer at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t, true, false, true);
+    resizeTerminal(f.view, size);
+    f.view.stdin.write("d");
+    await waitForFrame(f.view.lastFrame, /Uninstall it before/);
+    f.view.stdin.write("y");
+    f.markUninstalled();
+    await confirmAtEnd(f.view, size.rows, /\[y\] Check the uninstall now/, () => /Remove recipe for demo\? y\/n/.test(f.view.lastFrame() ?? ""));
+  });
+}

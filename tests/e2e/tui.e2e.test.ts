@@ -773,7 +773,9 @@ test("in a 40x17 terminal the update batch ignores y until its footer reads to t
       const position = footerPosition(session.screen);
       assert.ok(position, `the footer lost its review position:\n${session.screen}`);
       session.press("y");
-      await session.send("j", new RegExp(`Review (?!${position.cursor} of)\\d+ of`, "u"));
+      // An early y would leave the preview; waiting for that too lets the assertion below report it.
+      await session.send("j", new RegExp(`Review (?!${position.cursor} of)\\d+ of|Updating App|Update summary`, "u"));
+      assert.match(session.screen, /read /u, `y left the preview before the footer read to the end:\n${session.screen}`);
       assert.equal(await updateRan(), false, `y ran the update before the footer read to the end:\n${session.screen}`);
       pages += 1;
       assert.ok(pages < 200, "the preview never reached its end");
