@@ -14,14 +14,16 @@ import {
   SourceSelectionError,
 } from "../src/sources.js";
 import { defaultSourceStatePath, SourceStateError, SourceStateStore } from "../src/source-state.js";
-import type { GitSource, GitSourceAccess } from "../src/git-source.js";
+import type { GitSource, GitSourceAccess, GitSourceRefreshOptions } from "../src/git-source.js";
 import { skillTreeBaseline, type SourceContentAccess } from "../src/skill-discovery.js";
 
 class FakeGitAccess implements GitSourceAccess {
   readonly refreshed: GitSource[] = [];
+  readonly options: (GitSourceRefreshOptions | undefined)[] = [];
 
-  async refresh(source: GitSource): Promise<void> {
+  async refresh(source: GitSource, options?: GitSourceRefreshOptions): Promise<void> {
     this.refreshed.push(source);
+    this.options.push(options);
   }
 }
 
@@ -507,4 +509,17 @@ test("uses portable per-user state locations on Linux and Windows", () => {
     "C:\\Users\\alice\\AppData\\Roaming\\Agent Depot\\sources.json",
   );
   assert.equal(new SourceStateStore("/tmp/agent-depot-test-state").path, "/tmp/agent-depot-test-state");
+});
+
+test("forwards a background refresh request to Git access for registered and project Sources", async () => {
+  await withState(async (statePath, gitAccess) => {
+    const operations = createSourceOperations({ statePath, gitAccess });
+    const source = await operations.addGitSource("https://github.com/example/skills.git");
+
+    await operations.refreshSource(source.id, { background: true });
+    assert.ok(operations.refreshProjectSource);
+    await operations.refreshProjectSource({ kind: "external", url: source.url }, { background: true });
+
+    assert.deepEqual(gitAccess.options.map((options) => options?.background), [true, true]);
+  });
 });
