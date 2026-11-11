@@ -971,7 +971,8 @@ independently. Unknown selections and combining a block's inclusion filter with 
 `--no-*` flag are errors.
 
 Stdout contains JSON only; stderr shows the preview and exclusion reasons.
-`--out` requires a new file (existing files and symlinks are not replaced).
+`--out` requires a new file unless `--overwrite` is given, which atomically replaces an
+existing regular file; directories and symlinks are never replaced.
 Profiles contain canonical Git URLs with discovery inclusion, individual Skill
 selections with recorded version policies, Hosts and user methods, complete App
 recipes (including recipes for other platforms), and Package selections as

@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { Box, Text, useWindowSize } from "ink";
 import stringWidth from "string-width";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { createAppOperations } from "../app-flow.js";
 import {
   buildProfileExport, describeProfileExportExclusion, describeProfilePackage, describeProfileReplica, describeProfileSkill,
-  profileExportPreview, SKILL_EXPORT_EXPLANATION, writeProfileExport,
+  profileExportPreview, requireOverwritableProfileExport, SKILL_EXPORT_EXPLANATION, writeProfileExport,
   type ProfileExportDiagnostic, type ProfileExportPlan,
 } from "../profile-export.js";
 import {
@@ -36,7 +37,7 @@ import { busy, type Busy } from "./working-model.js";
 type Mode = "browse" | "busy" | "export-list" | "export-folder" | "export-name" | "import-browse" | "import-list" | "confirm" | "detail" | "results";
 
 type ConfirmRequest =
-  | { readonly kind: "export"; readonly file: string }
+  | { readonly kind: "export"; readonly file: string; readonly overwrite: boolean }
   | { readonly kind: "import"; readonly plan: ProfileImportPlan };
 
 /** A choice keeps its source identity and ordinal even when its group is collapsed or offscreen. */
@@ -323,9 +324,14 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const hintRows = Math.max(Math.ceil(stringWidth(hintText) / panelWidth), 1);
   const height = useListHeight(listHeight, 4 + titleRows + hintRows);
   const previewGeometry = usePreviewGeometry();
-  const confirmChrome = (): PreviewChrome => confirmRequest.current?.kind === "export"
-    ? { title: "Confirmation", action: "Save/Export Profile", consequence: "Save/Export Profile? (y/n)" }
-    : { title: "Confirmation", action: "Apply Profile", consequence: "Apply Profile? (y/n)" };
+  const confirmChrome = (): PreviewChrome => {
+    const request = confirmRequest.current;
+    if (request?.kind !== "export") return { title: "Confirmation", action: "Apply Profile", consequence: "Apply Profile? (y/n)" };
+    if (!request.overwrite) return { title: "Confirmation", action: "Save/Export Profile", consequence: "Save/Export Profile? (y/n)" };
+    // The full path is on the Destination line; the base name keeps the footer short on narrow terminals.
+    const name = path.basename(request.file);
+    return { title: "Confirmation", action: `Overwrite ${name}`, consequence: `Overwrite ${name}? (y/n)` };
+  };
   const showLines = (next: readonly string[], nextMode: "confirm" | "detail" | "results") => {
     setLines(next);
     cursorTo(0);
@@ -404,7 +410,10 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     setNameChecking(Date.now());
     void (async () => {
       let exists: boolean;
-      try { exists = await existsCheck(finalPath); }
+      try {
+        exists = await existsCheck(finalPath);
+        if (exists) await requireOverwritableProfileExport(finalPath);
+      }
       catch (error) {
         if (!mounted.current || nameRequest.current !== id || modeRef.current !== "export-name") return;
         setNameChecking(undefined);
@@ -415,10 +424,10 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       const current = resolveExportFileName(typed.current);
       if (!mounted.current || nameRequest.current !== id || modeRef.current !== "export-name") return;
       if (current.kind !== "ok" || current.fileName !== fileName) return;
-      if (exists) { setNameError(`${finalPath} already exists; choose another name`); return; }
-      confirmRequest.current = { kind: "export", file: finalPath };
+      confirmRequest.current = { kind: "export", file: finalPath, overwrite: exists };
       setNameError(undefined);
-      showLines([`Destination: ${finalPath}`, ...profileExportPreview(chosenProfile(), diagnostics.current)], "confirm");
+      const destination = exists ? `Destination: ${finalPath} (exists; it will be replaced)` : `Destination: ${finalPath}`;
+      showLines([destination, ...profileExportPreview(chosenProfile(), diagnostics.current)], "confirm");
     })();
   };
   const confirmApply = () => {
@@ -427,7 +436,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     void run(request.kind === "export" ? "Exporting…" : "Applying import…", async () => {
       let result: readonly string[];
       if (request.kind === "export") {
-        await writeProfileExport(request.file, chosenProfile());
+        await writeProfileExport(request.file, chosenProfile(), { overwrite: request.overwrite });
         result = [`Exported profile to ${request.file}`];
       } else {
         const outcomes = await applyProfileImport(request.plan, operations, apps, true, () => undefined,
