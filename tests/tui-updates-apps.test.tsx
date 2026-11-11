@@ -10,7 +10,7 @@ import { UpdatesView } from "../src/tui/updates-view.js";
 import { expandList } from "./expand-updates.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
-import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 /** `now` drives the view's clock; while `versionGate.promise` is set, reading the App version waits for it. */
 async function fixture(t: TestContext, manual: boolean | "spawn" = false, brokenSkills = false,
@@ -26,7 +26,7 @@ async function fixture(t: TestContext, manual: boolean | "spawn" = false, broken
   let version = "1.0.0";
   let latestCalls = 0;
   const commands: string[] = [];
-  const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory,
+  const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory, platform: "linux", isWsl: false,
     resolveExecutable: async () => "/usr/bin/demo",
     fetch: async () => { latestCalls++; return new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })); },
     runner: async (_exe, args) => {
@@ -223,3 +223,24 @@ for (const size of PREVIEW_SIZES) {
     await waitForFrame(f.view.lastFrame, frame => squash(frame).includes("Updatesummary:"));
   });
 }
+
+test("a manual App update shows its header with both versions and one block with the instruction", async t => {
+  const f = await fixture(t, true);
+  await expandList(f.view.lastFrame, f.view.stdin, frame => frame.includes("1.0.0 -> 2.0.0"));
+  resizeTerminal(f.view, { columns: 220, rows: 80 });
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, /1 selected/);
+  f.view.stdin.write("\r");
+  await waitForFrame(f.view.lastFrame, /Apply 1 update/);
+  f.view.stdin.write("y");
+  const rows = panelRows(await waitForFrame(f.view.lastFrame, /Manual step done, check now/));
+  const start = rows.findIndex(row => row.startsWith(" App demo update"));
+  assert.ok(start >= 0, rows.join("\n"));
+  assert.deepEqual(rows.slice(start, start + 5), [
+    " App demo update  1.0.0 → 2.0.0",
+    " ",
+    " └ update",
+    "   Manual: upgrade demo yourself",
+    `   in ${f.home} · on linux`,
+  ].map(row => row.trimEnd()));
+});

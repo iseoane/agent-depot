@@ -10,7 +10,7 @@ import { App } from "../src/tui/app.js";
 import { SourcesView, type SourcesViewProps } from "../src/tui/sources-view.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
-import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const recipe = { name: "demo", install: { argv: ["demo", "install"] }, update: { manual: "update demo" },
   uninstall: { argv: ["demo", "remove"] }, version: { argv: ["demo", "version"], pattern: "(.*)" },
@@ -97,9 +97,6 @@ test("Enter previews every step; only y approves and changed content needs appro
   assert.deepEqual(f.commands, []);
   assert.match(frame, /ID\s+KIND/);
 });
-
-/** The rows inside the open panel, without its border and padding. */
-const panelRows = (frame: string) => frame.split("\n").filter(row => row.startsWith("│ ")).map(row => row.slice(2).replace(/ *│$/u, ""));
 
 test("the recipe review shows the App's identity, then one block per step with its command and where it runs", async t => {
   const f = await fixture(t, async name => name === "missing-tool" ? undefined : `/usr/bin/${name}`);

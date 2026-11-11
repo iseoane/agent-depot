@@ -20,6 +20,9 @@ interface PreviewView {
   readonly stdout: NodeJS.EventEmitter;
 }
 
+/** The rows inside the open panel, without its border and padding. */
+export const panelRows = (frame: string) => frame.split("\n").filter(row => row.startsWith("│ ")).map(row => row.slice(2).replace(/ *│$/u, ""));
+
 export function resizeTerminal(view: PreviewView, size: TerminalSize): void {
   Object.defineProperty(view.stdout, "rows", { configurable: true, value: size.rows });
   Object.defineProperty(view.stdout, "columns", { configurable: true, value: size.columns });
