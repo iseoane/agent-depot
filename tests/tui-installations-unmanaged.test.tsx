@@ -134,6 +134,8 @@ test("u removes every location of an unmanaged skill after listing each exact pa
   const agents = await writeSkill(f.home, ".agents", "no-mistakes");
   const claude = await writeSkill(f.home, ".claude", "no-mistakes");
   const view = mount(f);
+  // One page holds the whole preview even with long temporary paths, so y answers at once and paths do not wrap.
+  resizeTerminal(view, { columns: 300, rows: 80 });
   await openUnmanaged(view, /no-mistakes \[/);
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all locations.*2 choose locations/s);
@@ -170,6 +172,8 @@ test("the checklist removes only the chosen locations", async (t) => {
   const agents = await writeSkill(f.home, ".agents", "no-mistakes");
   const claude = await writeSkill(f.home, ".claude", "no-mistakes");
   const view = mount(f);
+  // One page holds the whole preview even with long temporary paths, so y answers at once and paths do not wrap.
+  resizeTerminal(view, { columns: 300, rows: 80 });
   await openUnmanaged(view, /no-mistakes \[/);
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /2 choose locations/);

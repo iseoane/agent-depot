@@ -552,6 +552,7 @@ test("an external record change between items fails the remaining uninstalls wit
       environment={f.environment}
     />,
   );
+  resizeTerminal(view, { columns: 300, rows: 80 });
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(3\)/);
   await open(view, [/builtin:agent-depot \(3\)/]);
   view.stdin.write("a");
