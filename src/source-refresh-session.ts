@@ -30,6 +30,8 @@ export interface SourceRefreshSession {
   now(): number;
   /** Drops queued background refreshes; refreshes already running finish. */
   stop(): void;
+  /** Resolves once every refresh running now has finished, whatever its outcome. */
+  settled(): Promise<void>;
 }
 
 /** ADR 0004 (amended): how long a refresh made by this process stands in for the one a preview needs. */
@@ -140,6 +142,7 @@ export function createSourceRefreshSession(
     stop() {
       queue.length = 0;
     },
+    settled: () => Promise.resolve(),
   };
 }
 
