@@ -14,7 +14,7 @@ Type: feature
 - Brief J004b: [brief-r1.md](jobs/J004b/brief-r1.md)
 - Brief J004c: [brief-r1.md](jobs/J004c/brief-r1.md)
 - Blocker: None
-- Next step: J004c (worker sonnet), luego J004d, J005, J006 y release 0.6.14.
+- Next step: J004c en curso (worker en feat/footer-sources-removal); después J004d, J005, J006 y release 0.6.14. Reanudación programada 22:35 (2026-11-11): reconciliar plan, git y PRs antes de actuar.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
