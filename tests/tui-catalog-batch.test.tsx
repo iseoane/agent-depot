@@ -249,6 +249,38 @@ test("one item failing while installing does not stop the others", async (t) => 
   view.unmount();
 });
 
+test("the busy line names the skill being installed and counts the finished ones", async (t) => {
+  const f = await fixture(t);
+  const real = f.operations;
+  const releases: (() => void)[] = [];
+  const operations: SourceOperations = {
+    ...real,
+    addUserGlobalInstallation: async (record) => {
+      await new Promise<void>((resolve) => { releases.push(resolve); });
+      return real.addUserGlobalInstallation!(record);
+    },
+  };
+  const view = await mount({ ...f, operations });
+  await highlight(view, "alpha");
+  await step(view, " ");
+  await highlight(view, "gamma");
+  await step(view, " ");
+  view.stdin.write("i");
+  await choose(view, ["1"], "2", "1");
+  await waitForFrame(view.lastFrame, /Install 2 skills\? y\/n/);
+  view.stdin.write("y");
+  const first = await waitForFrame(view.lastFrame, /Installing Skill alpha \(1\/2\)…/);
+  assert.ok(!first.includes("finished"), first);
+  await waitForFrame(view.lastFrame, () => releases.length === 1);
+  releases.shift()!();
+  const second = await waitForFrame(view.lastFrame, /Installing Skill gamma \(2\/2\)…/);
+  assert.match(second, /1 finished/);
+  await waitForFrame(view.lastFrame, () => releases.length === 1);
+  releases.shift()!();
+  await waitForFrame(view.lastFrame, /Installed Skill "gamma"/);
+  view.unmount();
+});
+
 test("one additional-host confirmation covers the items that need it; n installs nothing", async (t) => {
   const f = await fixture(t);
   const canonical = path.join(f.project, ".agents", "skills", "alpha");
