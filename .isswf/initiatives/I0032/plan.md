@@ -23,3 +23,4 @@ Type: feature
 - Autorización del operador (2026-11-11): integrar sin preguntar salvo algo grave que requiera confirmación.
 - Revisión J001 V001 (Agent-tool, no ligada): pass, 0 bloqueantes. S1 (preexistente en base 88e3166, keys.ts parte ráfagas por carácter): `jjj…y` en un mismo bloque puede actuar antes de dibujar ✓ → abordar en J004. I1 'Review 1 of 0' con preview vacía; I2 título muy largo o panel working pueden pasar de 17 filas; I4 Package approve/forget ahora exige leer hasta el final (dirección segura, aceptado).
 - J001 entregado: PR #106 fusionado con CI verde.
+- Decisión del operador (2026-11-11): partir el resto en trabajos pequeños — J003a revisión de recetas; J003b confirmación/desinstalación/paso manual de Apps con los bloques de paso; J004a pie en añadir/quitar hosts y desinstalar; J004b instalar y adoptar; J004c quitar receta y quitar Source; J005 ráfagas de teclas que alcanzan `y` antes de dibujar ✓.
