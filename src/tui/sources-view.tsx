@@ -128,7 +128,9 @@ function refreshViewport(mode: Extract<Mode, { readonly kind: "confirm"; readonl
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange, refreshSession }: SourcesViewProps) {
   const refreshStates = useRefreshStates(refreshSession);
   const { columns, rows: terminalRows } = useWindowSize();
-  const height = useListHeight(listHeight, 9);
+  // With a refresh session, one more row is kept for the selected Source's refresh error; below 24 rows
+  // the list is already at its minimum, so that line is left out rather than pushing the footer away.
+  const height = useListHeight(listHeight, refreshSession === undefined ? 9 : 10);
   const [state, setState] = useState<LoadState>(() => ({ status: "loading", startedAt: Date.now() }));
   // The highlight follows the source id; the index is only the fallback once that source is gone.
   // Selection and marks are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
@@ -404,7 +406,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
         );
       })}
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
-      {selectedRefresh?.status === "failed" ? <Text color={theme.error}>Refresh failed: {selectedRefresh.error}</Text> : null}
+      {selectedRefresh?.status === "failed" && (terminalRows || 24) >= 24 ? <Text color={theme.error} wrap="truncate-end">Refresh failed: {selectedRefresh.error}</Text> : null}
       {selectedCount > 0 ? <Text>{selectedCount} selected</Text> : null}
       {recipes.loadingSince !== undefined && mode.kind !== "busy" && !recipes.capturing
         ? <Working label="Loading App recipes…" since={recipes.loadingSince} /> : null}
