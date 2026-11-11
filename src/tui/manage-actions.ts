@@ -22,10 +22,10 @@ import {
 } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
 import { errorText } from "./batch.js";
-import { BULK_KINDS, handleBulkKey, type BulkMode } from "./bulk-actions.js";
+import { BULK_KINDS, bulkConfirmPreview, handleBulkKey, type BulkMode, type BulkPagedMode } from "./bulk-actions.js";
 import { answerYesNo, applyChecklistOutcome, hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
 import type { PreviewChrome, PreviewGeometry } from "./preview-window.js";
-import { handleUnmanagedKey, UNMANAGED_KINDS, type UnmanagedMode } from "./unmanaged-actions.js";
+import { handleUnmanagedKey, UNMANAGED_KINDS, unmanagedConfirmPreview, type UnmanagedMode } from "./unmanaged-actions.js";
 import { busy, type Busy } from "./working-model.js";
 
 /**
@@ -191,10 +191,14 @@ function handleRemoveScopeKey(context: ManageContext, mode: ModeOf<"remove-scope
   else if (input === "2") context.setMode({ kind: "hosts-remove", skill: mode.skill, choices: mode.hosts, cursor: 0, selected: [] });
 }
 
-export type PagedConfirmMode = ModeOf<"confirm-host-add" | "confirm-host-remove" | "confirm-uninstall">;
+type SkillPagedMode = ModeOf<"confirm-host-add" | "confirm-host-remove" | "confirm-uninstall">;
+
+export type PagedConfirmMode = SkillPagedMode | ModeOf<"confirm-unmanaged"> | BulkPagedMode;
 
 /** What a paged confirmation shows, so the key handler and the panel page the same rows. */
 export function pagedConfirmPreview(mode: PagedConfirmMode): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+  if (mode.kind === "confirm-unmanaged") return unmanagedConfirmPreview(mode);
+  if (mode.kind === "confirm-bulk-uninstall" || mode.kind === "confirm-bulk-hosts") return bulkConfirmPreview(mode);
   const name = mode.skill.name;
   switch (mode.kind) {
     case "confirm-host-add":
@@ -207,11 +211,11 @@ export function pagedConfirmPreview(mode: PagedConfirmMode): { readonly lines: r
 }
 
 export function isPagedConfirmMode(mode: { readonly kind: string }): mode is PagedConfirmMode {
-  return mode.kind === "confirm-host-add" || mode.kind === "confirm-host-remove" || mode.kind === "confirm-uninstall";
+  return ["confirm-host-add", "confirm-host-remove", "confirm-uninstall", "confirm-unmanaged", "confirm-bulk-uninstall", "confirm-bulk-hosts"].includes(mode.kind);
 }
 
 /** Pages the preview like the other footer confirmations: `y` answers only once it has all been displayed. */
-function handlePagedConfirmKey(context: ManageContext, mode: PagedConfirmMode, input: string, key: Key): void {
+function handlePagedConfirmKey(context: ManageContext, mode: SkillPagedMode, input: string, key: Key): void {
   const { operations, env } = context;
   const { lines, chrome } = pagedConfirmPreview(mode);
   const viewport = context.previewGeometry(lines, mode.cursor, chrome);

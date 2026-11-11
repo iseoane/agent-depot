@@ -205,6 +205,8 @@ async function markedEverything(t: TestContext) {
   const loose = await unmanaged(f, "loose");
   await projectInstall(f, "proj");
   const view = await mount(f);
+  // The whole preview must fit one page for these tests, which answer y at once.
+  resizeTerminal(view, { columns: 110, rows: 80 });
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await open(view, [/builtin:agent-depot \(3\)/, /Managed \(project\)/, /builtin:agent-depot \(1\)/, /Unmanaged/]);
   view.stdin.write("a");
@@ -335,6 +337,8 @@ async function markedForHosts(t: TestContext) {
   await unmanaged(f, "loose");
   await projectInstall(f, "proj");
   const view = await mount(f);
+  // The whole preview must fit one page for these tests, which answer y at once.
+  resizeTerminal(view, { columns: 110, rows: 80 });
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await open(view, [/builtin:agent-depot \(3\)/, /Managed \(project\)/, /builtin:agent-depot \(1\)/, /Unmanaged/]);
   view.stdin.write("a");
@@ -374,7 +378,7 @@ test("y, then one exposure confirmation naming the items, adds the hosts to each
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 1 item\? y\/n/);
   view.stdin.write("y");
-  const exposure = await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  const exposure = await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   assert.match(exposure, /portable\/alpha/);
   assert.equal(await exists(claudeDir(f.home, "alpha")), false);
   view.stdin.write("y");
@@ -405,7 +409,7 @@ test("several items are applied one after another against the moving records", a
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Added hosts codex to portable\/beta/);
   assert.match(done, /Added hosts codex to portable\/alpha/);
@@ -430,7 +434,7 @@ test("n on the exposure confirmation cancels every item", async (t) => {
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("n");
   const frame = await waitForFrame(view.lastFrame, /cancelled/i);
   assert.match(frame, /2 selected/);
@@ -476,7 +480,7 @@ test("a host addition that fails does not stop the other items and stays marked"
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   // A real directory now occupies alpha's Claude location, so its recheck refuses.
   await mkdir(claudeDir(f.home, "alpha"), { recursive: true });
   view.stdin.write("y");
@@ -581,6 +585,7 @@ test("an external record change between items fails the remaining host additions
       environment={f.environment}
     />,
   );
+  resizeTerminal(view, { columns: 110, rows: 80 });
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(3\)/);
   await open(view, [/builtin:agent-depot \(3\)/]);
   view.stdin.write("a");
@@ -592,7 +597,7 @@ test("an external record change between items fails the remaining host additions
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 3 items\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Failed portable\/\w+: .*changed outside this batch/);
   assert.equal(done.match(/Added hosts claude to /g)?.length, 1, done);

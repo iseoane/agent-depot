@@ -18,7 +18,8 @@ import {
   type UserGlobalSymlinkRemovalInspection,
 } from "../user-global-skill-inventory.js";
 import type { TuiEnvironment } from "./environment.js";
-import { answerYesNo, moveCursor } from "./mode-keys.js";
+import { answerPaged, moveCursor } from "./mode-keys.js";
+import type { PreviewChrome, PreviewGeometry } from "./preview-window.js";
 import { homeOf, type UnmanagedGroup, type UnmanagedLocation } from "./installations.js";
 import { busy, type Busy } from "./working-model.js";
 
@@ -43,7 +44,7 @@ export interface PreparedUnmanagedRemoval {
 export type UnmanagedMode =
   | { readonly kind: "unmanaged-scope"; readonly group: UnmanagedGroup }
   | { readonly kind: "unmanaged-pick"; readonly group: UnmanagedGroup; readonly cursor: number; readonly selected: readonly string[] }
-  | { readonly kind: "confirm-unmanaged"; readonly group: UnmanagedGroup; readonly prepared: PreparedUnmanagedRemoval };
+  | { readonly kind: "confirm-unmanaged"; readonly group: UnmanagedGroup; readonly prepared: PreparedUnmanagedRemoval; readonly cursor: number };
 
 export const UNMANAGED_KINDS: readonly UnmanagedMode["kind"][] = ["unmanaged-scope", "unmanaged-pick", "confirm-unmanaged"];
 
@@ -56,6 +57,8 @@ interface Message {
 export interface UnmanagedContext {
   readonly operations: SourceOperations;
   readonly env: TuiEnvironment;
+  /** The viewport of a paged preview at the current terminal size, shared with the panel. */
+  readonly previewGeometry: PreviewGeometry;
   setMode(mode: UnmanagedMode | Busy): void;
   browse(): void;
   setMessage(message: Message | undefined): void;
@@ -166,7 +169,7 @@ async function startPreview(context: UnmanagedContext, group: UnmanagedGroup, lo
   try {
     const prepared = await prepareUnmanagedRemoval(context.operations, context.env, group, locations);
     if (!context.isMounted()) return;
-    context.setMode({ kind: "confirm-unmanaged", group, prepared });
+    context.setMode({ kind: "confirm-unmanaged", group, prepared, cursor: 0 });
   } catch (error) {
     if (!context.isMounted()) return;
     context.setMessage({ kind: "error", text: errorText(error) });
@@ -183,6 +186,12 @@ export function startUnmanagedRemoval(context: UnmanagedContext, group: Unmanage
 function cancel(context: UnmanagedContext): void {
   context.setMessage({ kind: "ok", text: "Uninstall cancelled" });
   context.browse();
+}
+
+/** What the confirmation shows, so the key handler and the panel page the same rows. */
+export function unmanagedConfirmPreview(mode: Extract<UnmanagedMode, { kind: "confirm-unmanaged" }>): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+  const { name } = mode.group;
+  return { lines: mode.prepared.preview, chrome: { title: "Remove unmanaged skill", action: `Remove ${name}`, consequence: `Remove ${name}? y/n` } };
 }
 
 async function execute(context: UnmanagedContext, group: UnmanagedGroup, prepared: PreparedUnmanagedRemoval): Promise<void> {
@@ -221,9 +230,15 @@ export function handleUnmanagedKey(context: UnmanagedContext, mode: { readonly k
       }
       return true;
     }
-    case "confirm-unmanaged":
-      answerYesNo(input, key, () => void execute(context, current.group, current.prepared), () => cancel(context));
+    case "confirm-unmanaged": {
+      const { lines, chrome } = unmanagedConfirmPreview(current);
+      answerPaged(context.previewGeometry(lines, current.cursor, chrome), current.cursor, input, key, {
+        moveTo: (cursor) => context.setMode({ ...current, cursor }),
+        yes: () => void execute(context, current.group, current.prepared),
+        no: () => cancel(context),
+      });
       return true;
+    }
     default:
       return false;
   }

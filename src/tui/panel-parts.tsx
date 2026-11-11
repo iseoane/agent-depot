@@ -160,7 +160,7 @@ function profilePreviewSpans(line: string): readonly PreviewSpan[] | undefined {
 /** The colour of a warning, host exposure notice or refusal, which the flows indent to different depths. */
 function noticeColor(line: string): string | undefined {
   const text = line.trimStart();
-  if (text.startsWith("WARNING:") || text.startsWith("ADDITIONAL HOST EXPOSURE:")) return theme.warning;
+  if (text.startsWith("WARNING:") || text.startsWith("ADDITIONAL HOST EXPOSURE:") || text.startsWith("Skipped ")) return theme.warning;
   return text.startsWith("Cannot install ") ? theme.error : undefined;
 }
 
