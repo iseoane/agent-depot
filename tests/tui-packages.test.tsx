@@ -20,6 +20,7 @@ import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
 import { pagedRows, pageToEnd } from "./package-panel.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -272,19 +273,16 @@ test("Enter approves the install declaration without executing it", async (t) =>
   assert.deepEqual(f.calls, ["plan:install", "approve:install"]);
 });
 
-test("approval and forget panels page inside a short terminal, and y works from the first page", async (t) => {
+test("approval and forget panels page inside a short terminal, and y waits for the end of the preview", async (t) => {
   const longDirectory = path.join("/home/user", "a-long-working-directory-name".repeat(3), "agent-depot");
   const f = await fixture(t, { planLifecycle: async (_selection, action) => ({ ...plan(action), cwd: longDirectory }) });
-  Object.defineProperty(f.view.stdout, "rows", { configurable: true, value: 12 });
-  Object.defineProperty(f.view.stdout, "columns", { configurable: true, value: 60 });
-  f.view.stdout.emit("resize");
+  resizeTerminal(f.view, { columns: 60, rows: 12 });
   await waitForFrame(f.view.lastFrame, /Packages \(user-global\)/);
   await revealPackage(f.view);
 
   f.view.stdin.write(ENTER);
   const first = await waitForFrame(f.view.lastFrame, /Review 1 of \d+/);
-  assert.match(first, /Approve this install declaration for pstack\? y\/n/, "the question is on every page");
-  assert.match(first, /arrows\/Pg page/, "the legend names the paging keys");
+  assert.match(first, /\[y\] Approve the install declaration/, "the footer names what y does on every page");
   assert.ok(first.split("\n").length <= 12, first);
   const approvePages = await pageToEnd(f.view.lastFrame, f.view.stdin, 12);
   assert.ok(approvePages.length > 1, "the declaration needs several pages at 12 rows");
@@ -294,19 +292,46 @@ test("approval and forget panels page inside a short terminal, and y works from 
   assert.deepEqual(f.calls, [], "cancelling approves nothing");
 
   f.view.stdin.write(ENTER);
-  await waitForFrame(f.view.lastFrame, /Review 1 of \d+/);
-  f.view.stdin.write("y");
+  await confirmAtEnd(f.view, 12, /\[y\] Approve the install declaration/, () => f.calls.includes("approve:install"));
   await waitForFrame(f.view.lastFrame, /Approved the install declaration of pstack/);
-  assert.deepEqual(f.calls, ["approve:install"], "y approves from the first page");
+  assert.deepEqual(f.calls, ["approve:install"], "y approves only at the end");
 
   f.view.stdin.write("f");
-  const forget = await waitForFrame(f.view.lastFrame, /Review 1 of \d+/);
-  assert.match(forget, /Forget the selection record of pstack\? y\/n/);
-  assert.ok(forget.split("\n").length <= 12, forget);
-  f.view.stdin.write("y");
+  await confirmAtEnd(f.view, 12, /\[y\] Forget the selection record/, () => f.calls.includes("forget"));
   await waitForFrame(f.view.lastFrame, /Forgot pstack; no host command ran/);
   assert.deepEqual(f.calls, ["approve:install", "forget"]);
 });
+
+for (const size of PREVIEW_SIZES) {
+  test(`Package approval and forget accept y exactly when their footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const longDirectory = path.join("/home/user", "a-long-working-directory-name".repeat(3), "agent-depot");
+    const f = await fixture(t, { planLifecycle: async (_selection, action) => ({ ...plan(action), cwd: longDirectory }) });
+    resizeTerminal(f.view, size);
+    await waitForFrame(f.view.lastFrame, /Packages \(user-global\)/);
+    await revealPackage(f.view);
+    f.view.stdin.write(ENTER);
+    await confirmAtEnd(f.view, size.rows, /\[y\] Approve the install declaration/, () => f.calls.includes("approve:install"));
+    await waitForFrame(f.view.lastFrame, frame => squash(frame).includes("Approvedtheinstalldeclarationofpstack"));
+    f.view.stdin.write("f");
+    await confirmAtEnd(f.view, size.rows, /\[y\] Forget the selection record/, () => f.calls.includes("forget"));
+    await waitForFrame(f.view.lastFrame, frame => squash(frame).includes("Forgotpstack;nohostcommandran"));
+  });
+
+  test(`Package install confirmation accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const longDirectory = path.join("/home/user", "a-long-working-directory-name".repeat(3), "agent-depot");
+    const f = await fixture(t, { planLifecycle: async (_selection, action) => {
+      f.calls.push(`plan:${action}`);
+      return { ...plan(action), cwd: longDirectory };
+    } });
+    resizeTerminal(f.view, size);
+    await waitForFrame(f.view.lastFrame, /Packages \(user-global\) \(1\)/);
+    await revealPackage(f.view);
+    f.view.stdin.write("i");
+    await confirmAtEnd(f.view, size.rows, /\[y\] Approve and install pstack/, () => f.calls.includes("approve:install"));
+    await confirmAtEnd(f.view, size.rows, /\[y\] Install pstack/, () => f.calls.includes("execute:install"));
+    await waitForFrame(f.view.lastFrame, /pstack: installed/);
+  });
+}
 
 test("n and Esc cancel at every Package confirmation without approving or running", async (t) => {
   const f = await fixture(t);

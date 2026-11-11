@@ -10,6 +10,7 @@ import { App } from "../src/tui/app.js";
 import { SourcesView, type SourcesViewProps } from "../src/tui/sources-view.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const recipe = { name: "demo", install: { argv: ["demo", "install"] }, update: { manual: "update demo" },
   uninstall: { argv: ["demo", "remove"] }, version: { argv: ["demo", "version"], pattern: "(.*)" },
@@ -78,7 +79,7 @@ test("Enter previews every step; only y approves and changed content needs appro
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs\s+approval/);
   view.stdin.write("\r");
-  let frame = await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  let frame = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   assert.ok(squash(frame).includes(squash(f.file)), frame); // a long path wraps
   assert.match(frame, /Platform: all/);
   assert.match(frame, /argv: \[/);
@@ -87,7 +88,7 @@ test("Enter previews every step; only y approves and changed content needs appro
   await waitForFrame(view.lastFrame, frame => !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "needs approval");
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");
@@ -158,7 +159,7 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs\s+approval/);
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   await writeFile(f.file, JSON.stringify({ ...recipe, platform: "windows" }));
@@ -275,7 +276,7 @@ test("one cursor dispatches contextual actions for Skill Sources and App recipes
   assert.doesNotMatch(frame, /> \[.\] git:/);
   view.stdin.write(" a");
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   view.stdin.write("j".repeat(100));
   frame = await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   assert.doesNotMatch(frame, /selected|remove Git Source/);
@@ -347,3 +348,16 @@ test("n can add the first App recipe and closing the guide reloads the unified l
   assert.match(frame, /> .*demo.*app/u);
   assert.deepEqual(f.commands, []);
 });
+
+for (const size of PREVIEW_SIZES) {
+  test(`recipe approval accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t);
+    const view = f.mount();
+    resizeTerminal(view, size);
+    await waitForFrame(view.lastFrame, /needs\s+approval/);
+    view.stdin.write("\r");
+    const end = await confirmAtEnd(view, size.rows, /\[y\] Approve demo/, () => /✓ approved/.test(view.lastFrame() ?? ""));
+    assert.match(squash(end), /Approvedemo\?y\/n·recipeapprovaldoesnotinstalltheApp\./);
+    assert.deepEqual(f.commands, []);
+  });
+}

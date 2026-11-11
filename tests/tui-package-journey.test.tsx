@@ -183,9 +183,11 @@ test("a Claude install disappears from Catalog and shows a verified available up
   await waitForFrame(j.view.lastFrame, /Package pstack \(pi\)/u);
   await moveDownTo(j.view.lastFrame, j.view.stdin, /> .*Package pstack \(claude\)/u);
   j.view.stdin.write("i");
-  await waitForFrame(j.view.lastFrame, /Approve this declaration and continue\? y\/n/u);
+  await waitForFrame(j.view.lastFrame, /\[y\] Approve and install pstack/u);
+  await pageToEnd(j.view.lastFrame, j.view.stdin);
   j.view.stdin.write("y");
-  await waitForFrame(j.view.lastFrame, /install pstack\? y\/n/u);
+  await waitForFrame(j.view.lastFrame, /\[y\] Install pstack/u);
+  await pageToEnd(j.view.lastFrame, j.view.stdin);
   j.view.stdin.write("y");
   await waitForFrame(j.view.lastFrame, /pstack: installed/u);
 
@@ -232,7 +234,7 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
 
   j.view.stdin.write("i");
   const first = await waitForFrame(j.view.lastFrame, /Review 1 of \d+/u);
-  assert.match(first, /Approve this declaration and continue\? y\/n/u, "the question is on every page");
+  assert.match(first, /\[y\] Approve and install pstack/u, "the footer names what y does on every page");
   assert.match(first, /arrows\/Pg page/u, "the panel legend names the paging keys");
   const pages = await pageToEnd(j.view.lastFrame, j.view.stdin);
   assert.ok(pages.length > 1, "the declaration needs more than one page at the default height");

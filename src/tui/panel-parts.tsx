@@ -1,9 +1,9 @@
-import { Box, Text, useWindowSize } from "ink";
+import { Box, Text } from "ink";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
-import { previewViewport, type PreviewChrome } from "./preview-window.js";
+import { sliceSpans, type PreviewChrome, type PreviewFooterRole, type PreviewViewport } from "./preview-window.js";
 import { animationEnabled, formatElapsed, SPINNER_FRAMES, SPINNER_TICK_MS, STATIC_GLYPH } from "./working-model.js";
 
 /** A titled, color-independent boundary for a focused interaction or result. */
@@ -156,20 +156,6 @@ function profilePreviewSpans(line: string): readonly PreviewSpan[] | undefined {
   return undefined;
 }
 
-function visiblePreviewSpans(spans: readonly PreviewSpan[], offset: number, length: number): readonly PreviewSpan[] {
-  const end = offset + length;
-  let spanStart = 0;
-  const visible: PreviewSpan[] = [];
-  for (const span of spans) {
-    const spanEnd = spanStart + span.text.length;
-    const start = Math.max(offset, spanStart);
-    const stop = Math.min(end, spanEnd);
-    if (start < stop) visible.push({ ...span, text: span.text.slice(start - spanStart, stop - spanStart) });
-    spanStart = spanEnd;
-  }
-  return visible;
-}
-
 function PreviewLine({ line, position, warnFirst, logicalLine, offset = 0 }: {
   readonly line: string;
   readonly position: number;
@@ -179,14 +165,14 @@ function PreviewLine({ line, position, warnFirst, logicalLine, offset = 0 }: {
 }) {
   const profileSpans = logicalLine === undefined ? profilePreviewSpans(line) : profilePreviewSpans(logicalLine);
   if (profileSpans) {
-    const spans = logicalLine === undefined ? profileSpans : visiblePreviewSpans(profileSpans, offset, line.length);
+    const spans = logicalLine === undefined ? profileSpans : sliceSpans(profileSpans, offset, line.length);
     return <Text key={position}>{spans.map((span, index) =>
       <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>;
   }
   const field = previewField(logicalLine ?? line);
   if (field) {
     const fieldSpans = [previewSpan(field.label, theme.field), previewSpan(field.value, theme.value)];
-    const spans = logicalLine === undefined ? fieldSpans : visiblePreviewSpans(fieldSpans, offset, line.length);
+    const spans = logicalLine === undefined ? fieldSpans : sliceSpans(fieldSpans, offset, line.length);
     return <Text key={position}>{spans.map((span, index) =>
       <Text key={index} color={span.color}>{span.text}</Text>)}</Text>;
   }
@@ -220,32 +206,55 @@ export function ListFooter({ indicator, selectedCount, message }: {
   );
 }
 
-/** A preview followed by a y/n question. */
-export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst, cursor, chrome }: {
+/** A preview that fits on one screen, followed by a y/n question. */
+export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst }: {
   readonly title?: string;
   readonly lines: readonly string[];
   readonly question: string;
   readonly warnFirst?: boolean;
-  readonly cursor?: number;
-  readonly chrome?: PreviewChrome;
 }) {
-  const { rows, columns } = useWindowSize();
-  const viewport = cursor === undefined ? undefined : previewViewport(lines, cursor, rows || 24, columns || 80, chrome ?? { title, questions: [question], footerRows: 2 });
-  const shown = viewport?.rows ?? lines;
+  const marker = question.indexOf("y/n");
   return (
     <BorderPanel title={title}>
-      {viewport ? shown.map((line, position) => {
-        const sourceLine = viewport.sourceLines[position]!;
-        return <PreviewLine key={position} line={line} position={position}
-          warnFirst={Boolean(warnFirst && viewport.start === 0)} logicalLine={lines[sourceLine]!}
-          offset={viewport.sourceOffsets[position]!} />;
-      }) : <PreviewLines lines={shown} warnFirst={warnFirst} />}
-      {viewport && viewport.total > viewport.height ? <Text color={theme.muted}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
-      {viewport ? <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · arrows/Pg page</Text> : null}
-      {question.includes("y/n") ? (() => {
-        const marker = question.indexOf("y/n");
-        return <Text><Text color={theme.warning}>{question.slice(0, marker)}</Text><Text color={theme.success} bold>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text><Text color={theme.legend}>{question.slice(marker + 3)}</Text></Text>;
-      })() : <Text color={theme.legend}>{question}</Text>}
+      <PreviewLines lines={lines} warnFirst={warnFirst} />
+      {marker >= 0
+        ? <Text><Text color={theme.warning}>{question.slice(0, marker)}</Text><Text color={theme.success} bold>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text><Text color={theme.legend}>{question.slice(marker + 3)}</Text></Text>
+        : <Text color={theme.legend}>{question}</Text>}
+    </BorderPanel>
+  );
+}
+
+function footerColor(role: PreviewFooterRole, reachedEnd: boolean): { readonly color: string; readonly bold?: boolean } {
+  switch (role) {
+    case "read": return { color: theme.success };
+    case "reading": return { color: theme.warning };
+    case "consequence": return { color: theme.warning };
+    case "yes": return { color: theme.success, bold: true };
+    case "no": return { color: theme.error };
+    case "action": return reachedEnd ? { color: theme.success, bold: true } : { color: theme.muted };
+    case "position":
+    case "cancel": return { color: theme.legend };
+  }
+}
+
+/**
+ * A paged preview with the shared two-row footer: reading progress, then what `y` does. `[y]` stays
+ * dimmed until `viewport` reaches the end; callers ignore `y` until then using the same viewport.
+ */
+export function PagedPreview({ chrome, lines, viewport, warnFirst = false }: {
+  readonly chrome: PreviewChrome;
+  readonly lines: readonly string[];
+  readonly viewport: PreviewViewport;
+  readonly warnFirst?: boolean;
+}) {
+  return (
+    <BorderPanel title={chrome.title}>
+      {viewport.rows.map((line, position) =>
+        <PreviewLine key={position} line={line} position={position}
+          warnFirst={warnFirst && viewport.start === 0} logicalLine={lines[viewport.sourceLines[position]!]!}
+          offset={viewport.sourceOffsets[position]!} />)}
+      {viewport.footer.map((spans, row) => <Text key={`footer-${row}`}>{spans.map((span, index) =>
+        <Text key={index} {...footerColor(span.role, viewport.reachedEnd)}>{span.text}</Text>)}</Text>)}
     </BorderPanel>
   );
 }

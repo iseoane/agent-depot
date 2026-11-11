@@ -37,34 +37,15 @@ export function updateModePreviewChrome(mode: UpdatesMode): PreviewChrome {
   switch (mode.kind) {
     case "preview": {
       const count = mode.prepared.applicable.length;
-      const question = `Apply ${count} ${count === 1 ? "update" : "updates"}? y/n`;
-      return {
-        title: "Update batch preview",
-        questions: ["Scroll to end before confirming; n cancels.", question],
-        footerRows: 2,
-      };
+      if (count === 0) return { title: "Update batch preview", consequence: "Nothing can be applied.", cancel: "[Enter/Esc] back" };
+      const updates = `${count} ${count === 1 ? "update" : "updates"}`;
+      return { title: "Update batch preview", action: `Apply ${updates}`, consequence: `Apply ${updates}? y/n` };
     }
     case "manual":
-      return {
-        title: "Manual App update",
-        questions: ["Scroll to end before confirming; n cancels.", "Manual step done, check now? y/n"],
-        footerRows: 2,
-      };
+      return { title: "Manual App update", action: "Check now", consequence: "Manual step done, check now? y/n" };
     case "confirm-paths":
-      return {
-        title: "Confirm replacing non-canonical locations",
-        questions: ["Scroll to end before confirming; n cancels.", "Replace exactly these paths? y/n"],
-        footerRows: 2,
-      };
+      return { title: "Confirm replacing non-canonical locations", action: "Replace these paths", consequence: "Replace exactly these paths? y/n" };
     default:
-      return { title: "Updates", questions: ["Continue? y/n"] };
+      return { title: "Updates" };
   }
-}
-
-export function updateModeQuestion(mode: UpdatesMode, reachedEnd: boolean): string {
-  if (mode.kind === "preview" && mode.prepared.applicable.length === 0) {
-    return "Nothing can be applied. Enter or Esc to go back.";
-  }
-  const chrome = updateModePreviewChrome(mode);
-  return reachedEnd ? chrome.questions.at(-1) ?? "Continue? y/n" : chrome.questions[0] ?? "Scroll to end before confirming; n cancels.";
 }

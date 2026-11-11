@@ -11,8 +11,8 @@ import { computeWindow, pageStep, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
 import { groupRecipeRows, useSourcesRecipes, type RecipeGroup } from "./sources-recipes.js";
-import { BorderPanel, DecisionPrompt, FieldLine, PreviewLines, Working } from "./panel-parts.js";
-import { previewViewport } from "./preview-window.js";
+import { BorderPanel, DecisionPrompt, FieldLine, PagedPreview, Working } from "./panel-parts.js";
+import { usePreviewGeometry, type PreviewChrome, type PreviewGeometry } from "./preview-window.js";
 import { movePreviewCursor } from "./mode-keys.js";
 import { formatAgo } from "./updates.js";
 import { animationEnabled, formatElapsed } from "./working-model.js";
@@ -117,17 +117,18 @@ function refreshPreviewLines(sources: readonly GitSource[]): string[] {
   return sources.map(source => `Source: refresh Git Source ${source.id} from ${source.url}`);
 }
 
-function refreshViewport(mode: Extract<Mode, { readonly kind: "confirm"; readonly action: "refresh" }>, rows: number, columns: number) {
-  return previewViewport(refreshPreviewLines(mode.sources), mode.cursor, rows, columns, {
+function refreshChrome(count: number): PreviewChrome {
+  return {
     title: "Refresh Git Sources",
-    questions: ["Scroll to end; n cancels.", "Refresh these Sources? y/n"],
-    footerRows: 2,
-  });
+    action: `Refresh ${count} ${count === 1 ? "Source" : "Sources"}`,
+    consequence: "Refresh these Sources? y/n",
+  };
 }
 
 export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange, refreshSession }: SourcesViewProps) {
   const refreshStates = useRefreshStates(refreshSession);
-  const { columns, rows: terminalRows } = useWindowSize();
+  const { rows: terminalRows } = useWindowSize();
+  const previewGeometry = usePreviewGeometry();
   // With a refresh session, one more row is kept for the selected Source's refresh error; below 24 rows
   // the list is already at its minimum, so that line is left out rather than pushing the footer away.
   const height = useListHeight(listHeight, refreshSession === undefined ? 9 : 10);
@@ -206,8 +207,6 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       const row = rows[resolveIndex(rows, selectionRef.current)];
       return row?.kind === "app" ? row.group.primary.entry.file : undefined;
     },
-    terminalRows: terminalRows || 24,
-    terminalColumns: columns || 80,
   });
   const rows: readonly SourceRow[] = [
     ...sources.map((source): SourceRow => ({ id: source.id, kind: "skills", source })),
@@ -307,7 +306,8 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
     }
     if (mode.kind === "confirm") {
       if (mode.action === "refresh") {
-        const viewport = refreshViewport(mode, terminalRows || 24, columns || 80);
+        const lines = refreshPreviewLines(mode.sources);
+        const viewport = previewGeometry(lines, mode.cursor, refreshChrome(mode.sources.length));
         const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
         if (cursor !== undefined) { dispatch({ type: "preview-cursor", cursor }); return; }
         if (input === "y" && !viewport.reachedEnd) return;
@@ -382,7 +382,7 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   const window = computeWindow(rows.length, selected, height);
   const now = refreshSession?.now() ?? 0;
   const selectedRefresh = selectedRow?.kind === "skills" ? refreshStates.get(selectedRow.source.id) : undefined;
-  if (mode.kind === "confirm") return <Prompt mode={mode} terminalRows={terminalRows || 24} terminalColumns={columns || 80} />;
+  if (mode.kind === "confirm") return <Prompt mode={mode} previewGeometry={previewGeometry} />;
   if (recipes.capturing) return <Box flexDirection="column">{recipes.panel}</Box>;
 
   return (
@@ -437,29 +437,24 @@ function RecipeStatus({ group }: { readonly group: RecipeGroup }) {
   );
 }
 
-function Prompt({ mode, terminalRows = 24, terminalColumns = 80 }: { readonly mode: Mode; readonly terminalRows?: number; readonly terminalColumns?: number }) {
+function Prompt({ mode, previewGeometry }: { readonly mode: Mode; readonly previewGeometry?: PreviewGeometry }) {
   if (mode.kind === "add-kind") return <Text>Add: 1 Git Source (skills + Packages) · 2 App recipe (Esc cancel)</Text>;
   if (mode.kind === "input") return <Text>URL: {mode.value}</Text>;
   if (mode.kind === "busy") return <BorderPanel title="Sources"><Working label={mode.label} since={mode.startedAt} /></BorderPanel>;
   if (mode.kind === "confirm") {
-    return mode.action === "refresh" ? (() => {
-      const viewport = refreshViewport(mode, terminalRows, terminalColumns);
+    if (mode.action === "refresh" && previewGeometry !== undefined) {
+      const lines = refreshPreviewLines(mode.sources);
+      const chrome = refreshChrome(mode.sources.length);
+      return <PagedPreview chrome={chrome} lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
+    }
+    if (mode.action === "remove") {
       return (
-        <BorderPanel title="Refresh Git Sources">
-          <PreviewLines lines={viewport.rows} />
-          {viewport.total > viewport.height ? <Text color={theme.legend}>{viewport.start + 1}–{viewport.end} of {viewport.total}</Text> : null}
-          <Text color={theme.legend}>Review {viewport.cursor + 1} of {viewport.total} · arrows/Pg page</Text>
-          {viewport.reachedEnd
-            ? <DecisionPrompt>Refresh these Sources?</DecisionPrompt>
-            : <Text color={theme.legend}>Scroll to end; n cancels.</Text>}
+        <BorderPanel title="Remove Git Source">
+          <FieldLine label="Source" value={`remove Git Source ${mode.source.id} from ${mode.source.url}`} />
+          <DecisionPrompt>Remove this Source?</DecisionPrompt>
         </BorderPanel>
       );
-    })() : (
-      <BorderPanel title="Remove Git Source">
-        <FieldLine label="Source" value={`remove Git Source ${mode.source.id} from ${mode.source.url}`} />
-        <DecisionPrompt>Remove this Source?</DecisionPrompt>
-      </BorderPanel>
-    );
+    }
   }
   return null;
 }

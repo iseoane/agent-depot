@@ -22,6 +22,7 @@ import { invalidateRetention, type ViewRetention } from "./view-retention.js";
 import { useLoadingSince, useMarks, useMounted, type ViewMessage } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
 import { useKeys } from "./keys.js";
+import { usePreviewGeometry } from "./preview-window.js";
 
 const NO_ENVIRONMENT: TuiEnvironment = {};
 
@@ -59,7 +60,8 @@ export interface CatalogViewProps {
 }
 
 export function CatalogView({ operations, sourceId, onCapturingChange, environment, listHeight, retention }: CatalogViewProps) {
-  const { columns, rows: terminalRows } = useWindowSize();
+  const { columns } = useWindowSize();
+  const previewGeometry = usePreviewGeometry();
   const env = environment ?? NO_ENVIRONMENT;
   const [all, setAll] = useState(sourceId === undefined);
   const mounted = useMounted();
@@ -180,7 +182,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
       setAction(BROWSE);
     },
   };
-  const packageContext: PackageContext = { packages, manage: packageHost, terminalRows: terminalRows || 24, terminalColumns: columns || 80 };
+  const packageContext: PackageContext = { packages, manage: packageHost, previewGeometry };
   const browse: CatalogBrowseContext = {
     navigation,
     height,
@@ -190,14 +192,14 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
     ready: state.status === "ready" && appCatalog.status === "ready",
     toggleAll: () => setAll((value) => !value),
     startPackage: (target) => void startPackageAction(packageContext, target, "i"),
-    startApp: (entry: AppEntry) => void startAppAction({ apps, manage: appManage, terminalRows: terminalRows || 24, terminalColumns: columns || 80 }, [entry], "i"),
+    startApp: (entry: AppEntry) => void startAppAction({ apps, manage: appManage, previewGeometry }, [entry], "i"),
     setMessage,
     setAction,
   };
 
   useKeys((input, key) => {
     const runningAppMode = appModeRef.current;
-    if (runningAppMode !== undefined) handleAppKey({ apps, manage: appManage, terminalRows: terminalRows || 24, terminalColumns: columns || 80 }, runningAppMode, input, key);
+    if (runningAppMode !== undefined) handleAppKey({ apps, manage: appManage, previewGeometry }, runningAppMode, input, key);
     else {
       const mode = actionRef.current;
       if (isPackageMode(mode)) handlePackageKey(packageContext, mode, input, key);

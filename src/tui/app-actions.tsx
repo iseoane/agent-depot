@@ -1,12 +1,12 @@
-import { Text, useWindowSize, type Key } from "ink";
+import { Text, type Key } from "ink";
 
 import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
 import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
-import { BorderPanel, HostChecklist, PreviewConfirm, Working } from "./panel-parts.js";
-import { previewViewport, type PreviewChrome } from "./preview-window.js";
+import { BorderPanel, HostChecklist, PagedPreview, Working } from "./panel-parts.js";
+import { usePreviewGeometry, type PreviewChrome, type PreviewGeometry } from "./preview-window.js";
 import { theme } from "./theme.js";
 import { operationStart } from "./working-model.js";
 
@@ -58,20 +58,30 @@ export type AppActionHost = Pick<ManageContext, "browse" | "setMessage" | "isMou
 export interface AppContext {
   readonly apps: AppOperations;
   readonly manage: AppActionHost;
-  readonly terminalRows: number;
-  readonly terminalColumns: number;
+  readonly previewGeometry: PreviewGeometry;
 }
 
 /** Recipe name, falling back to the file identity for invalid recipes. */
 export const appName = (entry: AppEntry) => entry.recipe?.name ?? entry.file;
 
 function appPreviewChrome(mode: Extract<AppMode, { kind: "app-approve" | "app-confirm" | "app-manual" }>): PreviewChrome {
-  const title = mode.kind === "app-approve" ? "Recipe approval · does not install"
-    : mode.kind === "app-manual" ? "App manual step" : `App ${mode.plan.action} confirmation`;
-  const question = mode.kind === "app-approve" ? `Approve ${appName(mode.entry)}? y/n · recipe approval does not install the App.`
-    : mode.kind === "app-manual" ? "Manual step done, check now? y/n"
-      : `${mode.plan.action} ${appName(mode.plan.entry)}? y/n`;
-  return { title, questions: [question, "Scroll to end before y; n cancels."], footerRows: 2 };
+  if (mode.kind === "app-approve") return recipeApprovalChrome(mode.entry);
+  if (mode.kind === "app-manual") return { title: "App manual step", action: "Check now", consequence: "Manual step done, check now? y/n" };
+  const { action, entry } = mode.plan;
+  return {
+    title: `App ${action} confirmation`,
+    action: `${action[0]!.toUpperCase()}${action.slice(1)} ${appName(entry)}`,
+    consequence: `${action} ${appName(entry)}? y/n`,
+  };
+}
+
+/** Approving a recipe records consent to its commands; it installs nothing. */
+export function recipeApprovalChrome(entry: AppEntry): PreviewChrome {
+  return {
+    title: "Recipe approval · does not install",
+    action: `Approve ${appName(entry)}`,
+    consequence: `Approve ${appName(entry)}? y/n · recipe approval does not install the App.`,
+  };
 }
 
 export function appStepLines(step: {
@@ -250,7 +260,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
     }
   } else {
     const lines = appPreviewLines(mode);
-    const viewport = previewViewport(lines, mode.cursor, context.terminalRows, context.terminalColumns, appPreviewChrome(mode));
+    const viewport = context.previewGeometry(lines, mode.cursor, appPreviewChrome(mode));
     const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
     if (cursor !== undefined) {
       manage.setMode({ ...mode, cursor });
@@ -277,7 +287,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
 
 /** Renders App prompts using the existing checklist and preview-confirm panels. */
 export function AppPanel({ mode }: { readonly mode: AppMode }) {
-  const { rows, columns } = useWindowSize();
+  const geometry = usePreviewGeometry();
   if (mode.kind === "app-busy") {
     const done = mode.done ?? [];
     return (
@@ -299,14 +309,5 @@ export function AppPanel({ mode }: { readonly mode: AppMode }) {
   }
   const lines = appPreviewLines(mode);
   const chrome = appPreviewChrome(mode);
-  const viewport = previewViewport(lines, mode.cursor, rows || 24, columns || 80, chrome);
-  return (
-    <PreviewConfirm
-      title={chrome.title}
-      lines={lines}
-      cursor={mode.cursor}
-      question={viewport.reachedEnd ? chrome.questions[0]! : chrome.questions[1]!}
-      chrome={chrome}
-    />
-  );
+  return <PagedPreview chrome={chrome} lines={lines} viewport={geometry(lines, mode.cursor, chrome)} />;
 }

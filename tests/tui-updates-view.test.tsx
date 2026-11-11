@@ -26,6 +26,7 @@ import { fakePackageOperations } from "./fake-package-operations.js";
 import { expandList } from "./expand-updates.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const ESC = "\u001B";
 const ENTER = "\r";
@@ -1085,7 +1086,7 @@ test("mixed Skills and Apps continue after App failure with a combined summary",
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write(ENTER);
-  await reviewToEnd(view.lastFrame, view.stdin, /Apply 3 updates/);
+  await reviewToEnd(view.lastFrame, view.stdin, /Apply 3 updates\?/);
   assert.equal(lookups, 2);
   view.stdin.write("y");
   const frame = await waitForFrame(view.lastFrame, /Update summary: 2 updated, 1 failed/);
@@ -1448,3 +1449,35 @@ test("a root-level Package result names its Source without a root segment", asyn
   const done = await waitForFrame(view.lastFrame, /Updated Package: pstack/);
   assert.ok(squash(done).includes("UpdatedPackage:pstack(claude)frombuiltin:agent-depot::claude#pstack:"));
 });
+
+for (const size of PREVIEW_SIZES) {
+  test(`the update batch preview accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t);
+    await seedProject(f, [{ name: "one", state: "outdated", method: ["node", "--fake-update"] }]);
+    const view = mount(f);
+    await expandList(view.lastFrame, view.stdin, /portable\/one/);
+    resizeTerminal(view, size);
+    press(view.stdin, "a");
+    press(view.stdin, ENTER);
+    const end = await confirmAtEnd(view, size.rows, /\[y\] Apply 1 update/, () => f.methodCalls.length > 0);
+    assert.match(squash(end), /Apply1update\?y\/n/);
+    await waitForFrame(view.lastFrame, frame => squash(frame).includes("1updated,0failed"));
+    view.unmount();
+  });
+}
+
+for (const size of PREVIEW_SIZES) {
+  test(`replacing non-canonical paths waits for the end of their list in the shared footer at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t);
+    await seedProject(f, [{ name: "one", state: "outdated", installPath: "tools/skills/one" }]);
+    const view = mount(f);
+    await expandList(view.lastFrame, view.stdin, /portable\/one/);
+    resizeTerminal(view, size);
+    press(view.stdin, "a");
+    press(view.stdin, ENTER);
+    await confirmAtEnd(view, size.rows, /\[y\] Apply 1 update/, () => /Outside \.agents\/skills/.test(view.lastFrame() ?? ""));
+    await confirmAtEnd(view, size.rows, /\[y\] Replace these paths/, () => squash(view.lastFrame() ?? "").includes("1updated,0failed"));
+    assert.equal(await f.read(f.project, "tools/skills/one"), newText("one"));
+    view.unmount();
+  });
+}

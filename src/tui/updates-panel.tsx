@@ -1,13 +1,13 @@
-import { Box, Text, useWindowSize } from "ink";
+import { Box, Text } from "ink";
 
 import { rowStyle, theme } from "./theme.js";
-import { BorderPanel, FieldLine, PreviewConfirm } from "./panel-parts.js";
-import { previewViewport } from "./preview-window.js";
+import { BorderPanel, FieldLine, PagedPreview } from "./panel-parts.js";
+import { usePreviewGeometry } from "./preview-window.js";
 import { describeRefresh, describeUnknownReasons, type Entry, type UpdatesListView, type UpdatesMessage } from "./updates-model.js";
 import type { UpdatesMode } from "./updates-mode.js";
 import { formatAgo, previewLineText, type UpdatesData } from "./updates.js";
 import { groupCheckState, packageLeafLabel, type CheckState } from "./updates-tree.js";
-import { updateModePreviewChrome, updateModePreviewLines, updateModeQuestion } from "./updates-preview.js";
+import { updateModePreviewChrome, updateModePreviewLines } from "./updates-preview.js";
 
 function updateResultField(line: string, defaultOk: boolean): { readonly ok: boolean; readonly label: string | undefined; readonly value: string } {
   if (line.startsWith("Update summary: ")) {
@@ -116,19 +116,9 @@ export function UpdatesFooter({ indicator, upToDate, updatableCount, checkedCoun
 type CapturedUpdateMode = Extract<UpdatesMode, { readonly kind: "manual" | "preview" | "confirm-paths" }>;
 
 function CapturedUpdatePreview({ mode }: { readonly mode: CapturedUpdateMode }) {
-  const { rows, columns } = useWindowSize();
   const lines = updateModePreviewLines(mode).map(previewLineText);
   const chrome = updateModePreviewChrome(mode);
-  const viewport = previewViewport(lines, mode.cursor, rows || 24, columns || 80, chrome);
-  return (
-    <PreviewConfirm
-      title={chrome.title}
-      lines={lines}
-      cursor={mode.cursor}
-      question={updateModeQuestion(mode, viewport.reachedEnd)}
-      chrome={chrome}
-    />
-  );
+  return <PagedPreview chrome={chrome} lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
 }
 
 export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {

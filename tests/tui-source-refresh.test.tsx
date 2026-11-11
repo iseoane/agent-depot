@@ -9,6 +9,7 @@ import { BUILT_IN_SOURCE, type SourceOperations, type SourceRefreshOptions } fro
 import { App } from "../src/tui/app.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 function gitSource(name: string): GitSource {
   const url = `https://example.test/${name}.git`;
@@ -138,3 +139,19 @@ test("App starts no refresh unless asked to", { timeout: 15_000 }, async () => {
   assert.equal(calls.length, 0);
   unmount();
 });
+
+for (const size of PREVIEW_SIZES) {
+  test(`refreshing marked Sources accepts y exactly when the footer reads to the end at ${size.columns}x${size.rows}`, { timeout: 30_000 }, async () => {
+    const sources = Array.from({ length: 30 }, (_, index) => gitSource(`source-${String(index).padStart(2, "0")}`));
+    const { operations, calls } = deferredOperations(sources);
+    const view = render(<SourcesView operations={operations} listHeight={5} />);
+    await waitForFrame(view.lastFrame, /source-00/);
+    resizeTerminal(view, size);
+    view.stdin.write("a");
+    await waitForFrame(view.lastFrame, /30 selected/);
+    view.stdin.write("r");
+    await confirmAtEnd(view, size.rows, /\[y\] Refresh 30 Sources/, () => calls.length > 0);
+    for (const call of calls) call.resolve();
+    view.unmount();
+  });
+}

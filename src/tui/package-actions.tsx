@@ -6,8 +6,8 @@ import type { PackageApprovalStatus } from "../package-state.js";
 import { errorText } from "./batch.js";
 import { movePreviewCursor } from "./mode-keys.js";
 import { installedEvidenceLabel, packagePlanLines } from "./package-rows.js";
-import { PreviewConfirm } from "./panel-parts.js";
-import { previewViewport, type PreviewChrome } from "./preview-window.js";
+import { PagedPreview } from "./panel-parts.js";
+import { usePreviewGeometry, type PreviewChrome, type PreviewGeometry } from "./preview-window.js";
 import type { ViewMessage } from "./view-state.js";
 import { busy, type Busy } from "./working-model.js";
 
@@ -52,8 +52,7 @@ export function isPackageMode(mode: { readonly kind: string }): mode is PackageM
 export interface PackageContext {
   readonly packages: PackageOperations;
   readonly manage: PackageActionHost;
-  readonly terminalRows: number;
-  readonly terminalColumns: number;
+  readonly previewGeometry: PreviewGeometry;
 }
 
 /** `install`, `update`, `uninstall` and `forget` plan a step; `approve` writes the install receipt. */
@@ -168,30 +167,33 @@ function packagePreview(mode: PackageMode): { readonly lines: readonly string[];
     case "package-approve":
       return {
         lines: mode.lines,
-        chrome: reviewChrome("Package approval", `Approve this install declaration for ${mode.target.name}? y/n`),
+        chrome: { title: "Package approval", action: "Approve the install declaration",
+          consequence: `Approve this install declaration for ${mode.target.name}? y/n` },
       };
     case "package-forget":
       return {
         lines: mode.lines,
-        chrome: reviewChrome("Forget Package selection", `Forget the selection record of ${mode.target.name}? y/n`),
+        chrome: { title: "Forget Package selection", action: "Forget the selection record",
+          consequence: `Forget the selection record of ${mode.target.name}? y/n` },
       };
-    case "package-confirm":
+    case "package-confirm": {
+      const { action, descriptor } = mode.plan;
+      const needsApproval = mode.approval === "needs approval";
       return {
         lines: packagePlanLines(mode.plan, mode.approval),
-        chrome: reviewChrome(`Package ${mode.plan.action} confirmation`, mode.approval === "needs approval"
-          ? "Approve this declaration and continue? y/n"
-          : `${mode.plan.action} ${mode.plan.descriptor.name}? y/n`),
+        chrome: {
+          title: `Package ${action} confirmation`,
+          action: needsApproval ? `Approve and ${action} ${descriptor.name}` : `${action[0]!.toUpperCase()}${action.slice(1)} ${descriptor.name}`,
+          consequence: needsApproval ? "Approve this declaration and continue? y/n" : `${action} ${descriptor.name}? y/n`,
+        },
       };
+    }
   }
 }
 
-function reviewChrome(title: string, question: string): PreviewChrome {
-  return { title, questions: [question], footerRows: 2 };
-}
-
 /**
- * Pages the declaration with the arrows, PgUp/PgDn and j/k. `y` answers from any page: the panel shows
- * the `Review N of M` position and the row window while more remains. `n` and Esc run nothing.
+ * Pages the declaration with the arrows, PgUp/PgDn and j/k. `y` answers only once the whole declaration
+ * has been displayed. `n` and Esc run nothing.
  */
 export function handlePackageKey(context: PackageContext, mode: PackageMode, input: string, key: Key): void {
   const { manage, packages } = context;
@@ -200,7 +202,7 @@ export function handlePackageKey(context: PackageContext, mode: PackageMode, inp
     manage.browse();
   };
   const { lines, chrome } = packagePreview(mode);
-  const viewport = previewViewport(lines, mode.cursor, context.terminalRows, context.terminalColumns, chrome);
+  const viewport = context.previewGeometry(lines, mode.cursor, chrome);
   const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
   if (cursor !== undefined) {
     manage.setMode({ ...mode, cursor });
@@ -210,7 +212,7 @@ export function handlePackageKey(context: PackageContext, mode: PackageMode, inp
     cancel("Package action cancelled");
     return;
   }
-  if (input !== "y") return;
+  if (input !== "y" || !viewport.reachedEnd) return;
   switch (mode.kind) {
     case "package-approve":
       manage.setMode(busy(`Approving the install declaration of ${mode.target.name}…`));
@@ -229,8 +231,9 @@ export function handlePackageKey(context: PackageContext, mode: PackageMode, inp
   }
 }
 
-/** Renders a Package prompt with the existing preview panel and y/n confirmation. */
+/** Renders a Package prompt with the shared paged preview. */
 export function PackagePanel({ mode }: { readonly mode: PackageMode }) {
   const { lines, chrome } = packagePreview(mode);
-  return <PreviewConfirm title={chrome.title} lines={lines} cursor={mode.cursor} question={chrome.questions[0]!} chrome={chrome} />;
+  const viewport = usePreviewGeometry()(lines, mode.cursor, chrome);
+  return <PagedPreview chrome={chrome} lines={lines} viewport={viewport} />;
 }

@@ -15,6 +15,7 @@ import { fakePackageOperations, installedPackage, piPackage } from "./profile-pa
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { skipWithoutFileSymlinks } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
@@ -354,13 +355,13 @@ test("export panel stays inside a resized terminal with wrapped choices and the 
   view.stdin.write("review.json");
   await waitForFrame(view.lastFrame, /review\.json_/);
   view.stdin.write("\r");
-  const confirmation = await waitForFrame(view.lastFrame, /Save\/Export Profile\? \(y\/n\)/);
+  const confirmation = await waitForFrame(view.lastFrame, /\[y\] Save\/Export Profile/);
   assert.ok(confirmation.split("\n").length <= rows, confirmation);
   const confirmationPages = await pageToEnd(view.lastFrame, view.stdin, rows);
   assert.ok(confirmationPages.length > 1, "the confirmation needs paging at this height");
   assert.ok(squash(pagedRows(confirmationPages).join("")).includes(squash(`Destination: ${path.join(f.picker, "review.json")}`)),
     "paging the confirmation reveals the whole destination");
-  assert.match(confirmation, /arrows\/PgUp\/PgDn page/);
+  assert.ok(squash(confirmation).includes("arrows/Pgpage"), confirmation);
   assert.doesNotMatch(confirmation, /Portable Profile|▸ Sources/);
 });
 
@@ -695,6 +696,7 @@ test("import shows same reasons, keeps them unselectable, and reports Sources an
   assert.match(await waitForFrame(f.view.lastFrame, /3 selected/), /3 selected/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Apply Profile/);
+  await pageToEnd(f.view.lastFrame, f.view.stdin);
   f.view.stdin.write("y");
   const results = await waitForFrame(f.view.lastFrame, /failed: Skill missing-skill/);
   assert.match(results, /skipped: Source https:\/\/example.com\/existing.git/);
@@ -977,3 +979,38 @@ test("with nothing to import Enter on a group header previews instead of only to
   const preview = await waitForFrame(f.view.lastFrame, /Apply Profile/);
   assert.match(squash(preview), /same:Apprecipetool/);
 });
+
+for (const size of PREVIEW_SIZES) {
+  test(`Profile import confirmation accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t);
+    const file = path.join(f.picker, "many.json");
+    const apps = Array.from({ length: 30 }, (_, index) => ({ ...recipe, name: `app-${String(index).padStart(2, "0")}` }));
+    await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0", sources: [], skills: [], apps }));
+    await importFile(f.view, file);
+    resizeTerminal(f.view, size);
+    f.view.stdin.write("\r");
+    const end = await confirmAtEnd(f.view, size.rows, /\[y\] Apply Profile/, () => /added: App recipe/.test(f.view.lastFrame() ?? ""));
+    assert.match(squash(end), /ApplyProfile\?\(y\/n\)/);
+  });
+}
+
+for (const size of PREVIEW_SIZES) {
+  test(`an export note opens in the shared footer with a close action and no y at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t);
+    await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
+    resizeTerminal(f.view, size);
+    f.view.stdin.write("e");
+    await waitForFrame(f.view.lastFrame, /▸ Sources/);
+    await expandExportGroup(f.view, "Export notes");
+    f.view.stdin.write("j");
+    await waitForFrame(f.view.lastFrame, /> .*Not transferred|> .*Selected Skills/);
+    f.view.stdin.write("\r");
+    const detail = await waitForFrame(f.view.lastFrame, /│ Export note(?!s)/);
+    assert.match(detail, /read ✓/);
+    assert.match(detail, /\[Esc\] close/);
+    assert.doesNotMatch(detail, /\[y\]/);
+    assert.ok(detail.split("\n").length <= size.rows, detail);
+    f.view.stdin.write("\u001b");
+    await waitForFrame(f.view.lastFrame, /Export notes/);
+  });
+}
