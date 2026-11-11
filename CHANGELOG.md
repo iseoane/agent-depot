@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.13] - 2026-11-11
+
+### Fixed
+
+- `self update` accepts a global npm install when Node is managed by mise (for
+  example on Omarchy), where `npm` is a wrapper script instead of a link to
+  `npm-cli.js`. The npm next to the wrapper must be verifiable and npm's global
+  directory must still contain this exact installation (#102).
+
+### Changed
+
+- Development only: release checks pass on Windows without touching real state (#101).
+
 ## [0.6.12] - 2026-11-09
 
 ### Changed
