@@ -699,8 +699,11 @@ test("the busy line names the item being updated and the clock keeps running fro
   await waitForFrame(lastFrame, /Updating Skill portable\/one \(1\/2\)…/);
   clock += 4500;
   await waitForFrame(lastFrame, /Updating Skill portable\/one \(1\/2\)… 4s/);
+  // The label is set before the item reaches its method, so wait for the method to be held.
+  await waitForFrame(lastFrame, () => releases.length === 1);
   releases.shift()!();
   await waitForFrame(lastFrame, /Updating Skill portable\/two \(2\/2\)… 4s/);
+  await waitForFrame(lastFrame, () => releases.length === 1);
   releases.shift()!();
   await waitForFrame(lastFrame, /2 updated, 0 failed/);
 });
