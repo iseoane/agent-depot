@@ -87,7 +87,6 @@ export function HostChecklist({ choices, cursor, selected }: {
   return <ChecklistLines choices={choices} cursor={cursor} isSelected={(host) => selected.includes(host)} keyOf={(host) => host} label={(host) => host} />;
 }
 
-/** Preview lines; `warnFirst` colors the first one as a warning. */
 const PREVIEW_FIELD_LABELS = [
   "File:", "Name:", "Platform:", "Status:", "Homepage:", "Owned Skills:",
   "App:", "Environment:", "Version:", "argv:", "Executable:", "Manual:",
@@ -165,10 +164,9 @@ function noticeColor(line: string): string | undefined {
   return text.startsWith("Cannot install ") ? theme.error : undefined;
 }
 
-function PreviewLine({ line, position, warnFirst, logicalLine, offset = 0 }: {
+function PreviewLine({ line, position, logicalLine, offset = 0 }: {
   readonly line: string;
   readonly position: number;
-  readonly warnFirst: boolean;
   readonly logicalLine?: string;
   readonly offset?: number;
 }) {
@@ -185,15 +183,12 @@ function PreviewLine({ line, position, warnFirst, logicalLine, offset = 0 }: {
     return <Text key={position}>{spans.map((span, index) =>
       <Text key={index} color={span.color}>{span.text}</Text>)}</Text>;
   }
-  return <Text key={position} color={warnFirst && position === 0 ? theme.warning : noticeColor(logicalLine ?? line) ?? theme.value}>{line}</Text>;
+  return <Text key={position} color={noticeColor(logicalLine ?? line) ?? theme.value}>{line}</Text>;
 }
 
-export function PreviewLines({ lines, warnFirst = false }: {
-  readonly lines: readonly string[];
-  readonly warnFirst?: boolean;
-}) {
+export function PreviewLines({ lines }: { readonly lines: readonly string[] }) {
   return <>{lines.map((line, position) =>
-    <PreviewLine key={position} line={line} position={position} warnFirst={warnFirst} />)}</>;
+    <PreviewLine key={position} line={line} position={position} />)}</>;
 }
 
 /** Under a list: the window indicator, how many items are marked, and the last result. */
@@ -215,24 +210,6 @@ export function ListFooter({ indicator, selectedCount, message }: {
   );
 }
 
-/** A preview that fits on one screen, followed by a y/n question. */
-export function PreviewConfirm({ title = "Confirmation", lines, question, warnFirst }: {
-  readonly title?: string;
-  readonly lines: readonly string[];
-  readonly question: string;
-  readonly warnFirst?: boolean;
-}) {
-  const marker = question.indexOf("y/n");
-  return (
-    <BorderPanel title={title}>
-      <PreviewLines lines={lines} warnFirst={warnFirst} />
-      {marker >= 0
-        ? <Text><Text color={theme.warning}>{question.slice(0, marker)}</Text><Text color={theme.success} bold>y</Text><Text color={theme.legend}>/</Text><Text color={theme.error}>n</Text><Text color={theme.legend}>{question.slice(marker + 3)}</Text></Text>
-        : <Text color={theme.legend}>{question}</Text>}
-    </BorderPanel>
-  );
-}
-
 function footerColor(role: PreviewFooterRole, reachedEnd: boolean): { readonly color: string; readonly bold?: boolean } {
   switch (role) {
     case "read": return { color: theme.success };
@@ -250,13 +227,12 @@ function footerColor(role: PreviewFooterRole, reachedEnd: boolean): { readonly c
  * A paged preview with the shared two-row footer: reading progress, then what `y` does. `[y]` stays
  * dimmed until `viewport` reaches the end; callers ignore `y` until then using the same viewport.
  */
-export function PagedPreview({ chrome, lines, styled, viewport, warnFirst = false }: {
+export function PagedPreview({ chrome, lines, styled, viewport }: {
   readonly chrome: PreviewChrome;
   readonly lines: readonly string[];
   /** Colours of each line in `lines`; a line without them has its colours inferred from the text. */
   readonly styled?: readonly (StyledLine | undefined)[];
   readonly viewport: PreviewViewport;
-  readonly warnFirst?: boolean;
 }) {
   useOpenPreview();
   return (
@@ -266,7 +242,7 @@ export function PagedPreview({ chrome, lines, styled, viewport, warnFirst = fals
         const custom = styled?.[logical];
         return custom === undefined
           ? <PreviewLine key={position} line={line} position={position}
-            warnFirst={warnFirst && viewport.start === 0} logicalLine={lines[logical]!}
+            logicalLine={lines[logical]!}
             offset={viewport.sourceOffsets[position]!} />
           : <Text key={position}>{sliceSpans(custom, viewport.sourceOffsets[position]!, line.length).map((span, index) =>
             <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>;
