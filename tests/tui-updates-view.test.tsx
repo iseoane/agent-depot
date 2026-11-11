@@ -1480,6 +1480,27 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
+test("a y pasted in the same block as the cursor moves does not confirm the update batch", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated", method: ["node", "--fake-update"] }]);
+  const view = mount(f);
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
+  await expandList(view.lastFrame, view.stdin, /portable\/one/);
+  resizeTerminal(view, { columns: 40, rows: 17 });
+  press(view.stdin, "a");
+  press(view.stdin, ENTER);
+  await waitForFrame(view.lastFrame, /read [█░]* ?\d+%|read ✓/u);
+  press(view.stdin, `${"j".repeat(200)}y`);
+  await waitForFrame(view.lastFrame, frame => /read ✓/u.test(frame) || squash(frame).includes("1updated"));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(f.methodCalls.length, 0, "the y in the burst ran the update");
+  assert.match(view.lastFrame() ?? "", /read ✓/u);
+  assert.match(squash(view.lastFrame() ?? ""), /\[y\]Apply1update/u);
+  press(view.stdin, "y");
+  await waitForFrame(view.lastFrame, frame => squash(frame).includes("1updated,0failed"));
+  assert.equal(f.methodCalls.length, 1);
+});
+
 test("the update batch preview opens with the count per type and its warnings, then one section per type", async t => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "one", state: "outdated", diskContent: "edited by hand" }]);

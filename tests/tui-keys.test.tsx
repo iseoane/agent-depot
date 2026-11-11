@@ -4,6 +4,8 @@ import { test } from "node:test";
 import { Text } from "ink";
 import { render } from "ink-testing-library";
 
+import { PagedPreview } from "../src/tui/panel-parts.js";
+import { previewViewport } from "../src/tui/preview-window.js";
 import { useKeys } from "../src/tui/keys.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
@@ -86,4 +88,27 @@ test("real terminal remnants are kept whole", async () => {
     const seen = await received([sequence]);
     assert.ok(!seen.some((input) => input.length === 1 && input !== ""), `${sequence} was split into ${JSON.stringify(seen)}`);
   }
+});
+
+const OPEN_PREVIEW_CHROME = { title: "Confirmation", action: "Apply", consequence: "Apply? (y/n)" };
+const OPEN_PREVIEW_LINES = ["one", "two", "three"];
+
+function ProbeBesidePreview({ seen }: { readonly seen: string[] }) {
+  return <>
+    <PagedPreview chrome={OPEN_PREVIEW_CHROME} lines={OPEN_PREVIEW_LINES}
+      viewport={previewViewport(OPEN_PREVIEW_LINES, 0, 24, 80, OPEN_PREVIEW_CHROME)} />
+    <Probe seen={seen} />
+  </>;
+}
+
+test("a y in a multi-character block is dropped while a paged preview is open, a lone y is delivered", async () => {
+  const seen: string[] = [];
+  const view = render(<ProbeBesidePreview seen={seen} />);
+  await waitForFrame(view.lastFrame, /probe/);
+  view.stdin.write("jjjyY");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  view.stdin.write("y");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  view.unmount();
+  assert.deepEqual(seen, ["j", "j", "j", "y"]);
 });
