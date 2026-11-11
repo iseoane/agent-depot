@@ -7,8 +7,9 @@ Type: feature
 - Objective: Rediseñar la presentación de la revisión de recetas, la preview de lotes de actualización y la confirmación para que se distinga qué pertenece a qué.
 - Depends on: None
 - Brief: [J001 brief-r1.md](jobs/J001/brief-r1.md)
+- Brief J002: [brief-r1.md](jobs/J002/brief-r1.md)
 - Blocker: None
-- Next step: I0033 (sobrescribir al exportar), luego J002, J003, J004 y release 0.6.14.
+- Next step: J002 preview de lote (worker), luego J003, J004 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».

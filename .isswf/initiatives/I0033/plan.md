@@ -3,12 +3,12 @@
 Type: feature
 
 ## J001
-- Status: in-progress
+- Status: done
 - Objective: Al exportar un Profile a un fichero que ya existe, ofrecer sobrescribirlo (con confirmación explícita) en vez de solo pedir otro nombre.
 - Depends on: I0032 J001 (pie de confirmación).
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: diseño con confirmación de sobrescritura en TUI (profile-view.tsx:418) y flag explícito en CLI si aplica (profile-export.ts:267 usa `wx`); escritura atómica (atomic-file.ts).
+- Next step: None (seguimientos en Evidence).
 
 ### Acceptance
 - Si el destino existe, la TUI pregunta si sobrescribir; `y` sobrescribe de forma atómica, `n` vuelve a pedir nombre.
@@ -20,3 +20,4 @@ Type: feature
 - Operador (2026-11-11): «lo de sobrescribir no lo haces?» — se hará en esta tanda, antes de J002, e irá en la release.
 - Autorización del operador (2026-11-11): integrar sin preguntar salvo algo grave que requiera confirmación.
 - Worker J001: 894d9ba..2b34101. Revisión V001 (Agent-tool): Spec pass, sin bloqueantes; Standards inconcluso por checks no observados → el coordinador observó test:single profile 36/0 y tui-profile 38/0; CI del PR. Seguimientos: documentar pérdida de permisos/hardlinks al sobrescribir; test de fallo de escritura; fsync en atomic-file.ts.
+- Entrega: PR #107 fusionado con CI verde.
