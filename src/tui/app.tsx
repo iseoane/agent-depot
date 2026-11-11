@@ -1,7 +1,8 @@
 import { Box, Text, useApp, useWindowSize } from "ink";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../project-manifest.js";
+import { withRefreshSession, type SourceRefreshSession } from "../source-refresh-session.js";
 import type { SourceOperations } from "../sources.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
@@ -21,6 +22,10 @@ export interface AppProps {
   readonly environment?: TuiEnvironment;
   /** Invoked once when the user asks to quit. */
   readonly onExit?: () => void;
+  /** Shared by every view so refreshes are deduplicated, reused and shown in Sources. */
+  readonly refreshSession?: SourceRefreshSession;
+  /** Refreshes the registered Git Sources in the background once mounted; opt-in so tests stay offline. */
+  readonly refreshOnStart?: boolean;
 }
 
 /** Sources derives its own hints from the selected row, so it is excluded here. */
@@ -60,7 +65,31 @@ export function Header({ view, columns }: { readonly view: ViewName; readonly co
   );
 }
 
-export function App({ operations, environment, onExit }: AppProps) {
+export function App({ operations: plainOperations, environment: plainEnvironment, onExit, refreshSession, refreshOnStart }: AppProps) {
+  // Memoized: views reload whenever the operations they receive change identity.
+  const operations = useMemo(
+    () => refreshSession === undefined ? plainOperations : withRefreshSession(plainOperations, refreshSession),
+    [plainOperations, refreshSession],
+  );
+  // Package previews refresh through the same session, so they reuse and show the same refreshes.
+  const environment = useMemo<TuiEnvironment | undefined>(
+    () => refreshSession === undefined ? plainEnvironment : {
+      ...plainEnvironment,
+      refreshSession,
+      ...(plainEnvironment?.packages !== undefined ? {} : {
+        packagesEnvironment: { ...plainEnvironment?.packagesEnvironment, sourceOperations: operations },
+      }),
+    },
+    [plainEnvironment, refreshSession, operations],
+  );
+  useEffect(() => {
+    if (!refreshOnStart || refreshSession === undefined) return;
+    // D3 (I0031): only registered Git Sources; the built-in Source is never refreshed.
+    plainOperations.listSources().then(
+      (sources) => refreshSession.refreshInBackground(sources.filter((source) => source.kind === "git")),
+      () => undefined,
+    );
+  }, [plainOperations, refreshSession, refreshOnStart]);
   const { exit } = useApp();
   const { columns, rows } = useWindowSize();
   const [capturing, setCapturing] = useState(false);
@@ -113,6 +142,7 @@ export function App({ operations, environment, onExit }: AppProps) {
             environment={environment}
             onCapturingChange={onCapturingChange}
             onHintsChange={setSourcesHints}
+            refreshSession={refreshSession}
             onOpenCatalog={(source) => {
               setCatalogSourceId(source.id);
               showView("catalog");

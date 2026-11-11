@@ -4,7 +4,9 @@ import type { PackageOperations } from "../package-flow.js";
 import { displayPackageSelection, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { formatVersionPolicy } from "../skill-install.js";
-import type { SourceOperations } from "../sources.js";
+import { sourceIdForUrl } from "../git-source.js";
+import type { SourceRefreshSession } from "../source-refresh-session.js";
+import type { SourceOperations, SourceRefreshOptions } from "../sources.js";
 import type { UpdateBatchAssessmentItem } from "../update-batch.js";
 import type { ProjectSkillSelection, ProjectSource } from "../project-manifest.js";
 import {
@@ -95,6 +97,8 @@ export interface RefreshReport {
   readonly failed: readonly SourceRefreshFailure[];
   /** Scopes whose installations could not be read to find the sources to refresh; the check used the cached data. */
   readonly unreadable: readonly { readonly scope: UpdateScope; readonly reason: string }[];
+  /** When the oldest reused refresh finished, if a recent refresh stood in for a new one. */
+  readonly reusedAt?: number;
 }
 
 /** A non-canonical location together with the scope it belongs to: the same relative path can exist in both. */
@@ -123,6 +127,8 @@ export type UpdatesPhase = "refreshing" | "checking";
 export interface LoadUpdatesOptions {
   /** Refresh the Git sources of the installations before assessing. */
   readonly refresh: boolean;
+  /** Refresh even when a refresh session holds a recent one (`r`). */
+  readonly force?: boolean;
   readonly onPhase?: (phase: UpdatesPhase) => void;
   readonly now?: () => number;
 }
@@ -158,34 +164,46 @@ function scopeInput(operations: SourceOperations, environment: TuiEnvironment, s
 type GitProjectSource = Extract<ProjectSource, { readonly url: string }>;
 
 /** Refreshes through the project-source operation the install flow uses; a registered Source is refreshed by id otherwise. */
-async function refreshOne(operations: SourceOperations, source: GitProjectSource): Promise<void> {
+async function refreshOne(operations: SourceOperations, source: GitProjectSource, options: SourceRefreshOptions): Promise<void> {
   if (operations.refreshProjectSource) {
-    await operations.refreshProjectSource(source);
+    await operations.refreshProjectSource(source, options);
     return;
   }
   const registered = (await operations.listSources()).find((candidate) => candidate.kind === "git" && candidate.url === source.url);
   if (!registered) throw new Error("the Source is not registered, so it cannot be refreshed here");
-  await operations.refreshSource(registered.id);
+  await operations.refreshSource(registered.id, options);
 }
 
 /** Refreshes every distinct Git source the installations use, one at a time; the built-in source is skipped. */
-async function refreshSources(operations: SourceOperations, selections: readonly ProjectSkillSelection[]): Promise<RefreshReport> {
+async function refreshSources(
+  operations: SourceOperations,
+  selections: readonly ProjectSkillSelection[],
+  options: SourceRefreshOptions,
+  session: SourceRefreshSession | undefined,
+): Promise<RefreshReport> {
   const distinct = new Map<string, GitProjectSource>();
   for (const { source } of selections) {
     if (source.kind === "external" && "url" in source) distinct.set(`${source.url}\u0000${source.ref ?? ""}`, source);
   }
   const refreshed: string[] = [];
   const failed: SourceRefreshFailure[] = [];
+  const startedAt = session?.now();
+  let reusedAt: number | undefined;
   for (const source of distinct.values()) {
     const label = source.ref === undefined ? source.url : `${source.url}@${source.ref}`;
     try {
-      await refreshOne(operations, source);
+      await refreshOne(operations, source, options);
       refreshed.push(label);
+      // A refresh that finished before this check began was reused, not made now.
+      const finishedAt = session?.snapshot().get(sourceIdForUrl(source.url))?.finishedAt;
+      if (startedAt !== undefined && finishedAt !== undefined && finishedAt < startedAt) {
+        reusedAt = Math.min(reusedAt ?? finishedAt, finishedAt);
+      }
     } catch (error) {
       failed.push({ source: label, reason: errorText(error) });
     }
   }
-  return { attempted: true, refreshed, failed, unreadable: [] };
+  return { attempted: true, refreshed, failed, unreadable: [], ...(reusedAt === undefined ? {} : { reusedAt }) };
 }
 
 /**
@@ -211,7 +229,7 @@ export async function loadUpdateRows(
         return [];
       })),
     );
-    refresh = { ...(await refreshSources(operations, installations.flat())), unreadable };
+    refresh = { ...(await refreshSources(operations, installations.flat(), { force: options.force === true }, environment.refreshSession)), unreadable };
   }
   options.onPhase?.("checking");
   const results = await Promise.all(UPDATE_SCOPES.map(async (scope): Promise<ScopeResult> => {

@@ -19,6 +19,8 @@ export function withChildOutput<T>(sink: ChildOutputSink, work: () => Promise<T>
 
 export interface ProcessRunOptions {
   readonly cwd?: string;
+  /** Variables added to the inherited environment. */
+  readonly env?: Readonly<Record<string, string>>;
   /** Optional bounded input; all other commands retain stdin EOF. */
   readonly stdin?: Uint8Array;
   /** Collect stdout instead of discarding it. */
@@ -207,6 +209,7 @@ export function runProcess(
     const sink = childOutputSinks.getStore();
     const child = spawn(invocation.command, [...invocation.args], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
       shell: false,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       // Without a capture, stdout is piped only for a sink, and then discarded after it is shown.

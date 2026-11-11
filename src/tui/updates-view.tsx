@@ -94,7 +94,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
     operations, env, clock, mounted, checkedRef, latest, setChecked, setCursor, setMode, modeRef, setMessage,
   });
 
-  // Entering the view refreshes the Git sources first, like `r`.
+  // Entering the view refreshes the Git sources first, like `r`, but may reuse a recent refresh (ADR 0004).
   useEffect(() => {
     void load(true);
   }, [load]);
@@ -135,7 +135,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
     recheck: () => {
       setMessage(undefined);
       setShowUnknown(false);
-      void load(true);
+      void load(true, true);
     },
     startPreview: () => void startPreview(),
     setMode,

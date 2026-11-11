@@ -333,3 +333,11 @@ test("on POSIX a terminal SIGINT to the foreground process group still stops the
     }
   });
 });
+
+test("adds the requested variables to the inherited environment", async () => {
+  const result = await runProcess(node, ["-e", "process.stdout.write(JSON.stringify([process.env.AGENT_DEPOT_PROBE, process.env.PATH === undefined]))"], {
+    captureStdout: true,
+    env: { AGENT_DEPOT_PROBE: "set" },
+  });
+  assert.equal(Buffer.from(result.stdout).toString("utf8"), JSON.stringify(["set", false]));
+});

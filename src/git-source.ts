@@ -15,12 +15,20 @@ export interface GitSource {
   readonly ref?: string;
 }
 
+/** How a refresh runs; a background refresh cannot prompt for credentials and is time-limited. */
+export interface GitSourceRefreshOptions {
+  readonly background?: boolean;
+}
+
 export interface GitSourceAccess {
-  refresh(source: GitSource): Promise<void>;
+  refresh(source: GitSource, options?: GitSourceRefreshOptions): Promise<void>;
 }
 
 export interface GitCommandRunnerOptions {
   readonly cwd?: string;
+  /** Variables added to the inherited environment. */
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs?: number;
 }
 
 /** Runs one executable with an argument vector and never invokes a shell. */
@@ -106,7 +114,14 @@ function gitFailureDetail(result: ProcessRunResult): string {
 
 class NodeGitCommandRunner implements GitCommandRunner {
   async run(command: string, args: readonly string[], options: GitCommandRunnerOptions = {}): Promise<void> {
-    const result = await runProcess(command, args, options.cwd === undefined ? {} : { cwd: options.cwd });
+    const result = await runProcess(command, args, {
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    });
+    if (result.timedOut) {
+      throw new Error(`git command timed out after ${Math.round((options.timeoutMs ?? 0) / 1000)} s`);
+    }
     if (result.code !== 0) {
       throw new Error(`git command failed: ${gitFailureDetail(result)}`);
     }
@@ -141,6 +156,11 @@ export interface GitSourceAccessOptions {
 }
 
 const SOURCE_LOCK_TIMEOUT_MS = 30_000;
+/** D2 (I0031): nobody is watching a background refresh, so it must neither prompt nor hang. */
+const BACKGROUND_REFRESH_OPTIONS: GitCommandRunnerOptions = Object.freeze({
+  env: Object.freeze({ GIT_TERMINAL_PROMPT: "0" }),
+  timeoutMs: 60_000,
+});
 const SOURCE_LOCK_RETRY_MS = 10;
 
 /**
@@ -156,7 +176,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
     this.runner = options.runner ?? new NodeGitCommandRunner();
   }
 
-  async refresh(source: GitSource): Promise<void> {
+  async refresh(source: GitSource, options: GitSourceRefreshOptions = {}): Promise<void> {
     const expectedId = sourceIdForUrl(source.url);
     if (source.kind !== "git" || source.id !== expectedId) {
       throw new GitSourceAccessError(source, "the Source identity does not match its registered URL");
@@ -170,7 +190,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
 
       const release = await acquireSourceLock(`${destination}.lock`);
       try {
-        await this.refreshLocked(source, destination);
+        await this.refreshLocked(source, destination, options.background ? BACKGROUND_REFRESH_OPTIONS : undefined);
       } finally {
         await release();
       }
@@ -183,7 +203,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
     }
   }
 
-  private async refreshLocked(source: GitSource, destination: string): Promise<void> {
+  private async refreshLocked(source: GitSource, destination: string, runOptions?: GitCommandRunnerOptions): Promise<void> {
     const existing = await pathType(destination);
     if (existing === "symlink") {
       throw new Error("the Source cache path is a symbolic link");
@@ -203,13 +223,13 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
         "--force",
         gitSourceLocation(source.url).repositoryUrl,
         "+refs/*:refs/*",
-      ]);
+      ], runOptions);
       return;
     }
 
     const temporaryDestination = `${destination}.${process.pid}.${randomUUID()}.tmp`;
     try {
-      await this.runner.run("git", ["clone", "--mirror", gitSourceLocation(source.url).repositoryUrl, temporaryDestination]);
+      await this.runner.run("git", ["clone", "--mirror", gitSourceLocation(source.url).repositoryUrl, temporaryDestination], runOptions);
       await assertNoSymlinkPath(temporaryDestination, "cache path");
       if ((await pathType(temporaryDestination)) !== "directory") {
         throw new Error("Git clone did not create a directory mirror");

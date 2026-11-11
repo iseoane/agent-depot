@@ -13,6 +13,8 @@
 //   user.name/user.email; tests that need their own git config override these after this preload runs.
 // - AGENT_DEPOT_NO_ANIMATION: set to 1 so Working renders one static frame; a ticking spinner would
 //   change every frame and break tests that wait for `frame !== before`.
+// - AGENT_DEPOT_NO_BACKGROUND_REFRESH: set to 1 so a TUI started by an E2E test does not run `git`
+//   against its registered Sources at startup.
 // - FORCE_COLOR: `node --test` sets it for its child processes when run from a real terminal, which
 //   makes Ink render ANSI colors into the frames the TUI tests match (so `npm publish` failed in a TTY).
 // - COLUMNS and LINES: set to 80x24. ink-testing-library's stdout has no `rows`, so Ink asks
@@ -25,6 +27,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 process.env.AGENT_DEPOT_NO_ANIMATION = "1";
+process.env.AGENT_DEPOT_NO_BACKGROUND_REFRESH = "1";
 delete process.env.FORCE_COLOR;
 process.env.COLUMNS = "80";
 process.env.LINES = "24";

@@ -2,6 +2,7 @@ import type { AppEnvironment } from "../app-flow.js";
 import { createPackageOperations, type PackageEnvironment, type PackageOperations } from "../package-flow.js";
 import type { ProjectInstallationOptions, ProjectSkillTreeAccess } from "../project-installation.js";
 import type { ProjectManifestStore } from "../project-manifest.js";
+import type { SourceRefreshSession } from "../source-refresh-session.js";
 
 /** Package operations for the TUI; tests inject a fake, the default builds the real flow. */
 export interface TuiPackagesEnvironment {
@@ -23,6 +24,8 @@ export interface TuiEnvironment extends TuiPackagesEnvironment {
   readonly sourceAccess?: ProjectSkillTreeAccess;
   readonly installationOptions?: Omit<ProjectInstallationOptions, "projectRoot" | "sourceAccess">;
   readonly projectManifestStore?: ProjectManifestStore;
+  /** Lets Updates tell a reused recent refresh from a new one. */
+  readonly refreshSession?: SourceRefreshSession;
 }
 
 /** The Package operations a view uses: the injected fake, or the real flow over this environment. */

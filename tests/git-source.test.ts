@@ -15,6 +15,7 @@ import {
   SKILL_TREE_LIMITS,
   sourceIdForUrl,
   type GitCommandRunner,
+  type GitSourceAccess,
   type GitSnapshotCommandRunner,
 } from "../src/git-source.js";
 
@@ -690,4 +691,27 @@ test("directory Sources read and install the selected branch from a real Git mir
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("a background refresh cannot prompt for credentials and is limited to 60 seconds; a foreground one is unchanged", async () => {
+  await withCache(async (cachePath) => {
+    const calls: Array<{ env?: Readonly<Record<string, string>>; timeoutMs?: number }> = [];
+    const runner: GitCommandRunner = {
+      async run(_command, args, options = {}) {
+        calls.push({ env: options.env, timeoutMs: options.timeoutMs });
+        if (args[0] === "clone") await mkdir(args[args.length - 1], { recursive: true });
+      },
+    };
+    const url = "https://github.com/example/background.git";
+    const source = { id: sourceIdForUrl(url), kind: "git" as const, url };
+    const access: GitSourceAccess = new GitSourceAccessAdapter({ cachePath, runner });
+
+    await access.refresh(source, { background: true });
+    await access.refresh(source);
+
+    assert.deepEqual(calls, [
+      { env: { GIT_TERMINAL_PROMPT: "0" }, timeoutMs: 60_000 },
+      { env: undefined, timeoutMs: undefined },
+    ]);
+  });
 });

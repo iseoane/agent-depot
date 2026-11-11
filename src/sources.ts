@@ -8,6 +8,7 @@ import {
   sourceIdForUrl,
   type GitSource,
   type GitSourceAccess,
+  type GitSourceRefreshOptions,
 } from "./git-source.js";
 import { defaultSourceStatePath, SourceStateStore } from "./source-state.js";
 import {
@@ -106,10 +107,18 @@ export interface UserGlobalSkillMigration {
   readonly to: UserGlobalSkillInstallation;
 }
 
+/**
+ * `force` only matters to wrappers that reuse a recent refresh (see source-refresh-session.ts);
+ * the plain operations always refresh.
+ */
+export interface SourceRefreshOptions extends GitSourceRefreshOptions {
+  readonly force?: boolean;
+}
+
 export interface SourceOperations {
   addGitSource(url: string): Promise<GitSource>;
   listSources(): Promise<readonly Source[]>;
-  refreshSource(sourceId: string): Promise<GitSource>;
+  refreshSource(sourceId: string, options?: SourceRefreshOptions): Promise<GitSource>;
   /** Removes a Git Source and, when requested, its selected user-global records. */
   removeGitSource?: (sourceId: string, installations?: readonly UserGlobalSkillInstallation[]) => Promise<void>;
   /** Rewrites only explicitly selected user-global identities; it never moves files or project manifests. */
@@ -122,7 +131,7 @@ export interface SourceOperations {
   /** Resolves a self-contained project Source without consulting global state. */
   resolveProjectSource?: (source: ProjectSource) => Promise<Source>;
   /** Refreshes a self-contained project Source after explicit CLI confirmation. */
-  refreshProjectSource?: (source: ProjectSource) => Promise<Source>;
+  refreshProjectSource?: (source: ProjectSource, options?: SourceRefreshOptions) => Promise<Source>;
   /**
    * Reads structured upstream metadata from the supplied preview snapshot;
    * implementations must not replace it with a mutable latest read.
@@ -195,7 +204,7 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
       return Object.freeze([BUILT_IN_SOURCE, ...state.gitSources]);
     },
 
-    async refreshSource(sourceId: string): Promise<GitSource> {
+    async refreshSource(sourceId: string, options?: SourceRefreshOptions): Promise<GitSource> {
       if (sourceId === BUILT_IN_SOURCE.id) {
         throw new BuiltInSourceError();
       }
@@ -206,7 +215,7 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
         throw new SourceNotFoundError(sourceId);
       }
 
-      await gitAccess.refresh(source);
+      await gitAccess.refresh(source, options);
       return source;
     },
 
@@ -335,12 +344,12 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
       return resolveProjectSource(projectSource);
     },
 
-    async refreshProjectSource(projectSource: ProjectSource): Promise<Source> {
+    async refreshProjectSource(projectSource: ProjectSource, options?: SourceRefreshOptions): Promise<Source> {
       const source = resolveProjectSource(projectSource);
       if (source.kind === "builtin") {
         throw new BuiltInSourceError();
       }
-      await gitAccess.refresh(source);
+      await gitAccess.refresh(source, options);
       return source;
     },
 

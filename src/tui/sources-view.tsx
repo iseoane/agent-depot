@@ -1,8 +1,9 @@
 import { Box, Text, useWindowSize } from "ink";
 import path from "node:path";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 
 import type { GitSource } from "../git-source.js";
+import type { SourceRefreshSession, SourceRefreshState } from "../source-refresh-session.js";
 import type { Source, SourceOperations } from "../sources.js";
 import { initialMode, modeReducer, type Mode, type ModeEvent } from "./sources-mode.js";
 import { rowStyle, theme } from "./theme.js";
@@ -13,6 +14,8 @@ import { groupRecipeRows, useSourcesRecipes, type RecipeGroup } from "./sources-
 import { BorderPanel, DecisionPrompt, FieldLine, PreviewLines, Working } from "./panel-parts.js";
 import { previewViewport } from "./preview-window.js";
 import { movePreviewCursor } from "./mode-keys.js";
+import { formatAgo } from "./updates.js";
+import { animationEnabled, formatElapsed } from "./working-model.js";
 
 export interface SourcesViewProps {
   readonly operations: SourceOperations;
@@ -25,6 +28,8 @@ export interface SourcesViewProps {
   readonly listHeight?: number;
   /** Contextual browse hints for the shell footer. */
   readonly onHintsChange?: (hints: string) => void;
+  /** Source of the per-row refresh marks; without it no marks are shown. */
+  readonly refreshSession?: SourceRefreshSession;
 }
 
 type LoadState =
@@ -63,7 +68,7 @@ async function refreshEach(operations: SourceOperations, targets: readonly GitSo
   let failed = false;
   for (const source of targets) {
     try {
-      lines.push(`Refreshed Git Source: ${(await operations.refreshSource(source.id)).id}`);
+      lines.push(`Refreshed Git Source: ${(await operations.refreshSource(source.id, { force: true })).id}`);
     } catch (error) {
       failed = true;
       lines.push(`Failed ${source.id}: ${errorText(error)}`);
@@ -74,6 +79,38 @@ async function refreshEach(operations: SourceOperations, targets: readonly GitSo
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const NO_REFRESHES: ReadonlyMap<string, SourceRefreshState> = new Map();
+const NO_SUBSCRIPTION = () => () => undefined;
+
+/** Re-renders on every session change and, when animation is on, every second so elapsed times move. */
+function useRefreshStates(session: SourceRefreshSession | undefined): ReadonlyMap<string, SourceRefreshState> {
+  const states = useSyncExternalStore(session?.subscribe ?? NO_SUBSCRIPTION, session?.snapshot ?? (() => NO_REFRESHES));
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (session === undefined || !animationEnabled()) return undefined;
+    const timer = setInterval(() => setTick((value) => value + 1), 1000);
+    // A redraw timer alone must never keep the process alive.
+    timer.unref();
+    return () => clearInterval(timer);
+  }, [session]);
+  return states;
+}
+
+/** The mark is text first; color only supports it. */
+function RefreshMark({ state, now }: { readonly state: SourceRefreshState | undefined; readonly now: number }) {
+  switch (state?.status) {
+    case undefined:
+    case "not-refreshed":
+      return <Text color={theme.muted}>· not refreshed</Text>;
+    case "refreshing":
+      return <Text color={theme.warning}>… refreshing {formatElapsed(now - (state.startedAt ?? now))}</Text>;
+    case "refreshed":
+      return <Text color={theme.success}>✓ refreshed {formatAgo(now - (state.finishedAt ?? now))}</Text>;
+    case "failed":
+      return <Text color={theme.error}>✗ refresh failed</Text>;
+  }
 }
 
 function refreshPreviewLines(sources: readonly GitSource[]): string[] {
@@ -88,9 +125,12 @@ function refreshViewport(mode: Extract<Mode, { readonly kind: "confirm"; readonl
   });
 }
 
-export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange }: SourcesViewProps) {
+export function SourcesView({ operations, onCapturingChange, onOpenCatalog, listHeight, environment, onHintsChange, refreshSession }: SourcesViewProps) {
+  const refreshStates = useRefreshStates(refreshSession);
   const { columns, rows: terminalRows } = useWindowSize();
-  const height = useListHeight(listHeight, 9);
+  // With a refresh session, one more row is kept for the selected Source's refresh error; below 24 rows
+  // the list is already at its minimum, so that line is left out rather than pushing the footer away.
+  const height = useListHeight(listHeight, refreshSession === undefined ? 9 : 10);
   const [state, setState] = useState<LoadState>(() => ({ status: "loading", startedAt: Date.now() }));
   // The highlight follows the source id; the index is only the fallback once that source is gone.
   // Selection and marks are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
@@ -340,6 +380,8 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
   if (state.status === "error") return <BorderPanel title="Source error"><Text color={theme.error}>{state.message}</Text></BorderPanel>;
 
   const window = computeWindow(rows.length, selected, height);
+  const now = refreshSession?.now() ?? 0;
+  const selectedRefresh = selectedRow?.kind === "skills" ? refreshStates.get(selectedRow.source.id) : undefined;
   if (mode.kind === "confirm") return <Prompt mode={mode} terminalRows={terminalRows || 24} terminalColumns={columns || 80} />;
   if (recipes.capturing) return <Box flexDirection="column">{recipes.panel}</Box>;
 
@@ -358,12 +400,13 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
             <Text color={theme.value}>{id}</Text><Text color={theme.legend}>  </Text>
             <Text color={theme.field}>{row.kind}</Text><Text color={theme.legend}>  </Text>
             {row.kind === "skills"
-              ? <Text color={theme.value}>{row.source.url}</Text>
+              ? <><Text color={theme.value}>{row.source.url}</Text>{refreshSession === undefined ? null : <><Text color={theme.legend}>  </Text><RefreshMark state={refreshStates.get(row.source.id)} now={now} /></>}</>
               : <RecipeStatus group={row.group} />}
           </Text>
         );
       })}
       {window.indicator ? <Text color={theme.muted}>{window.indicator}</Text> : null}
+      {selectedRefresh?.status === "failed" && (terminalRows || 24) >= 24 ? <Text color={theme.error} wrap="truncate-end">Refresh failed: {selectedRefresh.error}</Text> : null}
       {selectedCount > 0 ? <Text>{selectedCount} selected</Text> : null}
       {recipes.loadingSince !== undefined && mode.kind !== "busy" && !recipes.capturing
         ? <Working label="Loading App recipes…" since={recipes.loadingSince} /> : null}

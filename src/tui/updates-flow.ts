@@ -28,8 +28,8 @@ export interface UpdatesFlowInputs {
 
 export interface UpdatesFlow {
   readonly state: LoadState;
-  /** Checks for updates, fetching the Git sources first when `refresh` is set. */
-  readonly load: (refresh: boolean) => Promise<void>;
+  /** Checks for updates, fetching the Git sources first when `refresh` is set; `force` skips a recent refresh. */
+  readonly load: (refresh: boolean, force?: boolean) => Promise<void>;
   /** Prepares the preview of the selected updates. */
   readonly startPreview: () => Promise<void>;
   readonly apply: (prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[]) => Promise<void>;
@@ -44,7 +44,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
     pendingAnswer.current?.(false);
   }, []);
 
-  const load = useCallback(async (refresh: boolean) => {
+  const load = useCallback(async (refresh: boolean, force = false) => {
     const token = ++loadToken.current;
     // The check after an applied update continues that update's clock; a check from browsing starts one.
     const running = busy(refresh ? REFRESHING : CHECKING, modeRef.current, clock);
@@ -57,7 +57,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
     setMode(running);
     let next: LoadState;
     try {
-      next = { status: "ready", data: await loadUpdateRows(operations, env, { refresh, onPhase: phase, now: clock }) };
+      next = { status: "ready", data: await loadUpdateRows(operations, env, { refresh, force, onPhase: phase, now: clock }) };
     } catch (error) {
       // The scopes are read separately, so this is unexpected; show it as the check's result.
       next = { status: "ready", data: emptyData(errorText(error), clock()) };
