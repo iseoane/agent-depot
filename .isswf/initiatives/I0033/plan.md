@@ -19,3 +19,4 @@ Type: feature
 - Código: src/profile-export.ts:267-269 (`wx`, EEXIST → error), src/tui/profile-view.tsx:418.
 - Operador (2026-11-11): «lo de sobrescribir no lo haces?» — se hará en esta tanda, antes de J002, e irá en la release.
 - Autorización del operador (2026-11-11): integrar sin preguntar salvo algo grave que requiera confirmación.
+- Worker J001: 894d9ba..2b34101. Revisión V001 (Agent-tool): Spec pass, sin bloqueantes; Standards inconcluso por checks no observados → el coordinador observó test:single profile 36/0 y tui-profile 38/0; CI del PR. Seguimientos: documentar pérdida de permisos/hardlinks al sobrescribir; test de fallo de escritura; fsync en atomic-file.ts.
