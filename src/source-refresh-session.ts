@@ -17,7 +17,10 @@ export interface SourceRefreshSessionOptions {
 
 /** In-memory refresh state of one TUI process; it never writes files. */
 export interface SourceRefreshSession {
-  /** Joins a refresh in flight; otherwise reuses a success younger than an hour unless forced. */
+  /**
+   * Joins another user refresh in flight; waits out a background one. Then reuses a success younger
+   * than an hour unless forced, or refreshes in the foreground.
+   */
   refresh(source: GitSource, options?: Pick<SourceRefreshOptions, "force">): Promise<void>;
   /** Queues refreshes that cannot prompt; callers never wait for the queue and failures only update the state. */
   refreshInBackground(sources: readonly GitSource[]): void;
@@ -77,18 +80,43 @@ export function createSourceRefreshSession(
     return state?.status === "refreshed" && state.finishedAt !== undefined && now() - state.finishedAt < FRESHNESS_WINDOW_MS;
   };
 
-  const refresh = (source: GitSource, background: boolean, force: boolean): Promise<void> => {
+  // Background refreshes cannot prompt and are time-limited (D2), so a user call never joins one:
+  // it waits for it to settle, then reuses its success (unless forced) or refreshes in the foreground.
+  const backgroundRuns = new Set<Promise<void>>();
+  const userRuns = new Map<string, Promise<void>>();
+
+  const refreshInBackground = (source: GitSource): Promise<void> => {
     const running = inFlight.get(source.id);
     if (running) return running;
-    if (!force && isFresh(source.id)) return Promise.resolve();
-    return start(source, background);
+    if (isFresh(source.id)) return Promise.resolve();
+    const started = start(source, true);
+    backgroundRuns.add(started);
+    const forget = () => backgroundRuns.delete(started);
+    started.then(forget, forget);
+    return started;
+  };
+
+  const refreshForUser = (source: GitSource, force: boolean): Promise<void> => {
+    const pending = userRuns.get(source.id);
+    if (pending) return pending;
+    const run = (async () => {
+      const running = inFlight.get(source.id);
+      if (running && backgroundRuns.has(running)) await running.catch(() => undefined);
+      else if (running) return running;
+      if (!force && isFresh(source.id)) return;
+      await start(source, false);
+    })();
+    userRuns.set(source.id, run);
+    const forget = () => userRuns.delete(source.id);
+    run.then(forget, forget);
+    return run;
   };
 
   const drain = () => {
     while (backgroundRunning < BACKGROUND_CONCURRENCY && queue.length > 0) {
       const source = queue.shift()!;
       backgroundRunning += 1;
-      void refresh(source, true, false)
+      void refreshInBackground(source)
         .catch(() => undefined)
         .finally(() => {
           backgroundRunning -= 1;
@@ -98,7 +126,7 @@ export function createSourceRefreshSession(
   };
 
   return {
-    refresh: (source, refreshOptions = {}) => refresh(source, false, refreshOptions.force === true),
+    refresh: (source, refreshOptions = {}) => refreshForUser(source, refreshOptions.force === true),
     refreshInBackground(sources) {
       queue.push(...sources);
       drain();
