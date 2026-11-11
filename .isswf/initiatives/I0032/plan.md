@@ -13,8 +13,9 @@ Type: feature
 - Brief J004a: [brief-r1.md](jobs/J004a/brief-r1.md)
 - Brief J004b: [brief-r1.md](jobs/J004b/brief-r1.md)
 - Brief J004c: [brief-r1.md](jobs/J004c/brief-r1.md)
+- Brief J004d: [brief-r1.md](jobs/J004d/brief-r1.md)
 - Blocker: None
-- Next step: J004c en curso (worker en feat/footer-sources-removal); después J004d, J005, J006 y release 0.6.14. Reanudación programada 22:35 (2026-11-11): reconciliar plan, git y PRs antes de actuar.
+- Next step: J004d (worker sonnet), luego J005, J006 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -42,3 +43,4 @@ Type: feature
 - J004b worker (sonnet, 16 min + corrección 17 min, 307k) 273251d..4ed5687. Revisión V001 (opus): fail (F1 bloqueante: filas de mensajes sobre la preview de instalación de recetas). Corrección: F1, F2 (colores de avisos, también en la desinstalación de J004a), F3 (Esc). V002: approve. Coordinador: sin aserciones eliminadas en tests editados; RED 9490d2c solo tests; CLI sin cambios. Tamaño: subestimado (1 corrección).
 - J004b entregado: PR #112 fusionado con CI verde.
 - J004c worker (sonnet, 12 min, 92k, sin corrección) 3a34f1a..ac8c4eb. Revisión V001 (opus): 0 bloqueantes; coordinador cerró lo no observado: RED f6f3e97 solo tests, CLI sin cambios, base sin colores en la retirada (nada perdido), tests 50/0. Seguimientos a J004d: ocultar filas de mensaje también en approve/uninstall-confirm/uninstall-manual de recetas (o limpiar notice en startRemoval); test de Source removal sin filas encima.
+- J004c entregado: PR #113 fusionado con CI verde.
