@@ -1,9 +1,10 @@
-import { writeFile } from "node:fs/promises";
+import { lstat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppOperations } from "./app-flow.js";
 import { loadAppOwnedSkillFilter } from "./app-owned-skills.js";
 import { sourceIdForUrl } from "./git-source.js";
 import { bundleRoot, describeBundleInSource, describeCoordinates, type PackageSelection } from "./package-model.js";
+import { writeFileAtomically } from "./atomic-file.js";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "./project-manifest.js";
 import { parseProfile, PROFILE_FORMAT, PROFILE_FORMAT_V2, serializeProfile, type Profile, type ProfilePackageOperations, type ProfileReplica } from "./profile.js";
 import { formatVersionPolicy } from "./skill-install.js";
@@ -261,9 +262,26 @@ export function requireProfileExportSelection(profile: Profile): void {
   }
 }
 
-/** Exclusively create an export artifact; never replace a file or follow a symlink. */
-export async function writeProfileExport(file: string, profile: Profile): Promise<void> {
+/** Rejects an existing destination that is not a regular file, such as a directory or symlink. */
+async function requireOverwritableProfileExport(file: string): Promise<void> {
+  try {
+    if (!(await lstat(file)).isFile()) throw new Error(`${file} is not a regular file; choose another path`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+/**
+ * Exclusively create an export artifact unless `overwrite` explicitly allows atomically replacing a
+ * regular file. Neither path follows a symlink: `wx` refuses it and the atomic rename replaces the entry.
+ */
+export async function writeProfileExport(file: string, profile: Profile, options: { readonly overwrite?: boolean } = {}): Promise<void> {
   requireProfileExportSelection(profile);
+  if (options.overwrite) {
+    await requireOverwritableProfileExport(file);
+    await writeFileAtomically(file, serializeProfile(profile));
+    return;
+  }
   try { await writeFile(file, serializeProfile(profile), { encoding: "utf8", flag: "wx" }); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`${file} already exists; choose another path`);

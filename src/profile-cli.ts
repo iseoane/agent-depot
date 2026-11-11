@@ -7,14 +7,14 @@ import { NO_PROGRESS, type Progress } from "./progress.js";
 import type { SourceOperations } from "./sources.js";
 import { CliUsageError } from "./usage-error.js";
 
-export const EXPORT_USAGE = "agent-depot export [--out <file>] [--no-sources] [--no-skills] [--no-apps] [--no-packages] [--source <id|url>...] [--skill <path|name>...] [--app <name>...] [--package <selection>...]";
+export const EXPORT_USAGE = "agent-depot export [--out <file> [--overwrite]] [--no-sources] [--no-skills] [--no-apps] [--no-packages] [--source <id|url>...] [--skill <path|name>...] [--app <name>...] [--package <selection>...]";
 
 export const IMPORT_USAGE = "agent-depot import <file> [--yes] [--no-sources] [--no-skills] [--no-apps] [--no-packages] [--source <id|url>...] [--skill <path|name>...] [--app <name>...] [--package <selection>...]";
 
 export async function runProfileExport(values: readonly string[], operations: SourceOperations, apps: AppOperations,
   output: (line: string) => void, diagnostic: (line: string) => void, homeDirectory?: string,
   packageOperations?: ProfilePackageOperations, progress: Progress = NO_PROGRESS): Promise<number> {
-  const { filters, out } = parseProfileOptions(values, false);
+  const { filters, out, overwrite } = parseProfileOptions(values, false);
   const plan = await progress.run("Building Profile export", () => buildProfileExport(operations, apps, {
     ...filters,
     homeDirectory,
@@ -25,7 +25,7 @@ export async function runProfileExport(values: readonly string[], operations: So
   const content = serializeProfile(plan.profile);
   if (out === undefined) output(content.trimEnd());
   else {
-    await writeProfileExport(out, plan.profile);
+    await writeProfileExport(out, plan.profile, { overwrite });
     diagnostic(`Exported profile to ${out}`);
   }
   return 0;
@@ -36,11 +36,15 @@ function parseProfileOptions(values: readonly string[], importing: boolean) {
   const filters: { -readonly [Key in keyof ProfileFilters]: ProfileFilters[Key] } = { sources, skills, apps: appNames, packages: packageNames };
   let out: string | undefined;
   let confirmed = false;
+  let overwrite = false;
   for (let index = 0; index < values.length; index++) {
     const option = values[index];
     if (option === "--yes" && importing) {
       if (confirmed) throw new CliUsageError("Duplicate --yes");
       confirmed = true;
+    } else if (option === "--overwrite" && !importing) {
+      if (overwrite) throw new CliUsageError("Duplicate --overwrite");
+      overwrite = true;
     } else if (option === "--no-sources") filters.noSources = true;
     else if (option === "--no-skills") filters.noSkills = true;
     else if (option === "--no-apps") filters.noApps = true;
@@ -59,7 +63,8 @@ function parseProfileOptions(values: readonly string[], importing: boolean) {
       }
     } else throw new CliUsageError(`Usage: ${importing ? IMPORT_USAGE : EXPORT_USAGE}`);
   }
-  return { filters, out, confirmed };
+  if (overwrite && out === undefined) throw new CliUsageError("--overwrite requires --out");
+  return { filters, out, confirmed, overwrite };
 }
 
 export async function runProfileImport(values: readonly string[], operations: SourceOperations, apps: AppOperations,
