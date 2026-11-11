@@ -12,8 +12,9 @@ Type: feature
 - Brief J003b: [brief-r1.md](jobs/J003b/brief-r1.md)
 - Brief J004a: [brief-r1.md](jobs/J004a/brief-r1.md)
 - Brief J004b: [brief-r1.md](jobs/J004b/brief-r1.md)
+- Brief J004c: [brief-r1.md](jobs/J004c/brief-r1.md)
 - Blocker: None
-- Next step: J004b (worker sonnet), luego J004c, J004d, J005, J006 y release 0.6.14.
+- Next step: J004c (worker sonnet), luego J004d, J005, J006 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -39,3 +40,4 @@ Type: feature
 - J004a worker (sonnet, 11 min, 93k) edb5a85..ed1c11f. Revisión V001 (opus): Spec pass, 0 bloqueantes; coordinador observó RED 0b1499c solo tests, CLI sin cambios, tui-installations-manage 23/0. Seguimientos: forzar paginación en tests de add/remove hosts; test de n/Esc a mitad de lectura. Pendiente añadido: quitar unmanaged y confirmaciones en lote (confirm-bulk-*) → J004d.
 - J004a entregado: PR #111 fusionado con CI verde.
 - J004b worker (sonnet, 16 min + corrección 17 min, 307k) 273251d..4ed5687. Revisión V001 (opus): fail (F1 bloqueante: filas de mensajes sobre la preview de instalación de recetas). Corrección: F1, F2 (colores de avisos, también en la desinstalación de J004a), F3 (Esc). V002: approve. Coordinador: sin aserciones eliminadas en tests editados; RED 9490d2c solo tests; CLI sin cambios. Tamaño: subestimado (1 corrección).
+- J004b entregado: PR #112 fusionado con CI verde.
