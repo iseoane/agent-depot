@@ -2,6 +2,7 @@ import { Box, Text, useApp, useWindowSize } from "ink";
 import { useCallback, useRef, useState } from "react";
 
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../project-manifest.js";
+import type { SourceRefreshSession } from "../source-refresh-session.js";
 import type { SourceOperations } from "../sources.js";
 import { CatalogView } from "./catalog-view.js";
 import type { TuiEnvironment } from "./environment.js";
@@ -21,6 +22,10 @@ export interface AppProps {
   readonly environment?: TuiEnvironment;
   /** Invoked once when the user asks to quit. */
   readonly onExit?: () => void;
+  /** Shared by every view so refreshes are deduplicated, reused and shown in Sources. */
+  readonly refreshSession?: SourceRefreshSession;
+  /** Refreshes the registered Git Sources in the background once mounted; opt-in so tests stay offline. */
+  readonly refreshOnStart?: boolean;
 }
 
 /** Sources derives its own hints from the selected row, so it is excluded here. */

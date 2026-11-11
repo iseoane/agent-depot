@@ -3,6 +3,7 @@ import path from "node:path";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import type { GitSource } from "../git-source.js";
+import type { SourceRefreshSession } from "../source-refresh-session.js";
 import type { Source, SourceOperations } from "../sources.js";
 import { initialMode, modeReducer, type Mode, type ModeEvent } from "./sources-mode.js";
 import { rowStyle, theme } from "./theme.js";
@@ -25,6 +26,8 @@ export interface SourcesViewProps {
   readonly listHeight?: number;
   /** Contextual browse hints for the shell footer. */
   readonly onHintsChange?: (hints: string) => void;
+  /** Source of the per-row refresh marks; without it no marks are shown. */
+  readonly refreshSession?: SourceRefreshSession;
 }
 
 type LoadState =
