@@ -64,6 +64,7 @@
         "name": "core",
         "patterns": [
           "src/sources.ts",
+          "src/source-refresh-session.ts",
           "src/source-state.ts",
           "src/skill-discovery.ts",
           "src/project-manifest.ts",
