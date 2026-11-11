@@ -1481,3 +1481,81 @@ for (const size of PREVIEW_SIZES) {
     view.unmount();
   });
 }
+
+test("the update batch preview opens with the count per type and its warnings, then one section per type", async t => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "one", state: "outdated", diskContent: "edited by hand" }]);
+  const recipesDirectory = path.join(f.home, "apps");
+  await mkdir(recipesDirectory);
+  await writeFile(path.join(recipesDirectory, "demo.json"), JSON.stringify({
+    name: "demo", install: { manual: "install" }, uninstall: { manual: "remove" }, update: { argv: ["demo", "update", "--note", "two words"] },
+    version: { argv: ["demo", "version"], pattern: "(\\S+)" }, latest: { npm: "demo" },
+  }));
+  const appEnvironment = { recipesDirectory, homeDirectory: f.home,
+    resolveExecutable: async (name: string) => `/usr/bin/${name}`,
+    fetch: async () => new Response(JSON.stringify({ "dist-tags": { latest: "2.0.0" } })),
+    runner: async () => ({ code: 0, signal: null, stdout: Buffer.from("1.0.0"), stderr: "", outputTooLarge: false }),
+  };
+  const apps = createAppOperations(appEnvironment);
+  for (const entry of await apps.load()) await apps.approve(entry);
+  const packages = fakePackageOperations({
+    checkUpdates: async () => [{ installed: packageRecord, observed: { kind: "installed", version: "1.0.0" }, status: "update available",
+      available: { kind: "manifest-version", version: "1.1.0", declaredBy: "bundle" } }],
+    planLifecycle: async () => packagePlan,
+    approvalStatus: async () => "needs approval",
+  });
+  const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, appEnvironment, packages }} />);
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
+  await expandList(view.lastFrame, view.stdin, frame => frame.includes("App: demo") && frame.includes("portable/one") && frame.includes("Package: pstack"));
+  resizeTerminal(view, { columns: 120, rows: 200 });
+  press(view.stdin, "a");
+  await waitForFrame(view.lastFrame, /3 selected/);
+  press(view.stdin, ENTER);
+  const frame = await waitForFrame(view.lastFrame, /read ✓/);
+  const rows = frame.split("\n").map(row => row.replace(/^│\s?|\s*│$/gu, ""));
+  const at = (pattern: RegExp) => rows.findIndex(row => pattern.test(row));
+  const header = at(/Apply 3 updates {2}1 Skill · 1 App · 1 Package/u);
+  const skills = at(/^ *SKILLS$/u);
+  const appsHeading = at(/^ *APPS$/u);
+  const packagesHeading = at(/^ *PACKAGES$/u);
+  assert.ok(header >= 0 && header < skills && skills < appsHeading && appsHeading < packagesHeading, `header, then SKILLS, APPS and PACKAGES in order:\n${frame}`);
+  const topWarning = at(/⚠ portable\/one: the installed Skill has local modifications/u);
+  assert.ok(topWarning > header && topWarning < skills, `the local-modification warning is collected at the top:\n${frame}`);
+  const itemWarning = rows.findIndex((row, index) => index > skills && index < appsHeading && /⚠ the installed Skill has local modifications/u.test(row));
+  assert.ok(itemWarning > skills, `the warning is repeated in its Skill:\n${frame}`);
+  assert.match(rows[skills + 1] ?? "", /portable\/one {2}builtin:agent-depot · project {2}0\.0\.1 → /u);
+  const app = at(/demo {2}1\.0\.0 → 2\.0\.0/u);
+  assert.ok(app > appsHeading && app < packagesHeading, `the App block shows its version arrow:\n${frame}`);
+  assert.match(rows[app + 1] ?? "", /\$ demo update --note "two words"$/u);
+  assert.match(rows[app + 2] ?? "", new RegExp(`/usr/bin/demo · in ${f.home.replace(/[\\^$.*+?()[\]{}|]/gu, "\\$&")}`, "u"));
+  const pkg = at(/pstack {2}pi {2}1\.0\.0 → 1\.1\.0/u);
+  assert.ok(pkg > packagesHeading, `the Package block shows its installed and available versions:\n${frame}`);
+  assert.ok(rows.slice(pkg).some(row => /\$ pi update github\.com\/iseoane\/pstack$/u.test(row)), `the Package command reads as a shell line:\n${frame}`);
+  assert.ok(rows.slice(pkg).some(row => /Approval: needs approval/u.test(row)));
+  assert.ok(rows.slice(pkg).some(row => /This apply approves the declaration above\./u.test(row)));
+  assert.match(squash(frame), /replacesportable\/one'slocalchanges·runs2commands·Apply3updates\?y\/n/u);
+});
+
+test("the update batch preview lists the items it could not preview in their own section", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "good", state: "outdated" }, { name: "bad", state: "outdated" }]);
+  const operations: SourceOperations = {
+    ...f.operations,
+    async readInstallationMethod(_source, skillPath) {
+      if (skillPath === "portable/bad") throw new Error("cannot read install metadata");
+      return undefined;
+    },
+  };
+  const view = render(<UpdatesView operations={operations} environment={f.environment} />);
+  deferCleanup(t, () => { view.unmount(); view.cleanup(); });
+  await expandList(view.lastFrame, view.stdin, /portable\/bad/);
+  resizeTerminal(view, { columns: 120, rows: 200 });
+  press(view.stdin, "a");
+  press(view.stdin, ENTER);
+  const frame = await waitForFrame(view.lastFrame, /read ✓/);
+  const rows = frame.split("\n").map(row => row.replace(/^│\s?|\s*│$/gu, ""));
+  assert.match(frame, /Apply 1 update {2}1 Skill/u);
+  const failed = rows.findIndex(row => /^ *FAILED$/u.test(row));
+  assert.ok(failed > rows.findIndex(row => /^ *SKILLS$/u.test(row)), `failures follow the applicable items:\n${frame}`);
+  assert.match(rows[failed + 1] ?? "", /portable\/bad: cannot read install metadata/u);
+});
