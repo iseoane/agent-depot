@@ -142,7 +142,9 @@ export function createSourceRefreshSession(
     stop() {
       queue.length = 0;
     },
-    settled: () => Promise.resolve(),
+    async settled() {
+      await Promise.allSettled([...inFlight.values()]);
+    },
   };
 }
 
