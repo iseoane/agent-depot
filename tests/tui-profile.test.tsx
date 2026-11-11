@@ -132,7 +132,7 @@ async function importFile(view: ReturnType<typeof render>, file: string): Promis
   return waitForFrame(view.lastFrame, frame => frame.includes("Import Profile") || frame.includes("Error: "));
 }
 
-test("export shows grouped choices and exclusions, confirms a new file and refuses replacement", async t => {
+test("export shows grouped choices and exclusions, confirms a new file and overwrites only after confirmation", async t => {
   const f = await fixture(t);
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
   f.view.stdin.write("e");
@@ -145,14 +145,25 @@ test("export shows grouped choices and exclusions, confirms a new file and refus
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Exported profile to/);
   assert.equal(parseProfile(JSON.parse(await readFile(file, "utf8"))).apps[0]?.name, "demo");
-  const original = await readFile(file, "utf8");
+  await writeFile(file, "stale");
   f.view.stdin.write("e");
   await waitForFrame(f.view.lastFrame, /▸ Sources/);
   await enterExportName(f.view, "out.json");
-  const refusedFrame = await waitForFrame(f.view.lastFrame, /already[\s│]+exists;[\s│]+choose[\s│]+another[\s│]+name/);
-  assert.match(refusedFrame, /out\.json/);
-  assert.doesNotMatch(refusedFrame, /Apply Profile|Save\/Export Profile/);
-  assert.equal(await readFile(file, "utf8"), original);
+  const overwrite = await waitForFrame(f.view.lastFrame, /Overwrite out\.json\? \(y\/n\)/);
+  assert.doesNotMatch(overwrite, /Save\/Export Profile/);
+  f.view.stdin.write("n");
+  await waitForFrame(f.view.lastFrame, frame => frame.includes("Name: out.json_") && !frame.includes("Overwrite out.json"));
+  assert.equal(await readFile(file, "utf8"), "stale");
+  f.view.stdin.write("\r");
+  await waitForFrame(f.view.lastFrame, /Overwrite out\.json\? \(y\/n\)/);
+  f.view.stdin.write("\u001b");
+  await waitForFrame(f.view.lastFrame, frame => frame.includes("Name: out.json_") && !frame.includes("Overwrite out.json"));
+  assert.equal(await readFile(file, "utf8"), "stale");
+  f.view.stdin.write("\r");
+  await waitForFrame(f.view.lastFrame, /Overwrite out\.json\? \(y\/n\)/);
+  f.view.stdin.write("y");
+  await waitForFrame(f.view.lastFrame, /Exported profile to/);
+  assert.equal(parseProfile(JSON.parse(await readFile(file, "utf8"))).apps[0]?.name, "demo");
 });
 
 test("confirming an import subset preserves the selected item after reindexing", async t => {
@@ -626,7 +637,7 @@ test("Esc cancels the export checklist and the import browser, and a fresh brows
   assert.doesNotMatch(fresh, /Error: /);
 });
 
-test("export refuses an existing file and a dangling symlink at the name stage", async t => {
+test("export offers to overwrite an existing file but refuses a dangling symlink or directory at the name stage", async t => {
   if (await skipWithoutFileSymlinks(t)) return;
   const f = await fixture(t);
   await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
@@ -634,18 +645,25 @@ test("export refuses an existing file and a dangling symlink at the name stage",
   await writeFile(existing, "keep");
   const link = path.join(f.picker, "link.json");
   await symlink(path.join(f.picker, "nowhere.json"), link);
+  await mkdir(path.join(f.picker, "folder.json"));
   f.view.stdin.write("e");
   await waitForFrame(f.view.lastFrame, /▸ Sources/);
   await enterExportName(f.view, "taken.json");
-  await waitForFrame(f.view.lastFrame, /already[\s│]+exists;[\s│]+choose[\s│]+another[\s│]+name/);
+  await waitForFrame(f.view.lastFrame, /Overwrite taken\.json\? \(y\/n\)/);
+  f.view.stdin.write("n");
+  await waitForFrame(f.view.lastFrame, frame => frame.includes("Name: taken.json_") && !frame.includes("Overwrite taken.json"));
   assert.equal(await readFile(existing, "utf8"), "keep");
-  f.view.stdin.write("\u0015");
-  f.view.stdin.write("link.json");
-  await waitForFrame(f.view.lastFrame, /Name: link\.json_/);
-  f.view.stdin.write("\r");
-  await waitForFrame(f.view.lastFrame, /already[\s│]+exists;[\s│]+choose[\s│]+another[\s│]+name/);
+  for (const name of ["link.json", "folder.json"]) {
+    f.view.stdin.write("\u0015");
+    f.view.stdin.write(name);
+    await waitForFrame(f.view.lastFrame, frame => frame.includes(`Name: ${name}_`));
+    f.view.stdin.write("\r");
+    const refused = await waitForFrame(f.view.lastFrame, /is[\s│]+not[\s│]+a[\s│]+regular[\s│]+file/);
+    assert.doesNotMatch(refused, /Overwrite|Save\/Export Profile/);
+  }
   assert.equal(await readlink(link), path.join(f.picker, "nowhere.json"));
   assert.ok((await lstat(link)).isSymbolicLink());
+  assert.ok((await lstat(path.join(f.picker, "folder.json"))).isDirectory());
 });
 
 test("unchecking an exported Source recomputes the subset's omitted-Source warning", async t => {
