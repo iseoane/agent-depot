@@ -77,9 +77,7 @@ test("successful optional uninstall is followed by separate recipe removal confi
   await waitForFrame(f.view.lastFrame, /Uninstall it before/);
   f.view.stdin.write("y");
   const preview = await waitForFrame(f.view.lastFrame, /Uninstall demo\? y\/n/);
-  assert.match(preview, /argv: \[/u);
-  assert.match(preview, /"demo"/u);
-  assert.match(preview, /"remove"/u);
+  assert.match(preview, /\$ demo remove/u);
   assert.ok(!f.commands.includes("remove"));
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);

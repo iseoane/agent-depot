@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { AppLifecyclePlan } from "../src/app-flow.js";
+import { appPlanLines } from "../src/tui/app-actions.js";
 import { lineText, renderPreviewDocument, stepBlockLines } from "../src/tui/preview-render.js";
 import { theme } from "../src/tui/theme.js";
 
@@ -66,4 +68,26 @@ test("recipe step blocks colour step names, commands, where they run, a missing 
   assert.deepEqual(lines[3]![1], { text: "⚠ Windows executable blocked", color: theme.warning });
   assert.deepEqual(lines[6]![1], { text: "in /home/me", color: theme.legend });
   assert.equal(lineText(stepBlockLines([{ step: "install", argv: ["x"], executable: "/bin/x", cwd: "/" }])[0]!), " └ install");
+});
+
+test("an App plan names its versions and Host, and keeps a lone version, the missing executable and the warning", () => {
+  const step = { argv: ["demo", "run"] satisfies [string, ...string[]] };
+  const plan: AppLifecyclePlan = {
+    entry: { file: "demo.json", applicable: true, recipe: {
+      name: "demo", install: step, update: step, uninstall: step, version: { argv: ["demo", "version"], pattern: "(.*)" },
+    } },
+    action: "update", host: "pi", argv: ["demo", "update"],
+    cwd: "/home/me", environment: "linux", warning: "blocked executable",
+  };
+  const rows = (extra: Partial<AppLifecyclePlan>) => appPlanLines({ ...plan, ...extra }).map(lineText);
+  assert.deepEqual(rows({ previousVersion: "1.0.0", latestVersion: "2.0.0" }), [
+    " App demo update (pi)  1.0.0 → 2.0.0",
+    " ",
+    " └ update.pi",
+    "   $ demo update",
+    "   demo not found in PATH · in /home/me · on linux",
+    "   ⚠ blocked executable",
+  ]);
+  assert.deepEqual(rows({ previousVersion: "1.0.0" }).slice(0, 3), [" App demo update (pi)", " Previous version: 1.0.0", " "]);
+  assert.deepEqual(rows({ latestVersion: "2.0.0" }).slice(0, 3), [" App demo update (pi)", " Latest version: 2.0.0", " "]);
 });

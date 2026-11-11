@@ -385,10 +385,10 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     await session.send("j", /fixture-app/u);
     assert.ok(session.screen.split("\n").length <= 17, `Catalog exceeded a 40x17 PTY:\n${session.screen}`);
     session.resize(80, 24);
-    const appInstall = await session.send("i", /argv:/u);
-    assert.match(appInstall, /argv:/u);
-    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "argv:")), "App install field names use Xeo blue");
-    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " [")), "App install values use Xeo brightText");
+    const appInstall = await session.send("i", /\$ depot-e2e-app install/u);
+    assert.match(appInstall, /\$ depot-e2e-app install/u);
+    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, " └ install")), "App install step labels use Xeo blue");
+    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, "$ depot-e2e-app install")), "App install commands use Xeo brightText");
     assert.doesNotMatch(await readFile(fixture.log, "utf8").catch(() => ""), /install/u, "previewing does not execute the App recipe");
     // The preview already shows `fixture-app`; wait for the cancel result so `3` is not sent mid-transition.
     await session.send("n", /fixture-app: cancelled/u);
@@ -1089,15 +1089,13 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     installPreview += capturedOutput(session);
     installPreview += await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u, installFrames);
     const continuousInstallPreview = installPreview.replace(/\s/gu, "");
-    assert.ok(continuousInstallPreview.includes("argv:["), `install preview omitted JSON argv:\n${installPreview}`);
-    assert.ok(continuousInstallPreview.includes("Executable:"));
-    assert.ok(continuousInstallPreview.includes("depot-e2e-app"));
-    assert.ok(!continuousInstallPreview.includes("Executable:…"), `install preview abbreviated the executable path:\n${installPreview}`);
-    assert.ok(continuousInstallPreview.includes("Environment:linux"));
-    assert.ok(continuousInstallPreview.includes("FINAL-IN") && continuousInstallPreview.includes("STALL-MANUAL-TERM"), `manual execution terms were not displayed before consent:\n${installPreview}`);
+    assert.ok(continuousInstallPreview.includes("$depot-e2e-appinstall"), `install preview omitted the command:\n${installPreview}`);
     // A long home wraps the working directory over several rows, so it is read back from the pages' row windows.
     const installRowsSeen = pagedRows(installFrames).join("").replace(/\s/gu, "");
     assert.ok(installRowsSeen.includes(previewHome.replace(/\s/gu, "")), `install preview omitted the full working directory:\n${session.screen}`);
+    assert.ok(installRowsSeen.includes(path.join(fixture.bin, "depot-e2e-app").replace(/\s/gu, "")), `install preview abbreviated the executable path:\n${installPreview}`);
+    assert.ok(installRowsSeen.includes("FINAL-INSTALL-MANUAL-TERM"), `manual execution terms were not displayed before consent:\n${installPreview}`);
+    assert.ok(installRowsSeen.includes("onlinux"), `install preview omitted the environment:\n${installPreview}`);
     assert.ok(session.screen.split("\n").length <= 17, `confirmation exceeded the 17-row PTY:\n${session.screen}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "preview must not execute the recipe");
     const installed = await session.send("y", /fixture-app: installed/u);
@@ -1121,9 +1119,9 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     const uninstallPreview = await session.send("u", /uninstall fixture-app\? y\/n/u);
     // Box borders are dropped too: a long path wraps across rows, and each wrapped row ends in a border.
     const continuousUninstallPreview = uninstallPreview.replace(/[│╭╮╰╯─\s]/gu, "");
-    assert.ok(continuousUninstallPreview.includes("Executable:"));
-    assert.ok(continuousUninstallPreview.includes("depot-e2e-app"));
-    assert.ok(continuousUninstallPreview.includes("Environment:linux"));
+    assert.ok(continuousUninstallPreview.includes("$depot-e2e-appuninstall"));
+    assert.ok(continuousUninstallPreview.includes(path.join(fixture.bin, "depot-e2e-app").replace(/\s/gu, "")));
+    assert.ok(continuousUninstallPreview.includes("onlinux"));
     assert.ok(continuousUninstallPreview.includes(homeDirectory.replace(/\s/gu, "")), `80x24 preview omitted the complete working directory:\n${uninstallPreview}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"uninstall"')), "preview must not run uninstall");
     await session.send("n", /fixture-app: cancelled/u);

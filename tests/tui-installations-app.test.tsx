@@ -225,7 +225,7 @@ test("manual App setup and teardown remain separate confirmed Host actions", asy
   await waitForFrame(fixture.view.lastFrame, /Checked = setup/i);
   fixture.view.stdin.write("\r");
   const setup = await waitForFrame(fixture.view.lastFrame, /setup demo\? y\/n/);
-  assert.match(setup, /argv: \[[\s\S]*"demo",[\s\S]*"setup"/);
+  assert.match(setup, /\$ demo setup/);
   fixture.view.stdin.write("y");
   await waitForFrame(fixture.view.lastFrame, /demo: completed/);
   assert.ok(fixture.commands.includes("setup"));
