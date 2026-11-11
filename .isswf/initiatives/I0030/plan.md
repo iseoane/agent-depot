@@ -6,8 +6,9 @@ Type: feature
 - Status: in-progress
 - Objective: Durante install/update en la TUI, mostrar junto al contador una línea con el recurso (Skill/App/Package) y paso en curso, en lugar de una vista estática.
 - Depends on: None
+- Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: planner: research de cómo los flujos core (update-flow, app-flow, package-flow, skill-install) podrían emitir eventos de progreso sin que la TUI parsee salida CLI (ADR 0006).
+- Next step: worker implementa brief-r1 (actualizaciones + instalación desde catálogo, nivel de elemento).
 
 ### Acceptance
 - La vista de trabajo muestra qué se está instalando/actualizando y avanza al cambiar de recurso.
