@@ -22,6 +22,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const SKILL_MD = "---\nname: demo\ndescription: Demo skill\n---\n\nBody\n";
 const tree: readonly SkillTreeFile[] = [
@@ -564,4 +565,27 @@ test("q and number keys are blocked while the adoption flow captures keys", asyn
   stdin.write("\u001B");
   await waitForFrame(lastFrame, /Adoption cancelled/);
   unmount();
+});
+
+for (const size of PREVIEW_SIZES) {
+  test(`App lifecycle confirmation accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async t => {
+    const fixture = await appFixture(t, true);
+    await selectInstalledApp(fixture.view);
+    resizeTerminal(fixture.view, size);
+    fixture.view.stdin.write("u");
+    await confirmAtEnd(fixture.view, size.rows, /\[y\] Uninstall demo/, () => fixture.commands.includes("uninstall"));
+  });
+}
+
+test("a manual App Host step names its check in the shared footer", async t => {
+  const fixture = await appFixture(t, true);
+  await selectInstalledApp(fixture.view);
+  resizeTerminal(fixture.view, { columns: 40, rows: 17 });
+  fixture.view.stdin.write("h");
+  await waitForFrame(fixture.view.lastFrame, /Checked = setup/i);
+  fixture.view.stdin.write(" ");
+  await waitForFrame(fixture.view.lastFrame, /\[ \] 1 pi/);
+  fixture.view.stdin.write("\r");
+  await confirmAtEnd(fixture.view, 17, /\[y\] Check now/, () => /demo: completed/.test(fixture.view.lastFrame() ?? ""));
+  assert.ok(!fixture.commands.includes("teardown"));
 });

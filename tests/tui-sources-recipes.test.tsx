@@ -10,6 +10,7 @@ import { App } from "../src/tui/app.js";
 import { SourcesView, type SourcesViewProps } from "../src/tui/sources-view.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const recipe = { name: "demo", install: { argv: ["demo", "install"] }, update: { manual: "update demo" },
   uninstall: { argv: ["demo", "remove"] }, version: { argv: ["demo", "version"], pattern: "(.*)" },
@@ -347,3 +348,16 @@ test("n can add the first App recipe and closing the guide reloads the unified l
   assert.match(frame, /> .*demo.*app/u);
   assert.deepEqual(f.commands, []);
 });
+
+for (const size of PREVIEW_SIZES) {
+  test(`recipe approval accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t);
+    const view = f.mount();
+    resizeTerminal(view, size);
+    await waitForFrame(view.lastFrame, /needs\s+approval/);
+    view.stdin.write("\r");
+    const end = await confirmAtEnd(view, size.rows, /\[y\] Approve demo/, () => /✓ approved/.test(view.lastFrame() ?? ""));
+    assert.match(squash(end), /Approvedemo\?y\/n·recipeapprovaldoesnotinstalltheApp\./);
+    assert.deepEqual(f.commands, []);
+  });
+}

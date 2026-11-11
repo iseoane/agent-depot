@@ -11,6 +11,7 @@ import { App } from "../src/tui/app.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 async function fixture(t: TestContext, installed = false, failUninstall = false, manual = false) {
   const home = await mkdtemp(path.join(tmpdir(), "sources-removal-"));
@@ -155,4 +156,26 @@ test("removal approval gates version checks before any uninstall or deletion", a
   await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);
   assert.deepEqual(f.commands, ["version"]);
   assert.ok(await readFile(f.file));
+});
+
+for (const size of PREVIEW_SIZES) {
+  test(`App uninstall before recipe removal accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t, true);
+    resizeTerminal(f.view, size);
+    f.view.stdin.write("d");
+    await waitForFrame(f.view.lastFrame, /Uninstall it before/);
+    f.view.stdin.write("y");
+    await confirmAtEnd(f.view, size.rows, /\[y\] Uninstall demo/, () => f.commands.includes("remove"));
+    await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);
+  });
+}
+
+test("manual App uninstall names its check in the shared footer", async t => {
+  const f = await fixture(t, true, false, true);
+  resizeTerminal(f.view, { columns: 40, rows: 17 });
+  f.view.stdin.write("d");
+  await waitForFrame(f.view.lastFrame, /Uninstall it before/);
+  f.view.stdin.write("y");
+  f.markUninstalled();
+  await confirmAtEnd(f.view, 17, /\[y\] Check the uninstall now/, () => /Remove recipe for demo\? y\/n/.test(f.view.lastFrame() ?? ""));
 });

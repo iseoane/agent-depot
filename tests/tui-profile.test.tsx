@@ -15,6 +15,7 @@ import { fakePackageOperations, installedPackage, piPackage } from "./profile-pa
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { skipWithoutFileSymlinks } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
@@ -976,4 +977,33 @@ test("with nothing to import Enter on a group header previews instead of only to
   f.view.stdin.write("\r");
   const preview = await waitForFrame(f.view.lastFrame, /Apply Profile/);
   assert.match(squash(preview), /same:Apprecipetool/);
+});
+
+for (const size of PREVIEW_SIZES) {
+  test(`Profile import confirmation accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t);
+    const file = path.join(f.picker, "many.json");
+    const apps = Array.from({ length: 30 }, (_, index) => ({ ...recipe, name: `app-${String(index).padStart(2, "0")}` }));
+    await writeFile(file, JSON.stringify({ format: "agent-depot-profile/v1", agentDepotVersion: "0.3.0", sources: [], skills: [], apps }));
+    await importFile(f.view, file);
+    resizeTerminal(f.view, size);
+    f.view.stdin.write("\r");
+    const end = await confirmAtEnd(f.view, size.rows, /\[y\] Apply Profile/, () => /added: App recipe/.test(f.view.lastFrame() ?? ""));
+    assert.match(end, /Apply Profile\? \(y\/n\)/);
+  });
+}
+
+test("an export note opens in the shared footer with a close action and no y", async t => {
+  const f = await fixture(t);
+  await writeFile(path.join(f.directory, "demo.json"), JSON.stringify(recipe));
+  f.view.stdin.write("e");
+  await waitForFrame(f.view.lastFrame, /▸ Sources/);
+  await expandExportGroup(f.view, "Export notes");
+  f.view.stdin.write("j");
+  await waitForFrame(f.view.lastFrame, /> .*Not transferred|> .*Selected Skills/);
+  f.view.stdin.write("\r");
+  const detail = await waitForFrame(f.view.lastFrame, /│ Export note(?!s)/);
+  assert.match(detail, /read ✓/);
+  assert.match(detail, /\[Esc\] close/);
+  assert.doesNotMatch(detail, /\[y\]/);
 });

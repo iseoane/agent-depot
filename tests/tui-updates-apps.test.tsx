@@ -10,6 +10,7 @@ import { UpdatesView } from "../src/tui/updates-view.js";
 import { expandList } from "./expand-updates.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { confirmAtEnd, resizeTerminal } from "./preview-footer.js";
 
 /** `now` drives the view's clock; while `versionGate.promise` is set, reading the App version waits for it. */
 async function fixture(t: TestContext, manual: boolean | "spawn" = false, brokenSkills = false,
@@ -206,4 +207,16 @@ test("unmount cancels pending manual evidence instead of leaving the batch waiti
   }, 10);
   try { await waitForFrame(() => pending, value => value === ""); }
   finally { clearInterval(timer); }
+});
+
+test("a manual App update step names its check in the shared footer and waits for the end", async t => {
+  const f = await fixture(t, "spawn");
+  await expandList(f.view.lastFrame, f.view.stdin, frame => frame.includes("1.0.0 -> 2.0.0"));
+  resizeTerminal(f.view, { columns: 40, rows: 17 });
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, /1 selected/);
+  f.view.stdin.write("\r");
+  await confirmAtEnd(f.view, 17, /\[y\] Apply 1 update/, () => /Manual step done, check now/.test(f.view.lastFrame() ?? ""));
+  const before = f.commands.length;
+  await confirmAtEnd(f.view, 17, /\[y\] Check now/, () => f.commands.length > before);
 });
