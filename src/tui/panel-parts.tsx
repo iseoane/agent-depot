@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
+import { useOpenPreview } from "./keys.js";
 import { theme } from "./theme.js";
 import type { StyledLine } from "./preview-render.js";
 import { sliceSpans, type PreviewChrome, type PreviewFooterRole, type PreviewViewport } from "./preview-window.js";
@@ -257,6 +258,7 @@ export function PagedPreview({ chrome, lines, styled, viewport, warnFirst = fals
   readonly viewport: PreviewViewport;
   readonly warnFirst?: boolean;
 }) {
+  useOpenPreview();
   return (
     <BorderPanel title={chrome.title}>
       {viewport.rows.map((line, position) => styled === undefined
