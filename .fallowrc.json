@@ -75,7 +75,8 @@
           "src/package-host-plans.ts",
           "src/package-owned-skills.ts",
           "src/package-state.ts",
-          "src/package-flow.ts"
+          "src/package-flow.ts",
+          "src/flow-progress.ts"
         ]
       },
       {

@@ -8,6 +8,10 @@ export interface FlowProgress {
   readonly verb: "Installing" | "Updating";
 }
 
-export function formatProgressLabel(_event: FlowProgress): string {
-  return "";
+const KIND_LABEL = { skill: "Skill", app: "App", package: "Package" } as const;
+
+/** `Updating Skill tdd (2/5)…`; a batch of one has no position. */
+export function formatProgressLabel(event: FlowProgress): string {
+  const position = event.total > 1 ? ` (${event.position}/${event.total})` : "";
+  return `${event.verb} ${KIND_LABEL[event.kind]} ${event.name}${position}…`;
 }
