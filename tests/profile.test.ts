@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runCli } from "../src/cli.js";
@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../src/project-manifest.js";
 import { parseProfile, serializeProfile } from "../src/profile.js";
 import type { PackageSelection } from "../src/package-model.js";
+import { skipWithoutFileSymlinks } from "./link-helpers.js";
 import { claudePackage, fakePackageOperations, installedPackage, piPackage } from "./profile-package-fixture.js";
 
 const recipe = {
@@ -422,6 +423,67 @@ test("CLI export refuses an existing output path with guidance and leaves it unc
   }), 1);
   assert.equal(await readFile(out, "utf8"), "keep this content\n");
   assert.match(stderr.at(-1)!, /profile.json.*already exists; choose another path/);
+});
+
+async function exportTo(home: string, args: readonly string[]) {
+  const stderr: string[] = [];
+  const operations = createSourceOperations({ statePath: path.join(home, "sources.json") });
+  await operations.addGitSource("https://example.com/skills.git");
+  const code = await runCli(["export", ...args], {
+    homeDirectory: home, operations,
+    appOperations: createAppOperations({ recipesDirectory: path.join(home, "apps") }),
+    stdout: () => assert.fail("file export must not write stdout"), stderr: line => stderr.push(line),
+  });
+  return { code, stderr };
+}
+
+test("CLI export --overwrite atomically replaces an existing regular file", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-overwrite-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const out = path.join(home, "profile.json");
+  await writeFile(out, "old content\n");
+  const before = await stat(out);
+  const { code, stderr } = await exportTo(home, ["--out", out, "--overwrite"]);
+  assert.equal(code, 0, stderr.join("\n"));
+  assert.deepEqual(parseProfile(JSON.parse(await readFile(out, "utf8"))).sources.map(source => source.url),
+    ["https://example.com/skills.git"]);
+  if (process.platform !== "win32") assert.notEqual((await stat(out)).ino, before.ino);
+  assert.deepEqual(await readdir(home).then(names => names.filter(name => name.endsWith(".tmp"))), []);
+  assert.equal(stderr.at(-1), `Exported profile to ${out}`);
+});
+
+test("CLI export --overwrite refuses a directory or symlink destination and leaves it unchanged", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-overwrite-other-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const directory = path.join(home, "dir.json");
+  await mkdir(directory);
+  const refusedDirectory = await exportTo(home, ["--out", directory, "--overwrite"]);
+  assert.equal(refusedDirectory.code, 1);
+  assert.match(refusedDirectory.stderr.at(-1)!, /dir\.json is not a regular file; choose another path/);
+  assert.ok((await lstat(directory)).isDirectory());
+  if (await skipWithoutFileSymlinks(t)) return;
+  const target = path.join(home, "target.json");
+  await writeFile(target, "keep\n");
+  const link = path.join(home, "link.json");
+  await symlink(target, link);
+  const refusedLink = await exportTo(home, ["--out", link, "--overwrite"]);
+  assert.equal(refusedLink.code, 1);
+  assert.match(refusedLink.stderr.at(-1)!, /link\.json is not a regular file; choose another path/);
+  assert.equal(await readlink(link), target);
+  assert.equal(await readFile(target, "utf8"), "keep\n");
+});
+
+test("CLI --overwrite is accepted only once and only with export --out", async t => {
+  const home = await mkdtemp(path.join(tmpdir(), "ad-profile-overwrite-usage-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const out = path.join(home, "profile.json");
+  const duplicate = await exportTo(home, ["--out", out, "--overwrite", "--overwrite"]);
+  assert.equal(duplicate.code, 1);
+  assert.match(duplicate.stderr.join("\n"), /Duplicate --overwrite/);
+  const withoutOut = await exportTo(home, ["--overwrite"]);
+  assert.equal(withoutOut.code, 1);
+  assert.match(withoutOut.stderr.join("\n"), /--overwrite requires --out/);
+  await assert.rejects(access(out));
 });
 
 test("Source and external Skill URLs reject credentials with the corresponding field path", () => {
