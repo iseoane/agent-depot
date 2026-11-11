@@ -93,7 +93,6 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
     setMode(running);
     let result: UpdatesMessage;
     try {
-      // Each item keeps the batch's start, also after a manual pause, which is not a busy mode.
       const progress = (event: FlowProgress) => {
         if (mounted.current) setMode(busy(formatProgressLabel(event), running, clock));
       };
@@ -104,7 +103,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
           resolve(done);
         };
         pendingAnswer.current = answer;
-        setMode({ kind: "manual", plan, reason, answer, cursor: 0 });
+        setMode({ kind: "manual", plan, reason, answer, cursor: 0, startedAt: running.startedAt });
       }), progress);
       result = { kind: outcome.failed === 0 ? "ok" : "error", lines: outcome.lines };
     } catch (error) {
