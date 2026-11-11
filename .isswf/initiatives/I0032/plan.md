@@ -8,8 +8,9 @@ Type: feature
 - Depends on: None
 - Brief: [J001 brief-r1.md](jobs/J001/brief-r1.md)
 - Brief J002: [brief-r1.md](jobs/J002/brief-r1.md)
+- Brief J003a: [brief-r1.md](jobs/J003a/brief-r1.md)
 - Blocker: None
-- Next step: J002 preview de lote (worker), luego J003, J004 y release 0.6.14.
+- Next step: J003a revisión de recetas (worker), luego J003b, J004a-c, J005 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -25,3 +26,4 @@ Type: feature
 - J001 entregado: PR #106 fusionado con CI verde.
 - Decisión del operador (2026-11-11): partir el resto en trabajos pequeños — J003a revisión de recetas; J003b confirmación/desinstalación/paso manual de Apps con los bloques de paso; J004a pie en añadir/quitar hosts y desinstalar; J004b instalar y adoptar; J004c quitar receta y quitar Source; J005 ráfagas de teclas que alcanzan `y` antes de dibujar ✓.
 - J002 worker b048313..c2ff9cb. Revisión V001: Spec pass, sin bloqueantes (Standards inconcluso por checks no observados). Coordinador observó: golden 2/0, preview-model 1/0, tui-updates-view 70/0; cli.test.ts y skill-update.test.ts sin cambios. Seguimientos para J003a: escapar caracteres invisibles (\p{Cf}) en comandos mostrados; casos golden sin cwd y sin declaredChanges.
+- J002 entregado: PR #108 fusionado con CI verde.
