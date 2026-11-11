@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,7 +13,9 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import type { UnmanagedGroup } from "../src/tui/installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval } from "../src/tui/unmanaged-actions.js";
-import { squash, waitForFrame } from "./wait-for-frame.js";
+import { App } from "../src/tui/app.js";
+import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -355,4 +358,59 @@ test("recipe loading failure keeps the Unmanaged group usable and shows a warnin
   const frame = await openUnmanaged(view, /ordinary \[/);
   assert.match(frame, /WARNING: App-owned Skill exclusions unavailable/);
   view.unmount();
+});
+
+for (const size of PREVIEW_SIZES) {
+  test(`removing an unmanaged skill accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t);
+    const directory = await writeSkill(f.home, ".agents", "no-mistakes");
+    const view = mount(f);
+    deferCleanup(t, () => view.unmount());
+    resizeTerminal(view, size);
+    await openUnmanaged(view, /no-mistakes \[/);
+    view.stdin.write("u");
+    await confirmAtEnd(view, size.rows, /\[y\] Remove no-mistakes/, () => !existsSync(directory));
+    await waitForFrame(view.lastFrame, /Removed /);
+    assert.equal(await exists(directory), false);
+  });
+}
+
+for (const [label, cancelKey] of [["n", "n"], ["Esc", ESC]] as const) {
+  test(`the unmanaged removal ignores y mid-read and ${label} cancels it`, async (t) => {
+    const f = await fixture(t);
+    const directory = await writeSkill(f.home, ".agents", "no-mistakes");
+    const view = mount(f);
+    deferCleanup(t, () => view.unmount());
+    resizeTerminal(view, { columns: 40, rows: 12 });
+    await openUnmanaged(view, /no-mistakes \[/);
+    view.stdin.write("u");
+    const reading = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+    view.stdin.write("y");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.match(view.lastFrame() ?? "", /read [█░]* ?\d+%/u, reading);
+    assert.equal(await exists(directory), true);
+    view.stdin.write(cancelKey);
+    await waitForFrame(view.lastFrame, /Uninstall cancelled/);
+    assert.equal(await exists(directory), true);
+  });
+}
+
+test("the unmanaged removal preview stands alone in the whole App: no tree rows sit above it", async (t) => {
+  const f = await fixture(t);
+  await writeSkill(f.home, ".agents", "no-mistakes");
+  const view = render(<App operations={f.operations} environment={f.environment} />);
+  deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, { columns: 80, rows: 24 });
+  await waitForFrame(view.lastFrame, /▶ \[1\] Sources/);
+  view.stdin.write("3");
+  await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
+  await openUnmanaged(view, /no-mistakes \[/);
+  view.stdin.write("u");
+  const frame = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%|read ✓/u);
+  assert.doesNotMatch(frame, /Unmanaged \(user-global\)/);
+  assert.match(frame, /\[y\] Remove no-mistakes/);
+  assert.ok(frame.split("\n").length <= 24, frame);
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, /Uninstall cancelled/);
+  await waitForSettled(view.lastFrame);
 });
