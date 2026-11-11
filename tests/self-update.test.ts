@@ -35,12 +35,13 @@ async function fixture(): Promise<Fixture> {
 
 function operations(
   setup: Fixture,
-  options: { readonly packageRoot?: string; readonly packageVersion?: string; readonly latest?: string; readonly rootExitCode?: number; readonly installExitCode?: number; readonly executable?: string } = {},
+  options: { readonly packageRoot?: string; readonly packageVersion?: string; readonly latest?: string; readonly rootExitCode?: number; readonly installExitCode?: number; readonly executable?: string; readonly platform?: NodeJS.Platform } = {},
 ) {
   return createSelfUpdateOperations({
     packageName: "@iseoane/agent-depot",
     packageVersion: options.packageVersion ?? "0.5.1",
     packageRoot: options.packageRoot ?? setup.packageRoot,
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
     resolveExecutable: async () => ({ executable: options.executable ?? setup.npmPath, blocked: false }),
     run: async (executable, args) => {
       setup.calls.push({ executable, args });
@@ -160,18 +161,64 @@ test("refuses npm-linked local Git checkouts even when npm reports the link as g
   assert.deepEqual(setup.fetchUrls, []);
 });
 
-test("does not trust an arbitrary npm PATH shim as installation provenance", async (t) => {
+const UNSUPPORTED = { kind: "unsupported", reason: "this CLI is not verified in npm's global package directory" } as const;
+
+test("does not trust an arbitrary npm PATH shim without a sibling npm-cli.js as installation provenance", async (t) => {
   const setup = await fixture();
   t.after(() => rm(setup.root, { recursive: true, force: true }));
-  const shim = path.join(setup.root, "bin", "npm");
+  const shim = path.join(setup.root, "elsewhere", "bin", "npm");
   await mkdir(path.dirname(shim), { recursive: true });
   await writeFile(shim, "arbitrary PATH shim");
 
-  assert.deepEqual(await operations(setup, { executable: shim }).check(), {
+  assert.deepEqual(await operations(setup, { executable: shim, platform: "linux" }).check(), {
     kind: "unsupported",
     reason: "this CLI is not verified in npm's global package directory",
   });
   assert.deepEqual(setup.calls, []);
+  assert.deepEqual(setup.fetchUrls, []);
+});
+
+// mise replaces `<prefix>/bin/npm` with a script that runs `<prefix>/lib/node_modules/npm/bin/npm-cli.js`.
+async function wrapperNpmFixture(setup: Fixture, name = "npm"): Promise<string> {
+  const wrapper = path.join(setup.root, "bin", name);
+  await mkdir(path.dirname(wrapper), { recursive: true });
+  await writeFile(wrapper, "#!/usr/bin/env bash\nexec node npm-cli.js \"$@\"\n");
+  return wrapper;
+}
+
+test("accepts a non-symlink npm wrapper with a sibling npm-cli.js and runs the wrapper", async (t) => {
+  const setup = await fixture();
+  t.after(() => rm(setup.root, { recursive: true, force: true }));
+  const wrapper = await wrapperNpmFixture(setup);
+  const selfUpdate = operations(setup, { executable: wrapper, platform: "linux" });
+
+  assert.deepEqual(await selfUpdate.check(), { kind: "available", current: "0.5.1", latest: "0.6.0" });
+  assert.deepEqual(setup.calls.map(({ executable, args }) => [executable, args[0]]), [[wrapper, "root"]]);
+  await selfUpdate.apply("0.6.0");
+  assert.deepEqual(setup.calls.map(({ executable, args }) => [executable, args[0]]), [[wrapper, "root"], [wrapper, "root"], [wrapper, "install"]]);
+});
+
+test("refuses npm wrappers whose sibling npm-cli.js has the wrong shape, non-npm names, and foreign package roots", async (t) => {
+  const setup = await fixture();
+  t.after(() => rm(setup.root, { recursive: true, force: true }));
+
+  const yarn = await wrapperNpmFixture(setup, "yarn");
+  assert.deepEqual(await operations(setup, { executable: yarn, platform: "linux" }).check(), UNSUPPORTED);
+  assert.deepEqual(setup.calls, []);
+
+  const wrapper = await wrapperNpmFixture(setup);
+  assert.deepEqual(await operations(setup, { executable: wrapper, platform: "linux", packageRoot: setup.root }).check(), UNSUPPORTED);
+  assert.deepEqual(setup.calls.map(({ args }) => args[0]), ["root"]);
+  setup.calls.length = 0;
+
+  if (process.platform !== "win32") {
+    const evil = path.join(setup.root, "evil.js");
+    await writeFile(evil, "not npm");
+    await rm(setup.npmPath);
+    await symlink(evil, setup.npmPath);
+    assert.deepEqual(await operations(setup, { executable: wrapper, platform: "linux" }).check(), UNSUPPORTED);
+    assert.deepEqual(setup.calls, []);
+  }
   assert.deepEqual(setup.fetchUrls, []);
 });
 
@@ -202,7 +249,6 @@ function windowsOperations(setup: Fixture, shim: string, packageRoot?: string) {
   });
 }
 
-const UNSUPPORTED = { kind: "unsupported", reason: "this CLI is not verified in npm's global package directory" } as const;
 
 test("accepts a win32 npm.cmd shim with a sibling npm-cli.js (case-insensitive) and still checks the global root", async (t) => {
   const setup = await fixture();
