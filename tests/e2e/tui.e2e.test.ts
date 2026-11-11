@@ -1081,8 +1081,8 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     assert.ok(updateReview.includes("FINAL-UPDATE-EXECUTION-TERM"), `update preview omitted its final execution term:\n${updateReview}`);
     assert.ok(session.screen.split("\n").length <= 24, `resized update preview exceeded its PTY:\n${session.screen}`);
     assert.doesNotMatch(await readFile(fixture.log, "utf8"), /"update"/u, "reviewing the update preview does not execute the recipe");
-    const progress = await session.send("y", /Applying updates/u);
-    assert.match(progress, /Applying updates/u);
+    const progress = await session.send("y", /Updating App fixture-app…/u);
+    assert.match(progress, /Updating App fixture-app…/u);
     assert.ok(session.screen.split("\n").length <= 24, `update progress exceeded its PTY:\n${session.screen}`);
     const updateResult = await session.waitFor(/Update summary: 1 updated, 0 failed/u);
     assert.match(updateResult, /Update summary: 1 updated, 0 failed/u);
