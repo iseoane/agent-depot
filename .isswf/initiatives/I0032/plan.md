@@ -14,8 +14,9 @@ Type: feature
 - Brief J004b: [brief-r1.md](jobs/J004b/brief-r1.md)
 - Brief J004c: [brief-r1.md](jobs/J004c/brief-r1.md)
 - Brief J004d: [brief-r1.md](jobs/J004d/brief-r1.md)
+- Brief J005: [brief-r1.md](jobs/J005/brief-r1.md)
 - Blocker: None
-- Next step: J004d (worker sonnet), luego J005, J006 y release 0.6.14.
+- Next step: J005 (worker sonnet), luego J006 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -45,3 +46,4 @@ Type: feature
 - J004c worker (sonnet, 12 min, 92k, sin corrección) 3a34f1a..ac8c4eb. Revisión V001 (opus): 0 bloqueantes; coordinador cerró lo no observado: RED f6f3e97 solo tests, CLI sin cambios, base sin colores en la retirada (nada perdido), tests 50/0. Seguimientos a J004d: ocultar filas de mensaje también en approve/uninstall-confirm/uninstall-manual de recetas (o limpiar notice en startRemoval); test de Source removal sin filas encima.
 - J004c entregado: PR #113 fusionado con CI verde.
 - J004d worker (sonnet; interrumpido por cuota y reanudado con SendMessage) 5e99044..f49a531. Revisión V001 (opus): 0 bloqueantes; coordinador: RED 2a2aff9 solo tests, CLI sin cambios, contenido del lote conservado (solo pierde color de grupo en etiquetas), tests 78/0. Seguimientos para J005: borrar PreviewConfirm/warnFirst sin uso en producción; devolver color de grupo a etiquetas del lote con líneas styled.
+- J004d entregado: PR #114 fusionado con CI verde (arreglo de tests frágiles en Windows 7df4c28).
