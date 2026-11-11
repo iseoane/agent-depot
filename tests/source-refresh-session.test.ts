@@ -244,3 +244,59 @@ test("settled resolves only after every running refresh has finished", { timeout
   await settled;
   assert.equal(done, true);
 });
+
+test("a forced user refresh is not absorbed by an unforced one waiting on a background refresh", { timeout: 5_000 }, async () => {
+  const skills = gitSource("skills");
+  const { operations, calls } = deferredOperations([skills]);
+  const session = createSourceRefreshSession(operations);
+
+  session.refreshInBackground([skills]);
+  await settle();
+  const unforced = session.refresh(skills);
+  const forced = session.refresh(skills, { force: true });
+  calls[0]!.resolve();
+  await unforced;
+  await settle();
+  assert.deepEqual(calls.map((call) => call.background), [true, false]);
+  calls[1]!.resolve();
+  await forced;
+});
+
+test("a user refresh never overlaps a background refresh that starts while it waits", { timeout: 5_000 }, async () => {
+  const [skills, other] = [gitSource("skills"), gitSource("other")];
+  const { operations, calls } = deferredOperations([skills, other]);
+  const session = createSourceRefreshSession(operations);
+
+  session.refreshInBackground([skills, other, skills]);
+  await settle();
+  const user = session.refresh(skills, { force: true });
+  calls[0]!.reject(new Error("timed out"));
+  calls[1]!.resolve();
+  await settle();
+  const pendingForSkills = () => calls.filter((call, index) => call.sourceId === skills.id && index >= 2);
+  assert.equal(pendingForSkills().length, 1, "only one real refresh of the Source runs at a time");
+  pendingForSkills()[0]!.reject(new Error("timed out"));
+  await settle();
+  assert.deepEqual(calls.map((call) => [call.sourceId, call.background]).slice(2), [[skills.id, true], [skills.id, false]]);
+  calls[3]!.resolve();
+  await user;
+});
+
+test("settled also waits for user refreshes still waiting on a background refresh", { timeout: 5_000 }, async () => {
+  const skills = gitSource("skills");
+  const { operations, calls } = deferredOperations([skills]);
+  const session = createSourceRefreshSession(operations);
+  session.refreshInBackground([skills]);
+  await settle();
+  const user = session.refresh(skills, { force: true });
+
+  let done = false;
+  const settled = session.settled().then(() => { done = true; });
+  calls[0]!.resolve();
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.equal(done, false);
+  calls[1]!.resolve();
+  await Promise.all([user, settled]);
+  assert.equal(done, true);
+});
