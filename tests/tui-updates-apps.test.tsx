@@ -11,7 +11,9 @@ import { expandList } from "./expand-updates.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 
-async function fixture(t: TestContext, manual: boolean | "spawn" = false, brokenSkills = false) {
+/** `now` drives the view's clock; while `versionGate.promise` is set, reading the App version waits for it. */
+async function fixture(t: TestContext, manual: boolean | "spawn" = false, brokenSkills = false,
+  extra: { readonly now?: () => number; readonly versionGate?: { promise?: Promise<void> } } = {}) {
   const home = await mkdtemp(path.join(tmpdir(), "updates-apps-"));
   const recipesDirectory = path.join(home, "state", "apps");
   await mkdir(recipesDirectory, { recursive: true });
@@ -30,6 +32,7 @@ async function fixture(t: TestContext, manual: boolean | "spawn" = false, broken
       commands.push(args.join(" "));
       if (args[0] === "update" && manual === "spawn") throw Object.assign(new Error("missing"), { code: "ENOENT" });
       if (args[0] === "update") version = "2.0.0";
+      if (args[0] === "version" && extra.versionGate?.promise) await extra.versionGate.promise;
       return { code: 0, signal: null, stdout: Buffer.from(version), stderr: "", outputTooLarge: false };
     },
   };
@@ -38,7 +41,7 @@ async function fixture(t: TestContext, manual: boolean | "spawn" = false, broken
   await apps.approve(entry!);
   if (brokenSkills) await writeFile(path.join(home, "state", "sources.json"), "{}");
   const view = render(<UpdatesView operations={createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") })}
-    environment={{ homeDirectory: home, projectRoot: home, appEnvironment }} />);
+    environment={{ homeDirectory: home, projectRoot: home, appEnvironment }} now={extra.now} />);
   deferCleanup(t, async () => { view.unmount(); view.cleanup(); await rm(home, { recursive: true, force: true }); });
   return { view, apps, commands, home, recipesDirectory, latestCalls: () => latestCalls, setVersion: (next: string) => { version = next; } };
 }
@@ -55,6 +58,34 @@ test("App updates preview the loaded check and apply verified versions", async t
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, frame => frame.includes("Update summary: 1 updated, 0 failed"));
   assert.equal((await f.apps.trackedApps())[0]?.installedVersion, "2.0.0");
+});
+
+test("checking a manual App update keeps the clock of the whole update", async t => {
+  // The elapsed time only shows while animating, which the test environment turns off.
+  const previous = process.env.AGENT_DEPOT_NO_ANIMATION;
+  process.env.AGENT_DEPOT_NO_ANIMATION = "0";
+  deferCleanup(t, () => {
+    if (previous === undefined) delete process.env.AGENT_DEPOT_NO_ANIMATION;
+    else process.env.AGENT_DEPOT_NO_ANIMATION = previous;
+  });
+  let clock = 1_000_000;
+  const versionGate: { promise?: Promise<void> } = {};
+  const f = await fixture(t, true, false, { now: () => clock, versionGate });
+  await expandList(f.view.lastFrame, f.view.stdin, frame => frame.includes("1.0.0 -> 2.0.0"));
+  f.view.stdin.write("a");
+  await waitForFrame(f.view.lastFrame, frame => frame.includes("1 selected"));
+  f.view.stdin.write("\r");
+  await waitForFrame(f.view.lastFrame, frame => frame.includes("Apply 1 update? y/n"));
+  f.view.stdin.write("y");
+  await waitForFrame(f.view.lastFrame, frame => frame.includes("done, check now? y/n"));
+  clock += 4500;
+  let release!: () => void;
+  versionGate.promise = new Promise<void>(resolve => { release = resolve; });
+  f.setVersion("2.0.0");
+  f.view.stdin.write("y");
+  await waitForFrame(f.view.lastFrame, /Checking App version… 4s/);
+  release();
+  await waitForFrame(f.view.lastFrame, frame => frame.includes("Update summary: 1 updated, 0 failed"));
 });
 
 for (const version of ["v1.0.0+build", "1.5.0"]) {

@@ -79,7 +79,10 @@ export interface SkillUpdateResult {
   readonly installation: ProjectSkillInstallationResult;
 }
 
-export type UpdateBatchApplyOptions = SkillUpdateApplicationOptions;
+export interface UpdateBatchApplyOptions extends SkillUpdateApplicationOptions {
+  /** Called before each item runs, including one that then fails, with its 1-based position. */
+  readonly onItem?: (item: UpdateBatchAssessmentItem, position: number, total: number) => void;
+}
 
 export interface UpdateBatchResultItem {
   readonly id: string;
@@ -235,6 +238,7 @@ export async function applyUpdateBatch(
   const items = "updateable" in selected ? selected.updateable : selected;
   const results: UpdateBatchResultItem[] = [];
   for (const item of items) {
+    options.onItem?.(item, results.length + 1, items.length);
     try {
       const result = await applySkillUpdate(item, options);
       results.push(Object.freeze({ id: item.id, selection: item.selection, status: "updated", result }));

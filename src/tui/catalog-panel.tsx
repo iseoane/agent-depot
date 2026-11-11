@@ -126,6 +126,11 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       );
     }
     case "busy":
-      return <BorderPanel title="Skill install"><Working label={mode.label} since={mode.startedAt} /></BorderPanel>;
+      return (
+        <BorderPanel title="Skill install">
+          <Working label={mode.label} since={mode.startedAt} />
+          {(mode.done ?? []).length > 0 ? <Text color={theme.muted}>{mode.done!.length} finished</Text> : null}
+        </BorderPanel>
+      );
   }
 }

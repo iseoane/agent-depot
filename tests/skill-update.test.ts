@@ -420,6 +420,50 @@ test("rolls back a direct user-global update when persistence fails after writin
   }
 });
 
+test("reports each item of a batch before it runs, including one that fails", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agent-depot-update-"));
+  try {
+    const first = await setupSkill(root, "first", "old-first", { update: { kind: "command", argv: ["pnpm", "update-first"] } });
+    const second = await setupSkill(root, "second", "old-second");
+    const store = new ProjectManifestStore(path.join(root, "agent-depot.json"));
+    await store.save({ version: 1, skills: [first, second] });
+    const assessment = await assessUpdateBatch([first, second], {
+      resolveSource: async () => BUILT_IN_SOURCE,
+      sourceAccess: {
+        async readSkillTreeSnapshot(_source, skillPath) {
+          return { files: tree(skillPath.endsWith("first") ? "first" : "second", "new"), resolvedVersion: newVersion };
+        },
+      },
+    });
+    const events: string[] = [];
+    const options = {
+      projectRoot: root,
+      scope: "project" as const,
+      sourceAccess: { async readSkillTree(): Promise<never> { throw new Error("must use immutable preview"); } },
+      sourceOperations: {
+        async executeInstallationMethod(_method: SourceInstallationMethod, context: SourceInstallationContext) {
+          events.push(`run ${context.skillPath}`);
+          throw new Error("first failed");
+        },
+      } as unknown as SourceOperations,
+      confirmation: { externalMethod: true },
+      onItem: (item: { readonly selection: { readonly path: string } }, position: number, total: number) => {
+        events.push(`start ${item.selection.path} ${position}/${total}`);
+      },
+    };
+    const result = await applyUpdateBatch(assessment, options);
+
+    assert.equal(result.failed.length, 1);
+    assert.deepEqual(events, [
+      `start ${first.path} 1/2`,
+      `run ${first.path}`,
+      `start ${second.path} 2/2`,
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("continues a batch after one independent update fails", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agent-depot-update-"));
   try {

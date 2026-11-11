@@ -1,5 +1,6 @@
 import type { Key } from "ink";
 
+import { formatProgressLabel } from "../flow-progress.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
 import { BROWSE, describeSkills, HOST_CHOICES, SCOPE_CHOICES, type ActionMode, type BatchItem } from "./catalog-actions.js";
@@ -57,11 +58,16 @@ async function startInstall(
 
 /** Applies the prepared items one by one; a failure is reported for that item and the rest still run. */
 async function confirmInstall(context: CatalogFlowContext, items: readonly BatchItem[], exposure: boolean): Promise<void> {
-  context.setAction(busy(`Installing ${describeSkills(items.map((item) => item.skill))}…`));
+  const running = busy(`Installing ${describeSkills(items.map((item) => item.skill))}…`);
+  context.setAction(running);
   const outcomes = await runBatch(items, async ({ prepared, error }) => {
     if (prepared === undefined) throw new Error(error);
     return (await runInstall(prepared, context.operations, exposure && prepared.additionalHostExposure)).join(" ");
-  }, ({ skill }, caught) => `Failed ${skill.name}: ${errorText(caught)}`);
+  }, ({ skill }, caught) => `Failed ${skill.name}: ${errorText(caught)}`, ({ skill }, position, total, finished) => {
+    if (!context.isMounted()) return;
+    const label = formatProgressLabel({ kind: "skill", name: skill.name, position, total, verb: "Installing" });
+    context.setAction({ ...running, label, done: finished.map((outcome) => outcome.line) });
+  });
   const lines = outcomes.map((outcome) => outcome.line);
   const failed = new Set(outcomes.filter((outcome) => !outcome.ok).map((outcome) => skillKey(outcome.item.skill)));
   // Installed Skills leave the list; only the failed ones stay marked for another try.

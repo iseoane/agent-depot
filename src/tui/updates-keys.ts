@@ -130,10 +130,10 @@ export function handleUpdatesKey(context: UpdatesKeyContext, mode: UpdatesMode, 
       if (cursor !== undefined) { context.setMode({ ...mode, cursor }); return; }
       answerYesNo(input, key, () => {
         if (!context.previewAtEnd(mode)) return;
-        context.setMode(busy("Checking App version…", undefined, context.now));
+        context.setMode(busy("Checking App version…", mode, context.now));
         mode.answer(true);
       }, () => {
-        context.setMode(busy("Continuing updates…", undefined, context.now));
+        context.setMode(busy("Continuing updates…", mode, context.now));
         mode.answer(false);
       });
       return;
