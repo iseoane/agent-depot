@@ -172,7 +172,7 @@ for (const size of PREVIEW_SIZES) {
     await waitForFrame(f.view.lastFrame, /Uninstall it before/);
     f.view.stdin.write("y");
     await confirmAtEnd(f.view, size.rows, /\[y\] Uninstall demo/, () => f.commands.includes("remove"));
-    await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);
+    await confirmAtEnd(f.view, size.rows, /\[y\] Remove the demo recipe/, () => /Removed App recipe:/.test(f.view.lastFrame() ?? ""));
   });
 }
 
@@ -184,7 +184,8 @@ for (const size of PREVIEW_SIZES) {
     await waitForFrame(f.view.lastFrame, /Uninstall it before/);
     f.view.stdin.write("y");
     f.markUninstalled();
-    await confirmAtEnd(f.view, size.rows, /\[y\] Check the uninstall now/, () => /Remove recipe for demo\? y\/n/.test(f.view.lastFrame() ?? ""));
+    await confirmAtEnd(f.view, size.rows, /\[y\] Check the uninstall now/, () => /Recipe removal/.test(f.view.lastFrame() ?? ""));
+    await confirmAtEnd(f.view, size.rows, /\[y\] Remove the demo recipe/, () => /Removed App recipe:/.test(f.view.lastFrame() ?? ""));
   });
 }
 

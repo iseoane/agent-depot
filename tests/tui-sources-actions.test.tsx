@@ -8,7 +8,7 @@ import type { GitSource } from "../src/git-source.js";
 import { BUILT_IN_SOURCE, type Source, type SourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import { SourcesView } from "../src/tui/sources-view.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { squash, waitForFrame } from "./wait-for-frame.js";
 import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const external: GitSource = {
@@ -195,7 +195,7 @@ test("d previews, y removes the source and reloads the list", async () => {
   stdin.write(DOWN);
   await highlights(lastFrame, /git:1234/);
   stdin.write("d");
-  await waitForFrame(lastFrame, (frame) => /remove Git Source git:1234567890abcdef12345678 from https:\/\/github\.com\/example\/skills\.git/u.test(normalized(frame)));
+  await waitForFrame(lastFrame, (frame) => squash(frame).includes("removeGitSourcegit:1234567890abcdef12345678fromhttps://github.com/example/skills.git"));
   stdin.write("y");
   const frame = await waitForFrame(lastFrame, /Removed Git Source: git:1234/);
   assert.deepEqual(h.calls, ["remove git:1234567890abcdef12345678"]);
@@ -365,7 +365,7 @@ for (const size of PREVIEW_SIZES) {
     await highlights(view.lastFrame, /git:1234/);
     view.stdin.write("d");
     await confirmAtEnd(view, size.rows, /\[y\] Remove Git Source/, () => h.calls.includes(`remove ${external.id}`));
-    await waitForFrame(view.lastFrame, /Removed Git Source: git:1234/);
+    await waitForFrame(view.lastFrame, (frame) => squash(frame).includes("RemovedGitSource:git:1234"));
     view.unmount();
   });
 }

@@ -12,7 +12,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { appName, appPlanLines, appRecipePreviewLines, recipeApprovalChrome } from "./app-actions.js";
 import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
-import { BorderPanel, DecisionPrompt, PagedPreview, PreviewConfirm, Working } from "./panel-parts.js";
+import { BorderPanel, DecisionPrompt, PagedPreview, Working } from "./panel-parts.js";
 import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
 import { usePreviewGeometry, type PreviewChrome } from "./preview-window.js";
 import { lineText, textLine, type StyledLine } from "./preview-render.js";
@@ -59,6 +59,15 @@ function uninstallChrome(mode: Extract<RecipeMode, { kind: "uninstall-confirm" |
     : { title: "App uninstall confirmation", action: `Uninstall ${name}`, consequence: `Uninstall ${name}? y/n` };
 }
 
+function removeChrome(removal: AppRecipeRemovalPlan): PreviewChrome {
+  const name = appName(removal.entry);
+  return { title: "Recipe removal", action: `Remove the ${name} recipe`, consequence: `Remove recipe for ${name}? y/n` };
+}
+
+function removeLines(removal: AppRecipeRemovalPlan): string[] {
+  return [`Delete recipe: ${removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."];
+}
+
 /** Captured approval, guide and delegated Catalog install interactions. */
 type RecipeMode =
   | { readonly kind: "browse" }
@@ -67,7 +76,8 @@ type RecipeMode =
   | { readonly kind: "install"; readonly action: ActionMode }
   | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly StyledLine[]; readonly cursor: number; readonly removeAfterApproval?: boolean }
   | { readonly kind: "pick"; readonly members: readonly RecipeRow[] }
-  | { readonly kind: "uninstall-question" | "remove"; readonly removal: AppRecipeRemovalPlan }
+  | { readonly kind: "uninstall-question"; readonly removal: AppRecipeRemovalPlan }
+  | { readonly kind: "remove"; readonly removal: AppRecipeRemovalPlan; readonly cursor: number }
   | { readonly kind: "uninstall-confirm" | "uninstall-manual"; readonly removal: AppRecipeRemovalPlan; readonly plan: AppLifecyclePlan; readonly cursor: number };
 
 interface RecipeSectionOptions {
@@ -190,7 +200,7 @@ export function useSourcesRecipes({
         return;
       }
       const removal = await planAppRecipeRemoval(apps, entry);
-      if (mounted.current) setMode({ kind: removal.installed ? "uninstall-question" : "remove", removal });
+      if (mounted.current) setMode(removal.installed ? { kind: "uninstall-question", removal } : { kind: "remove", removal, cursor: 0 });
     } catch (error) {
       if (mounted.current) {
         setError(errorText(error));
@@ -206,7 +216,7 @@ export function useSourcesRecipes({
         : await apps.executeLifecycle(current.plan, true);
       if (!mounted.current) return;
       if (result.status === "manual required") setMode({ ...current, kind: "uninstall-manual" });
-      else if (result.status === "untracked") setMode({ kind: "remove", removal: current.removal });
+      else if (result.status === "untracked") setMode({ kind: "remove", removal: current.removal, cursor: 0 });
       else {
         setError(`Uninstall failed: ${result.reason ?? result.status}; recipe retained`);
         setMode({ kind: "browse" });
@@ -281,6 +291,10 @@ export function useSourcesRecipes({
       return true;
     }
     if (current.kind === "remove") {
+      const viewport = previewGeometry(removeLines(current.removal), current.cursor, removeChrome(current.removal));
+      const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
+      if (cursor !== undefined) { setMode({ ...current, cursor }); return true; }
+      if (input === "y" && !viewport.reachedEnd) return true;
       answerYesNo(input, key, () => {
         setBusy("Removing App recipe…");
         void removeAppRecipe(apps, current.removal, true).then(async () => {
@@ -329,13 +343,13 @@ export function useSourcesRecipes({
     }
   }, [apps, mounted]);
   useEffect(() => { void reload(); }, [reload]);
-  // The paged install preview sizes itself to the whole terminal, so no message row may sit above it.
-  const pagedInstall = mode.kind === "install" && mode.action.kind === "confirm-install";
+  // A paged preview sizes itself to the whole terminal, so no message row may sit above it.
+  const pagedPreview = (mode.kind === "install" && mode.action.kind === "confirm-install") || mode.kind === "remove";
   const panel = (
     <Box flexDirection="column">
-      {loadError && !pagedInstall ? <Text color={theme.error}>Error loading App recipes: {loadError}</Text> : null}
-      {error && !pagedInstall ? <Text color={theme.error}>{error}</Text> : null}
-      {notice && !pagedInstall ? <Text color={theme.success}>{notice}</Text> : null}
+      {loadError && !pagedPreview ? <Text color={theme.error}>Error loading App recipes: {loadError}</Text> : null}
+      {error && !pagedPreview ? <Text color={theme.error}>{error}</Text> : null}
+      {notice && !pagedPreview ? <Text color={theme.success}>{notice}</Text> : null}
       {mode.kind === "guide" ? (
         <BorderPanel title="Add an App recipe">
           <Text>1 With the AI skill · install if missing, then copy the prompt</Text>
@@ -380,10 +394,11 @@ export function useSourcesRecipes({
         const lines = styled.map(lineText);
         return <PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
       })() : null}
-      {mode.kind === "remove" ? (
-        <PreviewConfirm title="Recipe removal" lines={[`Delete recipe: ${mode.removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."]}
-          question={`Remove recipe for ${appName(mode.removal.entry)}? y/n`} />
-      ) : null}
+      {mode.kind === "remove" ? (() => {
+        const chrome = removeChrome(mode.removal);
+        const lines = removeLines(mode.removal);
+        return <PagedPreview chrome={chrome} lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
+      })() : null}
     </Box>
   );
   return { rows, loadingSince, handleKey, startAdd, reload, clearMessage: () => { setError(undefined); setNotice(undefined); }, panel, directory: apps.directory, capturing: mode.kind !== "browse" };
