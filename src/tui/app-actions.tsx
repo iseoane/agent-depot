@@ -1,6 +1,7 @@
 import { Text, type Key } from "ink";
 
 import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
+import { commandLine } from "../preview-model.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
@@ -113,7 +114,7 @@ export function appRecipePreviewLines(entry: AppEntry, status: string, steps: re
       span(`  ● ${status}`, status === "approved" ? theme.success : theme.warning),
     ],
     [span(` ${[entry.file, ...(recipe?.homepage ? [recipe.homepage] : [])].join(" · ")}`, theme.legend)],
-    ...(recipe?.skills ? [fieldLine(" Owned Skills:", recipe.skills.join(", "))] : []),
+    ...(recipe?.skills ? [fieldLine(" Owned Skills:", commandLine(recipe.skills))] : []),
     textLine(" "),
     ...stepBlockLines(steps),
   ];
