@@ -204,7 +204,7 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
       return Object.freeze([BUILT_IN_SOURCE, ...state.gitSources]);
     },
 
-    async refreshSource(sourceId: string): Promise<GitSource> {
+    async refreshSource(sourceId: string, options?: SourceRefreshOptions): Promise<GitSource> {
       if (sourceId === BUILT_IN_SOURCE.id) {
         throw new BuiltInSourceError();
       }
@@ -215,7 +215,7 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
         throw new SourceNotFoundError(sourceId);
       }
 
-      await gitAccess.refresh(source);
+      await gitAccess.refresh(source, options);
       return source;
     },
 
@@ -344,12 +344,12 @@ export function createSourceOperations(options: SourceOperationsOptions = {}): S
       return resolveProjectSource(projectSource);
     },
 
-    async refreshProjectSource(projectSource: ProjectSource): Promise<Source> {
+    async refreshProjectSource(projectSource: ProjectSource, options?: SourceRefreshOptions): Promise<Source> {
       const source = resolveProjectSource(projectSource);
       if (source.kind === "builtin") {
         throw new BuiltInSourceError();
       }
-      await gitAccess.refresh(source);
+      await gitAccess.refresh(source, options);
       return source;
     },
 
