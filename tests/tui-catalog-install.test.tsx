@@ -18,6 +18,7 @@ import { skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "../s
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -373,4 +374,37 @@ test("a slow install preparation shows a specific progress label until the previ
   assert.match(busy, /^.*Skill install/m);
   release?.();
   await waitForFrame(lastFrame, /Skill install preview/);
+});
+
+for (const size of PREVIEW_SIZES) {
+  test(`installing accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t);
+    const view = await mount(f);
+    deferCleanup(t, () => view.unmount());
+    resizeTerminal(view, size);
+    await showDemo(view.lastFrame, view.stdin);
+    await chooseInstall(view.stdin, ["2"], "2", "1");
+    await confirmAtEnd(view, size.rows, /\[y\] Install demo/, () => /Installing demo…|Installed Skill "demo"/.test(view.lastFrame() ?? ""));
+    await waitForFrame(view.lastFrame, /Installed Skill "demo"/);
+    assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
+  });
+}
+
+test("a preview longer than a page keeps y inert until the install footer reads to the end, and n cancels mid-read", async (t) => {
+  const f = await fixture(t);
+  const view = await mount(f);
+  deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, { columns: 40, rows: 12 });
+  await showDemo(view.lastFrame, view.stdin);
+  await chooseInstall(view.stdin, ["2"], "2", "1");
+  const first = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+  view.stdin.write("y");
+  view.stdin.write("y");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.doesNotMatch(view.lastFrame() ?? "", /Installing demo…|Installed Skill "demo"/);
+  assert.match(first, /Review 1 of \d+/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, /Install cancelled/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
 });

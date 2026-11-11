@@ -19,6 +19,7 @@ import { skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "../s
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal, type TerminalSize } from "./preview-footer.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -538,4 +539,47 @@ test("InstallationsView starts with every scope collapsed and opens each level o
     await step(view, ENTER);
     assert.match(view.lastFrame() ?? "", /portable\/demo/);
   } finally { view.unmount(); }
+});
+
+/** Opens the adoption preview of the unmanaged `demo` at the given terminal size. */
+async function adoptionPreview(f: Fixture, size: TerminalSize) {
+  const view = await mount(f);
+  resizeTerminal(view, size);
+  await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
+  await goto(view, /(^|\s)demo \[/);
+  press(view.stdin, "A");
+  await waitForFrame(view.lastFrame, /Adopt demo/);
+  press(view.stdin, ENTER);
+  await waitForFrame(view.lastFrame, /Version: 1 latest/);
+  press(view.stdin, "1");
+  return view;
+}
+
+for (const size of PREVIEW_SIZES) {
+  test(`adopting accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t);
+    await writeUnmanaged(f.home);
+    const view = await adoptionPreview(f, size);
+    deferCleanup(t, () => view.unmount());
+    await confirmAtEnd(view, size.rows, /\[y\] Adopt demo/, () => /Adopting demo…|Adopted Skill "demo"/.test(view.lastFrame() ?? ""));
+    await waitForFrame(view.lastFrame, /Adopted Skill "demo"/);
+    assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
+  });
+}
+
+test("a preview longer than a page keeps y inert until the adoption footer reads to the end, and n cancels mid-read", async (t) => {
+  const f = await fixture(t);
+  await writeUnmanaged(f.home);
+  const view = await adoptionPreview(f, { columns: 40, rows: 12 });
+  deferCleanup(t, () => view.unmount());
+  const first = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+  press(view.stdin, "y");
+  press(view.stdin, "y");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.doesNotMatch(view.lastFrame() ?? "", /Adopting demo…|Adopted Skill "demo"/);
+  assert.match(first, /Review 1 of \d+/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  press(view.stdin, "n");
+  await waitForFrame(view.lastFrame, /Adoption cancelled/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
 });
