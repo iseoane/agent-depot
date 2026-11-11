@@ -7,6 +7,7 @@ import type { ManageContext } from "./manage-actions.js";
 import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
 import { BorderPanel, HostChecklist, PagedPreview, Working } from "./panel-parts.js";
 import { usePreviewGeometry, type PreviewChrome, type PreviewGeometry } from "./preview-window.js";
+import { fieldLine, lineText, span, stepBlockLines, textLine, type StepPreview, type StyledLine } from "./preview-render.js";
 import { theme } from "./theme.js";
 import { operationStart } from "./working-model.js";
 
@@ -28,7 +29,7 @@ export type AppMode =
       /** Result lines of the batch items finished so far. */
       readonly done?: readonly string[];
     }
-  | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number }
+  | { readonly kind: "app-approve"; readonly entry: AppEntry; readonly lines: readonly StyledLine[]; readonly cursor: number }
   | {
       readonly kind: "app-hosts";
       readonly entries: readonly AppEntry[];
@@ -84,16 +85,7 @@ export function recipeApprovalChrome(entry: AppEntry): PreviewChrome {
   };
 }
 
-export function appStepLines(step: {
-  readonly argv?: readonly string[];
-  readonly manual?: string;
-  readonly executable?: string;
-  readonly cwd: string;
-  readonly warning?: string;
-  readonly environment?: string;
-  readonly declaration?: string;
-  readonly pattern?: string;
-}): string[] {
+export function appStepLines(step: Omit<StepPreview, "step">): string[] {
   const argv = step.argv;
   return [
     ...(argv ? [
@@ -111,23 +103,24 @@ export function appStepLines(step: {
   ];
 }
 
-type AppPreviewStep = Parameters<typeof appStepLines>[0] & { readonly step: string };
-
-export function appRecipePreviewLines(entry: AppEntry, status: string, steps: readonly AppPreviewStep[]): string[] {
+/** The recipe's identity and approval status, then one block per step. */
+export function appRecipePreviewLines(entry: AppEntry, status: string, steps: readonly StepPreview[]): readonly StyledLine[] {
   const recipe = entry.recipe;
   return [
-    `File: ${entry.file}`,
-    `Name: ${recipe?.name ?? entry.file}`,
-    `Platform: ${recipe?.platform ?? "all"}`,
-    `Status: ${status}`,
-    ...(recipe?.homepage ? [`Homepage: ${recipe.homepage}`] : []),
-    ...(recipe?.skills ? [`Owned Skills: ${JSON.stringify(recipe.skills)}`] : []),
-    ...steps.flatMap(step => [step.step, ...appStepLines(step)]),
+    [
+      span(` ${appName(entry)}`, theme.value, true),
+      span(`  ${recipe?.platform ?? "all"}`, theme.field),
+      span(`  ● ${status}`, status === "approved" ? theme.success : theme.warning),
+    ],
+    [span(` ${[entry.file, ...(recipe?.homepage ? [recipe.homepage] : [])].join(" · ")}`, theme.legend)],
+    ...(recipe?.skills ? [fieldLine(" Owned Skills:", recipe.skills.join(", "))] : []),
+    textLine(" "),
+    ...stepBlockLines(steps),
   ];
 }
 
 function appPreviewLines(mode: Extract<AppMode, { kind: "app-approve" | "app-confirm" | "app-manual" }>): readonly string[] {
-  if (mode.kind === "app-approve") return mode.lines;
+  if (mode.kind === "app-approve") return mode.lines.map(lineText);
   return [
     `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,
     ...(mode.plan.previousVersion ? [`Previous version: ${mode.plan.previousVersion}`] : []),
@@ -309,5 +302,6 @@ export function AppPanel({ mode }: { readonly mode: AppMode }) {
   }
   const lines = appPreviewLines(mode);
   const chrome = appPreviewChrome(mode);
-  return <PagedPreview chrome={chrome} lines={lines} viewport={geometry(lines, mode.cursor, chrome)} />;
+  return <PagedPreview chrome={chrome} lines={lines} styled={mode.kind === "app-approve" ? mode.lines : undefined}
+    viewport={geometry(lines, mode.cursor, chrome)} />;
 }

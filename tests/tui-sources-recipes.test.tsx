@@ -81,9 +81,7 @@ test("Enter previews every step; only y approves and changed content needs appro
   view.stdin.write("\r");
   let frame = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   assert.ok(squash(frame).includes(squash(f.file)), frame); // a long path wraps
-  assert.match(frame, /Platform: all/);
-  assert.match(frame, /argv: \[/);
-  assert.match(frame, /"demo",/);
+  assert.match(frame, /demo {2}all {2}● needs approval/);
   view.stdin.write("n");
   await waitForFrame(view.lastFrame, frame => !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "needs approval");
@@ -211,7 +209,7 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   view.stdin.write("r");
   await waitForFrame(view.lastFrame, /not\s+applicable\s+here/);
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Platform: windows/);
+  await waitForFrame(view.lastFrame, /demo {2}windows {2}● not applicable here/);
   view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");

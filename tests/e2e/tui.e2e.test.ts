@@ -369,9 +369,9 @@ test("the Xeo semantic palette reaches colored text in a real terminal", { timeo
     await session.send("j", /fixture-app/u);
     await session.send("\r", /Recipe approval · does not install/u);
     const appApproval = await scrollPreviewToEnd(session, /Approve fixture-app\? y\/n/u);
-    assert.match(appApproval, /File:/u);
-    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, "Version pattern:")), "App recipe field names use Xeo blue");
-    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, " linux")), "App recipe values use Xeo brightText");
+    assert.match(appApproval, /fixture\.json/u);
+    assert.ok(session.terminalOutput.includes(ansiColor(122, 162, 247, " └ version")), "App recipe step names use Xeo blue");
+    assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, "$ depot-e2e-app --version")), "App recipe commands use Xeo brightText");
     assert.ok(session.terminalOutput.includes(`\u001b[1m${ansiColor(158, 206, 106, "y")}`), "App approval yes uses bold Xeo success green");
     assert.ok(session.terminalOutput.includes(ansiColor(247, 118, 142, "n")), "App approval no uses Xeo red");
     await session.send("y", /approved/u);
@@ -945,14 +945,14 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
       const { first, last } = position;
       const titleRow = screenRows.findIndex(row => row.includes("Recipe approval · does not install"));
       const visible = screenRows.slice(titleRow + 1, position.footerRow)
-        .map(row => row.match(/^\s*│ ?(.*?)\s*│?\s*$/u)?.[1] ?? "")
-        .filter(row => row !== "");
+        // A blank row separates the recipe's identity from its steps, so empty rows count.
+        .map(row => row.match(/^\s*│ ?(.*?)\s*│?\s*$/u)?.[1] ?? "");
       assert.equal(visible.length, last - first + 1, `visible preview rows disagree with ${first}–${last}:\n${session.screen}`);
       visible.forEach((row, offset) => rows.set(first + offset, row));
     };
     const wideRows = new Map<number, string>();
     collectRows(wideRows);
-    assert.match(preview, /File:/u);
+    assert.ok(preview.replace(/[│\s]/gu, "").includes("review-all-terms.json"), `approval preview did not open on the recipe file:\n${preview}`);
     assert.doesNotMatch(preview, /latest-selector-unchanged|Host teardown instruction/u);
     assert.ok(preview.split("\n").length <= 24, `wide preview exceeded the 24-row PTY:\n${preview}`);
     for (let move = 0; move < 80 && !approvalQuestion(); move += 1) {
@@ -1009,12 +1009,8 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     collectRows(narrowRows);
     const reviewed = [...wideRows, ...narrowRows].sort(([left], [right]) => left - right).map(([, line]) => line).join(" ");
     const continuous = reviewed.replace(/\s/gu, "");
-    const argv = ["depot-e2e-app", "install", "separate", "argv", "--danger=host-setup-tail"];
-    let position = continuous.indexOf("argv:[");
-    for (const argument of argv) {
-      position = continuous.indexOf(JSON.stringify(argument), position + 1);
-      assert.notEqual(position, -1, `approval omitted or reordered argv value ${JSON.stringify(argument)}:\n${reviewed}`);
-    }
+    // Unquoted, the five arguments read as one command line; an argument holding a space would be shown quoted.
+    assert.ok(continuous.includes("$depot-e2e-appinstallseparateargv--danger=host-setup-tail"), `approval omitted or reordered the install argv:\n${reviewed}`);
     assert.ok(continuous.includes("latest-selector-unchanged"));
     assert.ok(continuous.includes("setup"));
     assert.ok(continuous.includes("FINAL-DANGER-TERM-MUST-STAY-HIDDEN"));
@@ -1022,7 +1018,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     assert.ok(continuous.includes("fullinstruction"));
     assert.ok(continuous.includes(home.replace(/\s/gu, "")), `full approval cwd was not reachable:\n${reviewed}`);
     assert.ok(continuous.includes(fixture.bin.replace(/\s/gu, "")), `full executable path was not reachable:\n${reviewed}`);
-    assert.ok(continuous.includes("Environment:linux".replace(/\s/gu, "")));
+    assert.ok(continuous.includes("onlinux"), `approval omitted the environment:\n${reviewed}`);
     await assert.rejects(readFile(fixture.log), { code: "ENOENT" });
     await session.send("y", /review-all-terms[\s\S]*approved/u);
   } finally {
