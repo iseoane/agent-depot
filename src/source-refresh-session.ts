@@ -18,8 +18,8 @@ export interface SourceRefreshSessionOptions {
 /** In-memory refresh state of one TUI process; it never writes files. */
 export interface SourceRefreshSession {
   /**
-   * Joins another user refresh in flight; waits out a background one. Then reuses a success younger
-   * than an hour unless forced, or refreshes in the foreground.
+   * Shares a pending user refresh (a forced call only a forced one); otherwise waits until no refresh
+   * of the Source runs, then reuses a success younger than an hour unless forced, or refreshes in the foreground.
    */
   refresh(source: GitSource, options?: Pick<SourceRefreshOptions, "force">): Promise<void>;
   /** Queues refreshes that cannot prompt; callers never wait for the queue and failures only update the state. */
@@ -85,7 +85,7 @@ export function createSourceRefreshSession(
   // Background refreshes cannot prompt and are time-limited (D2), so a user call never joins one:
   // it waits for it to settle, then reuses its success (unless forced) or refreshes in the foreground.
   const backgroundRuns = new Set<Promise<void>>();
-  const userRuns = new Map<string, Promise<void>>();
+  const userRuns = new Map<string, { readonly run: Promise<void>; readonly force: boolean }>();
 
   const refreshInBackground = (source: GitSource): Promise<void> => {
     const running = inFlight.get(source.id);
@@ -100,16 +100,22 @@ export function createSourceRefreshSession(
 
   const refreshForUser = (source: GitSource, force: boolean): Promise<void> => {
     const pending = userRuns.get(source.id);
-    if (pending) return pending;
+    // An unforced call may share any pending run; a forced one only another forced run.
+    if (pending && (pending.force || !force)) return pending.run;
     const run = (async () => {
-      const running = inFlight.get(source.id);
-      if (running && backgroundRuns.has(running)) await running.catch(() => undefined);
-      else if (running) return running;
+      if (pending) await pending.run.catch(() => undefined);
+      // A background refresh may start while this one waits, so wait until none is running.
+      for (let running = inFlight.get(source.id); running; running = inFlight.get(source.id)) {
+        await running.catch(() => undefined);
+      }
       if (!force && isFresh(source.id)) return;
       await start(source, false);
     })();
-    userRuns.set(source.id, run);
-    const forget = () => userRuns.delete(source.id);
+    const entry = { run, force };
+    userRuns.set(source.id, entry);
+    const forget = () => {
+      if (userRuns.get(source.id) === entry) userRuns.delete(source.id);
+    };
     run.then(forget, forget);
     return run;
   };
@@ -143,7 +149,9 @@ export function createSourceRefreshSession(
       queue.length = 0;
     },
     async settled() {
-      await Promise.allSettled([...inFlight.values()]);
+      while (inFlight.size > 0 || userRuns.size > 0) {
+        await Promise.allSettled([...inFlight.values(), ...[...userRuns.values()].map((entry) => entry.run)]);
+      }
     },
   };
 }

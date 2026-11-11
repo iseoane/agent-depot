@@ -53,7 +53,7 @@ async function settle(): Promise<void> {
   for (let index = 0; index < 5; index += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
-test("concurrent refreshes of one Source share a single real refresh, even when forced", { timeout: 5_000 }, async () => {
+test("concurrent user refreshes share one real refresh, and forced ones share among themselves after it", { timeout: 5_000 }, async () => {
   const skills = gitSource("skills");
   const { operations, calls } = deferredOperations([skills]);
   const session = createSourceRefreshSession(operations);
@@ -61,11 +61,16 @@ test("concurrent refreshes of one Source share a single real refresh, even when 
   const first = session.refresh(skills);
   const second = session.refresh(skills);
   const forced = session.refresh(skills, { force: true });
+  const forcedAgain = session.refresh(skills, { force: true });
   await settle();
   assert.equal(calls.length, 1);
   calls[0]!.resolve();
-  await Promise.all([first, second, forced]);
-  assert.equal(calls.length, 1);
+  await Promise.all([first, second]);
+  await settle();
+  assert.equal(calls.length, 2, "the forced calls refresh once more, together");
+  calls[1]!.resolve();
+  await Promise.all([forced, forcedAgain]);
+  assert.equal(calls.length, 2);
 });
 
 test("a registered and a project refresh of the same Source share one real refresh through the wrapper", { timeout: 5_000 }, async () => {
