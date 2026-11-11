@@ -1,4 +1,5 @@
 import { checkAppUpdates, createAppOperations, type AppOperations, type AppUpdateCheck, type AppLifecyclePlan } from "../app-flow.js";
+import type { FlowProgress } from "../flow-progress.js";
 import type { PackageOperations } from "../package-flow.js";
 import { displayPackageSelection, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
 import type { PackageApprovalStatus } from "../package-state.js";
@@ -430,13 +431,22 @@ export async function runUpdates(
   prepared: PreparedUpdates,
   confirmedPaths: readonly ScopedPath[],
   confirmManual?: (plan: AppLifecyclePlan, reason: string | undefined) => Promise<boolean>,
+  /** Called before each Skill, App and Package runs, numbered across the whole batch. */
+  onProgress?: (event: FlowProgress) => void,
 ): Promise<UpdateOutcome> {
   const updated: string[] = [];
   const failedLines: string[] = [];
+  const packagePlans = prepared.packagePlans ?? [];
+  const total = prepared.groups.reduce((sum, group) => sum + group.applicable.length, 0) + prepared.appPlans.length + packagePlans.length;
+  let position = 0;
+  const started = (kind: FlowProgress["kind"], name: string) => {
+    position += 1;
+    onProgress?.({ kind, name, position, total, verb: "Updating" });
+  };
   for (const group of prepared.groups) {
     const result = await applyConfirmedUpdates(
       group.applicable,
-      group.loaded.context,
+      { ...group.loaded.context, onItem: (item) => started("skill", item.selection.path) },
       confirmedPaths
         .filter((confirmed) => confirmed.scope === group.scope && group.nonCanonicalPaths.includes(confirmed.path))
         .map((confirmed) => confirmed.path),
@@ -446,6 +456,7 @@ export async function runUpdates(
     failedLines.push(...result.failed.map((item) => `Failed ${item.selection.path}: ${item.error ?? "unknown error"}`));
   }
   for (const plan of prepared.appPlans) {
+    started("app", plan.entry.recipe!.name);
     const name = `App: ${plan.entry.recipe!.name}`;
     try {
       const apps = prepared.apps;
@@ -465,7 +476,8 @@ export async function runUpdates(
       failedLines.push(`Failed ${name}: ${errorText(error)}`);
     }
   }
-  for (const { plan, approval } of prepared.packagePlans ?? []) {
+  for (const { plan, approval } of packagePlans) {
+    started("package", plan.descriptor.name);
     const name = `Package: ${plan.descriptor.name} (${plan.selection.host}) from ${displayPackageSelection(plan.selection)}`;
     try {
       const packages = prepared.packages;

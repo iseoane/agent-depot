@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 
+import { formatProgressLabel, type FlowProgress } from "../flow-progress.js";
 import { errorText } from "./batch.js";
 import type { TuiEnvironment } from "./environment.js";
 import type { SourceOperations } from "../sources.js";
@@ -88,9 +89,14 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
   };
 
   const apply = async (prepared: PreparedUpdates, confirmedPaths: readonly ScopedPath[]) => {
-    setMode(busy("Applying updates…", undefined, clock));
+    const running = busy("Applying updates…", undefined, clock);
+    setMode(running);
     let result: UpdatesMessage;
     try {
+      // Each item keeps the batch's start, also after a manual pause, which is not a busy mode.
+      const progress = (event: FlowProgress) => {
+        if (mounted.current) setMode(busy(formatProgressLabel(event), running, clock));
+      };
       const outcome = await runUpdates(prepared, confirmedPaths, (plan, reason) => new Promise<boolean>(resolve => {
         if (!mounted.current) { resolve(false); return; }
         const answer = (done: boolean) => {
@@ -99,7 +105,7 @@ export function useUpdatesFlow(inputs: UpdatesFlowInputs): UpdatesFlow {
         };
         pendingAnswer.current = answer;
         setMode({ kind: "manual", plan, reason, answer, cursor: 0 });
-      }));
+      }), progress);
       result = { kind: outcome.failed === 0 ? "ok" : "error", lines: outcome.lines };
     } catch (error) {
       result = { kind: "error", lines: [errorText(error)] };

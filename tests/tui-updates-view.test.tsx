@@ -658,8 +658,7 @@ test("reports each Skill, App and Package as it starts, numbered across the whol
   const onProgress = (event: { readonly kind: string; readonly name: string; readonly position: number; readonly total: number }) => {
     events.push(`${event.kind} ${event.name} ${event.position}/${event.total}`);
   };
-  // The fourth argument does not exist before this feature, so the call goes through Reflect to compile.
-  const outcome = await Reflect.apply(runUpdates, undefined, [prepared, [], confirmManual, onProgress]) as Awaited<ReturnType<typeof runUpdates>>;
+  const outcome = await runUpdates(prepared, [], confirmManual, onProgress);
   assert.equal(outcome.failed, 2);
   assert.deepEqual(events, [
     "skill portable/proj 1/4",

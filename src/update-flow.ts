@@ -19,6 +19,7 @@ import {
   relativeProjectPath,
   type SkillUpdateApplicationOptions,
   type SkillUpdatePlan,
+  type UpdateBatchApplyOptions,
   type UpdateBatchResult,
 } from "./skill-update.js";
 import { resolveProjectSource, type SourceOperations } from "./sources.js";
@@ -195,7 +196,7 @@ export function findPathConfirmationProblem(pending: readonly string[], confirme
  */
 export function applyConfirmedUpdates(
   selected: readonly UpdateBatchAssessmentItem[],
-  context: SkillUpdateApplicationOptions,
+  context: UpdateBatchApplyOptions,
   confirmedPaths: readonly string[],
   /** Ids of the items whose preview showed the overwrite of local modifications; when given, any other item that turns out modified fails instead of being overwritten. */
   previewedOverwrites?: ReadonlySet<string>,
