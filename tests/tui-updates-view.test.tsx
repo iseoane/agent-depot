@@ -17,6 +17,7 @@ import {
 import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
 import type { BundleDescriptor, InstalledPackage, PackageLifecyclePlan, PackageSelection } from "../src/package-model.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
+import { createSourceRefreshSession, withRefreshSession } from "../src/source-refresh-session.js";
 import { formatAgo, loadUpdateRows, prepareUpdates, previewLineText, runUpdates } from "../src/tui/updates.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
@@ -384,6 +385,28 @@ test("refreshes the Git sources involved before the assessment, showing a busy s
   assert.deepEqual(f.events.filter((event) => event.startsWith("refresh:")), [`refresh:${GIT_URL}`], "the built-in source is skipped");
   assert.ok(f.events.indexOf(`refresh:${GIT_URL}`) < f.events.findIndex((event) => event.startsWith("read:")), "refresh precedes the assessment");
   unmount();
+});
+
+test("with a refresh session, reopening Updates reuses the recent refresh while r refreshes again", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "ext", state: "outdated", url: GIT_URL }]);
+  const operations = withRefreshSession(f.operations, createSourceRefreshSession(f.operations));
+  const refreshes = () => f.events.filter((event) => event.startsWith("refresh:")).length;
+
+  const first = render(<UpdatesView operations={operations} environment={f.environment} />);
+  await expandList(first.lastFrame, first.stdin, /portable\/ext/);
+  assert.equal(refreshes(), 1);
+  first.unmount();
+
+  const second = render(<UpdatesView operations={operations} environment={f.environment} />);
+  const reopened = await expandList(second.lastFrame, second.stdin, /portable\/ext/);
+  assert.match(reopened, /sources refreshed/);
+  assert.equal(refreshes(), 1, "entering Updates again within the hour reuses the refresh");
+
+  second.stdin.write("r");
+  await waitForFrame(second.lastFrame, () => refreshes() === 2);
+  await expandList(second.lastFrame, second.stdin, /portable\/ext/);
+  second.unmount();
 });
 
 test("refreshes each distinct Git source once even when installed in both scopes", async (t) => {
