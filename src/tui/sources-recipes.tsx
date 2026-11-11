@@ -13,6 +13,7 @@ import { appName, appPlanLines, appRecipePreviewLines, recipeApprovalChrome } fr
 import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
 import { BorderPanel, DecisionPrompt, PagedPreview, Working } from "./panel-parts.js";
+import { isYes } from "./keys.js";
 import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
 import { usePreviewGeometry, type PreviewChrome } from "./preview-window.js";
 import { lineText, textLine, type StyledLine } from "./preview-render.js";
@@ -259,7 +260,7 @@ export function useSourcesRecipes({
       const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) setMode({ ...current, cursor });
       else if (input === "n" || key.escape) cancel();
-      else if (input === "y" && viewport.reachedEnd) {
+      else if (isYes(input, key) && viewport.reachedEnd) {
         setBusy("Approving App recipe…");
         void apps.approve(current.entry).then(async () => {
           await reload();
@@ -287,14 +288,14 @@ export function useSourcesRecipes({
       const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) setMode({ ...current, cursor });
       else if (input === "n" || key.escape) cancel();
-      else if (input === "y" && viewport.reachedEnd) void uninstall(current);
+      else if (isYes(input, key) && viewport.reachedEnd) void uninstall(current);
       return true;
     }
     if (current.kind === "remove") {
       const viewport = previewGeometry(removeLines(current.removal), current.cursor, removeChrome(current.removal));
       const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) { setMode({ ...current, cursor }); return true; }
-      if (input === "y" && !viewport.reachedEnd) return true;
+      if (isYes(input, key) && !viewport.reachedEnd) return true;
       answerYesNo(input, key, () => {
         setBusy("Removing App recipe…");
         void removeAppRecipe(apps, current.removal, true).then(async () => {

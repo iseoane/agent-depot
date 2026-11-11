@@ -8,7 +8,7 @@ import type { Source, SourceOperations } from "../sources.js";
 import { initialMode, modeReducer, type Mode, type ModeEvent } from "./sources-mode.js";
 import { rowStyle, theme } from "./theme.js";
 import { computeWindow, pageStep, useListHeight } from "./window.js";
-import { useKeys } from "./keys.js";
+import { isYes, useKeys } from "./keys.js";
 import type { TuiEnvironment } from "./environment.js";
 import { groupRecipeRows, useSourcesRecipes, type RecipeGroup } from "./sources-recipes.js";
 import { BorderPanel, PagedPreview, Working } from "./panel-parts.js";
@@ -326,8 +326,9 @@ export function SourcesView({ operations, onCapturingChange, onOpenCatalog, list
       const viewport = previewGeometry(lines, mode.cursor, chrome);
       const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) { dispatch({ type: "preview-cursor", cursor }); return; }
-      if (input === "y" && !viewport.reachedEnd) return;
-      if (input === "y") {
+      const yes = isYes(input, key);
+      if (yes && !viewport.reachedEnd) return;
+      if (yes) {
         if (mode.action === "refresh") {
           const { sources: targets } = mode;
           void run(targets.length === 1 ? "Refreshing Git Source…" : "Refreshing Git Sources…", async () => {

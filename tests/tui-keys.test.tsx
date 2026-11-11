@@ -4,9 +4,7 @@ import { test } from "node:test";
 import { Text } from "ink";
 import { render } from "ink-testing-library";
 
-import { PagedPreview } from "../src/tui/panel-parts.js";
-import { previewViewport } from "../src/tui/preview-window.js";
-import { useKeys } from "../src/tui/keys.js";
+import { isYes, useKeys } from "../src/tui/keys.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 /** Records every input the handler receives, joined by `|`. */
@@ -90,25 +88,21 @@ test("real terminal remnants are kept whole", async () => {
   }
 });
 
-const OPEN_PREVIEW_CHROME = { title: "Confirmation", action: "Apply", consequence: "Apply? (y/n)" };
-const OPEN_PREVIEW_LINES = ["one", "two", "three"];
-
-function ProbeBesidePreview({ seen }: { readonly seen: string[] }) {
-  return <>
-    <PagedPreview chrome={OPEN_PREVIEW_CHROME} lines={OPEN_PREVIEW_LINES}
-      viewport={previewViewport(OPEN_PREVIEW_LINES, 0, 24, 80, OPEN_PREVIEW_CHROME)} />
-    <Probe seen={seen} />
-  </>;
+function YesProbe({ seen }: { readonly seen: string[] }) {
+  useKeys((input, key) => {
+    seen.push(isYes(input, key) ? "yes" : input);
+  });
+  return <Text>probe</Text>;
 }
 
-test("a y in a multi-character block is dropped while a paged preview is open, a lone y is delivered", async () => {
+test("a y split off a multi-character block never counts as a confirmation, a lone y does", async () => {
   const seen: string[] = [];
-  const view = render(<ProbeBesidePreview seen={seen} />);
+  const view = render(<YesProbe seen={seen} />);
   await waitForFrame(view.lastFrame, /probe/);
-  view.stdin.write("jjjyY");
+  view.stdin.write("ry");
   await new Promise((resolve) => setTimeout(resolve, 20));
   view.stdin.write("y");
   await new Promise((resolve) => setTimeout(resolve, 20));
   view.unmount();
-  assert.deepEqual(seen, ["j", "j", "j", "y"]);
+  assert.deepEqual(seen, ["r", "y", "yes"]);
 });

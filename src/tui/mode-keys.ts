@@ -2,6 +2,7 @@ import type { Key } from "ink";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { isValidFixedVersion } from "../skill-install.js";
+import { isYes } from "./keys.js";
 import type { PreviewViewport } from "./preview-window.js";
 
 /** The cursor after a down/up key (arrows or j/k), or undefined when the key does not move it. */
@@ -77,7 +78,7 @@ export function applyChecklistOutcome(
 
 /** The y/n confirmation keys: `y` confirms, `n` or Esc declines, anything else is ignored. */
 export function answerYesNo(input: string, key: Key, onYes: () => void, onNo: () => void): void {
-  if (input === "y") onYes();
+  if (isYes(input, key)) onYes();
   else if (input === "n" || key.escape) onNo();
 }
 

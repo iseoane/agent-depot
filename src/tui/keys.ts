@@ -1,4 +1,3 @@
-import { useLayoutEffect } from "react";
 import { useInput, type Key } from "ink";
 
 export type KeyHandler = (input: string, key: Key) => void;
@@ -16,20 +15,16 @@ const PRINTABLE = /^[^\p{Cc}]+$/u;
 const ESCAPE_REMNANT = /^(?:\[[\d;<:?]*[A-DFHIMOPQRSZm~]|O[A-DFHPQRS])$/;
 const PASTE_MARKERS = new Set(["[200~", "[201~"]);
 
-/** Paged previews currently on screen, counted by `useOpenPreview`. */
-let openPreviews = 0;
+/** Keys that were split off a multi-character block (fast typing, a paste). */
+const blockKeys = new WeakSet<Key>();
 
 /**
- * Marks a paged preview as open while the calling component is mounted. Handlers read refs that
- * update synchronously, so a `y` split off a block that also moved the cursor would confirm before
- * the footer could show `read ✓`.
+ * Whether this key press is a `y` that answers a confirmation. A `y` that came in a block with other
+ * characters never does: the block may have opened the question itself, before it was drawn.
+ * Text fields read `input` directly, so pasted text still reaches them.
  */
-export function useOpenPreview(): void {
-  // Layout, not passive: the count must be current as soon as the frame is on screen.
-  useLayoutEffect(() => {
-    openPreviews += 1;
-    return () => { openPreviews -= 1; };
-  }, []);
+export function isYes(input: string, key: Key): boolean {
+  return input === "y" && !blockKeys.has(key);
 }
 
 /**
@@ -43,11 +38,9 @@ export function useKeys(handler: KeyHandler): void {
       return;
     }
     if (input.length > 1 && !key.ctrl && !key.meta && !key.escape && PRINTABLE.test(input)) {
-      // A confirmation must be its own key press after the footer shows `read ✓`.
-      for (const character of input) {
-        if (openPreviews > 0 && (character === "y" || character === "Y")) continue;
-        handler(character, key);
-      }
+      const blockKey = { ...key };
+      blockKeys.add(blockKey);
+      for (const character of input) handler(character, blockKey);
       return;
     }
     handler(input, key);
