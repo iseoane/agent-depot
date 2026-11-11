@@ -1,6 +1,6 @@
 import { buildUpdateTree, type UpdateNodeData } from "./updates-tree.js";
 import { flattenVisible, type Expanded, type VisibleRow } from "./tree.js";
-import type { UpdateRow, UpdateScopeFilter, UpdatesData, UpdatesPhase } from "./updates.js";
+import { formatAgo, type UpdateRow, type UpdateScopeFilter, type UpdatesData, type UpdatesPhase } from "./updates.js";
 
 export const REFRESHING = "Refreshing sources…";
 export const CHECKING = "Checking for updates…";
@@ -68,7 +68,7 @@ export function viewOf(data: UpdatesData | undefined, scope: UpdateScopeFilter, 
 export type UpdatesListView = ReturnType<typeof viewOf>;
 
 export function describeRefresh(data: UpdatesData): string {
-  const { attempted, refreshed, failed, unreadable } = data.refresh;
+  const { attempted, refreshed, failed, unreadable, reusedAt } = data.refresh;
   if (!attempted) return "sources not fetched again";
   if (unreadable.length > 0) {
     return `could not refresh: ${unreadable.map(({ scope, reason }) => `${reason} (${scope})`).join("; ")}; cached data was used`;
@@ -76,7 +76,8 @@ export function describeRefresh(data: UpdatesData): string {
   if (failed.length > 0) {
     return `${failed.length} of ${failed.length + refreshed.length} sources could not be refreshed; their current data was used`;
   }
-  return refreshed.length > 0 ? "sources refreshed" : "no Git sources to refresh";
+  if (refreshed.length === 0) return "no Git sources to refresh";
+  return reusedAt === undefined ? "sources refreshed" : `sources refreshed ${formatAgo(data.checkedAt - reusedAt)}`;
 }
 
 /** Data for a check that failed as a whole, so the view can show the reason. */

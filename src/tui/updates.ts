@@ -4,6 +4,8 @@ import type { PackageOperations } from "../package-flow.js";
 import { displayPackageSelection, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { formatVersionPolicy } from "../skill-install.js";
+import { sourceIdForUrl } from "../git-source.js";
+import type { SourceRefreshSession } from "../source-refresh-session.js";
 import type { SourceOperations, SourceRefreshOptions } from "../sources.js";
 import type { UpdateBatchAssessmentItem } from "../update-batch.js";
 import type { ProjectSkillSelection, ProjectSource } from "../project-manifest.js";
@@ -173,23 +175,35 @@ async function refreshOne(operations: SourceOperations, source: GitProjectSource
 }
 
 /** Refreshes every distinct Git source the installations use, one at a time; the built-in source is skipped. */
-async function refreshSources(operations: SourceOperations, selections: readonly ProjectSkillSelection[], options: SourceRefreshOptions): Promise<RefreshReport> {
+async function refreshSources(
+  operations: SourceOperations,
+  selections: readonly ProjectSkillSelection[],
+  options: SourceRefreshOptions,
+  session: SourceRefreshSession | undefined,
+): Promise<RefreshReport> {
   const distinct = new Map<string, GitProjectSource>();
   for (const { source } of selections) {
     if (source.kind === "external" && "url" in source) distinct.set(`${source.url}\u0000${source.ref ?? ""}`, source);
   }
   const refreshed: string[] = [];
   const failed: SourceRefreshFailure[] = [];
+  const startedAt = session?.now();
+  let reusedAt: number | undefined;
   for (const source of distinct.values()) {
     const label = source.ref === undefined ? source.url : `${source.url}@${source.ref}`;
     try {
       await refreshOne(operations, source, options);
       refreshed.push(label);
+      // A refresh that finished before this check began was reused, not made now.
+      const finishedAt = session?.snapshot().get(sourceIdForUrl(source.url))?.finishedAt;
+      if (startedAt !== undefined && finishedAt !== undefined && finishedAt < startedAt) {
+        reusedAt = Math.min(reusedAt ?? finishedAt, finishedAt);
+      }
     } catch (error) {
       failed.push({ source: label, reason: errorText(error) });
     }
   }
-  return { attempted: true, refreshed, failed, unreadable: [] };
+  return { attempted: true, refreshed, failed, unreadable: [], ...(reusedAt === undefined ? {} : { reusedAt }) };
 }
 
 /**
@@ -215,7 +229,7 @@ export async function loadUpdateRows(
         return [];
       })),
     );
-    refresh = { ...(await refreshSources(operations, installations.flat(), { force: options.force === true })), unreadable };
+    refresh = { ...(await refreshSources(operations, installations.flat(), { force: options.force === true }, environment.refreshSession)), unreadable };
   }
   options.onPhase?.("checking");
   const results = await Promise.all(UPDATE_SCOPES.map(async (scope): Promise<ScopeResult> => {

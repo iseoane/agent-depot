@@ -73,9 +73,12 @@ export function App({ operations: plainOperations, environment: plainEnvironment
   );
   // Package previews refresh through the same session, so they reuse and show the same refreshes.
   const environment = useMemo<TuiEnvironment | undefined>(
-    () => refreshSession === undefined || plainEnvironment?.packages !== undefined ? plainEnvironment : {
+    () => refreshSession === undefined ? plainEnvironment : {
       ...plainEnvironment,
-      packagesEnvironment: { ...plainEnvironment?.packagesEnvironment, sourceOperations: operations },
+      refreshSession,
+      ...(plainEnvironment?.packages !== undefined ? {} : {
+        packagesEnvironment: { ...plainEnvironment?.packagesEnvironment, sourceOperations: operations },
+      }),
     },
     [plainEnvironment, refreshSession, operations],
   );
