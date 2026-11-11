@@ -17,7 +17,8 @@ import {
   type UninstallPreparation,
 } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
-import { answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
+import { answerPaged, answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
+import type { PreviewChrome, PreviewGeometry } from "./preview-window.js";
 import { skillOf, sourceIdOf, type InstallationRow, type UnmanagedGroup } from "./installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval, type PreparedUnmanagedRemoval } from "./unmanaged-actions.js";
 import { busy, type Busy } from "./working-model.js";
@@ -83,8 +84,8 @@ export type BulkMode =
       readonly cursor: number;
       readonly selected: readonly ProjectHost[];
     }
-  | { readonly kind: "confirm-bulk-uninstall"; readonly plan: BulkUninstallPlan }
-  | { readonly kind: "confirm-bulk-hosts"; readonly plan: BulkHostPlan }
+  | { readonly kind: "confirm-bulk-uninstall"; readonly plan: BulkUninstallPlan; readonly cursor: number }
+  | { readonly kind: "confirm-bulk-hosts"; readonly plan: BulkHostPlan; readonly cursor: number }
   | { readonly kind: "confirm-bulk-exposure"; readonly plan: BulkHostPlan };
 
 export const BULK_KINDS: readonly BulkMode["kind"][] = ["bulk-hosts", "confirm-bulk-uninstall", "confirm-bulk-hosts", "confirm-bulk-exposure"];
@@ -99,6 +100,8 @@ export interface BulkContext {
   readonly operations: SourceOperations;
   readonly env: TuiEnvironment;
   readonly installed: InstalledSkills;
+  /** The viewport of a paged preview at the current terminal size, shared with the panel. */
+  readonly previewGeometry: PreviewGeometry;
   setMode(mode: BulkMode | Busy): void;
   browse(): void;
   setMessage(message: Message | undefined): void;
@@ -325,7 +328,7 @@ export function startBulkUninstall(context: BulkContext, targets: readonly BulkT
     context,
     `Preparing uninstall of ${count(targets.length, "item")}…`,
     () => prepareBulkUninstall(context, targets),
-    (plan) => ({ kind: "confirm-bulk-uninstall", plan }),
+    (plan) => ({ kind: "confirm-bulk-uninstall", plan, cursor: 0 }),
   );
 }
 
@@ -346,7 +349,7 @@ function prepareHosts(context: BulkContext, mode: Extract<BulkMode, { kind: "bul
     context,
     `Preparing host change of ${count(mode.targets.length, "item")}…`,
     () => prepareBulkHostAddition(context, mode.targets, mode.skipped, mode.selected),
-    (plan) => ({ kind: "confirm-bulk-hosts", plan }),
+    (plan) => ({ kind: "confirm-bulk-hosts", plan, cursor: 0 }),
   );
 }
 
@@ -366,6 +369,26 @@ async function apply(context: BulkContext, label: string, action: (progress: Bul
   await context.finish(result.message);
 }
 
+function previewOf(item: BulkUninstallItem | BulkHostItem): readonly string[] {
+  if (!("kind" in item)) return item.prepared.preview;
+  return item.kind === "managed" ? item.prepared.plan.preview : item.prepared.preview;
+}
+
+export type BulkPagedMode = Extract<BulkMode, { kind: "confirm-bulk-uninstall" | "confirm-bulk-hosts" }>;
+
+/** One block per planned item (its label, then its preview), then the skipped ones, with the footer's action and question. */
+export function bulkConfirmPreview(mode: BulkPagedMode): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+  const { plan } = mode;
+  const items = count(plan.items.length, "item");
+  const lines = [
+    ...(plan.items as readonly (BulkUninstallItem | BulkHostItem)[]).flatMap((item): readonly string[] => [item.label, ...previewOf(item)]),
+    ...plan.skipped.map(({ label, reason }) => `Skipped ${label}: ${reason}`),
+  ];
+  return mode.kind === "confirm-bulk-uninstall"
+    ? { lines, chrome: { title: "Uninstall", action: `Uninstall ${items}`, consequence: `Uninstall ${items}? y/n` } }
+    : { lines, chrome: { title: "Add hosts", action: `Add hosts to ${items}`, consequence: `Add hosts to ${items}? y/n` } };
+}
+
 /** Handles a key in a bulk mode; returns false for any other mode. */
 export function handleBulkKey(context: BulkContext, mode: { readonly kind: string }, input: string, key: Key): boolean {
   const current = mode as BulkMode;
@@ -381,13 +404,18 @@ export function handleBulkKey(context: BulkContext, mode: { readonly kind: strin
       return true;
     }
     case "confirm-bulk-uninstall":
-      answerYesNo(input, key, () => {
-        void apply(context, `Removing ${count(current.plan.items.length, "item")}…`, (progress) => runBulkUninstall(current.plan, operations, env, progress));
-      }, () => cancel(context, "Uninstall cancelled"));
+    case "confirm-bulk-hosts": {
+      const { lines, chrome } = bulkConfirmPreview(current);
+      answerPaged(context.previewGeometry(lines, current.cursor, chrome), current.cursor, input, key, {
+        moveTo: (cursor) => context.setMode({ ...current, cursor }),
+        yes: () => {
+          if (current.kind === "confirm-bulk-hosts") context.setMode({ kind: "confirm-bulk-exposure", plan: current.plan });
+          else void apply(context, `Removing ${count(current.plan.items.length, "item")}…`, (progress) => runBulkUninstall(current.plan, operations, env, progress));
+        },
+        no: () => cancel(context, current.kind === "confirm-bulk-hosts" ? "Add hosts cancelled" : "Uninstall cancelled"),
+      });
       return true;
-    case "confirm-bulk-hosts":
-      answerYesNo(input, key, () => context.setMode({ kind: "confirm-bulk-exposure", plan: current.plan }), () => cancel(context, "Add hosts cancelled"));
-      return true;
+    }
     case "confirm-bulk-exposure":
       answerYesNo(input, key, () => {
         void apply(context, `Changing hosts of ${count(current.plan.items.length, "item")}…`, (progress) => runBulkHostAddition(current.plan, operations, env, progress));

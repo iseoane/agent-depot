@@ -2,9 +2,9 @@ import { Box, Text } from "ink";
 
 import { AppPanel } from "./app-actions.js";
 import { PackagePanel } from "./package-actions.js";
-import type { BulkHostPlan, BulkUninstallPlan, SkippedTarget } from "./bulk-actions.js";
+import type { SkippedTarget } from "./bulk-actions.js";
 import { pagedConfirmPreview, type ManageMode, type PagedConfirmMode } from "./manage-actions.js";
-import { ChecklistLines, DecisionPrompt, HostChecklist, PagedPreview, PreviewConfirm, PreviewLines, Working } from "./panel-parts.js";
+import { ChecklistLines, DecisionPrompt, HostChecklist, PagedPreview, Working } from "./panel-parts.js";
 import { usePreviewGeometry } from "./preview-window.js";
 import { theme } from "./theme.js";
 
@@ -16,48 +16,6 @@ function SkippedLines({ skipped }: { readonly skipped: readonly SkippedTarget[] 
       {skipped.map(({ id, label, reason }) => <Text key={id} color={theme.warning}>Skipped {label}: {reason}</Text>)}
     </>
   );
-}
-
-interface PlanEntry {
-  readonly id: string;
-  readonly label: string;
-  readonly lines: readonly string[];
-  readonly warnFirst: boolean;
-}
-
-/** One block per planned item, the skipped ones, then the y/n question. */
-function PlanPreview({ entries, skipped, question }: {
-  readonly entries: readonly PlanEntry[];
-  readonly skipped: readonly SkippedTarget[];
-  readonly question: string;
-}) {
-  return (
-    <Box flexDirection="column">
-      {entries.map((entry) => (
-        <Box key={entry.id} flexDirection="column">
-          <Text color={theme.group}>{entry.label}</Text>
-          <PreviewLines lines={entry.lines} warnFirst={entry.warnFirst} />
-        </Box>
-      ))}
-      <SkippedLines skipped={skipped} />
-      <DecisionPrompt>{question}</DecisionPrompt>
-    </Box>
-  );
-}
-
-function UninstallPreview({ plan }: { readonly plan: BulkUninstallPlan }) {
-  const entries = plan.items.map((item): PlanEntry => ({
-    id: item.id,
-    label: item.label,
-    lines: item.kind === "managed" ? item.prepared.plan.preview : item.prepared.preview,
-    warnFirst: item.kind === "unmanaged",
-  }));
-  return <PlanPreview entries={entries} skipped={plan.skipped} question={`Uninstall ${plural(plan.items.length)}?`} />;
-}
-
-function HostsPreview({ plan }: { readonly plan: BulkHostPlan }) {
-  const entries = plan.items.map((item): PlanEntry => ({ id: item.id, label: item.label, lines: item.prepared.preview, warnFirst: false }));
-  return <PlanPreview entries={entries} skipped={plan.skipped} question={`Add hosts to ${plural(plan.items.length)}?`} />;
 }
 
 /** A Skill confirmation with the shared footer; the view shows it alone so no tree rows count against its height. */
@@ -94,6 +52,9 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
     case "confirm-host-add":
     case "confirm-host-remove":
     case "confirm-uninstall":
+    case "confirm-unmanaged":
+    case "confirm-bulk-uninstall":
+    case "confirm-bulk-hosts":
       return <PagedConfirmPanel mode={mode} />;
     case "confirm-host-exposure":
       return (
@@ -116,8 +77,6 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
           />
         </Box>
       );
-    case "confirm-unmanaged":
-      return <PreviewConfirm lines={mode.prepared.preview} question={`Remove ${mode.group.name}? y/n`} warnFirst />;
     case "bulk-hosts":
       return (
         <Box flexDirection="column">
@@ -126,10 +85,6 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
           <SkippedLines skipped={mode.skipped} />
         </Box>
       );
-    case "confirm-bulk-uninstall":
-      return <UninstallPreview plan={mode.plan} />;
-    case "confirm-bulk-hosts":
-      return <HostsPreview plan={mode.plan} />;
     case "confirm-bulk-exposure":
       return (
         <Text color={theme.warning}>

@@ -2,6 +2,7 @@ import type { Key } from "ink";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { isValidFixedVersion } from "../skill-install.js";
+import type { PreviewViewport } from "./preview-window.js";
 
 /** The cursor after a down/up key (arrows or j/k), or undefined when the key does not move it. */
 export function moveCursor(cursor: number, length: number, input: string, key: Key): number | undefined {
@@ -78,6 +79,19 @@ export function applyChecklistOutcome(
 export function answerYesNo(input: string, key: Key, onYes: () => void, onNo: () => void): void {
   if (input === "y") onYes();
   else if (input === "n" || key.escape) onNo();
+}
+
+/** A paged preview answers `y` only once `viewport` has been read to the end; paging keys move the cursor. */
+export function answerPaged(
+  viewport: PreviewViewport,
+  cursor: number,
+  input: string,
+  key: Key,
+  outcome: { readonly moveTo: (cursor: number) => void; readonly yes: () => void; readonly no: () => void },
+): void {
+  const moved = movePreviewCursor(cursor, viewport.total, input, key, viewport.height);
+  if (moved !== undefined) outcome.moveTo(moved);
+  else answerYesNo(input, key, () => { if (viewport.reachedEnd) outcome.yes(); }, outcome.no);
 }
 
 /** What a key did to the fixed-version text input. */

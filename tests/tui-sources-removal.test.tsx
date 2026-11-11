@@ -23,13 +23,14 @@ async function fixture(t: TestContext, installed = false, failUninstall = false,
     version: { argv: ["demo", "version"], pattern: "(1\\.2\\.3)" } }));
   const commands: string[] = [];
   const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory: directory, platform: "linux", isWsl: false,
-    resolveExecutable: async () => "/bin/demo", runner: async (_command, args) => {
+    resolveExecutable: async name => `/bin/${name}`, runner: async (command, args) => {
       commands.push(args[0]);
       if (args[0] === "remove") {
         if (failUninstall) return { code: 1, signal: null, stdout: Buffer.from("uninstall failed"), stderr: "", outputTooLarge: false };
         installed = false;
       }
-      return { code: args[0] === "version" && !installed ? 1 : 0, signal: null, stdout: Buffer.from(installed ? "1.2.3" : ""), stderr: "", outputTooLarge: false };
+      const present = installed && command === "/bin/demo";
+      return { code: args[0] === "version" && !present ? 1 : 0, signal: null, stdout: Buffer.from(present ? "1.2.3" : ""), stderr: "", outputTooLarge: false };
     },
   };
   const apps = createAppOperations(appEnvironment);
@@ -273,3 +274,39 @@ test("the recipe removal preview stands alone: no earlier notice sits above it i
   assert.match(frame, /read [█░]* ?\d+%|read ✓/u);
   assert.ok(frame.split("\n").length <= 24, frame);
 });
+
+/** Removes the uninstalled `alpha` recipe so its notice is on screen, then opens the removal of `demo`. */
+async function removalAfterNotice(t: TestContext, kind: "approve" | "uninstall-confirm" | "uninstall-manual") {
+  const f = await fixture(t, kind !== "approve", false, kind === "uninstall-manual");
+  const recipe = { name: "alpha", install: { argv: ["alpha", "install"] }, update: { manual: "update alpha" },
+    uninstall: { argv: ["alpha", "remove"] }, version: { argv: ["alpha", "version"], pattern: "(1\\.2\\.3)" } };
+  await writeFile(path.join(f.home, "apps", "alpha.json"), JSON.stringify(recipe));
+  for (const entry of await f.apps.load()) if (entry.file.endsWith("alpha.json")) await f.apps.approve(entry);
+  // A changed recipe needs approval again.
+  if (kind === "approve") await writeFile(f.file, (await readFile(f.file, "utf8")).replace("update demo", "update demo again"));
+  f.view.unmount();
+  const view = render(<App operations={f.operations} environment={f.environment} />);
+  deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, { columns: 80, rows: 24 });
+  await waitForFrame(view.lastFrame, text => /alpha/.test(text) && /demo/.test(text));
+  view.stdin.write("d");
+  await waitForFrame(view.lastFrame, /Remove recipe for alpha\? y\/n/u);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Removed App recipe/);
+  await waitForSettled(view.lastFrame);
+  view.stdin.write("d");
+  return view;
+}
+
+for (const kind of ["approve", "uninstall-confirm", "uninstall-manual"] as const) {
+  test(`the ${kind} preview of a recipe stands alone in the whole App: no earlier notice sits above it`, async t => {
+    const view = await removalAfterNotice(t, kind);
+    if (kind !== "approve") {
+      await waitForFrame(view.lastFrame, /Uninstall it before/u);
+      view.stdin.write("y");
+    }
+    const frame = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%|read ✓/u);
+    assert.doesNotMatch(frame, /Removed App recipe/);
+    assert.ok(frame.split("\n").length <= 24, frame);
+  });
+}

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,6 +21,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal, type TerminalSize } from "./preview-footer.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -202,6 +205,8 @@ async function markedEverything(t: TestContext) {
   const loose = await unmanaged(f, "loose");
   await projectInstall(f, "proj");
   const view = await mount(f);
+  // The whole preview must fit one page for these tests, which answer y at once.
+  resizeTerminal(view, { columns: 110, rows: 80 });
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await open(view, [/builtin:agent-depot \(3\)/, /Managed \(project\)/, /builtin:agent-depot \(1\)/, /Unmanaged/]);
   view.stdin.write("a");
@@ -332,6 +337,8 @@ async function markedForHosts(t: TestContext) {
   await unmanaged(f, "loose");
   await projectInstall(f, "proj");
   const view = await mount(f);
+  // The whole preview must fit one page for these tests, which answer y at once.
+  resizeTerminal(view, { columns: 110, rows: 80 });
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
   await open(view, [/builtin:agent-depot \(3\)/, /Managed \(project\)/, /builtin:agent-depot \(1\)/, /Unmanaged/]);
   view.stdin.write("a");
@@ -371,7 +378,7 @@ test("y, then one exposure confirmation naming the items, adds the hosts to each
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 1 item\? y\/n/);
   view.stdin.write("y");
-  const exposure = await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  const exposure = await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   assert.match(exposure, /portable\/alpha/);
   assert.equal(await exists(claudeDir(f.home, "alpha")), false);
   view.stdin.write("y");
@@ -402,7 +409,7 @@ test("several items are applied one after another against the moving records", a
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Added hosts codex to portable\/beta/);
   assert.match(done, /Added hosts codex to portable\/alpha/);
@@ -427,7 +434,7 @@ test("n on the exposure confirmation cancels every item", async (t) => {
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("n");
   const frame = await waitForFrame(view.lastFrame, /cancelled/i);
   assert.match(frame, /2 selected/);
@@ -473,7 +480,7 @@ test("a host addition that fails does not stop the other items and stays marked"
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   // A real directory now occupies alpha's Claude location, so its recheck refuses.
   await mkdir(claudeDir(f.home, "alpha"), { recursive: true });
   view.stdin.write("y");
@@ -545,6 +552,7 @@ test("an external record change between items fails the remaining uninstalls wit
       environment={f.environment}
     />,
   );
+  resizeTerminal(view, { columns: 300, rows: 80 });
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(3\)/);
   await open(view, [/builtin:agent-depot \(3\)/]);
   view.stdin.write("a");
@@ -578,6 +586,7 @@ test("an external record change between items fails the remaining host additions
       environment={f.environment}
     />,
   );
+  resizeTerminal(view, { columns: 110, rows: 80 });
   await waitForFrame(view.lastFrame, /builtin:agent-depot \(3\)/);
   await open(view, [/builtin:agent-depot \(3\)/]);
   view.stdin.write("a");
@@ -589,7 +598,7 @@ test("an external record change between items fails the remaining host additions
   view.stdin.write(ENTER);
   await waitForFrame(view.lastFrame, /Add hosts to 3 items\? y\/n/);
   view.stdin.write("y");
-  await waitForFrame(view.lastFrame, /needs separate\s+confirmation/);
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Failed portable\/\w+: .*changed outside this batch/);
   assert.equal(done.match(/Added hosts claude to /g)?.length, 1, done);
@@ -640,4 +649,104 @@ test("a bulk uninstall names each item with its position and counts the finished
   release();
   await waitForFrame(view.lastFrame, /Removed portable\/beta/);
   view.unmount();
+});
+
+/** alpha and beta managed on pi, plus an unmanaged skill, all marked in a terminal of the given size. */
+async function markedAtSize(t: TestContext, size: TerminalSize) {
+  const f = await fixture(t);
+  await install(f, "alpha", ["pi"]);
+  await install(f, "beta", ["pi"]);
+  const loose = await unmanaged(f, "loose");
+  const view = await mount(f);
+  deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, size);
+  await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
+  await open(view, [/builtin:agent-depot \(2\)/, /Unmanaged/]);
+  view.stdin.write("a");
+  await waitForFrame(view.lastFrame, /3 selected/);
+  return { f, view, loose };
+}
+
+for (const size of PREVIEW_SIZES) {
+  test(`the bulk uninstall accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const { f, view } = await markedAtSize(t, size);
+    view.stdin.write("u");
+    await confirmAtEnd(view, size.rows, /\[y\] Uninstall 3 items/, () => !existsSync(agentsDir(f.home, "alpha")));
+    await waitForFrame(view.lastFrame, /Removed portable\/alpha/);
+    assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  });
+
+  test(`the bulk host change accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const { f, view } = await markedAtSize(t, size);
+    view.stdin.write("h");
+    await waitForFrame(view.lastFrame, /\[ \] 1 claude/);
+    view.stdin.write("1");
+    await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
+    view.stdin.write(ENTER);
+    await confirmAtEnd(view, size.rows, /\[y\] Add hosts to 2 items/, () => /needs\s+separate\s+confirmation/.test(view.lastFrame() ?? ""));
+    assert.equal(await exists(claudeDir(f.home, "alpha")), false);
+  });
+}
+
+for (const [label, cancelKey] of [["n", "n"], ["Esc", ESC]] as const) {
+  test(`the bulk uninstall ignores y mid-read and ${label} cancels it, with nothing above the preview`, async (t) => {
+    const { f, view, loose } = await markedAtSize(t, { columns: 40, rows: 12 });
+    view.stdin.write("u");
+    const reading = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+    assert.doesNotMatch(reading, /selected|Unmanaged \(user-global\)/);
+    view.stdin.write("y");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.match(view.lastFrame() ?? "", /read [█░]* ?\d+%/u, reading);
+    assert.equal(await exists(agentsDir(f.home, "alpha")), true);
+    view.stdin.write(cancelKey);
+    const frame = await waitForFrame(view.lastFrame, /Uninstall cancelled/);
+    assert.match(frame, /3 selected/);
+    for (const name of ["alpha", "beta"]) assert.equal(await exists(agentsDir(f.home, name)), true, name);
+    assert.equal(await exists(loose), true);
+  });
+
+  test(`the bulk host change ignores y mid-read and ${label} cancels it`, async (t) => {
+    const { f, view } = await markedAtSize(t, { columns: 40, rows: 12 });
+    view.stdin.write("h");
+    await waitForFrame(view.lastFrame, /\[ \] 1 claude/);
+    view.stdin.write("1");
+    await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
+    view.stdin.write(ENTER);
+    const reading = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+    view.stdin.write("y");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.match(view.lastFrame() ?? "", /read [█░]* ?\d+%/u, reading);
+    assert.doesNotMatch(view.lastFrame() ?? "", /separate\s+confirmation/);
+    view.stdin.write(cancelKey);
+    await waitForFrame(view.lastFrame, /Add hosts cancelled/);
+    assert.equal(await exists(claudeDir(f.home, "alpha")), false);
+  });
+}
+
+test("the unmanaged and bulk previews keep their warnings in the warning colour", () => {
+  const script = `
+    import React from "react";
+    import { render } from "ink-testing-library";
+    import { ManagePanel } from "./dist/src/tui/manage-panel.js";
+    const group = { name: "loose", locations: [] };
+    const unmanaged = { kind: "confirm-unmanaged", group, cursor: 0,
+      prepared: { items: [], installations: [], preview: ["WARNING: agent-depot did not create these files (unmanaged skill loose)", "Remove /home/x/loose"] } };
+    const bulk = { kind: "confirm-bulk-uninstall", cursor: 0,
+      plan: { items: [], installations: [], skipped: [{ id: "p", label: "portable/proj", reason: "Project uninstall is not supported" }] } };
+    for (const mode of [unmanaged, bulk]) {
+      const view = render(React.createElement(ManagePanel, { mode }));
+      process.stdout.write((view.lastFrame() ?? "") + "\\n=====\\n");
+      view.unmount();
+    }
+  `;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: { ...process.env, FORCE_COLOR: "3" },
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const amber = (text: string) => `\u001b[38;2;224;175;104m${text}`;
+  const [unmanagedFrame, bulkFrame] = child.stdout.split("=====");
+  assert.ok(unmanagedFrame!.includes(amber("WARNING: agent-depot did not create these files (unmanaged skill loose)")), unmanagedFrame);
+  assert.ok(bulkFrame!.includes(amber("Skipped portable/proj: Project uninstall is not supported")), bulkFrame);
 });

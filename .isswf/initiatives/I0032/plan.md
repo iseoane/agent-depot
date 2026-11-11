@@ -44,3 +44,4 @@ Type: feature
 - J004b entregado: PR #112 fusionado con CI verde.
 - J004c worker (sonnet, 12 min, 92k, sin corrección) 3a34f1a..ac8c4eb. Revisión V001 (opus): 0 bloqueantes; coordinador cerró lo no observado: RED f6f3e97 solo tests, CLI sin cambios, base sin colores en la retirada (nada perdido), tests 50/0. Seguimientos a J004d: ocultar filas de mensaje también en approve/uninstall-confirm/uninstall-manual de recetas (o limpiar notice en startRemoval); test de Source removal sin filas encima.
 - J004c entregado: PR #113 fusionado con CI verde.
+- J004d worker (sonnet; interrumpido por cuota y reanudado con SendMessage) 5e99044..f49a531. Revisión V001 (opus): 0 bloqueantes; coordinador: RED 2a2aff9 solo tests, CLI sin cambios, contenido del lote conservado (solo pierde color de grupo en etiquetas), tests 78/0. Seguimientos para J005: borrar PreviewConfirm/warnFirst sin uso en producción; devolver color de grupo a etiquetas del lote con líneas styled.

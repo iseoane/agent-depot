@@ -344,7 +344,8 @@ export function useSourcesRecipes({
   }, [apps, mounted]);
   useEffect(() => { void reload(); }, [reload]);
   // A paged preview sizes itself to the whole terminal, so no message row may sit above it.
-  const pagedPreview = (mode.kind === "install" && mode.action.kind === "confirm-install") || mode.kind === "remove";
+  const pagedPreview = (mode.kind === "install" && mode.action.kind === "confirm-install")
+    || ["approve", "remove", "uninstall-confirm", "uninstall-manual"].includes(mode.kind);
   const panel = (
     <Box flexDirection="column">
       {loadError && !pagedPreview ? <Text color={theme.error}>Error loading App recipes: {loadError}</Text> : null}
