@@ -3,10 +3,10 @@
 Type: feature
 
 ## J001
-- Status: pending
+- Status: in-progress
 - Objective: Rediseñar la presentación de la revisión de recetas, la preview de lotes de actualización y la confirmación para que se distinga qué pertenece a qué.
 - Depends on: None
-- Blocker: en cola tras I0031 (orden del operador: I0030, I0031, I0032).
+- Blocker: None
 - Next step: tras elegir, plan de cambios en las líneas de preview (core devuelve estructura; la TUI renderiza), preservando "leer hasta el final antes de confirmar" y la paridad con la CLI.
 
 ### Evidence

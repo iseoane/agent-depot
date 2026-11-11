@@ -3,12 +3,12 @@
 Type: feature
 
 ## J001
-- Status: in-progress
+- Status: done
 - Objective: En la vista Sources, marcar cada Source como sin refrescar/refrescando/refrescada; al arrancar la TUI refrescar en background y actualizar la marca por Source.
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: PR abierto; integrar con CI verde (autorizado por el operador).
+- Next step: None. Seguimientos: test de la espera al salir; inyectar el opt-out en vez de variable de entorno; lock huérfano.
 
 ### Acceptance
 - Cada Source muestra una marca de estado de refresco visible y accesible (no solo color).
@@ -26,3 +26,4 @@ Type: feature
 - Autorización del operador (2026-11-11): integrar I0031 sin preguntar («te doy ya mi autorización para integrarlo sin preguntarme»), sujeto a revisión independiente aprobada y CI verde.
 - Worker J001: a73cb55..461fa7d, con dos rondas de corrección (ronda 2 autorizada por el coordinador por un bloqueante). Checks autoinformados finales: typecheck/lint, test 1316/0, e2e 16/16, audit:all OK.
 - Revisión V001: inconclusive (sin bloqueantes; F1 contradecía D2). V002 (delta): changes required (R2-1 `r` absorbido por un refresco no forzado). V003 (delta): approve. Pendientes informativos: espera de render.tsx sin test; opt-out por variable de entorno solo usada en tests.
+- Entrega: PR #105 fusionado con CI verde.
