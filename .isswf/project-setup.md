@@ -46,3 +46,24 @@ explicitly require parallel writers are blocked until binding is verified.
 
 Disabled (no `.isswf/claude-native-usage.json`). Use
 `tools/token-native-claude-transcript.mjs` for on-demand usage from local transcripts.
+
+## Job sizing
+
+Decided by the operator on 2026-11-11 after I0031 and I0032 J001 grew too large to review in one pass.
+
+Before dispatching a writer, the planner (or the coordinator when there is no planner) classifies each job by its verification cost, never by a line count:
+
+1. How many distinct user-visible flows or screens must the reviewer check?
+2. Does it carry a concurrency, timing or security risk?
+3. Can an independent reviewer read the whole change in one pass?
+4. Would the worker have to improvise design decisions?
+
+| Size | When |
+| --- | --- |
+| S | One flow, no special risk, fits in one review pass |
+| M | Two or three related flows, or one well-bounded special risk |
+| L | Anything else |
+
+- S and M are dispatched as they are. An L job is split into functional parts that are each useful on their own (never into technical layers), or the brief records why it cannot be split.
+- Record the size and its one-line reason in the brief. When in doubt between two sizes, choose the smaller and proceed; there is no numeric threshold.
+- If a job needs more than one correction round, or the reviewer leaves parts uninspected, record it as a sizing miss in the plan's evidence.
