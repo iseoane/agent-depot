@@ -7,7 +7,7 @@ import { render } from "ink-testing-library";
 import { BUILT_IN_SOURCE, type Source, type SourceOperations } from "../src/sources.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { formatHeaderTabs, headerTabRowCount } from "../src/tui/header-layout.js";
-import { previewViewport } from "../src/tui/preview-window.js";
+import { previewViewport, type PreviewChrome } from "../src/tui/preview-window.js";
 import { computeWindow, pageStep, useListHeight } from "../src/tui/window.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
@@ -63,45 +63,50 @@ test("computeWindow never renders less than one row and clamps an out-of-range s
   assert.equal(clamped.end, 10);
 });
 
+const CONFIRM: PreviewChrome = { title: "Confirmation", action: "Confirm", consequence: "Confirm? y/n" };
+
 test("preview confirmation follows the rendered physical rows at the viewport end", () => {
   const lines = Array.from({ length: 10 }, (_, index) => `row ${index}`);
-  const middle = previewViewport(lines, 6, 15, 80);
-  assert.deepEqual(middle, {
-    rows: ["row 4", "row 5", "row 6", "row 7"],
-    sourceLines: [4, 5, 6, 7],
-    sourceOffsets: [0, 0, 0, 0],
-    start: 4,
-    end: 8,
-    total: 10,
-    cursor: 6,
-    height: 4,
-    reachedEnd: false,
-  });
-  const final = previewViewport(lines, 9, 15, 80);
-  assert.deepEqual(final.rows, ["row 6", "row 7", "row 8", "row 9"]);
+  const middle = previewViewport(lines, 6, 15, 80, CONFIRM);
+  const footerText = (viewport: typeof middle) => viewport.footer.map(spans => spans.map(({ text }) => text).join(""));
+  assert.deepEqual(middle.rows, ["row 4", "row 5", "row 6", "row 7", "row 8"]);
+  assert.deepEqual(middle.sourceLines, [4, 5, 6, 7, 8]);
+  assert.deepEqual(middle.sourceOffsets, [0, 0, 0, 0, 0]);
+  assert.deepEqual([middle.start, middle.end, middle.total, middle.cursor, middle.height, middle.reachedEnd], [4, 9, 10, 6, 5, false]);
+  assert.deepEqual(footerText(middle), [
+    "read ██████████░░ 90% · Review 7 of 10 · 5–9 of 10 · arrows/Pg page",
+    "[y] Confirm  [n] cancel",
+  ]);
+  const final = previewViewport(lines, 9, 15, 80, CONFIRM);
+  assert.deepEqual(final.rows, ["row 5", "row 6", "row 7", "row 8", "row 9"]);
   assert.equal(final.reachedEnd, true);
+  assert.deepEqual(footerText(final), [
+    "read ✓ · Review 10 of 10 · 6–10 of 10 · Confirm? y/n",
+    "[y] Confirm  [n] cancel",
+  ]);
+  assert.equal(final.height, middle.height, "reading to the end never changes the footer height");
 });
 
 test("preview viewport wraps complete long terms and responds to the latest terminal dimensions", () => {
   const line = `Working directory: ${"/resolved/full/path/".repeat(8)}`;
-  const wide = previewViewport([line], 0, 24, 80);
-  const narrow = previewViewport([line], 0, 17, 40);
+  const wide = previewViewport([line], 0, 24, 80, CONFIRM);
+  const narrow = previewViewport([line], 0, 17, 40, CONFIRM);
   assert.equal(wide.total, 3);
   assert.equal(narrow.total, 6);
-  const firstPage = previewViewport([line], 0, 17, 40);
-  const lastPage = previewViewport([line], 5, 17, 40);
+  const firstPage = previewViewport([line], 0, 17, 40, CONFIRM);
+  const lastPage = previewViewport([line], 5, 17, 40, CONFIRM);
   const visibleRows = new Map<number, string>();
   for (const page of [firstPage, lastPage]) page.rows.forEach((row, index) => visibleRows.set(page.start + index, row));
   assert.equal([...visibleRows.entries()].sort(([left], [right]) => left - right).map(([, row]) => row).join(""), line);
   assert.equal(lastPage.reachedEnd, true);
-  assert.equal(previewViewport(["界".repeat(19)], 0, 17, 40).total, 2);
+  assert.equal(previewViewport(["界".repeat(19)], 0, 17, 40, CONFIRM).total, 2);
   assert.ok(lastPage.height < wide.height);
 });
 
 test("preview viewport offsets preserve grapheme text through CJK, combining marks and emoji wraps", () => {
   const line = `Source git:界e\u0301👩‍💻-${"repeat/".repeat(20)}`;
-  const first = previewViewport([line], 0, 17, 40);
-  const continuation = previewViewport([line], first.total - 1, 17, 40);
+  const first = previewViewport([line], 0, 17, 40, CONFIRM);
+  const continuation = previewViewport([line], first.total - 1, 17, 40, CONFIRM);
   const rows = new Map<number, string>();
   for (const page of [first, continuation]) {
     page.rows.forEach((row, index) => {
@@ -116,15 +121,23 @@ test("preview viewport offsets preserve grapheme text through CJK, combining mar
 
 test("preview chrome wraps long approval names into the shared viewport geometry", () => {
   const name = `approved-${"long-recipe-name-".repeat(4)}`;
-  const chrome = {
+  const chrome: PreviewChrome = {
     title: "Recipe approval · does not install",
-    questions: [`Approve ${name}? y/n · recipe approval does not install the App.`, "Scroll to end before y; n cancels."],
+    action: `Approve ${name}`,
+    consequence: `Approve ${name}? y/n · recipe approval does not install the App.`,
   };
   const lines = Array.from({ length: 20 }, (_, index) => `danger term ${index}`);
   const wide = previewViewport(lines, 19, 24, 80, chrome);
   const narrow = previewViewport(lines, 19, 17, 40, chrome);
-  assert.equal(wide.height, 12);
+  assert.equal(wide.height, 11);
   assert.equal(narrow.height, 1);
+  // 40x17: header 6 rows, gap 1, borders 2, title 2 and the preview row leave 5 footer rows; the rest is cut.
+  const narrowFooter = narrow.footer.map(spans => spans.map(({ text }) => text).join(""));
+  assert.equal(narrowFooter.length, 5);
+  assert.ok(narrowFooter.every(row => row.length <= 32), narrowFooter.join("\n"));
+  assert.match(narrowFooter[0]!, /^read ✓ · Review 20 of 20/);
+  assert.equal(narrowFooter[3]!.at(-1), "…", narrowFooter.join("\n"));
+  assert.match(narrowFooter[4]!, /^\[y\] Approve approved-long-recip.*…$/u);
   assert.equal(wide.rows.at(-1), "danger term 19");
   assert.equal(narrow.rows.at(-1), "danger term 19");
   assert.equal(wide.reachedEnd, true);

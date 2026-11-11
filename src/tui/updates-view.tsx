@@ -1,10 +1,10 @@
-import { Box, Text, useWindowSize } from "ink";
+import { Box, Text } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";
 import type { TuiEnvironment } from "./environment.js";
 import { theme } from "./theme.js";
-import { previewViewport } from "./preview-window.js";
+import { usePreviewGeometry } from "./preview-window.js";
 import { computeWindow, useListHeight } from "./window.js";
 import { BROWSE, type UpdatesMode } from "./updates-mode.js";
 import { defaultExpanded, type Expanded } from "./tree.js";
@@ -35,7 +35,6 @@ const CLOCK_TICK_MS = 10_000;
 
 export function UpdatesView({ operations, environment, onCapturingChange, listHeight, now }: UpdatesViewProps) {
   const height = useListHeight(listHeight, 9);
-  const { rows: terminalRows, columns: terminalColumns } = useWindowSize();
   const env = environment ?? NO_ENVIRONMENT;
   const clock = now ?? Date.now;
   // Scope, cursor, fold and selection are mirrored in refs updated first, so keys delivered in one burst act on the latest state.
@@ -104,16 +103,9 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const { shown, updatable, unknown, upToDate, entries } = viewOf(data, scope, showUnknown, expanded);
   const index = Math.min(cursor, Math.max(entries.length - 1, 0));
 
-  const previewGeometry = (current: UpdatesMode) => {
-    const cursor = "cursor" in current ? current.cursor : 0;
-    return previewViewport(
-      updateModePreviewLines(current).map(previewLineText),
-      cursor,
-      terminalRows || 24,
-      terminalColumns || 80,
-      updateModePreviewChrome(current),
-    );
-  };
+  const geometry = usePreviewGeometry();
+  const previewGeometry = (current: UpdatesMode) =>
+    geometry(updateModePreviewLines(current).map(previewLineText), "cursor" in current ? current.cursor : 0, updateModePreviewChrome(current));
 
   const keyContext: UpdatesKeyContext = {
     height,

@@ -1086,7 +1086,7 @@ test("mixed Skills and Apps continue after App failure with a combined summary",
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write(ENTER);
-  await reviewToEnd(view.lastFrame, view.stdin, /Apply 3 updates/);
+  await reviewToEnd(view.lastFrame, view.stdin, /Apply 3 updates\?/);
   assert.equal(lookups, 2);
   view.stdin.write("y");
   const frame = await waitForFrame(view.lastFrame, /Update summary: 2 updated, 1 failed/);
@@ -1460,8 +1460,8 @@ for (const size of PREVIEW_SIZES) {
     press(view.stdin, "a");
     press(view.stdin, ENTER);
     const end = await confirmAtEnd(view, size.rows, /\[y\] Apply 1 update/, () => f.methodCalls.length > 0);
-    assert.match(end, /Apply 1 update\? y\/n/);
-    await waitForFrame(view.lastFrame, /1 updated, 0 failed/);
+    assert.match(squash(end), /Apply1update\?y\/n/);
+    await waitForFrame(view.lastFrame, frame => squash(frame).includes("1updated,0failed"));
     view.unmount();
   });
 }
@@ -1475,7 +1475,7 @@ test("replacing non-canonical paths waits for the end of their list in the share
   press(view.stdin, "a");
   press(view.stdin, ENTER);
   await confirmAtEnd(view, 17, /\[y\] Apply 1 update/, () => /Outside \.agents\/skills/.test(view.lastFrame() ?? ""));
-  await confirmAtEnd(view, 17, /\[y\] Replace these paths/, () => /1 updated, 0 failed/.test(view.lastFrame() ?? ""));
+  await confirmAtEnd(view, 17, /\[y\] Replace these paths/, () => squash(view.lastFrame() ?? "").includes("1updated,0failed"));
   assert.equal(await f.read(f.project, "tools/skills/one"), newText("one"));
   view.unmount();
 });

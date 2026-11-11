@@ -141,14 +141,14 @@ test("removal approval gates version checks before any uninstall or deletion", a
   f.view.stdin.write("r");
   await waitForFrame(f.view.lastFrame, /needs\s+approval/); // a long path wraps the status
   f.view.stdin.write("d");
-  const preview = await waitForFrame(f.view.lastFrame, /Scroll to end before y/);
+  const preview = await waitForFrame(f.view.lastFrame, /read [█░]* ?\d+%/u);
   assert.match(preview, /Host|version|argv/u);
   assert.deepEqual(f.commands, []);
   f.view.stdin.write("n");
   await waitForFrame(f.view.lastFrame, text => !text.includes("Approve demo?"));
   assert.ok(await readFile(f.file));
   f.view.stdin.write("d");
-  await waitForFrame(f.view.lastFrame, /Scroll to end before y/);
+  await waitForFrame(f.view.lastFrame, /read [█░]* ?\d+%/u);
   f.view.stdin.write("j".repeat(100));
   await waitForFrame(f.view.lastFrame, /Approve demo\? y\/n/);
   assert.deepEqual(f.commands, []);

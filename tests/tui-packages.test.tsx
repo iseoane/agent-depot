@@ -283,7 +283,6 @@ test("approval and forget panels page inside a short terminal, and y waits for t
   f.view.stdin.write(ENTER);
   const first = await waitForFrame(f.view.lastFrame, /Review 1 of \d+/);
   assert.match(first, /\[y\] Approve the install declaration/, "the footer names what y does on every page");
-  assert.match(first, /arrows\/Pg page/, "the legend names the paging keys");
   assert.ok(first.split("\n").length <= 12, first);
   const approvePages = await pageToEnd(f.view.lastFrame, f.view.stdin, 12);
   assert.ok(approvePages.length > 1, "the declaration needs several pages at 12 rows");

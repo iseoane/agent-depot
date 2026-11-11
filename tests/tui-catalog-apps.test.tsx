@@ -150,7 +150,7 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     assert.match(frame, /"npm"/);
     assert.match(frame, /"gentle-shell"/);
     assert.match(frame, /Manual installation details remain reviewable/);
-    assert.match(frame, /Scroll to end before y/);
+    assert.match(frame, /read [█░]* ?\d+%/u);
     assert.ok(!commands.some(command => command.startsWith("npm install")), "the preview is separate from execution");
 
     view.stdin.write("n");
@@ -158,11 +158,11 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     assert.ok(!commands.some(command => command.startsWith("npm install")), "declining the preview must not install");
     view.stdin.write("i");
     frame = await waitForFrame(view.lastFrame, /App install confirmation/);
-    assert.match(frame, /Scroll to end before y/);
+    assert.match(frame, /read [█░]* ?\d+%/u);
     view.stdin.write("y");
     await new Promise(resolve => setTimeout(resolve, 50));
     frame = view.lastFrame() ?? "";
-    assert.match(frame, /Scroll to end before y/);
+    assert.match(frame, /read [█░]* ?\d+%/u);
     assert.doesNotMatch(frame, /FINAL-MANUAL-TERM/);
     assert.ok(!commands.some(command => command.startsWith("npm install")), "consent is blocked until the full preview is reviewed");
     await reviewPreviewToEnd(view.lastFrame, view.stdin);

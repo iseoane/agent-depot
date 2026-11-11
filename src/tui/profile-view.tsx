@@ -23,9 +23,9 @@ import {
 } from "./file-picker-model.js";
 import { FilePicker } from "./file-picker.js";
 import { useKeys } from "./keys.js";
-import { previewViewport, type PreviewChrome } from "./preview-window.js";
+import { usePreviewGeometry, type PreviewChrome } from "./preview-window.js";
 import { answerYesNo, moveCursor, movePreviewCursor, toggleChoice } from "./mode-keys.js";
-import { BorderPanel, PreviewConfirm, PreviewLines, Working } from "./panel-parts.js";
+import { BorderPanel, PagedPreview, PreviewLines, Working } from "./panel-parts.js";
 import { clipText, elideMiddle, fitLines, wrapText } from "./text-wrap.js";
 import { theme } from "./theme.js";
 import { useMirrored, useMounted } from "./view-state.js";
@@ -187,6 +187,7 @@ function physicalListWindow(rows: readonly DisplayRow[], rowHeights: readonly nu
 /** An error naming a long path keeps its first and last rows, where the path starts and the reason ends. */
 const NAME_ERROR_ROWS = 3;
 const NAME_HINT = "Type to edit · Ctrl+U clear · Enter continue · Esc back to folder";
+const NOTE_CHROME: PreviewChrome = { title: "Export note", cancel: "[Esc] close" };
 
 /**
  * A `Label: value` line of the export name stage, wrapped to the panel and kept within `rows` rows. The
@@ -304,7 +305,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const [profile, setProfile] = useState<Profile>();
   const [plan, setPlan] = useState<ProfileImportPlan>();
   const diagnostics = useRef<readonly ProfileExportDiagnostic[]>([]);
-  const { rows: terminalRows, columns: terminalColumns } = useWindowSize();
+  const { columns: terminalColumns } = useWindowSize();
   const panelWidth = Math.max((terminalColumns || 80) - 4, 1);
   const hintCursorRow = listRows(mode, rows, expandedGroupsRef.current)[cursorRef.current];
   const enterHint = hintCursorRow === undefined ? undefined
@@ -321,13 +322,10 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const titleRows = Math.max(Math.ceil(stringWidth("Export Profile") / panelWidth), 1);
   const hintRows = Math.max(Math.ceil(stringWidth(hintText) / panelWidth), 1);
   const height = useListHeight(listHeight, 4 + titleRows + hintRows);
-  const confirmChrome = (): PreviewChrome => ({
-    title: "Confirmation",
-    questions: [confirmRequest.current?.kind === "export"
-      ? "Save/Export Profile? (y/n) · arrows/PgUp/PgDn page · j/k line"
-      : "Apply Profile? (y/n) · arrows/PgUp/PgDn page · j/k line"],
-    footerRows: 2,
-  });
+  const previewGeometry = usePreviewGeometry();
+  const confirmChrome = (): PreviewChrome => confirmRequest.current?.kind === "export"
+    ? { title: "Confirmation", action: "Save/Export Profile", consequence: "Save/Export Profile? (y/n)" }
+    : { title: "Confirmation", action: "Apply Profile", consequence: "Apply Profile? (y/n)" };
   const showLines = (next: readonly string[], nextMode: "confirm" | "detail" | "results") => {
     setLines(next);
     cursorTo(0);
@@ -515,17 +513,19 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
         setMode("export-list");
         return;
       }
-      const next = movePreviewCursor(cursorRef.current, lines.length, input, key, height);
+      const viewport = previewGeometry(lines, cursorRef.current, NOTE_CHROME);
+      const next = movePreviewCursor(cursorRef.current, viewport.total, input, key, viewport.height);
       if (next !== undefined) cursorTo(Math.max(0, next));
       return;
     }
     if (current === "confirm") {
-      answerYesNo(input, key, confirmApply, () => setMode(confirmRequest.current?.kind === "import" ? "import-list" : "export-name"));
-      if (input === "y" || input === "n" || key.escape) return;
       // The preview cursor counts wrapped rows, not source lines, or a long destination would cap the paging.
-      const viewport = previewViewport(lines, cursorRef.current, terminalRows || 24, terminalColumns || 80, confirmChrome());
+      const viewport = previewGeometry(lines, cursorRef.current, confirmChrome());
       const next = movePreviewCursor(cursorRef.current, viewport.total, input, key, viewport.height);
       if (next !== undefined) cursorTo(Math.max(0, next));
+      else if (input !== "y" || viewport.reachedEnd) {
+        answerYesNo(input, key, confirmApply, () => setMode(confirmRequest.current?.kind === "import" ? "import-list" : "export-name"));
+      }
       return;
     }
     if (key.escape) { setMode("browse"); return; }
@@ -649,10 +649,8 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       {nameChecking === undefined ? null : <Working label="Checking name…" since={nameChecking} />}
       <Text color={theme.legend}>{NAME_HINT}</Text>
     </BorderPanel> : null}
-    {mode === "confirm" ? <PreviewConfirm lines={lines} cursor={cursor} chrome={confirmChrome()}
-      question={confirmChrome().questions[0]!} /> : null}
-    {mode === "detail" ? <PreviewConfirm title="Export note" lines={lines} cursor={cursor}
-      question="Esc close · arrows/PgUp/PgDn page · j/k line" /> : null}
+    {mode === "confirm" ? <PagedPreview chrome={confirmChrome()} lines={lines} viewport={previewGeometry(lines, cursor, confirmChrome())} /> : null}
+    {mode === "detail" ? <PagedPreview chrome={NOTE_CHROME} lines={lines} viewport={previewGeometry(lines, cursor, NOTE_CHROME)} /> : null}
     {mode === "results" ? <>
       <PreviewLines lines={lines.slice(window.start, window.end)} />
       <Text>j/k scroll</Text>

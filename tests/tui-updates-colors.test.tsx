@@ -8,7 +8,8 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
   const script = `
     import React from "react";
     import { render } from "ink-testing-library";
-    import { DecisionPrompt, PreviewConfirm } from "./dist/src/tui/panel-parts.js";
+    import { DecisionPrompt, PagedPreview, PreviewConfirm } from "./dist/src/tui/panel-parts.js";
+    import { previewViewport } from "./dist/src/tui/preview-window.js";
     import { Header } from "./dist/src/tui/app.js";
     import { CheckStatus, EntryLine, UpdatesFooter } from "./dist/src/tui/updates-panel.js";
     import { TreeRowLine } from "./dist/src/tui/installations-rows.js";
@@ -56,8 +57,9 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
       "Skill skills/" + "long-skill-directory/".repeat(12) + "skill [pi, codex, claude] (latest)",
       "Package " + "package/".repeat(12) + "demo from https://example.test/" + "package-source/".repeat(10) + "repo.git (fixed 1.2.3; saved selection)",
     ];
-    const longProfile = Array.from({ length: 60 }, (_, cursor) => frame(React.createElement(PreviewConfirm, {
-      lines: longProfileLines, cursor, question: "Apply Profile? (y/n)",
+    const longChrome = { title: "Confirmation", action: "Apply Profile", consequence: "Apply Profile? (y/n)" };
+    const longProfile = Array.from({ length: 60 }, (_, cursor) => frame(React.createElement(PagedPreview, {
+      chrome: longChrome, lines: longProfileLines, viewport: previewViewport(longProfileLines, cursor, 24, 100, longChrome),
     }))).join("\\n");
     const prompt = frame(React.createElement(DecisionPrompt, null, "Refresh these Sources?"));
     const header = frame(React.createElement(Header, { view: "updates", columns: 80 }));

@@ -355,13 +355,13 @@ test("export panel stays inside a resized terminal with wrapped choices and the 
   view.stdin.write("review.json");
   await waitForFrame(view.lastFrame, /review\.json_/);
   view.stdin.write("\r");
-  const confirmation = await waitForFrame(view.lastFrame, /Save\/Export Profile\? \(y\/n\)/);
+  const confirmation = await waitForFrame(view.lastFrame, /\[y\] Save\/Export Profile/);
   assert.ok(confirmation.split("\n").length <= rows, confirmation);
   const confirmationPages = await pageToEnd(view.lastFrame, view.stdin, rows);
   assert.ok(confirmationPages.length > 1, "the confirmation needs paging at this height");
   assert.ok(squash(pagedRows(confirmationPages).join("")).includes(squash(`Destination: ${path.join(f.picker, "review.json")}`)),
     "paging the confirmation reveals the whole destination");
-  assert.match(confirmation, /arrows\/PgUp\/PgDn page/);
+  assert.ok(squash(confirmation).includes("arrows/Pgpage"), confirmation);
   assert.doesNotMatch(confirmation, /Portable Profile|▸ Sources/);
 });
 
@@ -696,6 +696,7 @@ test("import shows same reasons, keeps them unselectable, and reports Sources an
   assert.match(await waitForFrame(f.view.lastFrame, /3 selected/), /3 selected/);
   f.view.stdin.write("\r");
   await waitForFrame(f.view.lastFrame, /Apply Profile/);
+  await pageToEnd(f.view.lastFrame, f.view.stdin);
   f.view.stdin.write("y");
   const results = await waitForFrame(f.view.lastFrame, /failed: Skill missing-skill/);
   assert.match(results, /skipped: Source https:\/\/example.com\/existing.git/);
@@ -989,7 +990,7 @@ for (const size of PREVIEW_SIZES) {
     resizeTerminal(f.view, size);
     f.view.stdin.write("\r");
     const end = await confirmAtEnd(f.view, size.rows, /\[y\] Apply Profile/, () => /added: App recipe/.test(f.view.lastFrame() ?? ""));
-    assert.match(end, /Apply Profile\? \(y\/n\)/);
+    assert.match(squash(end), /ApplyProfile\?\(y\/n\)/);
   });
 }
 

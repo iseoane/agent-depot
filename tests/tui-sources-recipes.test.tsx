@@ -79,7 +79,7 @@ test("Enter previews every step; only y approves and changed content needs appro
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs\s+approval/);
   view.stdin.write("\r");
-  let frame = await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  let frame = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   assert.ok(squash(frame).includes(squash(f.file)), frame); // a long path wraps
   assert.match(frame, /Platform: all/);
   assert.match(frame, /argv: \[/);
@@ -88,7 +88,7 @@ test("Enter previews every step; only y approves and changed content needs appro
   await waitForFrame(view.lastFrame, frame => !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "needs approval");
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");
@@ -159,7 +159,7 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   const view = f.mount();
   await waitForFrame(view.lastFrame, /needs\s+approval/);
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   await writeFile(f.file, JSON.stringify({ ...recipe, platform: "windows" }));
@@ -276,7 +276,7 @@ test("one cursor dispatches contextual actions for Skill Sources and App recipes
   assert.doesNotMatch(frame, /> \[.\] git:/);
   view.stdin.write(" a");
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Scroll to end before y/);
+  await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   view.stdin.write("j".repeat(100));
   frame = await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   assert.doesNotMatch(frame, /selected|remove Git Source/);

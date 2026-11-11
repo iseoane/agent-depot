@@ -8,7 +8,7 @@ import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
 import { expandList } from "./expand-updates.js";
-import { waitForFrame } from "./wait-for-frame.js";
+import { squash, waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 import { confirmAtEnd, resizeTerminal } from "./preview-footer.js";
 
@@ -216,7 +216,8 @@ test("a manual App update step names its check in the shared footer and waits fo
   f.view.stdin.write("a");
   await waitForFrame(f.view.lastFrame, /1 selected/);
   f.view.stdin.write("\r");
-  await confirmAtEnd(f.view, 17, /\[y\] Apply 1 update/, () => /Manual step done, check now/.test(f.view.lastFrame() ?? ""));
+  await confirmAtEnd(f.view, 17, /\[y\] Apply 1 update/, () => /Manual App update/.test(f.view.lastFrame() ?? ""));
   const before = f.commands.length;
   await confirmAtEnd(f.view, 17, /\[y\] Check now/, () => f.commands.length > before);
+  await waitForFrame(f.view.lastFrame, frame => squash(frame).includes("Updatesummary:"));
 });
