@@ -3,8 +3,9 @@ import { Box, Text } from "ink";
 import { AppPanel } from "./app-actions.js";
 import { PackagePanel } from "./package-actions.js";
 import type { BulkHostPlan, BulkUninstallPlan, SkippedTarget } from "./bulk-actions.js";
-import type { ManageMode } from "./manage-actions.js";
-import { ChecklistLines, DecisionPrompt, HostChecklist, PreviewConfirm, PreviewLines, Working } from "./panel-parts.js";
+import { pagedConfirmPreview, type ManageMode, type PagedConfirmMode } from "./manage-actions.js";
+import { ChecklistLines, DecisionPrompt, HostChecklist, PagedPreview, PreviewConfirm, PreviewLines, Working } from "./panel-parts.js";
+import { usePreviewGeometry } from "./preview-window.js";
 import { theme } from "./theme.js";
 
 const plural = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
@@ -59,6 +60,12 @@ function HostsPreview({ plan }: { readonly plan: BulkHostPlan }) {
   return <PlanPreview entries={entries} skipped={plan.skipped} question={`Add hosts to ${plural(plan.items.length)}?`} />;
 }
 
+/** A Skill confirmation with the shared footer; the view shows it alone so no tree rows count against its height. */
+export function PagedConfirmPanel({ mode }: { readonly mode: PagedConfirmMode }) {
+  const { lines, chrome } = pagedConfirmPreview(mode);
+  return <PagedPreview chrome={chrome} lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
+}
+
 /** Renders the prompt of a manage mode: host lists, previews and confirmations. */
 export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
   switch (mode.kind) {
@@ -85,17 +92,15 @@ export function ManagePanel({ mode }: { readonly mode: ManageMode }) {
         </Box>
       );
     case "confirm-host-add":
-      return <PreviewConfirm lines={mode.prepared.preview} question={`Add hosts to ${mode.skill.name}? y/n`} />;
+    case "confirm-host-remove":
+    case "confirm-uninstall":
+      return <PagedConfirmPanel mode={mode} />;
     case "confirm-host-exposure":
       return (
         <Text color={theme.warning}>
           Adding hosts exposes the installed {mode.skill.name} to more hosts and needs separate confirmation (CLI: --confirm-additional-host). <DecisionPrompt>Confirm?</DecisionPrompt>
         </Text>
       );
-    case "confirm-host-remove":
-      return <PreviewConfirm lines={mode.prepared.preview} question={`Remove hosts from ${mode.skill.name}? y/n`} />;
-    case "confirm-uninstall":
-      return <PreviewConfirm lines={mode.prepared.plan.preview} question={`Uninstall ${mode.skill.name}? y/n`} />;
     case "unmanaged-scope":
       return <Text>Remove {mode.group.name} ({mode.group.locations.length} locations): 1 all locations  2 choose locations  (Esc cancel)</Text>;
     case "unmanaged-pick":

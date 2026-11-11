@@ -35,3 +35,4 @@ Type: feature
 - J003a entregado: PR #109 fusionado con CI verde (corrección de test frágil en Windows a89e9bc).
 - J003b worker (sonnet, 19 min, 109k) 18e7b4d..9a2f0e8. Revisión V001 (opus): Spec pass, 0 bloqueantes; Standards inconcluso → coordinador observó: RED 5c9fa2c solo tests; CLI sin cambios; e2e iguales o más estrictos; tests focalizados 67/0.
 - J003b entregado: PR #110 fusionado con CI verde.
+- J004a worker (sonnet, 11 min, 93k) edb5a85..ed1c11f. Revisión V001 (opus): Spec pass, 0 bloqueantes; coordinador observó RED 0b1499c solo tests, CLI sin cambios, tui-installations-manage 23/0. Seguimientos: forzar paginación en tests de add/remove hosts; test de n/Esc a mitad de lectura. Pendiente añadido: quitar unmanaged y confirmaciones en lote (confirm-bulk-*) → J004d.

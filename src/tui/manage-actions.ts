@@ -23,7 +23,8 @@ import {
 import type { TuiEnvironment } from "./environment.js";
 import { errorText } from "./batch.js";
 import { BULK_KINDS, handleBulkKey, type BulkMode } from "./bulk-actions.js";
-import { answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
+import { answerYesNo, applyChecklistOutcome, hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
+import type { PreviewChrome, PreviewGeometry } from "./preview-window.js";
 import { handleUnmanagedKey, UNMANAGED_KINDS, type UnmanagedMode } from "./unmanaged-actions.js";
 import { busy, type Busy } from "./working-model.js";
 
@@ -42,13 +43,14 @@ export type ManageMode =
       readonly cursor: number;
       readonly selected: readonly ProjectHost[];
     }
-  | { readonly kind: "confirm-host-add"; readonly skill: SkillCandidate; readonly prepared: PreparedHostAddition }
+  | { readonly kind: "confirm-host-add"; readonly skill: SkillCandidate; readonly prepared: PreparedHostAddition; readonly cursor: number }
   | { readonly kind: "confirm-host-exposure"; readonly skill: SkillCandidate; readonly prepared: PreparedHostAddition }
-  | { readonly kind: "confirm-host-remove"; readonly skill: SkillCandidate; readonly prepared: PreparedHostRemoval }
+  | { readonly kind: "confirm-host-remove"; readonly skill: SkillCandidate; readonly prepared: PreparedHostRemoval; readonly cursor: number }
   | {
       readonly kind: "confirm-uninstall";
       readonly skill: SkillCandidate;
       readonly prepared: Extract<UninstallPreparation, { kind: "ready" }>;
+      readonly cursor: number;
     }
   | AppMode
   | PackageMode
@@ -85,6 +87,8 @@ export interface ManageContext {
   readonly operations: SourceOperations;
   readonly env: TuiEnvironment;
   readonly installed: InstalledSkills;
+  /** The viewport of a paged preview at the current terminal size, shared with the panel. */
+  readonly previewGeometry: PreviewGeometry;
   setMode(mode: ManageMode): void;
   /** Returns the view to browsing. */
   browse(): void;
@@ -116,7 +120,7 @@ async function startFullUninstall(context: ManageContext, skill: SkillCandidate)
     const prepared = await prepareUninstall(context.operations, context.env, skill, context.installed);
     if (!context.isMounted()) return;
     if (prepared.kind === "ready") {
-      context.setMode({ kind: "confirm-uninstall", skill, prepared });
+      context.setMode({ kind: "confirm-uninstall", skill, prepared, cursor: 0 });
       return;
     }
     context.setMessage({ kind: "error", text: UNINSTALL_REFUSALS[prepared.kind] });
@@ -145,11 +149,11 @@ async function startHostChange(context: ManageContext, mode: Extract<ManageMode,
     if (mode.kind === "hosts-add") {
       const prepared = await prepareHostAddition(operations, env, mode.skill, installed, mode.selected);
       if (!context.isMounted()) return;
-      context.setMode({ kind: "confirm-host-add", skill: mode.skill, prepared });
+      context.setMode({ kind: "confirm-host-add", skill: mode.skill, prepared, cursor: 0 });
     } else {
       const prepared = await prepareHostRemoval(operations, env, mode.skill, installed, mode.selected);
       if (!context.isMounted()) return;
-      context.setMode({ kind: "confirm-host-remove", skill: mode.skill, prepared });
+      context.setMode({ kind: "confirm-host-remove", skill: mode.skill, prepared, cursor: 0 });
     }
   } catch (error) {
     if (!context.isMounted()) return;
@@ -187,35 +191,61 @@ function handleRemoveScopeKey(context: ManageContext, mode: ModeOf<"remove-scope
   else if (input === "2") context.setMode({ kind: "hosts-remove", skill: mode.skill, choices: mode.hosts, cursor: 0, selected: [] });
 }
 
-/** Keys of the confirmation modes: `y` runs the step (or asks for exposure consent first), `n`/Esc cancels. */
-function handleConfirmKey(context: ManageContext, mode: ModeOf<"confirm-host-add" | "confirm-host-exposure" | "confirm-host-remove" | "confirm-uninstall">, input: string, key: Key): void {
-  const { operations, env } = context;
-  const cancelWith = (text: string) => () => cancel(context, text);
+export type PagedConfirmMode = ModeOf<"confirm-host-add" | "confirm-host-remove" | "confirm-uninstall">;
+
+/** What a paged confirmation shows, so the key handler and the panel page the same rows. */
+export function pagedConfirmPreview(mode: PagedConfirmMode): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+  const name = mode.skill.name;
   switch (mode.kind) {
     case "confirm-host-add":
-      answerYesNo(input, key, () => context.setMode({ ...mode, kind: "confirm-host-exposure" }), cancelWith("Install cancelled"));
-      return;
-    case "confirm-host-exposure":
-      answerYesNo(input, key, () => {
-        void execute(context, `Changing hosts of ${mode.skill.name}…`, () => runHostAddition(mode.prepared, operations, env));
-      }, cancelWith("Install cancelled"));
-      return;
+      return { lines: mode.prepared.preview, chrome: { title: "Add hosts", action: `Add hosts to ${name}`, consequence: `Add hosts to ${name}? y/n` } };
     case "confirm-host-remove":
-      answerYesNo(input, key, () => {
-        void execute(context, `Changing hosts of ${mode.skill.name}…`, () => runHostRemoval(mode.prepared, operations, env, mode.skill));
-      }, cancelWith("Uninstall cancelled"));
-      return;
+      return { lines: mode.prepared.preview, chrome: { title: "Remove hosts", action: `Remove hosts from ${name}`, consequence: `Remove hosts from ${name}? y/n` } };
     case "confirm-uninstall":
-      answerYesNo(input, key, () => {
+      return { lines: mode.prepared.plan.preview, chrome: { title: "Uninstall", action: `Uninstall ${name}`, consequence: `Uninstall ${name}? y/n` } };
+  }
+}
+
+export function isPagedConfirmMode(mode: { readonly kind: string }): mode is PagedConfirmMode {
+  return mode.kind === "confirm-host-add" || mode.kind === "confirm-host-remove" || mode.kind === "confirm-uninstall";
+}
+
+/** Pages the preview like the other footer confirmations: `y` answers only once it has all been displayed. */
+function handlePagedConfirmKey(context: ManageContext, mode: PagedConfirmMode, input: string, key: Key): void {
+  const { operations, env } = context;
+  const { lines, chrome } = pagedConfirmPreview(mode);
+  const viewport = context.previewGeometry(lines, mode.cursor, chrome);
+  const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
+  if (cursor !== undefined) {
+    context.setMode({ ...mode, cursor });
+    return;
+  }
+  answerYesNo(input, key, () => {
+    if (!viewport.reachedEnd) return;
+    switch (mode.kind) {
+      case "confirm-host-add":
+        context.setMode({ kind: "confirm-host-exposure", skill: mode.skill, prepared: mode.prepared });
+        return;
+      case "confirm-host-remove":
+        void execute(context, `Changing hosts of ${mode.skill.name}…`, () => runHostRemoval(mode.prepared, operations, env, mode.skill));
+        return;
+      case "confirm-uninstall":
         void execute(context, `Removing ${mode.skill.name}…`, async () => {
           await runUninstall(mode.prepared, operations, env);
           return mode.prepared.plan.inspections.every((inspection) => inspection.recordOnly)
             ? `Forgot missing installation record for ${mode.skill.path}; no files were removed`
             : `Removed ${mode.skill.name} (${mode.skill.path})`;
         });
-      }, cancelWith("Uninstall cancelled"));
-      return;
-  }
+        return;
+    }
+  }, () => cancel(context, mode.kind === "confirm-host-add" ? "Install cancelled" : "Uninstall cancelled"));
+}
+
+/** The exposure question has no preview: `y` adds the hosts, `n`/Esc cancels. */
+function handleExposureKey(context: ManageContext, mode: ModeOf<"confirm-host-exposure">, input: string, key: Key): void {
+  answerYesNo(input, key, () => {
+    void execute(context, `Changing hosts of ${mode.skill.name}…`, () => runHostAddition(mode.prepared, context.operations, context.env));
+  }, () => cancel(context, "Install cancelled"));
 }
 
 /**
@@ -235,10 +265,12 @@ export function handleManageKey(context: ManageContext, mode: { readonly kind: s
       handleHostChecklistKey(context, mode, input, key);
       break;
     case "confirm-host-add":
-    case "confirm-host-exposure":
     case "confirm-host-remove":
     case "confirm-uninstall":
-      handleConfirmKey(context, mode, input, key);
+      handlePagedConfirmKey(context, mode, input, key);
+      break;
+    case "confirm-host-exposure":
+      handleExposureKey(context, mode, input, key);
       break;
     default:
       break;
