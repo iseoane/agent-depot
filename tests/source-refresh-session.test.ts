@@ -173,3 +173,20 @@ test("background refreshes run two at a time without prompts, never reject, and 
   assert.equal(session.snapshot().get(two.id)?.status, "refreshed");
   assert.equal(session.snapshot().get(three.id)?.status, "refreshed");
 });
+
+test("stopping the session drops the queued background refreshes and lets the running ones finish", { timeout: 5_000 }, async () => {
+  const [one, two, three] = [gitSource("one"), gitSource("two"), gitSource("three")];
+  const { operations, calls } = deferredOperations([one, two, three]);
+  const session = createSourceRefreshSession(operations);
+
+  session.refreshInBackground([one, two, three]);
+  await settle();
+  session.stop();
+  calls[0]!.resolve();
+  calls[1]!.resolve();
+  await settle();
+
+  assert.equal(calls.length, 2);
+  assert.equal(session.snapshot().get(two.id)?.status, "refreshed");
+  assert.equal(session.snapshot().get(three.id), undefined);
+});
