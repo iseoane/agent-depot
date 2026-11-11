@@ -387,25 +387,32 @@ test("refreshes the Git sources involved before the assessment, showing a busy s
   unmount();
 });
 
-test("with a refresh session, reopening Updates reuses the recent refresh while r refreshes again", async (t) => {
+test("with a refresh session, reopening Updates reuses the recent refresh and says when it was made, while r refreshes again", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "ext", state: "outdated", url: GIT_URL }]);
-  const operations = withRefreshSession(f.operations, createSourceRefreshSession(f.operations));
+  let clock = Date.now();
+  const now = () => clock;
+  const session = createSourceRefreshSession(f.operations, { now });
+  const operations = withRefreshSession(f.operations, session);
+  const environment = { ...f.environment, refreshSession: session };
   const refreshes = () => f.events.filter((event) => event.startsWith("refresh:")).length;
 
-  const first = render(<UpdatesView operations={operations} environment={f.environment} />);
-  await expandList(first.lastFrame, first.stdin, /portable\/ext/);
+  const first = render(<UpdatesView operations={operations} environment={environment} now={now} />);
+  const opened = await expandList(first.lastFrame, first.stdin, /portable\/ext/);
+  assert.match(opened, /sources refreshed\s*│/);
   assert.equal(refreshes(), 1);
   first.unmount();
 
-  const second = render(<UpdatesView operations={operations} environment={f.environment} />);
+  clock += 3 * 60_000;
+  const second = render(<UpdatesView operations={operations} environment={environment} now={now} />);
   const reopened = await expandList(second.lastFrame, second.stdin, /portable\/ext/);
-  assert.match(reopened, /sources refreshed/);
+  assert.match(reopened, /sources refreshed 3 min ago/);
   assert.equal(refreshes(), 1, "entering Updates again within the hour reuses the refresh");
 
   second.stdin.write("r");
   await waitForFrame(second.lastFrame, () => refreshes() === 2);
-  await expandList(second.lastFrame, second.stdin, /portable\/ext/);
+  const rechecked = await expandList(second.lastFrame, second.stdin, /portable\/ext/);
+  assert.match(rechecked, /sources refreshed\s*│/);
   second.unmount();
 });
 
