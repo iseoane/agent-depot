@@ -8,7 +8,7 @@ Type: feature
 - Depends on: None
 - Brief: [J001 brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: J001 en curso; al terminar el worker, PARAR y esperar indicación del operador antes de lanzar el reviewer (worker en rama feat/preview-confirm-footer). Si se interrumpe: revisar `git log 88e3166..feat/preview-confirm-footer` y `git status`, conservar commits, relanzar worker con brief-r1 indicando el punto alcanzado; luego revisión independiente, PR y CI. Después J002, J003, J004 y release 0.6.14.
+- Next step: J001 terminado por el worker (6aa0402..2055d08); esperar indicación del operador para lanzar la revisión independiente. Decidir si conservar tooling/.local/J001 (sin seguimiento). Luego PR, J002, J003, J004 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -17,3 +17,4 @@ Type: feature
 - Planner (2026-11-11): previews son líneas planas; el bloqueo de `y` hasta el final lo recalcula cada llamador (riesgo de desincronía); solo la preview de update de Skills es texto compartido con la CLI; ~30 aserciones e2e dependen del texto actual. Diseño: `src/preview-model.ts` (secciones/ítems/filas/comandos/avisos), `src/tui/preview-render.ts` (aplanado, pie), hook de geometría único; `describeUpdatePreview` se reescribe sobre el modelo con test golden (CLI idéntica).
 - Defaults del coordinador: CLI sin cambios; se permite cambiar los matchers e2e de «Scroll to end…» manteniendo «Review N of M», el rango y la pregunta.
 - Decisiones del operador (2026-11-11): comandos como `$ cmd args` entrecomillando argumentos con espacios, comillas o metacaracteres; extender el pie a las confirmaciones sin paginación como trabajo aparte (J004); release 0.6.14 al terminar I0032.
+- Worker J001: RED 6aa0402, GREEN 7fef274, e2e 0d5b2d2, fix cf5eae4, cobertura 2055d08. Checks autoinformados: typecheck/lint, test 1355/0, e2e 17/17, audit OK; CLI sin cambios. Desviaciones: sin preview-model/preview-render (se introducen en J002); app-approve sin test renderizado (inalcanzable desde la UI); la pregunta y/n aparece solo al final; recuento e2e de Profile 7–8 → 6–9 of 41.
