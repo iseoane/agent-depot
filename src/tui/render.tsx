@@ -9,7 +9,9 @@ import type { TuiEnvironment } from "./environment.js";
 export async function renderTui(operations: SourceOperations, environment?: TuiEnvironment): Promise<void> {
   const refreshSession = createSourceRefreshSession(operations);
   const instance = render(
-    <App operations={operations} environment={environment} refreshSession={refreshSession} refreshOnStart />,
+    <App operations={operations} environment={environment} refreshSession={refreshSession}
+      // Test-only opt-out (tests/isolated-env.ts); manual and preview refreshes are unaffected.
+      refreshOnStart={process.env.AGENT_DEPOT_NO_BACKGROUND_REFRESH !== "1"} />,
     { alternateScreen: true },
   );
   await instance.waitUntilExit();
