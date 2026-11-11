@@ -568,7 +568,8 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
-test("a preview longer than a page keeps y inert until the adoption footer reads to the end, and n cancels mid-read", async (t) => {
+for (const [cancelName, cancelKey] of [["n", "n"], ["Esc", ESC]] as const) {
+test(`a preview longer than a page keeps y inert until the adoption footer reads to the end, and ${cancelName} cancels mid-read`, async (t) => {
   const f = await fixture(t);
   await writeUnmanaged(f.home);
   const view = await adoptionPreview(f, { columns: 40, rows: 12 });
@@ -580,7 +581,8 @@ test("a preview longer than a page keeps y inert until the adoption footer reads
   assert.doesNotMatch(view.lastFrame() ?? "", /Adopting demo…|Adopted Skill "demo"/);
   assert.match(first, /Review 1 of \d+/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
-  press(view.stdin, "n");
+  press(view.stdin, cancelKey);
   await waitForFrame(view.lastFrame, /Adoption cancelled/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
 });
+}

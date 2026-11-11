@@ -391,7 +391,8 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
-test("a preview longer than a page keeps y inert until the install footer reads to the end, and n cancels mid-read", async (t) => {
+for (const [cancelName, cancelKey] of [["n", "n"], ["Esc", ESC]] as const) {
+test(`a preview longer than a page keeps y inert until the install footer reads to the end, and ${cancelName} cancels mid-read`, async (t) => {
   const f = await fixture(t);
   const view = await mount(f);
   deferCleanup(t, () => view.unmount());
@@ -405,7 +406,8 @@ test("a preview longer than a page keeps y inert until the install footer reads 
   assert.doesNotMatch(view.lastFrame() ?? "", /Installing demo…|Installed Skill "demo"/);
   assert.match(first, /Review 1 of \d+/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
-  view.stdin.write("n");
+  view.stdin.write(cancelKey);
   await waitForFrame(view.lastFrame, /Install cancelled/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
 });
+}

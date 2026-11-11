@@ -400,3 +400,45 @@ for (const size of PREVIEW_SIZES) {
     assert.deepEqual(f.commands, []);
   });
 }
+
+/** Opens the recipe Skill install preview after a refusal row was left on screen. */
+async function openRecipeInstallPreview(f: Awaited<ReturnType<typeof fixture>>, size: { readonly columns: number; readonly rows: number }) {
+  // The whole app, so the header rows count and a message row above the preview overflows the terminal.
+  const view = f.track(render(<App operations={f.operations} environment={{ homeDirectory: f.home, projectRoot: f.home,
+    appEnvironment: { recipesDirectory: f.directory, homeDirectory: f.home } }} />));
+  resizeTerminal(view, size);
+  const seen = (text: string) => (frame: string) => squash(frame).includes(text);
+  await waitForFrame(view.lastFrame, /needs\s+approval/);
+  view.stdin.write("n");
+  await waitForFrame(view.lastFrame, seen("1WiththeAIskill"));
+  view.stdin.write("1");
+  await waitForFrame(view.lastFrame, seen("Installagent-depot-apprecipe"));
+  view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, seen("Selectatleastonehost"));
+  view.stdin.write("1");
+  view.stdin.write("\r");
+  await waitForFrame(view.lastFrame, seen("Skillinstallationscope"));
+  view.stdin.write("2");
+  await waitForFrame(view.lastFrame, seen("Skillversionpolicy"));
+  view.stdin.write("1");
+  return view;
+}
+
+for (const size of PREVIEW_SIZES) {
+  test(`recipe Skill installation keeps its footer within the terminal while a message is shown at ${size.columns}x${size.rows}`, async t => {
+    const f = await fixture(t);
+    const view = await openRecipeInstallPreview(f, size);
+    await confirmAtEnd(view, size.rows, /\[y\] Install/, () => squash(view.lastFrame() ?? "").includes("Usetheagent-depot-apprecipeskill"));
+    assert.equal((await f.operations.listUserGlobalInstallations!())[0]?.path, "agent-depot-apprecipe");
+  });
+}
+
+test("recipe Skill installation shows no message row above the preview, which would push it past a narrow terminal", async t => {
+  const f = await fixture(t);
+  // At 20 columns the refusal wraps to two rows, more than the terminal leaves spare above the preview.
+  const view = await openRecipeInstallPreview(f, { columns: 20, rows: 24 });
+  const frame = await waitForFrame(view.lastFrame, candidate => squash(candidate).includes("Skillinstallpreview"));
+  assert.doesNotMatch(squash(frame), /Selectatleastonehost/);
+  const lines = frame.split("\n");
+  assert.equal(lines.filter(line => line.startsWith("╭")).length, lines.filter(line => line.startsWith("╰")).length, frame);
+});
