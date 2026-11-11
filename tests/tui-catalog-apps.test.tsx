@@ -146,9 +146,7 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     assert.match(frame, /^>\s+App gentle-shell {2}not installed$/m);
     view.stdin.write("i");
     frame = await waitForFrame(view.lastFrame, /App install confirmation/);
-    assert.match(frame, /argv: \[/);
-    assert.match(frame, /"npm"/);
-    assert.match(frame, /"gentle-shell"/);
+    assert.match(frame, /\$ npm .*gentle-shell/);
     assert.match(frame, /Manual installation details remain reviewable/);
     assert.match(frame, /read [█░]* ?\d+%/u);
     assert.ok(!commands.some(command => command.startsWith("npm install")), "the preview is separate from execution");

@@ -86,21 +86,19 @@ export function recipeApprovalChrome(entry: AppEntry): PreviewChrome {
   };
 }
 
-export function appStepLines(step: Omit<StepPreview, "step">): string[] {
-  const argv = step.argv;
+/** What confirming an App step does: its name, Host and versions, then the step as one block. */
+export function appPlanLines(plan: AppLifecyclePlan): readonly StyledLine[] {
+  const { previousVersion, latestVersion } = plan;
+  const both = previousVersion !== undefined && latestVersion !== undefined;
   return [
-    ...(argv ? [
-      "argv: [",
-      ...argv.map((argument, index) => `  ${JSON.stringify(argument)}${index < argv.length - 1 ? "," : ""}`),
-      "]",
-      `Executable: ${step.executable ?? `${JSON.stringify(argv[0])} not found in PATH`}`,
-    ] : []),
-    ...(step.manual ? [`Manual: ${step.manual}`] : []),
-    ...(step.declaration ? [step.declaration] : []),
-    ...(step.pattern ? [`Version pattern: ${step.pattern}`] : []),
-    ...(step.environment ? [`Environment: ${step.environment}`] : []),
-    `Working directory: ${step.cwd}`,
-    ...(step.warning ? [step.warning] : []),
+    [
+      span(` App ${appName(plan.entry)} ${plan.action}${plan.host ? ` (${plan.host})` : ""}`, theme.value, true),
+      ...(both ? [span(`  ${previousVersion} → ${latestVersion}`, theme.version)] : []),
+    ],
+    ...(!both && previousVersion !== undefined ? [fieldLine(" Previous version:", previousVersion)] : []),
+    ...(!both && latestVersion !== undefined ? [fieldLine(" Latest version:", latestVersion)] : []),
+    textLine(" "),
+    ...stepBlockLines([{ ...plan, step: plan.host ? `${plan.action}.${plan.host}` : plan.action }]),
   ];
 }
 
@@ -120,14 +118,8 @@ export function appRecipePreviewLines(entry: AppEntry, status: string, steps: re
   ];
 }
 
-function appPreviewLines(mode: Extract<AppMode, { kind: "app-approve" | "app-confirm" | "app-manual" }>): readonly string[] {
-  if (mode.kind === "app-approve") return mode.lines.map(lineText);
-  return [
-    `App: ${appName(mode.plan.entry)} ${mode.plan.action}${mode.plan.host ? ` (${mode.plan.host})` : ""}`,
-    ...(mode.plan.previousVersion ? [`Previous version: ${mode.plan.previousVersion}`] : []),
-    ...(mode.plan.latestVersion ? [`Latest version: ${mode.plan.latestVersion}`] : []),
-    ...appStepLines(mode.plan),
-  ];
+function appPreviewLines(mode: Extract<AppMode, { kind: "app-approve" | "app-confirm" | "app-manual" }>): readonly StyledLine[] {
+  return mode.kind === "app-approve" ? mode.lines : appPlanLines(mode.plan);
 }
 
 /** The busy mode of an App step; `previous` is the busy mode this step continues, so the clock keeps running. */
@@ -253,7 +245,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
       else void prepareNext(context, requests);
     }
   } else {
-    const lines = appPreviewLines(mode);
+    const lines = appPreviewLines(mode).map(lineText);
     const viewport = context.previewGeometry(lines, mode.cursor, appPreviewChrome(mode));
     const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
     if (cursor !== undefined) {
@@ -301,8 +293,8 @@ export function AppPanel({ mode }: { readonly mode: AppMode }) {
       </BorderPanel>
     );
   }
-  const lines = appPreviewLines(mode);
+  const styled = appPreviewLines(mode);
+  const lines = styled.map(lineText);
   const chrome = appPreviewChrome(mode);
-  return <PagedPreview chrome={chrome} lines={lines} styled={mode.kind === "app-approve" ? mode.lines : undefined}
-    viewport={geometry(lines, mode.cursor, chrome)} />;
+  return <PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={geometry(lines, mode.cursor, chrome)} />;
 }

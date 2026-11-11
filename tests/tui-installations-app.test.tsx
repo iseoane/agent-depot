@@ -22,7 +22,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
-import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 const SKILL_MD = "---\nname: demo\ndescription: Demo skill\n---\n\nBody\n";
 const tree: readonly SkillTreeFile[] = [
@@ -117,6 +117,8 @@ async function appFixture(
   const appEnvironment = {
     homeDirectory: home,
     recipesDirectory: recipes,
+    platform: "linux" as const,
+    isWsl: false,
     resolveExecutable,
     fetch: async () => { throw new Error("Installations must not check latest"); },
     runner: async (_executable: string, args: readonly string[]) => {
@@ -223,7 +225,7 @@ test("manual App setup and teardown remain separate confirmed Host actions", asy
   await waitForFrame(fixture.view.lastFrame, /Checked = setup/i);
   fixture.view.stdin.write("\r");
   const setup = await waitForFrame(fixture.view.lastFrame, /setup demo\? y\/n/);
-  assert.match(setup, /argv: \[[\s\S]*"demo",[\s\S]*"setup"/);
+  assert.match(setup, /\$ demo setup/);
   fixture.view.stdin.write("y");
   await waitForFrame(fixture.view.lastFrame, /demo: completed/);
   assert.ok(fixture.commands.includes("setup"));
@@ -254,6 +256,45 @@ test("Esc cancels an App Host checklist and lifecycle preview without running co
   fixture.view.stdin.write("\u001b");
   await waitForFrame(fixture.view.lastFrame, /demo: cancelled/);
   assert.ok(!fixture.commands.includes("uninstall"));
+});
+
+test("an App lifecycle confirmation shows its header and one block with the command and where it runs", async t => {
+  const fixture = await appFixture(t, true);
+  await selectInstalledApp(fixture.view);
+  resizeTerminal(fixture.view, { columns: 220, rows: 80 });
+  fixture.view.stdin.write("u");
+  const rows = panelRows(await waitForFrame(fixture.view.lastFrame, /read ✓/u));
+  const start = rows.findIndex(row => row.startsWith(" App demo uninstall"));
+  assert.ok(start >= 0, rows.join("\n"));
+  assert.deepEqual(rows.slice(start, start + 5), [
+    " App demo uninstall",
+    " ",
+    " └ uninstall",
+    "   $ demo uninstall",
+    `   /fake-bin/demo · in ${fixture.home} · on linux`,
+  ].map(row => row.trimEnd()));
+  assert.ok(!fixture.commands.includes("uninstall"));
+});
+
+test("a manual App Host step names its Host in the header and block and shows the instruction", async t => {
+  const fixture = await appFixture(t, true);
+  await selectInstalledApp(fixture.view);
+  resizeTerminal(fixture.view, { columns: 220, rows: 80 });
+  fixture.view.stdin.write("h");
+  await waitForFrame(fixture.view.lastFrame, /Checked = setup/i);
+  fixture.view.stdin.write(" ");
+  await waitForFrame(fixture.view.lastFrame, /\[ \] 1 pi/);
+  fixture.view.stdin.write("\r");
+  const rows = panelRows(await waitForFrame(fixture.view.lastFrame, /read ✓/u));
+  const start = rows.findIndex(row => row.startsWith(" App demo teardown"));
+  assert.ok(start >= 0, rows.join("\n"));
+  assert.deepEqual(rows.slice(start, start + 5), [
+    " App demo teardown (pi)",
+    " ",
+    " └ teardown.pi",
+    "   Manual: demo teardown manually",
+    `   in ${fixture.home} · on linux`,
+  ].map(row => row.trimEnd()));
 });
 
 /** Presses j until the selected line matches, waiting for each move to render. */

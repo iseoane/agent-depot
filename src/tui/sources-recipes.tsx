@@ -9,7 +9,7 @@ import type { ActionMode } from "./catalog-actions.js";
 import { ActionPanel } from "./catalog-panel.js";
 import { hasUnmanagedCopy, isInstalled, loadInstalledSkills } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
-import { appName, appRecipePreviewLines, appStepLines, recipeApprovalChrome } from "./app-actions.js";
+import { appName, appPlanLines, appRecipePreviewLines, recipeApprovalChrome } from "./app-actions.js";
 import { errorText } from "./batch.js";
 import { useMounted } from "./view-state.js";
 import { BorderPanel, DecisionPrompt, PagedPreview, PreviewConfirm, Working } from "./panel-parts.js";
@@ -271,7 +271,7 @@ export function useSourcesRecipes({
       return true;
     }
     if (current.kind === "uninstall-confirm" || current.kind === "uninstall-manual") {
-      const lines = appStepLines(current.plan);
+      const lines = appPlanLines(current.plan).map(lineText);
       const viewport = previewGeometry(lines, current.cursor, uninstallChrome(current));
       const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) setMode({ ...current, cursor });
@@ -373,8 +373,9 @@ export function useSourcesRecipes({
       ) : null}
       {mode.kind === "uninstall-confirm" || mode.kind === "uninstall-manual" ? (() => {
         const chrome = uninstallChrome(mode);
-        const lines = appStepLines(mode.plan);
-        return <PagedPreview chrome={chrome} lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
+        const styled = appPlanLines(mode.plan);
+        const lines = styled.map(lineText);
+        return <PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
       })() : null}
       {mode.kind === "remove" ? (
         <PreviewConfirm title="Recipe removal" lines={[`Delete recipe: ${mode.removal.file}`, "Only this recipe file or symlink will be removed; App data and Host configuration are not deleted."]}

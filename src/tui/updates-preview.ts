@@ -1,3 +1,4 @@
+import { appPlanLines } from "./app-actions.js";
 import type { UpdatesMode } from "./updates-mode.js";
 import { fieldLine, renderPreviewDocument, textLine, type StyledLine } from "./preview-render.js";
 import type { PreviewChrome } from "./preview-window.js";
@@ -8,13 +9,7 @@ export function updateModePreviewLines(mode: UpdatesMode): readonly StyledLine[]
     case "preview":
       return renderPreviewDocument(mode.prepared.document);
     case "manual":
-      return [
-        fieldLine("App:", mode.plan.entry.recipe?.name ?? mode.plan.entry.file),
-        fieldLine("Environment:", mode.plan.environment),
-        fieldLine("Working directory:", mode.plan.cwd),
-        fieldLine("Manual:", mode.plan.manual ?? ""),
-        ...(mode.reason === undefined ? [] : [textLine(mode.reason)]),
-      ];
+      return [...appPlanLines(mode.plan), ...(mode.reason === undefined ? [] : [textLine(mode.reason)])];
     case "confirm-paths":
       return [
         textLine("Outside .agents/skills and .claude/skills:"),

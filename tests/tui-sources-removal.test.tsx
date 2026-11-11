@@ -11,7 +11,7 @@ import { App } from "../src/tui/app.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
-import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
 async function fixture(t: TestContext, installed = false, failUninstall = false, manual = false) {
   const home = await mkdtemp(path.join(tmpdir(), "sources-removal-"));
@@ -22,7 +22,7 @@ async function fixture(t: TestContext, installed = false, failUninstall = false,
     uninstall: manual ? { manual: "Uninstall demo in your terminal" } : { argv: ["demo", "remove"] },
     version: { argv: ["demo", "version"], pattern: "(1\\.2\\.3)" } }));
   const commands: string[] = [];
-  const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory: directory,
+  const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory: directory, platform: "linux", isWsl: false,
     resolveExecutable: async () => "/bin/demo", runner: async (_command, args) => {
       commands.push(args[0]);
       if (args[0] === "remove") {
@@ -40,7 +40,7 @@ async function fixture(t: TestContext, installed = false, failUninstall = false,
   const view = render(<SourcesView operations={operations} environment={environment} />);
   deferCleanup(t, async () => { view.unmount(); await rm(home, { recursive: true, force: true }); });
   await waitForFrame(view.lastFrame, /approved/);
-  return { view, file, commands, apps, operations, environment, markUninstalled: () => { installed = false; } };
+  return { view, home, file, commands, apps, operations, environment, markUninstalled: () => { installed = false; } };
 }
 
 test("d removes an uninstalled recipe only after preview and confirmation", async t => {
@@ -77,9 +77,7 @@ test("successful optional uninstall is followed by separate recipe removal confi
   await waitForFrame(f.view.lastFrame, /Uninstall it before/);
   f.view.stdin.write("y");
   const preview = await waitForFrame(f.view.lastFrame, /Uninstall demo\? y\/n/);
-  assert.match(preview, /argv: \[/u);
-  assert.match(preview, /"demo"/u);
-  assert.match(preview, /"remove"/u);
+  assert.match(preview, /\$ demo remove/u);
   assert.ok(!f.commands.includes("remove"));
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);
@@ -189,3 +187,40 @@ for (const size of PREVIEW_SIZES) {
     await confirmAtEnd(f.view, size.rows, /\[y\] Check the uninstall now/, () => /Remove recipe for demo\? y\/n/.test(f.view.lastFrame() ?? ""));
   });
 }
+
+test("the App uninstall before recipe removal shows its header and one block with the command and where it runs", async t => {
+  const f = await fixture(t, true);
+  resizeTerminal(f.view, { columns: 220, rows: 80 });
+  f.view.stdin.write("d");
+  await waitForFrame(f.view.lastFrame, /Uninstall it before/);
+  f.view.stdin.write("y");
+  const rows = panelRows(await waitForFrame(f.view.lastFrame, /read ✓/u));
+  const start = rows.findIndex(row => row.startsWith(" App demo uninstall"));
+  assert.ok(start >= 0, rows.join("\n"));
+  assert.deepEqual(rows.slice(start, start + 5), [
+    " App demo uninstall",
+    " ",
+    " └ uninstall",
+    "   $ demo remove",
+    `   /bin/demo · in ${f.home} · on linux`,
+  ].map(row => row.trimEnd()));
+  assert.deepEqual(f.commands, ["version"]);
+});
+
+test("a manual App uninstall before recipe removal shows its instruction in the same block", async t => {
+  const f = await fixture(t, true, false, true);
+  resizeTerminal(f.view, { columns: 220, rows: 80 });
+  f.view.stdin.write("d");
+  await waitForFrame(f.view.lastFrame, /Uninstall it before/);
+  f.view.stdin.write("y");
+  const rows = panelRows(await waitForFrame(f.view.lastFrame, /read ✓/u));
+  const start = rows.findIndex(row => row.startsWith(" App demo uninstall"));
+  assert.ok(start >= 0, rows.join("\n"));
+  assert.deepEqual(rows.slice(start, start + 4), [
+    " App demo uninstall",
+    " ",
+    " └ uninstall",
+    "   Manual: Uninstall demo in your terminal",
+  ].map(row => row.trimEnd()));
+  assert.equal(rows[start + 4]?.trimEnd(), `   in ${f.home} · on linux`);
+});
