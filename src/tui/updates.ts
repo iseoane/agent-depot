@@ -4,7 +4,7 @@ import type { PackageOperations } from "../package-flow.js";
 import { displayPackageSelection, selectionKey, type PackageLifecyclePlan, type PackageUpdateCheck } from "../package-model.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { formatVersionPolicy } from "../skill-install.js";
-import type { SourceOperations } from "../sources.js";
+import type { SourceOperations, SourceRefreshOptions } from "../sources.js";
 import type { UpdateBatchAssessmentItem } from "../update-batch.js";
 import type { ProjectSkillSelection, ProjectSource } from "../project-manifest.js";
 import {
@@ -123,6 +123,8 @@ export type UpdatesPhase = "refreshing" | "checking";
 export interface LoadUpdatesOptions {
   /** Refresh the Git sources of the installations before assessing. */
   readonly refresh: boolean;
+  /** Refresh even when a refresh session holds a recent one (`r`). */
+  readonly force?: boolean;
   readonly onPhase?: (phase: UpdatesPhase) => void;
   readonly now?: () => number;
 }
@@ -158,18 +160,18 @@ function scopeInput(operations: SourceOperations, environment: TuiEnvironment, s
 type GitProjectSource = Extract<ProjectSource, { readonly url: string }>;
 
 /** Refreshes through the project-source operation the install flow uses; a registered Source is refreshed by id otherwise. */
-async function refreshOne(operations: SourceOperations, source: GitProjectSource): Promise<void> {
+async function refreshOne(operations: SourceOperations, source: GitProjectSource, options: SourceRefreshOptions): Promise<void> {
   if (operations.refreshProjectSource) {
-    await operations.refreshProjectSource(source);
+    await operations.refreshProjectSource(source, options);
     return;
   }
   const registered = (await operations.listSources()).find((candidate) => candidate.kind === "git" && candidate.url === source.url);
   if (!registered) throw new Error("the Source is not registered, so it cannot be refreshed here");
-  await operations.refreshSource(registered.id);
+  await operations.refreshSource(registered.id, options);
 }
 
 /** Refreshes every distinct Git source the installations use, one at a time; the built-in source is skipped. */
-async function refreshSources(operations: SourceOperations, selections: readonly ProjectSkillSelection[]): Promise<RefreshReport> {
+async function refreshSources(operations: SourceOperations, selections: readonly ProjectSkillSelection[], options: SourceRefreshOptions): Promise<RefreshReport> {
   const distinct = new Map<string, GitProjectSource>();
   for (const { source } of selections) {
     if (source.kind === "external" && "url" in source) distinct.set(`${source.url}\u0000${source.ref ?? ""}`, source);
@@ -179,7 +181,7 @@ async function refreshSources(operations: SourceOperations, selections: readonly
   for (const source of distinct.values()) {
     const label = source.ref === undefined ? source.url : `${source.url}@${source.ref}`;
     try {
-      await refreshOne(operations, source);
+      await refreshOne(operations, source, options);
       refreshed.push(label);
     } catch (error) {
       failed.push({ source: label, reason: errorText(error) });
@@ -211,7 +213,7 @@ export async function loadUpdateRows(
         return [];
       })),
     );
-    refresh = { ...(await refreshSources(operations, installations.flat())), unreadable };
+    refresh = { ...(await refreshSources(operations, installations.flat(), { force: options.force === true })), unreadable };
   }
   options.onPhase?.("checking");
   const results = await Promise.all(UPDATE_SCOPES.map(async (scope): Promise<ScopeResult> => {

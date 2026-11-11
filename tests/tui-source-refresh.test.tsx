@@ -11,7 +11,7 @@ import { SourcesView } from "../src/tui/sources-view.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 function gitSource(name: string): GitSource {
-  const url = `https://github.com/example/${name}.git`;
+  const url = `https://example.test/${name}.git`;
   return { id: sourceIdForUrl(url), kind: "git", url };
 }
 
@@ -63,7 +63,7 @@ test("each Git Source row carries a textual refresh mark that follows the sessio
     <SourcesView operations={withRefreshSession(operations, session)} refreshSession={session} />,
   );
   let frame = await waitForFrame(lastFrame, (next) => next.includes(beta.url));
-  assert.match(rowOf(frame, alpha), /skills\s+https:\/\/github\.com\/example\/alpha\.git\s+· not refreshed/);
+  assert.match(rowOf(frame, alpha), /skills\s+https:\/\/example\.test\/alpha\.git\s+· not refreshed/);
   assert.match(rowOf(frame, beta), /· not refreshed/);
 
   const alphaDone = session.refresh(alpha);
@@ -79,7 +79,7 @@ test("each Git Source row carries a textual refresh mark that follows the sessio
   calls[1]!.reject(new Error("network down"));
   await assert.rejects(betaDone);
   frame = await waitForFrame(lastFrame, (next) => /✗ refresh failed/.test(rowOf(next, beta)));
-  assert.match(rowOf(frame, alpha), /✓ refreshed 2m ago/);
+  assert.match(rowOf(frame, alpha), /✓ refreshed 2 min ago/);
   assert.doesNotMatch(frame, /network down/, "the error detail belongs to the selected row only");
 
   stdin.write("j");
