@@ -18,7 +18,9 @@ import {
 } from "./catalog-installs.js";
 import type { TuiEnvironment } from "./environment.js";
 import { answerPaged, answerYesNo, applyChecklistOutcome, hostChecklistKey } from "./mode-keys.js";
+import { span, type StyledLine } from "./preview-render.js";
 import type { PreviewChrome, PreviewGeometry } from "./preview-window.js";
+import { theme } from "./theme.js";
 import { skillOf, sourceIdOf, type InstallationRow, type UnmanagedGroup } from "./installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval, type PreparedUnmanagedRemoval } from "./unmanaged-actions.js";
 import { busy, type Busy } from "./working-model.js";
@@ -376,17 +378,28 @@ function previewOf(item: BulkUninstallItem | BulkHostItem): readonly string[] {
 
 export type BulkPagedMode = Extract<BulkMode, { kind: "confirm-bulk-uninstall" | "confirm-bulk-hosts" }>;
 
-/** One block per planned item (its label, then its preview), then the skipped ones, with the footer's action and question. */
-export function bulkConfirmPreview(mode: BulkPagedMode): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+/**
+ * One block per planned item (its label, then its preview), then the skipped ones, with the footer's action and question.
+ * Only the labels are styled; `styled` is sparse so the other lines keep the colours inferred from their text.
+ */
+export function bulkConfirmPreview(mode: BulkPagedMode): {
+  readonly lines: readonly string[];
+  readonly styled: readonly (StyledLine | undefined)[];
+  readonly chrome: PreviewChrome;
+} {
   const { plan } = mode;
   const items = count(plan.items.length, "item");
-  const lines = [
-    ...(plan.items as readonly (BulkUninstallItem | BulkHostItem)[]).flatMap((item): readonly string[] => [item.label, ...previewOf(item)]),
-    ...plan.skipped.map(({ label, reason }) => `Skipped ${label}: ${reason}`),
-  ];
+  const blocks = (plan.items as readonly (BulkUninstallItem | BulkHostItem)[]).flatMap((item) => [
+    { text: item.label, label: true },
+    ...previewOf(item).map((text) => ({ text, label: false })),
+  ]);
+  const skipped = plan.skipped.map(({ label, reason }) => ({ text: `Skipped ${label}: ${reason}`, label: false }));
+  const entries = [...blocks, ...skipped];
+  const lines = entries.map(({ text }) => text);
+  const styled = entries.map(({ text, label }) => label ? [span(text, theme.group)] : undefined);
   return mode.kind === "confirm-bulk-uninstall"
-    ? { lines, chrome: { title: "Uninstall", action: `Uninstall ${items}`, consequence: `Uninstall ${items}? y/n` } }
-    : { lines, chrome: { title: "Add hosts", action: `Add hosts to ${items}`, consequence: `Add hosts to ${items}? y/n` } };
+    ? { lines, styled, chrome: { title: "Uninstall", action: `Uninstall ${items}`, consequence: `Uninstall ${items}? y/n` } }
+    : { lines, styled, chrome: { title: "Add hosts", action: `Add hosts to ${items}`, consequence: `Add hosts to ${items}? y/n` } };
 }
 
 /** Handles a key in a bulk mode; returns false for any other mode. */

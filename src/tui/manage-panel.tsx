@@ -20,8 +20,8 @@ function SkippedLines({ skipped }: { readonly skipped: readonly SkippedTarget[] 
 
 /** A Skill confirmation with the shared footer; the view shows it alone so no tree rows count against its height. */
 export function PagedConfirmPanel({ mode }: { readonly mode: PagedConfirmMode }) {
-  const { lines, chrome } = pagedConfirmPreview(mode);
-  return <PagedPreview chrome={chrome} lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
+  const { lines, styled, chrome } = pagedConfirmPreview(mode);
+  return <PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
 }
 
 /** Renders the prompt of a manage mode: host lists, previews and confirmations. */

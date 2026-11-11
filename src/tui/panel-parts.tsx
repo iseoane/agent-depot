@@ -253,20 +253,24 @@ function footerColor(role: PreviewFooterRole, reachedEnd: boolean): { readonly c
 export function PagedPreview({ chrome, lines, styled, viewport, warnFirst = false }: {
   readonly chrome: PreviewChrome;
   readonly lines: readonly string[];
-  /** Colours of each line in `lines`; without them the colours are inferred from the text. */
-  readonly styled?: readonly StyledLine[];
+  /** Colours of each line in `lines`; a line without them has its colours inferred from the text. */
+  readonly styled?: readonly (StyledLine | undefined)[];
   readonly viewport: PreviewViewport;
   readonly warnFirst?: boolean;
 }) {
   useOpenPreview();
   return (
     <BorderPanel title={chrome.title}>
-      {viewport.rows.map((line, position) => styled === undefined
-        ? <PreviewLine key={position} line={line} position={position}
-          warnFirst={warnFirst && viewport.start === 0} logicalLine={lines[viewport.sourceLines[position]!]!}
-          offset={viewport.sourceOffsets[position]!} />
-        : <Text key={position}>{sliceSpans(styled[viewport.sourceLines[position]!]!, viewport.sourceOffsets[position]!, line.length).map((span, index) =>
-          <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>)}
+      {viewport.rows.map((line, position) => {
+        const logical = viewport.sourceLines[position]!;
+        const custom = styled?.[logical];
+        return custom === undefined
+          ? <PreviewLine key={position} line={line} position={position}
+            warnFirst={warnFirst && viewport.start === 0} logicalLine={lines[logical]!}
+            offset={viewport.sourceOffsets[position]!} />
+          : <Text key={position}>{sliceSpans(custom, viewport.sourceOffsets[position]!, line.length).map((span, index) =>
+            <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>;
+      })}
       {viewport.footer.map((spans, row) => <Text key={`footer-${row}`}>{spans.map((span, index) =>
         <Text key={index} {...footerColor(span.role, viewport.reachedEnd)}>{span.text}</Text>)}</Text>)}
     </BorderPanel>
