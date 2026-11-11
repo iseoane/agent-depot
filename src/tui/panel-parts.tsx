@@ -157,6 +157,13 @@ function profilePreviewSpans(line: string): readonly PreviewSpan[] | undefined {
   return undefined;
 }
 
+/** The colour of a warning, host exposure notice or refusal, which the flows indent to different depths. */
+function noticeColor(line: string): string | undefined {
+  const text = line.trimStart();
+  if (text.startsWith("WARNING:") || text.startsWith("ADDITIONAL HOST EXPOSURE:")) return theme.warning;
+  return text.startsWith("Cannot install ") ? theme.error : undefined;
+}
+
 function PreviewLine({ line, position, warnFirst, logicalLine, offset = 0 }: {
   readonly line: string;
   readonly position: number;
@@ -177,7 +184,7 @@ function PreviewLine({ line, position, warnFirst, logicalLine, offset = 0 }: {
     return <Text key={position}>{spans.map((span, index) =>
       <Text key={index} color={span.color}>{span.text}</Text>)}</Text>;
   }
-  return <Text key={position} color={warnFirst && position === 0 ? theme.warning : theme.value}>{line}</Text>;
+  return <Text key={position} color={warnFirst && position === 0 ? theme.warning : noticeColor(logicalLine ?? line) ?? theme.value}>{line}</Text>;
 }
 
 export function PreviewLines({ lines, warnFirst = false }: {

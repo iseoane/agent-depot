@@ -141,6 +141,7 @@ export function useSourcesRecipes({
   const flow: CatalogFlowContext = {
     operations,
     env: environment ?? {},
+    previewGeometry,
     isMounted: () => mounted.current,
     setAction: action => setMode(action.kind === "browse"
       ? { kind: "browse" }
@@ -328,11 +329,13 @@ export function useSourcesRecipes({
     }
   }, [apps, mounted]);
   useEffect(() => { void reload(); }, [reload]);
+  // The paged install preview sizes itself to the whole terminal, so no message row may sit above it.
+  const pagedInstall = mode.kind === "install" && mode.action.kind === "confirm-install";
   const panel = (
     <Box flexDirection="column">
-      {loadError ? <Text color={theme.error}>Error loading App recipes: {loadError}</Text> : null}
-      {error ? <Text color={theme.error}>{error}</Text> : null}
-      {notice ? <Text color={theme.success}>{notice}</Text> : null}
+      {loadError && !pagedInstall ? <Text color={theme.error}>Error loading App recipes: {loadError}</Text> : null}
+      {error && !pagedInstall ? <Text color={theme.error}>{error}</Text> : null}
+      {notice && !pagedInstall ? <Text color={theme.success}>{notice}</Text> : null}
       {mode.kind === "guide" ? (
         <BorderPanel title="Add an App recipe">
           <Text>1 With the AI skill · install if missing, then copy the prompt</Text>

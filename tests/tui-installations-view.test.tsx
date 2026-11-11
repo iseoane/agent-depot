@@ -19,7 +19,9 @@ import { skillTreeBaseline, type SkillCandidate, type SkillTreeFile } from "../s
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal, type TerminalSize } from "./preview-footer.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { readToEnd } from "./package-panel.js";
 import { deferCleanup } from "./test-cleanup.js";
 
 const ESC = "\u001B";
@@ -314,7 +316,7 @@ test("A adopts an identical unmanaged Skill after host, version, preview and y",
   press(stdin, ENTER);
   await waitForFrame(lastFrame, /Version: 1 latest/);
   press(stdin, "1");
-  const preview = await waitForFrame(lastFrame, /y\/n/);
+  const preview = await readToEnd(lastFrame, stdin);
   assert.match(preview, /can be adopted/);
   assert.ok(!preview.includes("ADDITIONAL HOST EXPOSURE"));
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
@@ -372,7 +374,7 @@ test("adopting with an extra host needs a separate exposure confirmation; n writ
   press(stdin, ENTER);
   await waitForFrame(lastFrame, /Version: 1 latest/);
   press(stdin, "1");
-  const preview = await waitForFrame(lastFrame, /y\/n/);
+  const preview = await readToEnd(lastFrame, stdin);
   assert.match(preview, /ADDITIONAL HOST EXPOSURE/);
   press(stdin, "y");
   await waitForFrame(lastFrame, /--confirm-additional-host/);
@@ -386,7 +388,7 @@ test("n at the preview cancels without writing", async (t) => {
   const f = await fixture(t);
   await writeUnmanaged(f.home);
   const { lastFrame, stdin, unmount } = await startAdoption(f, [ENTER, "1"]);
-  await waitForFrame(lastFrame, /y\/n/);
+  await readToEnd(lastFrame, stdin);
   press(stdin, "n");
   await waitForFrame(lastFrame, /Adoption cancelled/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
@@ -416,7 +418,7 @@ test("adopting with an extra host: two confirmations create the host location an
   const before = await readFile(path.join(directory, "SKILL.md"), "utf8");
   const view = await startAdoption(f, []);
   await chooseClaudeHost(view);
-  const preview = await waitForFrame(view.lastFrame, /y\/n/);
+  const preview = await readToEnd(view.lastFrame, view.stdin);
   assert.match(preview, /ADDITIONAL HOST EXPOSURE/);
   await assertAbsent(claudeLocation(f.home));
   press(view.stdin, "y");
@@ -437,7 +439,7 @@ test("declining the exposure confirmation creates no host location", async (t) =
   await writeUnmanaged(f.home);
   const view = await startAdoption(f, []);
   await chooseClaudeHost(view);
-  await waitForFrame(view.lastFrame, /y\/n/);
+  await readToEnd(view.lastFrame, view.stdin);
   press(view.stdin, "y");
   await waitForFrame(view.lastFrame, /--confirm-additional-host/);
   press(view.stdin, "n");
@@ -487,7 +489,7 @@ test("several Source Skills with the same name open a picker, and the chosen one
   press(view.stdin, ENTER);
   await waitForFrame(view.lastFrame, /Version: 1 latest/);
   press(view.stdin, "1");
-  await waitForFrame(view.lastFrame, /y\/n/);
+  await readToEnd(view.lastFrame, view.stdin);
   press(view.stdin, "y");
   await waitForFrame(view.lastFrame, /Adopted Skill "demo"/);
   const [installed] = await f.operations.listUserGlobalInstallations!();
@@ -539,3 +541,48 @@ test("InstallationsView starts with every scope collapsed and opens each level o
     assert.match(view.lastFrame() ?? "", /portable\/demo/);
   } finally { view.unmount(); }
 });
+
+/** Opens the adoption preview of the unmanaged `demo` at the given terminal size. */
+async function adoptionPreview(f: Fixture, size: TerminalSize) {
+  const view = await mount(f);
+  resizeTerminal(view, size);
+  await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(1\)/);
+  await goto(view, /(^|\s)demo \[/);
+  press(view.stdin, "A");
+  await waitForFrame(view.lastFrame, /Adopt demo/);
+  press(view.stdin, ENTER);
+  await waitForFrame(view.lastFrame, /Version: 1 latest/);
+  press(view.stdin, "1");
+  return view;
+}
+
+for (const size of PREVIEW_SIZES) {
+  test(`adopting accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t);
+    await writeUnmanaged(f.home);
+    const view = await adoptionPreview(f, size);
+    deferCleanup(t, () => view.unmount());
+    await confirmAtEnd(view, size.rows, /\[y\] Adopt demo/, () => /Adopting demo…|Adopted Skill "demo"/.test(view.lastFrame() ?? ""));
+    await waitForFrame(view.lastFrame, /Adopted Skill "demo"/);
+    assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
+  });
+}
+
+for (const [cancelName, cancelKey] of [["n", "n"], ["Esc", ESC]] as const) {
+test(`a preview longer than a page keeps y inert until the adoption footer reads to the end, and ${cancelName} cancels mid-read`, async (t) => {
+  const f = await fixture(t);
+  await writeUnmanaged(f.home);
+  const view = await adoptionPreview(f, { columns: 40, rows: 12 });
+  deferCleanup(t, () => view.unmount());
+  const first = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+  press(view.stdin, "y");
+  press(view.stdin, "y");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.doesNotMatch(view.lastFrame() ?? "", /Adopting demo…|Adopted Skill "demo"/);
+  assert.match(first, /Review 1 of \d+/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  press(view.stdin, cancelKey);
+  await waitForFrame(view.lastFrame, /Adoption cancelled/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+});
+}

@@ -9,7 +9,7 @@ import { filterSkills } from "./catalog-filter.js";
 import { handleCatalogActionKey, type CatalogFlowContext } from "./catalog-flow.js";
 import { isInstalled } from "./catalog-installs.js";
 import { AppPanel, handleAppKey, startAppAction, type AppActionHost, type AppMode } from "./app-actions.js";
-import { ActionPanel, CatalogHeader, CatalogRowLine, CatalogSelectionHelp } from "./catalog-panel.js";
+import { ActionPanel, CatalogHeader, InstallConfirmPanel, CatalogRowLine, CatalogSelectionHelp } from "./catalog-panel.js";
 import { packageOwnedSkillNotice } from "./catalog-ownership.js";
 import { packageOperationsOf, type TuiEnvironment } from "./environment.js";
 import { handlePackageKey, isPackageMode, PackagePanel, startPackageAction, type PackageActionHost, type PackageContext } from "./package-actions.js";
@@ -138,6 +138,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   const flow: CatalogFlowContext = {
     operations,
     env,
+    previewGeometry,
     setAction,
     setMessage,
     isMounted: () => mounted.current,
@@ -218,6 +219,7 @@ export function CatalogView({ operations, sourceId, onCapturingChange, environme
   if (appMode !== undefined) return <AppPanel mode={appMode} />;
   // A paged declaration owns the view: rows of the tree above it would not be counted in its height.
   if (isPackageMode(action)) return <PackagePanel mode={action} />;
+  if (action.kind === "confirm-install") return <InstallConfirmPanel mode={action} />;
 
   return (
     <Box flexDirection="column">

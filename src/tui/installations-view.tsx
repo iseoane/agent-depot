@@ -14,7 +14,7 @@ import { handleAdoptionKey, startAdoption, type AdoptionContext } from "./adopti
 import { handleBrowseKey, type BrowseContext } from "./installations-browse.js";
 import { handleManageKey, isPagedConfirmMode, type ManageContext } from "./manage-actions.js";
 import { PagedConfirmPanel } from "./manage-panel.js";
-import { ModePanel } from "./installations-panel.js";
+import { AdoptionConfirmPanel, ModePanel } from "./installations-panel.js";
 import { TreeRowLine } from "./installations-rows.js";
 import { buildTree, leavesOf, markersOf, type NodeData } from "./installations-tree.js";
 import { ListFooter, Working } from "./panel-parts.js";
@@ -185,6 +185,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   const adoption: AdoptionContext = {
     operations,
     env,
+    previewGeometry,
     setMode,
     browse: manage.browse,
     setMessage,
@@ -218,6 +219,7 @@ export function InstallationsView({ operations, environment, onCapturingChange, 
   // A paged declaration owns the view: rows of the tree above it would not be counted in its height.
   if (isPackageMode(mode)) return <PackagePanel mode={mode} />;
   if (isPagedConfirmMode(mode)) return <PagedConfirmPanel mode={mode} />;
+  if (mode.kind === "confirm" && mode.adoption.verdict.adoptable) return <AdoptionConfirmPanel mode={mode} />;
   const ready = state.data;
   const window = computeWindow(rows.length, index, height);
   const listed = rows.slice(window.start, window.end);

@@ -7,7 +7,8 @@ import type { TuiEnvironment } from "./environment.js";
 import { errorText } from "./batch.js";
 import { defaultAdoptionHosts, findAdoptionCandidates, prepareAdoption, type UnmanagedGroup } from "./installations.js";
 import type { InstallationsMode } from "./installations-mode.js";
-import { answerYesNo, applyChecklistOutcome, hostChecklistKey, moveCursor, versionInputKey } from "./mode-keys.js";
+import { answerYesNo, applyChecklistOutcome, hostChecklistKey, moveCursor, movePreviewCursor, versionInputKey } from "./mode-keys.js";
+import type { PreviewChrome, PreviewGeometry } from "./preview-window.js";
 import type { ViewMessage } from "./view-state.js";
 import { busy } from "./working-model.js";
 
@@ -15,6 +16,8 @@ import { busy } from "./working-model.js";
 export interface AdoptionContext {
   readonly operations: SourceOperations;
   readonly env: TuiEnvironment;
+  /** The viewport of a paged preview at the current terminal size, shared with the panel. */
+  readonly previewGeometry: PreviewGeometry;
   setMode(mode: InstallationsMode): void;
   /** Returns the view to browsing. */
   browse(): void;
@@ -71,7 +74,7 @@ async function prepare(
   try {
     const adoption = await prepareAdoption(context.operations, context.env, mode.entry, mode.skill, { hosts: mode.hosts, version });
     if (!context.isMounted()) return;
-    context.setMode({ kind: "confirm", entry: mode.entry, skill: mode.skill, adoption });
+    context.setMode({ kind: "confirm", entry: mode.entry, skill: mode.skill, adoption, cursor: 0 });
   } catch (error) {
     fail(context, error);
   }
@@ -122,12 +125,31 @@ function handleFixedKey(context: AdoptionContext, mode: ModeOf<"fixed">, input: 
   else if (outcome.kind === "edit") context.setMode({ ...mode, value: outcome.value });
 }
 
+/** What an adoptable preview shows, so the key handler and the panel page the same rows. */
+export function adoptionPreview(mode: ModeOf<"confirm">): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+  const { prepared } = mode.adoption;
+  const name = mode.entry.name;
+  return {
+    lines: [...prepared.preview, ...(prepared.runsExternalCommand ? ["This install runs an external command (see above)."] : [])],
+    chrome: { title: `Adopt ${name}`, action: `Adopt ${name}`, consequence: `Adopt ${name}? y/n` },
+  };
+}
+
+/** Pages the preview like the other footer confirmations: `y` answers only once it has all been displayed. */
 function handleConfirmKey(context: AdoptionContext, mode: ModeOf<"confirm">, input: string, key: Key): void {
   if (!mode.adoption.verdict.adoptable) {
     if (key.escape || key.return || input === "n") cancel(context);
     return;
   }
+  const { lines, chrome } = adoptionPreview(mode);
+  const viewport = context.previewGeometry(lines, mode.cursor, chrome);
+  const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
+  if (cursor !== undefined) {
+    context.setMode({ ...mode, cursor });
+    return;
+  }
   answerYesNo(input, key, () => {
+    if (!viewport.reachedEnd) return;
     if (mode.adoption.prepared.additionalHostExposure) context.setMode({ ...mode, kind: "confirm-exposure" });
     else void confirm(context, mode, false);
   }, () => cancel(context));

@@ -13,7 +13,7 @@ export type InstallationsMode =
   | { readonly kind: "host"; readonly entry: Entry; readonly skill: SkillCandidate; readonly cursor: number; readonly selected: readonly ProjectHost[] }
   | { readonly kind: "version"; readonly entry: Entry; readonly skill: SkillCandidate; readonly hosts: readonly ProjectHost[] }
   | { readonly kind: "fixed"; readonly entry: Entry; readonly skill: SkillCandidate; readonly hosts: readonly ProjectHost[]; readonly value: string }
-  | { readonly kind: "confirm"; readonly entry: Entry; readonly skill: SkillCandidate; readonly adoption: PreparedAdoption }
+  | { readonly kind: "confirm"; readonly entry: Entry; readonly skill: SkillCandidate; readonly adoption: PreparedAdoption; readonly cursor: number }
   | { readonly kind: "confirm-exposure"; readonly entry: Entry; readonly skill: SkillCandidate; readonly adoption: PreparedAdoption }
   | ManageMode;
 

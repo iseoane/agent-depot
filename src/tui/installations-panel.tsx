@@ -1,10 +1,18 @@
 import { Box, Text } from "ink";
 
+import { adoptionPreview } from "./adoption-actions.js";
 import { HOST_CHOICES } from "./catalog-actions.js";
 import type { InstallationsMode } from "./installations-mode.js";
 import { ManagePanel } from "./manage-panel.js";
-import { DecisionPrompt, HostChecklist, PreviewLines } from "./panel-parts.js";
+import { DecisionPrompt, HostChecklist, PagedPreview } from "./panel-parts.js";
+import { usePreviewGeometry } from "./preview-window.js";
 import { theme } from "./theme.js";
+
+/** An adoptable preview with the shared footer; the view shows it alone so no tree rows count against its height. */
+export function AdoptionConfirmPanel({ mode }: { readonly mode: Extract<InstallationsMode, { readonly kind: "confirm" }> }) {
+  const { lines, chrome } = adoptionPreview(mode);
+  return <PagedPreview chrome={chrome} lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
+}
 
 /** The prompt of the adoption and manage modes; browsing shows nothing. */
 export function ModePanel({ mode }: { readonly mode: InstallationsMode }) {
@@ -33,11 +41,7 @@ export function ModePanel({ mode }: { readonly mode: InstallationsMode }) {
       return <Text>Fixed version: {mode.value}_  (Enter confirm, Esc cancel)</Text>;
     case "confirm":
       return mode.adoption.verdict.adoptable ? (
-        <Box flexDirection="column">
-          <PreviewLines lines={mode.adoption.prepared.preview} />
-          {mode.adoption.prepared.runsExternalCommand ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
-          <DecisionPrompt>Adopt {mode.entry.name}?</DecisionPrompt>
-        </Box>
+        <AdoptionConfirmPanel mode={mode} />
       ) : (
         <Box flexDirection="column">
           <Text color={theme.error}>{mode.adoption.verdict.reason}</Text>
