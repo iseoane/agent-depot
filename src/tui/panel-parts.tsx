@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
+import type { StyledLine } from "./preview-render.js";
 import { sliceSpans, type PreviewChrome, type PreviewFooterRole, type PreviewViewport } from "./preview-window.js";
 import { animationEnabled, formatElapsed, SPINNER_FRAMES, SPINNER_TICK_MS, STATIC_GLYPH } from "./working-model.js";
 
@@ -241,18 +242,22 @@ function footerColor(role: PreviewFooterRole, reachedEnd: boolean): { readonly c
  * A paged preview with the shared two-row footer: reading progress, then what `y` does. `[y]` stays
  * dimmed until `viewport` reaches the end; callers ignore `y` until then using the same viewport.
  */
-export function PagedPreview({ chrome, lines, viewport, warnFirst = false }: {
+export function PagedPreview({ chrome, lines, styled, viewport, warnFirst = false }: {
   readonly chrome: PreviewChrome;
   readonly lines: readonly string[];
+  /** Colours of each line in `lines`; without them the colours are inferred from the text. */
+  readonly styled?: readonly StyledLine[];
   readonly viewport: PreviewViewport;
   readonly warnFirst?: boolean;
 }) {
   return (
     <BorderPanel title={chrome.title}>
-      {viewport.rows.map((line, position) =>
-        <PreviewLine key={position} line={line} position={position}
+      {viewport.rows.map((line, position) => styled === undefined
+        ? <PreviewLine key={position} line={line} position={position}
           warnFirst={warnFirst && viewport.start === 0} logicalLine={lines[viewport.sourceLines[position]!]!}
-          offset={viewport.sourceOffsets[position]!} />)}
+          offset={viewport.sourceOffsets[position]!} />
+        : <Text key={position}>{sliceSpans(styled[viewport.sourceLines[position]!]!, viewport.sourceOffsets[position]!, line.length).map((span, index) =>
+          <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>)}
       {viewport.footer.map((spans, row) => <Text key={`footer-${row}`}>{spans.map((span, index) =>
         <Text key={index} {...footerColor(span.role, viewport.reachedEnd)}>{span.text}</Text>)}</Text>)}
     </BorderPanel>

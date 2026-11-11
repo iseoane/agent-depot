@@ -1,36 +1,36 @@
 import type { UpdatesMode } from "./updates-mode.js";
-import { previewText, type UpdatePreviewLine } from "./updates.js";
+import { fieldLine, renderPreviewDocument, textLine, type StyledLine } from "./preview-render.js";
 import type { PreviewChrome } from "./preview-window.js";
+import type { PreparedUpdates } from "./updates.js";
 
-export function updateModePreviewLines(mode: UpdatesMode): readonly UpdatePreviewLine[] {
+export function updateModePreviewLines(mode: UpdatesMode): readonly StyledLine[] {
   switch (mode.kind) {
     case "preview":
-      return [
-        ...mode.prepared.lines,
-        ...mode.prepared.appFailures.map(previewText),
-        ...mode.prepared.packageFailures.map(previewText),
-        ...mode.prepared.failures.map(({ item, message }) => previewText(`Preview failed for ${JSON.stringify(item.id)}: ${message}`)),
-      ];
+      return renderPreviewDocument(mode.prepared.document);
     case "manual":
       return [
-        { kind: "field", label: "App:", value: mode.plan.entry.recipe?.name ?? mode.plan.entry.file },
-        { kind: "field", label: "Environment:", value: mode.plan.environment },
-        { kind: "field", label: "Working directory:", value: mode.plan.cwd },
-        { kind: "field", label: "Manual:", value: mode.plan.manual ?? "" },
-        ...(mode.reason === undefined ? [] : [previewText(mode.reason)]),
+        fieldLine("App:", mode.plan.entry.recipe?.name ?? mode.plan.entry.file),
+        fieldLine("Environment:", mode.plan.environment),
+        fieldLine("Working directory:", mode.plan.cwd),
+        fieldLine("Manual:", mode.plan.manual ?? ""),
+        ...(mode.reason === undefined ? [] : [textLine(mode.reason)]),
       ];
     case "confirm-paths":
       return [
-        previewText("Outside .agents/skills and .claude/skills:"),
-        ...mode.prepared.nonCanonicalPaths.map(({ scope, path }) => ({
-          kind: "field" as const,
-          label: "Path:",
-          value: `[${scope}] ${JSON.stringify(path)}`,
-        })),
+        textLine("Outside .agents/skills and .claude/skills:"),
+        ...mode.prepared.nonCanonicalPaths.map(({ scope, path }) => fieldLine("Path:", `[${scope}] ${JSON.stringify(path)}`)),
       ];
     default:
       return [];
   }
+}
+
+/** What else confirming does besides applying: replaced local changes and external commands. */
+function previewEffects(prepared: PreparedUpdates): readonly string[] {
+  const replaced = prepared.groups.flatMap((group) =>
+    group.applicable.filter((item) => group.overwriteShown.has(item.id)).map((item) => `replaces ${item.selection.path}'s local changes`));
+  const commands = prepared.document.sections.flatMap(({ items }) => items.flatMap(({ rows }) => rows.filter((row) => row.kind === "command"))).length;
+  return [...replaced, ...(commands === 0 ? [] : [`runs ${commands} ${commands === 1 ? "command" : "commands"}`])];
 }
 
 export function updateModePreviewChrome(mode: UpdatesMode): PreviewChrome {
@@ -38,8 +38,8 @@ export function updateModePreviewChrome(mode: UpdatesMode): PreviewChrome {
     case "preview": {
       const count = mode.prepared.applicable.length;
       if (count === 0) return { title: "Update batch preview", consequence: "Nothing can be applied.", cancel: "[Enter/Esc] back" };
-      const updates = `${count} ${count === 1 ? "update" : "updates"}`;
-      return { title: "Update batch preview", action: `Apply ${updates}`, consequence: `Apply ${updates}? y/n` };
+      const action = mode.prepared.document.action;
+      return { title: "Update batch preview", action, consequence: [...previewEffects(mode.prepared), `${action}? y/n`].join(" · ") };
     }
     case "manual":
       return { title: "Manual App update", action: "Check now", consequence: "Manual step done, check now? y/n" };

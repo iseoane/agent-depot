@@ -18,7 +18,7 @@ import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js
 import type { BundleDescriptor, InstalledPackage, PackageLifecyclePlan, PackageSelection } from "../src/package-model.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { createSourceRefreshSession, withRefreshSession } from "../src/source-refresh-session.js";
-import { formatAgo, loadUpdateRows, prepareUpdates, previewLineText, runUpdates } from "../src/tui/updates.js";
+import { formatAgo, loadUpdateRows, prepareUpdates, runUpdates } from "../src/tui/updates.js";
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { UpdatesView } from "../src/tui/updates-view.js";
@@ -538,7 +538,7 @@ test("previews the update, writes nothing before y, then reports and reloads wit
   press(stdin, ENTER);
   const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
   assert.equal(f.readCalls.length, checkReads, "the preview reuses the assessed snapshot instead of rereading or refreshing the Source");
-  assert.match(preview, /Preview: update Skill "portable\/one"/);
+  assert.match(preview, /SKILLS\s+│\n│ {2}portable\/one {2}/);
   assert.match(preview, /proposed changes: replace 1 managed files/);
   assert.equal(await f.read(f.project, ".agents/skills/one"), oldText("one"));
   press(stdin, "y");
@@ -586,8 +586,8 @@ test("previews the external command and runs it only after y", async (t) => {
   press(stdin, ENTER);
   // A long preview (long Windows paths wrap) needs paging to the end before y is accepted.
   const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
-  assert.match(preview, /"--fake-update"/);
-  assert.match(preview, /external cwd/);
+  assert.match(preview, /\$ node --fake-update/);
+  assert.match(preview, /^│ {4}in \S/mu);
   assert.deepEqual(f.methodCalls, []);
   press(stdin, "y");
   await waitForFrame(lastFrame, /1 updated, 0 failed/);
@@ -653,8 +653,8 @@ test("one preview and confirmation applies project and user-global updates toget
   press(stdin, "a");
   press(stdin, ENTER);
   const preview = await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
-  assert.match(preview, /Preview: update Skill "portable\/proj" from builtin:agent-depot \(scope: project\)/);
-  assert.match(preview, /Preview: update Skill "portable\/glob" from builtin:agent-depot \(scope: user-global\)/);
+  assert.match(preview, /portable\/proj {2}builtin:agent-depot · project/);
+  assert.match(preview, /portable\/glob {2}builtin:agent-depot · user-global/);
   press(stdin, "y");
   const done = await waitForFrame(lastFrame, /2 updated, 0 failed/);
   assert.match(done, /Updated portable\/proj/);
@@ -867,14 +867,12 @@ test("the project-scope update preview starts with the project root and the user
   await seedProject(f, [{ name: "one", state: "outdated" }]);
   await seedGlobal(f, { name: "two", state: "outdated" });
   const data = await loadUpdateRows(f.operations, f.environment, { refresh: false });
-  const lineTexts = async (scope: "project" | "user-global") => {
-    const prepared = await prepareUpdates(data, data.rows.filter((row) => row.kind !== "app" && row.kind !== "package" && row.scope === scope));
-    return prepared.lines.map(previewLineText);
-  };
-  const project = await lineTexts("project");
-  assert.equal(project[0], `Project: ${f.project}`);
-  assert.ok(project.some((line) => line.startsWith("Preview: update Skill")));
-  assert.ok(!(await lineTexts("user-global")).some((line) => line.startsWith("Project:")));
+  const documentOf = async (scope: "project" | "user-global") =>
+    (await prepareUpdates(data, data.rows.filter((row) => row.kind !== "app" && row.kind !== "package" && row.scope === scope))).document;
+  const project = await documentOf("project");
+  assert.deepEqual(project.context, [`Project: ${f.project}`]);
+  assert.equal(project.sections[0]?.items[0]?.title, "portable/one");
+  assert.deepEqual((await documentOf("user-global")).context, []);
 });
 
 test("the confirm-paths panel labels each path with its scope", async (t) => {
@@ -885,7 +883,7 @@ test("the confirm-paths panel labels each path with its scope", async (t) => {
   await expandList(lastFrame, stdin, /portable\/two/);
   press(stdin, "a");
   press(stdin, ENTER);
-  await waitForFrame(lastFrame, /y\/n/);
+  await reviewToEnd(lastFrame, stdin, /y\/n/);
   press(stdin, "y");
   const panel = await waitForFrame(lastFrame, /Confirm replacing non-canonical/);
   assert.match(panel, /\[project\] "tools\/skills\/one"/);
@@ -930,7 +928,7 @@ test("an item whose preview failed is excluded from the apply and its files stay
   press(stdin, "a");
   press(stdin, ENTER);
   const preview = await reviewToEnd(lastFrame, stdin, /Apply 1 update\?/);
-  assert.match(preview, /Preview failed for[\s\S]*bad/);
+  assert.match(preview, /FAILED\s+│\n│ {2}portable\/bad:/);
   assert.match(preview.replace(/[\s│]/gu, ""), /cannotreadinstallmetadata/);
   press(stdin, "y");
   const done = await waitForFrame(lastFrame, /1 updated, 1 failed/);
@@ -1192,7 +1190,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   await waitForFrame(view.lastFrame, /1 selected/);
   press(view.stdin, ENTER);
   const preview = await reviewToEnd(view.lastFrame, view.stdin, /Apply 1 update\?/);
-  assert.match(preview, /Step 1 \(apply\): \["pi","update","github\.com\/iseoane\/pstack"\]/);
+  assert.match(preview, /Step 1: apply\s+│\n│ {4}\$ pi update github\.com\/iseoane\/pstack/);
   assert.match(preview, /Approval: needs approval/);
   assert.match(preview, /runs a host process/);
   assert.match(preview, /This apply approves the declaration above\./);

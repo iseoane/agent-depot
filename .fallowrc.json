@@ -77,7 +77,8 @@
           "src/package-owned-skills.ts",
           "src/package-state.ts",
           "src/package-flow.ts",
-          "src/flow-progress.ts"
+          "src/flow-progress.ts",
+          "src/preview-model.ts"
         ]
       },
       {

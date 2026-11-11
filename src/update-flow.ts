@@ -11,6 +11,7 @@ import {
   type ProjectSkillSelection,
   type ProjectSource,
 } from "./project-manifest.js";
+import type { PreviewItem, PreviewRow } from "./preview-model.js";
 import { describeProjectTarget } from "./project-target.js";
 import { defaultProjectSkillTreeAccess } from "./skill-install.js";
 import {
@@ -133,6 +134,51 @@ export async function previewUpdateCandidates(
 /** How the preview names the confirmations: CLI flags or the interactive prompts. */
 export type UpdateConfirmationWording = "flags" | "prompt";
 
+/** One candidate's preview: target, warnings to confirm, proposed changes and any external command. */
+export function skillUpdatePreviewItem(
+  plan: SkillUpdatePlan,
+  scope: UpdateScope,
+  projectRoot: string,
+  wording: UpdateConfirmationWording,
+): PreviewItem {
+  const rows: PreviewRow[] = [{ kind: "field", label: "target", value: plan.target }];
+  if (plan.nonCanonicalPath !== undefined) {
+    const relative = relativeProjectPath(projectRoot, plan.nonCanonicalPath);
+    rows.push({ kind: "warning", text: wording === "flags"
+      ? `non-canonical location ${JSON.stringify(relative)} (outside .agents/skills and .claude/skills); --yes together with --confirm-path ${relative} explicitly confirms replacing this exact path`
+      : `non-canonical location ${JSON.stringify(relative)} (outside .agents/skills and .claude/skills); a separate confirmation of this exact path is required to replace it` });
+  }
+  rows.push({ kind: "field", label: "proposed changes", value: `replace ${plan.snapshot.files.length} managed files and persist the new version/content baseline` });
+  if (plan.overwriteRequired) {
+    rows.push({ kind: "warning", text: wording === "flags"
+      ? "the installed Skill has local modifications; --yes explicitly confirms replacing them"
+      : "the installed Skill has local modifications; confirming replaces them" });
+  }
+  if (plan.methodPreview) {
+    rows.push(
+      { kind: "command", argv: plan.methodPreview.argv, cwd: plan.methodPreview.cwd },
+      { kind: "field", label: "external target", value: JSON.stringify(plan.methodPreview.target) },
+      { kind: "field", label: "declared changes", value: "" },
+      ...plan.methodPreview.declaredChanges.map((change): PreviewRow => ({ kind: "text", text: change, indent: 1 })),
+      { kind: "warning", text: plan.methodPreview.warning },
+    );
+  }
+  return { title: plan.selection.path, detail: `${plan.source.id} · ${scope}`, rows };
+}
+
+/** How `update apply` prints one row of a Skill preview item. */
+function cliPreviewRow(row: PreviewRow): readonly string[] {
+  switch (row.kind) {
+    case "field": return [`  ${row.label}:${row.value === "" ? "" : ` ${row.value}`}`];
+    case "text": return [`  ${"  ".repeat(row.indent ?? 0)}${row.text}`];
+    case "warning": return [`  WARNING: ${row.text}`];
+    case "command": return [
+      `  external command: argv=${JSON.stringify(row.argv)}`,
+      ...(row.cwd === undefined ? [] : [`  external cwd: ${JSON.stringify(row.cwd)}`]),
+    ];
+  }
+}
+
 /** The preview `update apply` prints for one candidate. */
 export function describeUpdatePreview(
   plan: SkillUpdatePlan,
@@ -140,33 +186,10 @@ export function describeUpdatePreview(
   projectRoot: string,
   wording: UpdateConfirmationWording = "flags",
 ): readonly string[] {
-  const lines = [
+  return [
     `Preview: update Skill ${JSON.stringify(plan.selection.path)} from ${plan.source.id} (scope: ${scope})`,
-    `  target: ${plan.target}`,
+    ...skillUpdatePreviewItem(plan, scope, projectRoot, wording).rows.flatMap(cliPreviewRow),
   ];
-  if (plan.nonCanonicalPath !== undefined) {
-    const relative = relativeProjectPath(projectRoot, plan.nonCanonicalPath);
-    lines.push(wording === "flags"
-      ? `  WARNING: non-canonical location ${JSON.stringify(relative)} (outside .agents/skills and .claude/skills); --yes together with --confirm-path ${relative} explicitly confirms replacing this exact path`
-      : `  WARNING: non-canonical location ${JSON.stringify(relative)} (outside .agents/skills and .claude/skills); a separate confirmation of this exact path is required to replace it`);
-  }
-  lines.push(`  proposed changes: replace ${plan.snapshot.files.length} managed files and persist the new version/content baseline`);
-  if (plan.overwriteRequired) {
-    lines.push(wording === "flags"
-      ? "  WARNING: the installed Skill has local modifications; --yes explicitly confirms replacing them"
-      : "  WARNING: the installed Skill has local modifications; confirming replaces them");
-  }
-  if (plan.methodPreview) {
-    lines.push(
-      `  external command: argv=${JSON.stringify(plan.methodPreview.argv)}`,
-      `  external cwd: ${JSON.stringify(plan.methodPreview.cwd)}`,
-      `  external target: ${JSON.stringify(plan.methodPreview.target)}`,
-      "  declared changes:",
-      ...plan.methodPreview.declaredChanges.map((change) => `    ${change}`),
-      `  WARNING: ${plan.methodPreview.warning}`,
-    );
-  }
-  return lines;
 }
 
 /**

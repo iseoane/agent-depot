@@ -13,7 +13,8 @@ import { useUpdatesFlow } from "./updates-flow.js";
 import { handleUpdatesKey, type UpdatesKeyContext } from "./updates-keys.js";
 import { entryId, viewOf, type UpdatesMessage } from "./updates-model.js";
 import { CheckStatus, EntryLine, ModePanel, UpdatesFooter } from "./updates-panel.js";
-import { previewLineText, type UpdateScopeFilter, type UpdatesData } from "./updates.js";
+import { type UpdateScopeFilter, type UpdatesData } from "./updates.js";
+import { lineText } from "./preview-render.js";
 import { updateModePreviewChrome, updateModePreviewLines } from "./updates-preview.js";
 import { useKeys } from "./keys.js";
 import { BorderPanel, Working } from "./panel-parts.js";
@@ -105,7 +106,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
 
   const geometry = usePreviewGeometry();
   const previewGeometry = (current: UpdatesMode) =>
-    geometry(updateModePreviewLines(current).map(previewLineText), "cursor" in current ? current.cursor : 0, updateModePreviewChrome(current));
+    geometry(updateModePreviewLines(current).map(lineText), "cursor" in current ? current.cursor : 0, updateModePreviewChrome(current));
 
   const keyContext: UpdatesKeyContext = {
     height,
