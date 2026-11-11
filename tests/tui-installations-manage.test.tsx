@@ -20,6 +20,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { animatedClock } from "./animated-clock.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
@@ -364,4 +365,67 @@ test("unapproved App recipes do not appear as Installations alongside managed Sk
   assert.doesNotMatch(view.lastFrame()!, /Apps \(user-global\)/);
   assert.match(view.lastFrame()!, /portable\/demo/);
   assert.deepEqual(await hostsOf(f.operations), ["pi"]);
+});
+
+for (const size of PREVIEW_SIZES) {
+  test(`adding hosts accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t, ["pi"]);
+    const view = await mount(f);
+    deferCleanup(t, () => view.unmount());
+    resizeTerminal(view, size);
+    await revealSkill(view);
+    view.stdin.write("h");
+    await waitForFrame(view.lastFrame, /\[ \] 1 claude/);
+    view.stdin.write("1");
+    await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
+    view.stdin.write(ENTER);
+    await confirmAtEnd(view, size.rows, /\[y\] Add hosts to demo/, () => /needs separate confirmation/.test(view.lastFrame() ?? ""));
+    assert.equal(await exists(claude(f.home)), false);
+  });
+
+  test(`removing hosts accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t, ["pi", "claude"]);
+    const view = await mount(f);
+    deferCleanup(t, () => view.unmount());
+    resizeTerminal(view, size);
+    await revealSkill(view);
+    view.stdin.write("u");
+    await waitForFrame(view.lastFrame, /1 all hosts.*2 choose hosts/s);
+    view.stdin.write("2");
+    await waitForFrame(view.lastFrame, /\[ \] 1 pi.*\[ \] 2 claude/s);
+    view.stdin.write("2");
+    await waitForFrame(view.lastFrame, /\[x\] 2 claude/);
+    view.stdin.write(ENTER);
+    await confirmAtEnd(view, size.rows, /\[y\] Remove hosts from demo/, () => /Changing hosts of demo…|Removed hosts claude/.test(view.lastFrame() ?? ""));
+    await waitForFrame(view.lastFrame, /Removed hosts claude/);
+    assert.deepEqual(await hostsOf(f.operations), ["pi"]);
+  });
+
+  test(`uninstalling accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async (t) => {
+    const f = await fixture(t, ["pi"]);
+    const view = await mount(f);
+    deferCleanup(t, () => view.unmount());
+    resizeTerminal(view, size);
+    await revealSkill(view);
+    view.stdin.write("u");
+    await confirmAtEnd(view, size.rows, /\[y\] Uninstall demo/, () => /Removing demo…|Removed demo/.test(view.lastFrame() ?? ""));
+    await waitForFrame(view.lastFrame, /Removed demo/);
+    assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  });
+}
+
+test("a preview longer than a page keeps y inert until the uninstall footer reads to the end", async (t) => {
+  const f = await fixture(t, ["pi"]);
+  const view = await mount(f);
+  deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, { columns: 40, rows: 12 });
+  await revealSkill(view);
+  view.stdin.write("u");
+  const first = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+  view.stdin.write("y");
+  view.stdin.write("y");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.doesNotMatch(view.lastFrame() ?? "", /Removing demo…|Removed demo/);
+  assert.match(first, /Review 1 of \d+/);
+  assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
 });
