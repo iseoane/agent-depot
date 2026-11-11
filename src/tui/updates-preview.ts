@@ -25,12 +25,18 @@ export function updateModePreviewLines(mode: UpdatesMode): readonly StyledLine[]
   }
 }
 
-/** What else confirming does besides applying: replaced local changes and external commands. */
+/**
+ * What else confirming does besides applying: replaced local changes and external commands. Kept to
+ * a bounded length so a narrow footer still fits the question after it; the warnings name every Skill.
+ */
 function previewEffects(prepared: PreparedUpdates): readonly string[] {
-  const replaced = prepared.groups.flatMap((group) =>
-    group.applicable.filter((item) => group.overwriteShown.has(item.id)).map((item) => `replaces ${item.selection.path}'s local changes`));
+  const replaced = prepared.groups.flatMap((group) => group.applicable.filter((item) => group.overwriteShown.has(item.id)));
   const commands = prepared.document.sections.flatMap(({ items }) => items.flatMap(({ rows }) => rows.filter((row) => row.kind === "command"))).length;
-  return [...replaced, ...(commands === 0 ? [] : [`runs ${commands} ${commands === 1 ? "command" : "commands"}`])];
+  return [
+    ...(replaced.length === 1 ? [`replaces ${replaced[0]!.selection.path}'s local changes`] : []),
+    ...(replaced.length > 1 ? [`replaces local changes in ${replaced.length} Skills`] : []),
+    ...(commands === 0 ? [] : [`runs ${commands} ${commands === 1 ? "command" : "commands"}`]),
+  ];
 }
 
 export function updateModePreviewChrome(mode: UpdatesMode): PreviewChrome {
