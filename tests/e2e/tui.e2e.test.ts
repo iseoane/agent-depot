@@ -283,13 +283,33 @@ function capturedOutput(session: TuiSession): string {
   return session.terminalOutput.replace(ANSI, "").replaceAll("\r", "");
 }
 
+/** The review position and window that the shared preview footer reports, read across its wrapped rows. */
+function footerPosition(screen: string): { readonly footerRow: number; readonly cursor: number; readonly total: number; readonly first: number; readonly last: number } | undefined {
+  const rows = screen.split("\n");
+  const footerRow = rows.findIndex(row => /^\s*│ read /u.test(row));
+  if (footerRow < 0) return undefined;
+  const flat = rows.slice(footerRow).join("").replace(/[│\s]/gu, "");
+  const review = /Review(\d+)of(\d+)/u.exec(flat);
+  if (!review) return undefined;
+  const range = /(\d+)–(\d+)of(\d+)/u.exec(flat);
+  return { footerRow, cursor: Number(review[1]), total: Number(review[2]), first: range ? Number(range[1]) : 1, last: range ? Number(range[2]) : Number(review[2]) };
+}
+
+/** While the footer still shows reading progress, `y` is not accepted yet. */
+const READING = /read [█░]* ?\d+%/u;
+
 /** Pages to `ready` and returns the screens visited joined; `frames`, when given, also receives each screen. */
 async function scrollPreviewToEnd(session: TuiSession, ready: RegExp, frames: string[] = []): Promise<string> {
   let visited = session.screen;
   frames.push(session.screen);
   for (let move = 0; move < 200; move += 1) {
     if (ready.test(session.screen)) return `${visited}\n${session.screen}`;
-    await session.send("\u001b[6~", new RegExp(`${ready.source}|arrows\\/Pg page`, ready.flags));
+    // A narrow footer wraps the final question across panel rows.
+    if (/read ✓/u.test(session.screen)) {
+      assert.match(session.screen.replace(/ *│\n│ /gu, ""), ready, `the final footer does not ask ${ready}:\n${session.screen}`);
+      return `${visited}\n${session.screen}`;
+    }
+    await session.send("\u001b[6~", new RegExp(`${ready.source}|Review \\d+ of`, ready.flags));
     visited += `\n${session.screen}`;
     frames.push(session.screen);
   }
@@ -512,17 +532,14 @@ test("Sources refresh requires reviewing every selected Source at narrow and wid
       const indexedRows = new Map<number, string>();
       const collectVisibleRows = () => {
         const screenRows = session.screen.split("\n");
-        const range = /(\d+)–(\d+) of (\d+)/u.exec(session.screen);
-        const review = /Review (\d+) of (\d+)/u.exec(session.screen);
-        assert.ok(review, `preview lost its physical-row position:\n${session.screen}`);
-        assert.equal(Number(review[2]), total);
-        const first = range ? Number(range[1]) : 1;
-        const last = range ? Number(range[2]) : total;
+        const position = footerPosition(session.screen);
+        assert.ok(position, `preview lost its physical-row position:\n${session.screen}`);
+        assert.equal(position.total, total);
+        const { first, last } = position;
         const titleRow = screenRows.findIndex(row => row.includes("Refresh Git Sources"));
-        const reviewRow = screenRows.findIndex(row => /Review \d+ of \d+/u.test(row));
-        const visible = screenRows.slice(titleRow + 1, reviewRow)
+        const visible = screenRows.slice(titleRow + 1, position.footerRow)
           .map(row => row.match(/^\s*│ ?(.*?)\s*│?\s*$/u)?.[1] ?? "")
-          .filter(row => row !== "" && !/^\d+–\d+ of \d+$/u.test(row));
+          .filter(row => row !== "");
         assert.equal(visible.length, last - first + 1, `visible rows disagree with the indexed window ${first}–${last}:\n${session.screen}`);
         visible.forEach((row, offset) => {
           const index = first + offset;
@@ -533,9 +550,9 @@ test("Sources refresh requires reviewing every selected Source at narrow and wid
       };
       collectVisibleRows();
       const initialCursor = Number(/Review (\d+) of/u.exec(session.screen)?.[1] ?? 0);
-      const initialRange = /(\d+)–(\d+) of/u.exec(session.screen);
-      assert.ok(initialRange, `oversized preview should expose its visible physical rows:\n${session.screen}`);
-      const pageSize = Number(initialRange[2]) - Number(initialRange[1]) + 1;
+      const initialRange = footerPosition(session.screen);
+      assert.ok(initialRange && initialRange.last < initialRange.total, `oversized preview should expose its visible physical rows:\n${session.screen}`);
+      const pageSize = initialRange.last - initialRange.first + 1;
       await session.send("\u001B[B", /Review \d+ of/u);
       assert.equal(Number(/Review (\d+) of/u.exec(session.screen)?.[1]), Math.min(initialCursor + pageSize, total), "Down moves a whole visible page");
       collectVisibleRows();
@@ -548,11 +565,12 @@ test("Sources refresh requires reviewing every selected Source at narrow and wid
       await session.send("\u001B[5~", /Review \d+ of/u);
       assert.equal(Number(/Review (\d+) of/u.exec(session.screen)?.[1]), initialCursor, "PageUp returns to the same preview rows");
       collectVisibleRows();
-      for (let page = 0; page < 100 && !session.screen.includes("Refresh these Sources? y/n"); page += 1) {
+      const confirmable = () => session.screen.replace(/[│\s]/gu, "").includes("RefreshtheseSources?y/n");
+      for (let page = 0; page < 100 && !confirmable(); page += 1) {
         await session.send("\u001B[6~", new RegExp(`Review \\d+ of ${total}`, "u"));
         collectVisibleRows();
       }
-      assert.match(session.screen, /Refresh these Sources\? y\/n/u);
+      assert.ok(confirmable(), `the final footer does not ask to refresh:\n${session.screen}`);
       assert.ok(lastTarget, `expected registered Sources, got ${session.screen}`);
       const expectedLastLine = `Source: refresh Git Source ${sourceIdForUrl(lastTarget)} from ${lastTarget}`;
       const reviewedSources: string[] = [];
@@ -714,6 +732,69 @@ test("the Catalog keeps numbered destinations and Packages readable in a narrow 
   }
 });
 
+test("in a 40x17 terminal the update batch ignores y until its footer reads to the end, then [y] applies it", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
+  const root = await mkdtemp(path.join(sandbox, "update-footer-"));
+  const fixture = await fakeAppFixture(root);
+  const home = path.join(root, "home");
+  await mkdir(home);
+  const finalTerm = `${"Review every delegated update argument. ".repeat(12)}FINAL-BATCH-TERM`;
+  await writeFile(fixture.file, JSON.stringify({ ...fixture.recipe, update: { argv: ["depot-e2e-app", "update", finalTerm] } }));
+  const apps = createAppOperations({ homeDirectory: home, recipesDirectory: path.join(root, "state", "agent-depot", "apps"),
+    resolveExecutable: async name => path.join(fixture.bin, name) });
+  const [entry] = await apps.load();
+  assert.ok(entry, "fixture recipe exists");
+  await apps.approve(entry);
+  await apps.executeLifecycle(await apps.planLifecycle(entry, "install"), true);
+  assert.equal(await readFile(fixture.state, "utf8"), "1.0.0");
+  const rows = 17;
+  const session = new TuiSession({
+    PATH: `${fixture.bin}${path.delimiter}${process.env.PATH}`,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_STATE_HOME: path.join(root, "state"),
+    XDG_CONFIG_HOME: path.join(root, "config"),
+    XDG_CACHE_HOME: path.join(root, "cache"),
+    PI_CODING_AGENT_DIR: path.join(home, ".pi", "agent"),
+  }, 40, rows);
+  const flat = () => session.screen.replace(/[│\s]/gu, "");
+  const updateRan = async () => (await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"update"'));
+  try {
+    await session.waitFor(/n add ·/u);
+    await session.send("4", /Apps \(1\)/u);
+    await session.send("\r", /App: fixture-app/u);
+    await session.send(" ", /1 selected/u);
+    await session.send("u", READING);
+    let pages = 0;
+    let reviewed = "";
+    while (READING.test(session.screen)) {
+      reviewed += flat();
+      assert.ok(flat().includes("[y]Apply1update"), `the footer does not name what y does:\n${session.screen}`);
+      assert.ok(session.screen.split("\n").length <= rows, `the preview exceeded the ${rows}-row PTY:\n${session.screen}`);
+      const position = footerPosition(session.screen);
+      assert.ok(position, `the footer lost its review position:\n${session.screen}`);
+      session.press("y");
+      await session.send("j", new RegExp(`Review (?!${position.cursor} of)\\d+ of`, "u"));
+      assert.equal(await updateRan(), false, `y ran the update before the footer read to the end:\n${session.screen}`);
+      pages += 1;
+      assert.ok(pages < 200, "the preview never reached its end");
+    }
+    assert.ok(pages > 1, `the batch preview fit one screen, so nothing was gated:\n${session.screen}`);
+    assert.match(session.screen, /read ✓/u);
+    assert.ok(flat().includes("Apply1update?y/n") && flat().includes("[y]Apply1update"), `the final footer does not offer the update:\n${session.screen}`);
+    assert.ok(`${reviewed}${flat()}`.includes("FINAL-BATCH-TERM"), "paging never showed the delegated update argument");
+    assert.ok(flat().includes(`Workingdirectory:${home}`.replace(/\s/gu, "")), `the last preview row is not on screen:\n${session.screen}`);
+    assert.ok(session.screen.split("\n").length <= rows, `the final preview exceeded the ${rows}-row PTY:\n${session.screen}`);
+    session.press("y");
+    await session.waitFor(/Update summary: 1 updated,/u);
+    assert.equal(await updateRan(), true);
+    assert.equal(await readFile(fixture.state, "utf8"), "2.0.0");
+    session.press("q");
+    assert.equal(await session.exitCode(), 0);
+  } finally {
+    session.kill();
+  }
+});
+
 test("a long Package approval pages inside a short real terminal and never hides what it asks to approve", { timeout: 120_000, skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(path.join(tmpdir(), "depot-package-paging-"));
   // The long home puts the plan's working directory past the panel width on any machine.
@@ -771,8 +852,8 @@ test("a long Package approval pages inside a short real terminal and never hides
     session.press("i");
     const first = await session.waitFor(/Review 1 of \d+/u);
     assertWholeFrame(first);
-    assert.match(first, /Approve this declaration and continue\? y\/n/u, "the question is on every page");
-    assert.match(first, /arrows\/Pg page/u);
+    assert.match(first, /\[y\] Approve and install pstack/u, "the footer names what y does on every page");
+    assert.ok(first.replace(/[│\s]/gu, "").includes("arrows/Pgpage"), `the footer names the paging keys:\n${first}`);
 
     const visited: string[] = [];
     for (let page = 0; page < 60; page += 1) {
@@ -853,23 +934,17 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
   try {
     await session.waitFor(/n add ·/u);
     await session.send("j", /review-all-terms[\s\S]*needs approval/u);
-    const approvalQuestion = () => {
-      const visible = session.screen.replace(/\s/gu, "");
-      return visible.includes("Approve") && visible.includes("y/n");
-    };
-    let preview = await session.send("\r", /Scroll to end before y/u);
+    const approvalQuestion = () => /read ✓/u.test(session.screen);
+    let preview = await session.send("\r", READING);
     const collectRows = (rows: Map<number, string>) => {
       const screenRows = session.screen.split("\n");
-      const range = /(\d+)–(\d+) of (\d+)/u.exec(session.screen);
-      const review = /Review (\d+) of (\d+)/u.exec(session.screen);
-      assert.ok(review, `approval preview lost its physical-row position:\n${session.screen}`);
-      const first = range ? Number(range[1]) : 1;
-      const last = range ? Number(range[2]) : Number(review[2]);
+      const position = footerPosition(session.screen);
+      assert.ok(position, `approval preview lost its physical-row position:\n${session.screen}`);
+      const { first, last } = position;
       const titleRow = screenRows.findIndex(row => row.includes("Recipe approval · does not install"));
-      const reviewRow = screenRows.findIndex(row => /Review \d+ of \d+/u.test(row));
-      const visible = screenRows.slice(titleRow + 1, reviewRow)
+      const visible = screenRows.slice(titleRow + 1, position.footerRow)
         .map(row => row.match(/^\s*│ ?(.*?)\s*│?\s*$/u)?.[1] ?? "")
-        .filter(row => row !== "" && !/^\d+–\d+ of \d+$/u.test(row));
+        .filter(row => row !== "");
       assert.equal(visible.length, last - first + 1, `visible preview rows disagree with ${first}–${last}:\n${session.screen}`);
       visible.forEach((row, offset) => rows.set(first + offset, row));
     };
@@ -884,7 +959,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
       collectRows(wideRows);
     }
     assert.ok(approvalQuestion(), `wide preview never exposed its approval question:\n${session.screen}`);
-    assert.ok(session.screen.replace(/\s/gu, "").includes(approvalRecipe.name), `wide preview truncated the approved recipe name:\n${session.screen}`);
+    assert.ok(session.screen.replace(/[│\s]/gu, "").includes(approvalRecipe.name), `wide preview truncated the approved recipe name:\n${session.screen}`);
     assert.doesNotMatch(session.screen, /zzz-secondary/u, `wide preview left the Sources list visible below the panel:\n${session.screen}`);
     assert.match(session.screen, /FINAL-DANGER-TERM-MUST-STAY-HIDDEN/u, `wide preview never exposed its final term:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= 24, `wide final preview exceeded the 24-row PTY:\n${session.screen}`);
@@ -911,14 +986,14 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     assert.ok(nearEnd, `preview lost its position before consent:\n${session.screen}`);
     assert.ok(approvalQuestion(), `did not reach the final approval boundary:\n${session.screen}`);
     const beforeFinal = Number(nearEnd[1]) - 1;
-    await session.send("k", /Scroll to end before y/u);
+    await session.send("k", READING);
     collectRows(narrowRows);
-    assert.match(session.screen, /Scroll to end before y/u, `previous preview row did not close confirmation:\n${session.screen}`);
+    assert.match(session.screen, READING, `previous preview row did not close confirmation:\n${session.screen}`);
     assert.equal(Number(/Review (\d+) of (\d+)/u.exec(session.screen)?.[1]), beforeFinal, `preview cursor did not move back one physical row:\n${session.screen}`);
     session.press("y");
     await new Promise(resolve => setTimeout(resolve, 50));
     const prematureConfirm = session.screen;
-    assert.match(prematureConfirm, /Scroll to end before y/u, `y approved while the final preview content was not displayed:\n${prematureConfirm}`);
+    assert.match(prematureConfirm, READING, `y approved while the final preview content was not displayed:\n${prematureConfirm}`);
     assert.doesNotMatch(prematureConfirm, /latest-selector-unchanged|FINAL-DANGER-TERM-MUST-STAY-HIDDEN/u);
     assert.ok(prematureConfirm.split("\n").length <= 17, `resized preview exceeded the 17-row PTY:\n${prematureConfirm}`);
     await assert.rejects(readdir(path.join(state, "agent-depot", "app-approvals")), { code: "ENOENT" });
@@ -986,7 +1061,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     await session.send("\r", /j\/k move/u);
     await session.send("j", />\s+App fixture-app\s+not installed/u);
     await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
-    await session.send("i", /Scroll to end before y/u);
+    await session.send("i", READING);
     let installPreview = capturedOutput(session);
     session.resize(40, 17);
     await session.send("j", /Review 2 of \d+/u);
@@ -998,7 +1073,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
       const progress = /Review (\d+) of (\d+)/u.exec(session.screen);
       assert.ok(progress, `resized install preview lost its row position:\n${session.screen}`);
       if (Number(progress[1]) - 1 + 10 >= Number(progress[2])) break;
-      await session.send("\u001b[6~", /arrows\/Pg page/u);
+      await session.send("\u001b[6~", /Review \d+ of/u);
       installPreview += capturedOutput(session);
       installFrames.push(session.screen);
     }
@@ -1009,7 +1084,7 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     await session.send("j", new RegExp(`Review ${nearEnd[1]} of ${nearEnd[2]}`));
     session.press("y");
     await new Promise(resolve => setTimeout(resolve, 50));
-    assert.match(session.screen, /Scroll to end before y/u, `y executed before the complete install preview was displayed:\n${session.screen}`);
+    assert.match(session.screen, READING, `y executed before the complete install preview was displayed:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= 17, `resized install preview exceeded the 17-row PTY:\n${session.screen}`);
     assert.ok(!(await readFile(fixture.log, "utf8")).split("\n").some(line => line.includes('"install"')), "early y must not execute the install command");
     await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
@@ -1062,17 +1137,17 @@ test("the narrow TUI keeps recipe approval separate from confirmed App installat
     assert.match(updates, /2\.0\.0/u);
     await session.send(" ", /1 selected/u);
     const cancelledUpdate = await session.send("u", /Update batch preview/u);
-    assert.match(cancelledUpdate, /Scroll to end before confirming/u);
+    assert.match(cancelledUpdate, READING);
     await session.send("n", /Update cancelled/u);
     assert.doesNotMatch(await readFile(fixture.log, "utf8"), /"update"/u, "cancelling the update preview does not run the recipe");
     assert.equal(await readFile(fixture.state, "utf8"), "1.0.0", "cancelling the update preview leaves the App version unchanged");
     const updatePreview = await session.send("u", /Update batch preview/u);
-    assert.match(updatePreview, /Scroll to end before confirming/u);
+    assert.match(updatePreview, READING);
     session.resize(40, 17);
     const narrowUpdatePreview = await session.send("j", /Review/u);
     assert.match(narrowUpdatePreview, /Review/u);
     assert.ok(session.screen.split("\n").length <= 17, `40x17 update preview exceeded its PTY:\n${session.screen}`);
-    await session.send("y", /Scroll to end before confirming/u);
+    await session.send("y", READING);
     assert.doesNotMatch(await readFile(fixture.log, "utf8"), /"update"/u, "y before the final page does not execute the recipe");
     assert.equal(await readFile(fixture.state, "utf8"), "1.0.0", "y before the final page leaves the App version unchanged");
     session.resize(80, 24);
@@ -1114,10 +1189,11 @@ test("wrapped Profile preview retains semantic colors while scrolling in a narro
     await session.send("i", /Showing \.json only/u);
     await session.send("j", />\s+wrapped-profile-colors\.json/u);
     await session.send("\r", /Enter preview/u);
-    const preview = await session.send("\r", /Apply Profile\? \(y\/n\)/u);
+    const preview = await session.send("\r", /\[y\] Apply Profile/u);
     assert.ok(preview.split("\n").length <= 17, `wrapped Profile exceeded its 40x17 PTY:\n${preview}`);
     const continuation = await session.send("j".repeat(7), /Review 8 of 41/u);
-    assert.match(continuation, /7–8 of 41/u, "the narrow preview scrolls to wrapped continuation rows");
+    // The shared footer keeps the position and window on one wrapped row, leaving four preview rows here.
+    assert.ok(continuation.replace(/[│\s]/gu, "").includes("6–9of41"), `the narrow preview scrolls to wrapped continuation rows:\n${continuation}`);
     assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, "segment/source-segment/source-se")), "wrapped Source URL continuation retains its value color in a narrow PTY");
     await session.send("n", /Import Profile/u);
     await session.send("\u001b", /e export · i import/u);
@@ -1261,7 +1337,7 @@ test("a slow App install shows an advancing spinner, elapsed time from 1s, and c
     await session.send("fixture-app", /Filter: fixture-app/u);
     await session.send("\r", /j\/k move/u);
     await session.send("j", />\s+App fixture-app\s+not installed/u);
-    await session.send("i", /Scroll to end before y|install fixture-app\? y\/n/u);
+    await session.send("i", /read [█░]* ?\d+%|read ✓/u);
     await scrollPreviewToEnd(session, /install fixture-app\? y\/n/u);
     assert.doesNotMatch(session.screen, anySpinner, `the preview must not show a busy line:\n${session.screen}`);
     await assert.rejects(readFile(fixture.state), { code: "ENOENT" });
