@@ -10,8 +10,9 @@ Type: feature
 - Brief J002: [brief-r1.md](jobs/J002/brief-r1.md)
 - Brief J003a: [brief-r1.md](jobs/J003a/brief-r1.md)
 - Brief J003b: [brief-r1.md](jobs/J003b/brief-r1.md)
+- Brief J004a: [brief-r1.md](jobs/J004a/brief-r1.md)
 - Blocker: None
-- Next step: J003b (worker sonnet), luego J004a-c, J005, J006 y release 0.6.14.
+- Next step: J004a (worker sonnet), luego J004b, J004c, J005, J006 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -33,3 +34,4 @@ Type: feature
 - Nuevo J006 (prioritario, antes de la release; preexistente, confirmado en f762165): texto libre de recetas/Sources (nombre, homepage, manual, declaraciones, cwd) llega al terminal sin escapar caracteres de control/ESC → puede redibujar sobre las líneas `$ …` y alterar la geometría de la compuerta y. Escapar una vez al renderizar líneas estilizadas; incluir \p{Zs} no ASCII en commandLine.
 - J003a entregado: PR #109 fusionado con CI verde (corrección de test frágil en Windows a89e9bc).
 - J003b worker (sonnet, 19 min, 109k) 18e7b4d..9a2f0e8. Revisión V001 (opus): Spec pass, 0 bloqueantes; Standards inconcluso → coordinador observó: RED 5c9fa2c solo tests; CLI sin cambios; e2e iguales o más estrictos; tests focalizados 67/0.
+- J003b entregado: PR #110 fusionado con CI verde.
