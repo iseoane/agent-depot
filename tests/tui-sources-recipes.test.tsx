@@ -9,6 +9,7 @@ import { createSourceOperations } from "../src/sources.js";
 import { App } from "../src/tui/app.js";
 import { SourcesView, type SourcesViewProps } from "../src/tui/sources-view.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { readToEnd } from "./package-panel.js";
 import { deferCleanup } from "./test-cleanup.js";
 import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
 
@@ -159,7 +160,7 @@ test("recipe add guide offers exactly AI and manual routes, and AI reuses confir
   view.stdin.write("2");
   await waitForFrame(view.lastFrame, /Skill version policy/);
   view.stdin.write("1");
-  frame = await waitForFrame(view.lastFrame, /Install.*y\/n/);
+  frame = await readToEnd(view.lastFrame, view.stdin);
   assert.match(frame, /agent-depot-apprecipe/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
   view.stdin.write("y");
@@ -357,7 +358,7 @@ for (const stage of ["host", "scope", "version", "confirm"] as const) {
       }
       if (stage === "confirm") {
         view.stdin.write("1");
-        await waitForFrame(view.lastFrame, /Install agent-depot-apprecipe\? y\/n/);
+        await readToEnd(view.lastFrame, view.stdin);
       }
       view.stdin.write(cancel);
       await waitForFrame(view.lastFrame, /Install cancelled/);

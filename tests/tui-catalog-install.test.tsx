@@ -19,6 +19,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { readToEnd } from "./package-panel.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -179,7 +180,7 @@ test("i installs user-global step by step with a multi-host preview and confirma
   await key(stdin, "2");
   await waitForFrame(lastFrame, /Skill version policy[\s\S]*1 latest.*2 fixed/s);
   await key(stdin, "1");
-  const preview = await waitForFrame(lastFrame, /y\/n/);
+  const preview = await readToEnd(lastFrame, stdin);
   assert.match(preview, /scope: user-global; hosts: pi,claude,codex; version policy: latest/);
   assert.match(preview, /portable\/demo\/SKILL\.md/);
   assert.ok(!preview.includes("no --yes supplied"));
@@ -209,7 +210,7 @@ test("n declines the install preview without changing anything", async (t) => {
   const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["2"], "2", "1");
-  await waitForFrame(lastFrame, /y\/n/);
+  await readToEnd(lastFrame, stdin);
   await key(stdin, "n");
   const frame = await waitForFrame(lastFrame, /Install cancelled/);
   assert.ok(!frame.includes("[global"));
@@ -223,7 +224,7 @@ test("i installs into the project manifest and shows the project marker", async 
   const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["3"], "1", "1");
-  const preview = await waitForFrame(lastFrame, /y\/n/);
+  const preview = await readToEnd(lastFrame, stdin);
   assert.match(preview, /scope: project; hosts: codex/);
   await key(stdin, "y");
   const done = await waitForFrame(lastFrame, (frame) => /Installed Skill "demo"/.test(frame) && /All skills are installed/.test(frame));
@@ -242,7 +243,7 @@ test("fixed version policy asks for the version text", async (t) => {
   await waitForFrame(lastFrame, /Fixed Skill version/);
   for (const character of AGENT_DEPOT_PACKAGE_VERSION!) await key(stdin, character);
   await key(stdin, ENTER);
-  const preview = await waitForFrame(lastFrame, /y\/n/);
+  const preview = await readToEnd(lastFrame, stdin);
   assert.match(preview, new RegExp(`version policy: fixed:${AGENT_DEPOT_PACKAGE_VERSION!.replaceAll(".", "\\.")}`));
   await key(stdin, "n");
   unmount();
@@ -259,7 +260,7 @@ test("adopting an identical Skill with a missing Host location needs a separate 
   const { lastFrame, stdin, unmount } = await mount(f);
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["1", "2"], "1", "1");
-  const preview = await waitForFrame(lastFrame, /y\/n/);
+  const preview = await readToEnd(lastFrame, stdin);
   assert.match(preview, /ADDITIONAL HOST EXPOSURE/);
   await key(stdin, "y");
   const second = await waitForFrame(lastFrame, /Skill Host exposure/);
@@ -270,7 +271,7 @@ test("adopting an identical Skill with a missing Host location needs a separate 
   assert.deepEqual(await new ProjectManifestStore(defaultProjectManifestPath(f.project)).load().then((m) => m.skills), []);
 
   await chooseInstall(stdin, ["1", "2"], "1", "1");
-  await waitForFrame(lastFrame, /y\/n/);
+  await readToEnd(lastFrame, stdin);
   await key(stdin, "y");
   await waitForFrame(lastFrame, /Skill Host exposure/);
   await key(stdin, "y");
@@ -314,7 +315,7 @@ test("the Git Source is refreshed before the preview, which reflects the refresh
   const { lastFrame, stdin, unmount } = await mount({ ...g });
   await showDemo(lastFrame, stdin);
   await chooseInstall(stdin, ["2"], "2", "1");
-  const preview = await waitForFrame(lastFrame, /y\/n/);
+  const preview = await readToEnd(lastFrame, stdin);
   assert.deepEqual(events, ["refresh"], "the refresh happens before the preview is shown");
   assert.match(preview, /portable\/demo\/extra\.md/);
   assert.equal(installedAtRefresh, false);

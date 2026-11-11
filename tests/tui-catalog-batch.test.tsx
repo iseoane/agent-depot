@@ -13,6 +13,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame } from "./wait-for-frame.js";
+import { readToEnd } from "./package-panel.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -170,7 +171,7 @@ test("i installs the marked skills with one host, scope and version choice and o
   const host = await waitForFrame(view.lastFrame, /Host \(space/);
   assert.match(host, /Install 2 skills\./);
   await choose(view, ["1"], "2", "1");
-  const preview = await waitForFrame(view.lastFrame, /Install 2 skills\? y\/n/);
+  const preview = await readToEnd(view.lastFrame, view.stdin);
   assert.match(preview, /portable\/alpha\/SKILL\.md/);
   assert.match(preview, /portable\/gamma\/SKILL\.md/);
   assert.ok(!preview.includes("portable/beta/SKILL.md"));
@@ -193,7 +194,7 @@ test("a project batch records every skill in the manifest", async (t) => {
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write("i");
   await choose(view, ["3"], "1", "1");
-  await waitForFrame(view.lastFrame, /Install 3 skills\? y\/n/);
+  await readToEnd(view.lastFrame, view.stdin);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /All skills are installed/);
   const manifest = await new ProjectManifestStore(defaultProjectManifestPath(f.project)).load();
@@ -209,7 +210,7 @@ test("a skill that cannot be prepared is shown in the preview and skipped while 
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write("i");
   await choose(view, ["1"], "2", "1");
-  const preview = await waitForFrame(view.lastFrame, /Install 2 skills\? y\/n/);
+  const preview = await readToEnd(view.lastFrame, view.stdin);
   assert.match(preview, /Cannot install beta: cannot read portable\/beta/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Installed Skill "gamma"/);
@@ -235,7 +236,7 @@ test("one item failing while installing does not stop the others", async (t) => 
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write("i");
   await choose(view, ["1"], "2", "1");
-  await waitForFrame(view.lastFrame, /Install 3 skills\? y\/n/);
+  await readToEnd(view.lastFrame, view.stdin);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Failed beta/);
   assert.match(done, /state is locked/);
@@ -267,7 +268,7 @@ test("the busy line names the skill being installed and counts the finished ones
   await step(view, " ");
   view.stdin.write("i");
   await choose(view, ["1"], "2", "1");
-  await waitForFrame(view.lastFrame, /Install 2 skills\? y\/n/);
+  await readToEnd(view.lastFrame, view.stdin);
   view.stdin.write("y");
   const first = await waitForFrame(view.lastFrame, /Installing Skill alpha \(1\/2\)…/);
   assert.ok(!first.includes("finished"), first);
@@ -292,10 +293,10 @@ test("one additional-host confirmation covers the items that need it; n installs
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write("i");
   await choose(view, ["1", "2"], "1", "1");
-  const preview = await waitForFrame(view.lastFrame, /Install 3 skills\? y\/n/);
+  const preview = await readToEnd(view.lastFrame, view.stdin);
   assert.match(preview, /ADDITIONAL HOST EXPOSURE/);
   view.stdin.write("y");
-  const second = await waitForFrame(view.lastFrame, /--confirm-additional-host/);
+  const second = await waitForFrame(view.lastFrame, /needs separate confirmation/);
   assert.match(second, /alpha/);
   view.stdin.write("n");
   await waitForFrame(view.lastFrame, /Install cancelled/);
@@ -357,7 +358,7 @@ test("a project batch preview shows the project root and its warnings once, a us
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write("i");
   await choose(view, ["3"], "1", "1");
-  const preview = await waitForFrame(view.lastFrame, /Install 3 skills\? y\/n/);
+  const preview = await readToEnd(view.lastFrame, view.stdin);
   assert.equal(preview.split(`Project: ${f.project}`).length - 1, 1, preview);
   assert.equal(preview.split("WARNING: this directory has no project manifest").length - 1, 1, preview);
   view.unmount();
@@ -368,7 +369,7 @@ test("a project batch preview shows the project root and its warnings once, a us
   await waitForFrame(global.lastFrame, /3 selected/);
   global.stdin.write("i");
   await choose(global, ["1"], "2", "1");
-  const globalPreview = await waitForFrame(global.lastFrame, /Install 3 skills\? y\/n/);
+  const globalPreview = await readToEnd(global.lastFrame, global.stdin);
   assert.ok(!globalPreview.includes("Project:"), globalPreview);
   global.unmount();
 });

@@ -1,6 +1,7 @@
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { PackageMode } from "./package-actions.js";
+import type { PreviewChrome } from "./preview-window.js";
 import type { Busy } from "./working-model.js";
 import type {
   InstallScope,
@@ -36,7 +37,7 @@ export type ActionMode =
       readonly scope: InstallScope;
       readonly value: string;
     }
-  | { readonly kind: "confirm-install"; readonly items: readonly BatchItem[] }
+  | { readonly kind: "confirm-install"; readonly items: readonly BatchItem[]; readonly cursor: number }
   | { readonly kind: "confirm-exposure"; readonly items: readonly BatchItem[] }
   /** A Package bundle action reuses the shared Package modes and preview. */
   | PackageMode
@@ -44,3 +45,17 @@ export type ActionMode =
   | Busy;
 
 export const BROWSE: ActionMode = { kind: "browse" };
+
+/** What the install confirmation shows, so the key handler and the panel page the same rows. */
+export function installPreview(items: readonly BatchItem[]): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+  const ready = items.filter((item) => item.prepared !== undefined);
+  const single = items.length === 1;
+  const name = describeSkills(ready.map((item) => item.skill));
+  const lines = [
+    ...(ready[0]?.prepared?.projectTarget ?? []),
+    ...items.flatMap(({ skill, prepared, error }) =>
+      prepared === undefined ? [`Cannot install ${skill.name}: ${error}`] : [...(single ? [] : [skill.name]), ...prepared.preview]),
+    ...(ready.some((item) => item.prepared?.runsExternalCommand) ? ["This install runs an external command (see above)."] : []),
+  ];
+  return { lines, chrome: { title: `Skill install preview · ${ready.length} ready`, action: `Install ${name}`, consequence: `Install ${name}? y/n` } };
+}

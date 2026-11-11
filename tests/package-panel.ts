@@ -48,3 +48,11 @@ export function pagedRows(frames: readonly string[]): string[] {
   }
   return rebuilt;
 }
+
+/** Pages a paged preview to its end and returns every page, so assertions see the whole preview. */
+export async function readToEnd(
+  lastFrame: () => string | undefined,
+  stdin: { write(data: string): void },
+): Promise<string> {
+  return (await pageToEnd(lastFrame, stdin)).join("\n");
+}

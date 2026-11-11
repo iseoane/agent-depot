@@ -1,13 +1,13 @@
 import { Box, Text } from "ink";
 
-import { describeSkills, HOST_CHOICES, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
+import { describeSkills, HOST_CHOICES, installPreview, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
 import { packageOwnedSkillNotice, packageOwnerBadge } from "./catalog-ownership.js";
-import { skillKey } from "./catalog-tree.js";
 import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
 import type { FilterState } from "./catalog-filter.js";
 import { describeRow, truncateDescription, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
 import { isPackageMode, PackagePanel } from "./package-actions.js";
-import { BorderPanel, DecisionPrompt, HostChecklist, PreviewLines, Working } from "./panel-parts.js";
+import { BorderPanel, DecisionPrompt, HostChecklist, PagedPreview, Working } from "./panel-parts.js";
+import { usePreviewGeometry } from "./preview-window.js";
 import { rowStyle } from "./theme.js";
 import type { VisibleRow } from "./tree.js";
 import { theme } from "./theme.js";
@@ -75,6 +75,12 @@ export function CatalogSelectionHelp({ row, height }: {
   );
 }
 
+/** The install confirmation with the shared footer; the view shows it alone so no tree rows count against its height. */
+export function InstallConfirmPanel({ mode }: { readonly mode: Extract<ActionMode, { readonly kind: "confirm-install" }> }) {
+  const { lines, chrome } = installPreview(mode.items);
+  return <PagedPreview chrome={chrome} lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
+}
+
 /** The prompt of the install flow; browsing shows nothing. */
 export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
   if (isPackageMode(mode)) return <PackagePanel mode={mode} />;
@@ -94,27 +100,8 @@ export function ActionPanel({ mode }: { readonly mode: ActionMode }) {
       return <BorderPanel title="Skill version policy"><Text>1 latest  2 fixed  (Esc cancel)</Text></BorderPanel>;
     case "fixed":
       return <BorderPanel title="Fixed Skill version"><Text>{mode.value}_  (Enter confirm, Esc cancel)</Text></BorderPanel>;
-    case "confirm-install": {
-      const ready = mode.items.filter((item) => item.prepared !== undefined);
-      const single = mode.items.length === 1;
-      const projectTarget = ready[0]?.prepared?.projectTarget ?? [];
-      return (
-        <BorderPanel title={`Skill install preview · ${ready.length} ready`}>
-          {projectTarget.length === 0 ? null : <PreviewLines lines={projectTarget} />}
-          {mode.items.map(({ skill, prepared, error }) =>
-            prepared === undefined ? (
-              <Text key={skillKey(skill)} color={theme.error}>Cannot install {skill.name}: {error}</Text>
-            ) : (
-              <Box key={skillKey(skill)} flexDirection="column">
-                {single ? null : <Text color={theme.group}>{skill.name}</Text>}
-                <PreviewLines lines={prepared.preview} />
-              </Box>
-            ))}
-          {ready.some((item) => item.prepared?.runsExternalCommand) ? <Text color={theme.warning}>This install runs an external command (see above).</Text> : null}
-          <DecisionPrompt>Install {describeSkills(ready.map((item) => item.skill))}?</DecisionPrompt>
-        </BorderPanel>
-      );
-    }
+    case "confirm-install":
+      return <InstallConfirmPanel mode={mode} />;
     case "confirm-exposure": {
       const names = mode.items.filter((item) => item.prepared?.additionalHostExposure).map((item) => item.skill.name);
       return (

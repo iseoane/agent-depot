@@ -141,6 +141,7 @@ export function useSourcesRecipes({
   const flow: CatalogFlowContext = {
     operations,
     env: environment ?? {},
+    previewGeometry,
     isMounted: () => mounted.current,
     setAction: action => setMode(action.kind === "browse"
       ? { kind: "browse" }

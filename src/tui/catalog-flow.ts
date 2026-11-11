@@ -3,12 +3,13 @@ import type { Key } from "ink";
 import { formatProgressLabel } from "../flow-progress.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
-import { BROWSE, describeSkills, HOST_CHOICES, SCOPE_CHOICES, type ActionMode, type BatchItem } from "./catalog-actions.js";
+import { BROWSE, describeSkills, installPreview, HOST_CHOICES, SCOPE_CHOICES, type ActionMode, type BatchItem } from "./catalog-actions.js";
 import { prepareInstall, runInstall } from "./catalog-installs.js";
 import { skillKey } from "./catalog-tree.js";
 import type { TuiEnvironment } from "./environment.js";
 import { errorText, runBatch } from "./batch.js";
-import { answerYesNo, applyChecklistOutcome, hostChecklistKey, versionInputKey } from "./mode-keys.js";
+import { answerYesNo, applyChecklistOutcome, hostChecklistKey, movePreviewCursor, versionInputKey } from "./mode-keys.js";
+import type { PreviewGeometry } from "./preview-window.js";
 import type { ViewMessage } from "./view-state.js";
 import { busy } from "./working-model.js";
 
@@ -16,6 +17,8 @@ import { busy } from "./working-model.js";
 export interface CatalogFlowContext {
   readonly operations: SourceOperations;
   readonly env: TuiEnvironment;
+  /** The viewport of a paged preview at the current terminal size, shared with the panel. */
+  readonly previewGeometry: PreviewGeometry;
   setAction(mode: ActionMode): void;
   setMessage(message: ViewMessage | undefined): void;
   isMounted(): boolean;
@@ -53,7 +56,7 @@ async function startInstall(
     context.setAction(BROWSE);
     return;
   }
-  context.setAction({ kind: "confirm-install", items });
+  context.setAction({ kind: "confirm-install", items, cursor: 0 });
 }
 
 /** Applies the prepared items one by one; a failure is reported for that item and the rest still run. */
@@ -73,6 +76,22 @@ async function confirmInstall(context: CatalogFlowContext, items: readonly Batch
   // Installed Skills leave the list; only the failed ones stay marked for another try.
   context.keepMarked(failed);
   await context.finish({ kind: failed.size > 0 ? "error" : "ok", text: lines.join("\n") });
+}
+
+/** Pages the preview like the other footer confirmations: `y` answers only once it has all been displayed. */
+function handleInstallKey(context: CatalogFlowContext, mode: ModeOf<"confirm-install">, input: string, key: Key): void {
+  const { lines, chrome } = installPreview(mode.items);
+  const viewport = context.previewGeometry(lines, mode.cursor, chrome);
+  const cursor = movePreviewCursor(mode.cursor, viewport.total, input, key, viewport.height);
+  if (cursor !== undefined) {
+    context.setAction({ ...mode, cursor });
+    return;
+  }
+  answerYesNo(input, key, () => {
+    if (!viewport.reachedEnd) return;
+    if (mode.items.some((item) => item.prepared?.additionalHostExposure)) context.setAction({ kind: "confirm-exposure", items: mode.items });
+    else void confirmInstall(context, mode.items, false);
+  }, () => cancel(context));
 }
 
 function handleHostKey(context: CatalogFlowContext, mode: ModeOf<"host">, input: string, key: Key): void {
@@ -120,10 +139,7 @@ export function handleCatalogActionKey(context: CatalogFlowContext, mode: Action
       handleFixedKey(context, mode, input, key);
       return;
     case "confirm-install":
-      answerYesNo(input, key, () => {
-        if (mode.items.some((item) => item.prepared?.additionalHostExposure)) context.setAction({ ...mode, kind: "confirm-exposure" });
-        else void confirmInstall(context, mode.items, false);
-      }, () => cancel(context));
+      handleInstallKey(context, mode, input, key);
       return;
     case "confirm-exposure":
       answerYesNo(input, key, () => void confirmInstall(context, mode.items, true), () => cancel(context));
