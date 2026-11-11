@@ -11,8 +11,9 @@ Type: feature
 - Brief J003a: [brief-r1.md](jobs/J003a/brief-r1.md)
 - Brief J003b: [brief-r1.md](jobs/J003b/brief-r1.md)
 - Brief J004a: [brief-r1.md](jobs/J004a/brief-r1.md)
+- Brief J004b: [brief-r1.md](jobs/J004b/brief-r1.md)
 - Blocker: None
-- Next step: J004a (worker sonnet), luego J004b, J004c, J005, J006 y release 0.6.14.
+- Next step: J004b (worker sonnet), luego J004c, J004d, J005, J006 y release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -36,3 +37,4 @@ Type: feature
 - J003b worker (sonnet, 19 min, 109k) 18e7b4d..9a2f0e8. Revisión V001 (opus): Spec pass, 0 bloqueantes; Standards inconcluso → coordinador observó: RED 5c9fa2c solo tests; CLI sin cambios; e2e iguales o más estrictos; tests focalizados 67/0.
 - J003b entregado: PR #110 fusionado con CI verde.
 - J004a worker (sonnet, 11 min, 93k) edb5a85..ed1c11f. Revisión V001 (opus): Spec pass, 0 bloqueantes; coordinador observó RED 0b1499c solo tests, CLI sin cambios, tui-installations-manage 23/0. Seguimientos: forzar paginación en tests de add/remove hosts; test de n/Esc a mitad de lectura. Pendiente añadido: quitar unmanaged y confirmaciones en lote (confirm-bulk-*) → J004d.
+- J004a entregado: PR #111 fusionado con CI verde.
