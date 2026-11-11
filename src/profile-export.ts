@@ -263,7 +263,7 @@ export function requireProfileExportSelection(profile: Profile): void {
 }
 
 /** Rejects an existing destination that is not a regular file, such as a directory or symlink. */
-async function requireOverwritableProfileExport(file: string): Promise<void> {
+export async function requireOverwritableProfileExport(file: string): Promise<void> {
   try {
     if (!(await lstat(file)).isFile()) throw new Error(`${file} is not a regular file; choose another path`);
   } catch (error) {
