@@ -149,6 +149,22 @@ test("r previews, y confirms and refreshes the highlighted source", async () => 
   unmount();
 });
 
+test("a y pasted in the same block as r does not confirm the refresh, a lone y does", async () => {
+  const h = harness();
+  const { lastFrame, stdin, unmount } = await open(h);
+  stdin.write(DOWN);
+  await highlights(lastFrame, /git:1234/);
+  stdin.write("ry");
+  await waitForFrame(lastFrame, /Refresh these Sources\? y\/n|Refreshing Git Source|Refreshed Git Source/);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(h.calls, [], "the y in the block refreshed the Source");
+  assert.match(lastFrame() ?? "", /Refresh these Sources\? y\/n/);
+  stdin.write("y");
+  await waitFor(() => h.calls.length > 0);
+  assert.deepEqual(h.calls, ["refresh git:1234567890abcdef12345678"]);
+  unmount();
+});
+
 test("refresh failures use the titled error result panel", async () => {
   const h = harness({ async refreshSource() { h.calls.push("refresh failed"); throw new Error("mirror locked"); } });
   const { lastFrame, stdin, unmount } = await open(h);
