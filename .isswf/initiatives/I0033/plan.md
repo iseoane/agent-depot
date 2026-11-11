@@ -3,10 +3,11 @@
 Type: feature
 
 ## J001
-- Status: pending
+- Status: in-progress
 - Objective: Al exportar un Profile a un fichero que ya existe, ofrecer sobrescribirlo (con confirmación explícita) en vez de solo pedir otro nombre.
 - Depends on: I0032 J001 (pie de confirmación).
-- Blocker: en cola tras integrar I0032 J001 (antes de J002).
+- Brief: [brief-r1.md](jobs/J001/brief-r1.md)
+- Blocker: None
 - Next step: diseño con confirmación de sobrescritura en TUI (profile-view.tsx:418) y flag explícito en CLI si aplica (profile-export.ts:267 usa `wx`); escritura atómica (atomic-file.ts).
 
 ### Acceptance
