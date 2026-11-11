@@ -38,3 +38,4 @@ Type: feature
 - J003b entregado: PR #110 fusionado con CI verde.
 - J004a worker (sonnet, 11 min, 93k) edb5a85..ed1c11f. Revisión V001 (opus): Spec pass, 0 bloqueantes; coordinador observó RED 0b1499c solo tests, CLI sin cambios, tui-installations-manage 23/0. Seguimientos: forzar paginación en tests de add/remove hosts; test de n/Esc a mitad de lectura. Pendiente añadido: quitar unmanaged y confirmaciones en lote (confirm-bulk-*) → J004d.
 - J004a entregado: PR #111 fusionado con CI verde.
+- J004b worker (sonnet, 16 min + corrección 17 min, 307k) 273251d..4ed5687. Revisión V001 (opus): fail (F1 bloqueante: filas de mensajes sobre la preview de instalación de recetas). Corrección: F1, F2 (colores de avisos, también en la desinstalación de J004a), F3 (Esc). V002: approve. Coordinador: sin aserciones eliminadas en tests editados; RED 9490d2c solo tests; CLI sin cambios. Tamaño: subestimado (1 corrección).
