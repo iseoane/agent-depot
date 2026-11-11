@@ -16,7 +16,7 @@ const recipe = { name: "demo", install: { argv: ["demo", "install"] }, update: {
   uninstall: { argv: ["demo", "remove"] }, version: { argv: ["demo", "version"], pattern: "(.*)" },
   latest: { argv: ["demo", "latest"], pattern: "(.*)" }, setup: { pi: { argv: ["demo", "setup"] } } };
 
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, resolveExecutable: AppEnvironment["resolveExecutable"] = async name => `/usr/bin/${name}`) {
   const home = await mkdtemp(path.join(tmpdir(), "sources-recipes-"));
   const directory = path.join(home, "state", "apps");
   await mkdir(directory, { recursive: true });
@@ -25,8 +25,8 @@ async function fixture(t: TestContext) {
   const commands: string[] = [];
   const fetches: string[] = [];
   const views: { unmount: () => void; lastFrame: () => string | undefined }[] = [];
-  const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory: directory, platform: "linux",
-    resolveExecutable: async name => `/usr/bin/${name}`,
+  const appEnvironment: AppEnvironment = { homeDirectory: home, recipesDirectory: directory, platform: "linux", isWsl: false,
+    resolveExecutable,
     runner: async (_exe, args) => { commands.push(args.join(" ")); throw new Error("No recipe command should run"); },
     fetch: async () => { fetches.push("latest"); throw new Error("No latest lookup should run"); } };
   const operations = createSourceOperations({ homeDirectory: home, statePath: path.join(home, "state", "sources.json") });
@@ -81,9 +81,7 @@ test("Enter previews every step; only y approves and changed content needs appro
   view.stdin.write("\r");
   let frame = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
   assert.ok(squash(frame).includes(squash(f.file)), frame); // a long path wraps
-  assert.match(frame, /Platform: all/);
-  assert.match(frame, /argv: \[/);
-  assert.match(frame, /"demo",/);
+  assert.match(frame, /demo {2}all {2}● needs approval/);
   view.stdin.write("n");
   await waitForFrame(view.lastFrame, frame => !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "needs approval");
@@ -98,6 +96,49 @@ test("Enter previews every step; only y approves and changed content needs appro
   frame = await waitForFrame(view.lastFrame, /needs\s+approval/);
   assert.deepEqual(f.commands, []);
   assert.match(frame, /ID\s+KIND/);
+});
+
+/** The rows inside the open panel, without its border and padding. */
+const panelRows = (frame: string) => frame.split("\n").filter(row => row.startsWith("│ ")).map(row => row.slice(2).replace(/ *│$/u, ""));
+
+test("the recipe review shows the App's identity, then one block per step with its command and where it runs", async t => {
+  const f = await fixture(t, async name => name === "missing-tool" ? undefined : `/usr/bin/${name}`);
+  await writeFile(f.file, JSON.stringify({ ...recipe, platform: "linux", homepage: "https://example.com/demo", skills: ["demo-skill"],
+    install: { argv: ["demo", "install", "two words"] }, uninstall: { argv: ["missing-tool", "remove"] }, latest: { npm: "demo" } }));
+  const view = f.mount();
+  resizeTerminal(view, { columns: 220, rows: 80 });
+  await waitForFrame(view.lastFrame, /needs\s+approval/);
+  view.stdin.write("\r");
+  const rows = panelRows(await waitForFrame(view.lastFrame, /read ✓/u));
+  const where = `in ${f.home} · on linux`;
+  const start = rows.findIndex(row => row.includes("● needs approval"));
+  assert.ok(start >= 0, rows.join("\n"));
+  assert.deepEqual(rows.slice(start, start + 23), [
+    " demo  linux  ● needs approval",
+    ` ${f.file} · https://example.com/demo`,
+    " Owned Skills: demo-skill",
+    " ",
+    " ┌ install",
+    ' │ $ demo install "two words"',
+    ` │ /usr/bin/demo · ${where}`,
+    " ├ update",
+    " │ Manual: update demo",
+    ` │ ${where}`,
+    " ├ uninstall",
+    " │ $ missing-tool remove",
+    ` │ missing-tool not found in PATH · ${where}`,
+    " ├ version",
+    " │ $ demo version",
+    " │ Version pattern: (.*)",
+    ` │ /usr/bin/demo · ${where}`,
+    " ├ latest",
+    " │ Latest npm package: demo",
+    ` │ ${where}`,
+    " └ setup.pi",
+    "   $ demo setup",
+    `   /usr/bin/demo · ${where}`,
+  ].map(row => row.trimEnd()));
+  assert.deepEqual(f.commands, []);
 });
 
 test("recipe add guide offers exactly AI and manual routes, and AI reuses confirmed Skill installation", async t => {
@@ -168,7 +209,7 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   view.stdin.write("r");
   await waitForFrame(view.lastFrame, /not\s+applicable\s+here/);
   view.stdin.write("\r");
-  await waitForFrame(view.lastFrame, /Platform: windows/);
+  await waitForFrame(view.lastFrame, /demo {2}windows {2}● not applicable here/);
   view.stdin.write("j".repeat(100));
   await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
   view.stdin.write("y");

@@ -15,6 +15,7 @@ import { useMounted } from "./view-state.js";
 import { BorderPanel, DecisionPrompt, PagedPreview, PreviewConfirm, Working } from "./panel-parts.js";
 import { answerYesNo, movePreviewCursor } from "./mode-keys.js";
 import { usePreviewGeometry, type PreviewChrome } from "./preview-window.js";
+import { lineText, textLine, type StyledLine } from "./preview-render.js";
 import { theme } from "./theme.js";
 import { busy, type Busy } from "./working-model.js";
 
@@ -64,7 +65,7 @@ type RecipeMode =
   | Busy
   | { readonly kind: "guide" | "manual" | "prompt" }
   | { readonly kind: "install"; readonly action: ActionMode }
-  | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly string[]; readonly cursor: number; readonly removeAfterApproval?: boolean }
+  | { readonly kind: "approve"; readonly entry: AppEntry; readonly lines: readonly StyledLine[]; readonly cursor: number; readonly removeAfterApproval?: boolean }
   | { readonly kind: "pick"; readonly members: readonly RecipeRow[] }
   | { readonly kind: "uninstall-question" | "remove"; readonly removal: AppRecipeRemovalPlan }
   | { readonly kind: "uninstall-confirm" | "uninstall-manual"; readonly removal: AppRecipeRemovalPlan; readonly plan: AppLifecyclePlan; readonly cursor: number };
@@ -123,7 +124,9 @@ export function useSourcesRecipes({
           kind: "approve",
           entry, removeAfterApproval, cursor: 0,
           lines: [
-            ...(members.length > 1 ? [`Recipes named ${appName(entry)}:`, ...members.map(row => `  ${recipeMemberLine(row)}`), ""] : []),
+            ...(members.length > 1
+              ? [textLine(`Recipes named ${appName(entry)}:`), ...members.map(row => textLine(`  ${recipeMemberLine(row)}`)), textLine(" ")]
+              : []),
             ...appRecipePreviewLines(entry, status, steps),
           ],
         });
@@ -241,7 +244,7 @@ export function useSourcesRecipes({
       return true;
     }
     if (current.kind === "approve") {
-      const viewport = previewGeometry(current.lines, current.cursor, recipeApprovalChrome(current.entry));
+      const viewport = previewGeometry(current.lines.map(lineText), current.cursor, recipeApprovalChrome(current.entry));
       const cursor = movePreviewCursor(current.cursor, viewport.total, input, key, viewport.height);
       if (cursor !== undefined) setMode({ ...current, cursor });
       else if (input === "n" || key.escape) cancel();
@@ -353,7 +356,8 @@ export function useSourcesRecipes({
       {mode.kind === "busy" ? <BorderPanel title="App recipe workflow"><Working label={mode.label} since={mode.startedAt} /></BorderPanel> : null}
       {mode.kind === "approve" ? (() => {
         const chrome = recipeApprovalChrome(mode.entry);
-        return <PagedPreview chrome={chrome} lines={mode.lines} viewport={previewGeometry(mode.lines, mode.cursor, chrome)} />;
+        const lines = mode.lines.map(lineText);
+        return <PagedPreview chrome={chrome} lines={lines} styled={mode.lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
       })() : null}
       {mode.kind === "pick" ? (
         <BorderPanel title="Remove which recipe?">

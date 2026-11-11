@@ -10,7 +10,7 @@ export interface StyledSpan {
 /** One logical preview line; the preview window wraps its joined text and slices the spans to match. */
 export type StyledLine = readonly StyledSpan[];
 
-const span = (text: string, color: string, bold = false): StyledSpan => bold ? { text, color, bold } : { text, color };
+export const span = (text: string, color: string, bold = false): StyledSpan => bold ? { text, color, bold } : { text, color };
 
 // Ink drops the height of an empty Text, so a blank separator keeps one space.
 const BLANK: StyledLine = [span(" ", theme.value)];
@@ -52,6 +52,41 @@ function itemLines(item: PreviewItem): readonly StyledLine[] {
   if (item.detail !== undefined) title.push(span(`  ${item.detail}`, theme.legend));
   if (item.version !== undefined) title.push(span(`  ${item.version.from} → ${item.version.to}`, theme.version));
   return [title, ...item.rows.flatMap(rowLines)];
+}
+
+/** One recipe step as previewed: a command or a manual instruction, and where it would run. */
+export interface StepPreview {
+  readonly step: string;
+  readonly argv?: readonly string[];
+  readonly manual?: string;
+  /** The resolved executable; absent when it was not found in PATH. */
+  readonly executable?: string;
+  readonly cwd: string;
+  readonly warning?: string;
+  readonly environment?: string;
+  readonly declaration?: string;
+  readonly pattern?: string;
+}
+
+/** One block per step joined by a tree gutter: what the step runs or asks for, then dimmed where it runs. */
+export function stepBlockLines(steps: readonly StepPreview[]): readonly StyledLine[] {
+  return steps.flatMap((step, index) => {
+    const last = index === steps.length - 1;
+    const branch = last ? "└" : index === 0 ? "┌" : "├";
+    const row = (...spans: StyledSpan[]): StyledLine => [span(last ? "   " : " │ ", theme.field), ...spans];
+    const where = [`in ${step.cwd}`, ...(step.environment ? [`on ${step.environment}`] : [])].join(" · ");
+    return [
+      [span(` ${branch} ${step.step}`, theme.field)],
+      ...(step.argv ? [row(span(`$ ${commandLine(step.argv)}`, theme.value))] : []),
+      ...(step.manual ? [row(span(`Manual: ${step.manual}`, theme.value))] : []),
+      ...(step.declaration ? [row(span(step.declaration, theme.value))] : []),
+      ...(step.pattern ? [row(span(`Version pattern: ${step.pattern}`, theme.value))] : []),
+      step.argv && step.executable === undefined
+        ? row(span(`${commandLine(step.argv.slice(0, 1))} not found in PATH`, theme.warning), span(` · ${where}`, theme.legend))
+        : row(span(step.executable ? `${step.executable} · ${where}` : where, theme.legend)),
+      ...(step.warning ? [row(span(`⚠ ${step.warning}`, theme.warning))] : []),
+    ];
+  });
 }
 
 /** The document as preview lines: action and counts, context, every warning, one section per type, then the failures. */
