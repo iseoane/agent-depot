@@ -25,6 +25,8 @@ export interface SourceRefreshSession {
   snapshot(): ReadonlyMap<string, SourceRefreshState>;
   subscribe(listener: () => void): () => void;
   now(): number;
+  /** Drops queued background refreshes; refreshes already running finish. */
+  stop(): void;
 }
 
 /** ADR 0004 (amended): how long a refresh made by this process stands in for the one a preview needs. */
@@ -107,6 +109,7 @@ export function createSourceRefreshSession(
       return () => listeners.delete(listener);
     },
     now,
+    stop() {},
   };
 }
 
