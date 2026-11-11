@@ -13,8 +13,9 @@ export async function renderTui(operations: SourceOperations, environment?: TuiE
     { alternateScreen: true },
   );
   await instance.waitUntilExit();
+  refreshSession.stop();
   // Killing a refresh would leave its Source cache lock behind, so the process waits for it instead.
   if ([...refreshSession.snapshot().values()].some((state) => state.status === "refreshing")) {
-    process.stderr.write("Waiting for background Source refreshes to finish (up to 60 s)…\n");
+    process.stderr.write("Waiting for the Source refreshes still running to finish…\n");
   }
 }

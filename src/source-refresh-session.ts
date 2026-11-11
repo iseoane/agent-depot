@@ -109,7 +109,9 @@ export function createSourceRefreshSession(
       return () => listeners.delete(listener);
     },
     now,
-    stop() {},
+    stop() {
+      queue.length = 0;
+    },
   };
 }
 
