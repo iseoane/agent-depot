@@ -227,3 +227,20 @@ test("an unforced user refresh reuses a background refresh that succeeds and ref
   await retried;
   assert.equal(session.snapshot().get(broken.id)?.status, "refreshed");
 });
+
+test("settled resolves only after every running refresh has finished", { timeout: 5_000 }, async () => {
+  const [one, two] = [gitSource("one"), gitSource("two")];
+  const { operations, calls } = deferredOperations([one, two]);
+  const session = createSourceRefreshSession(operations);
+  session.refreshInBackground([one, two]);
+  await settle();
+
+  let done = false;
+  const settled = session.settled().then(() => { done = true; });
+  calls[0]!.reject(new Error("timed out"));
+  await settle();
+  assert.equal(done, false);
+  calls[1]!.resolve();
+  await settled;
+  assert.equal(done, true);
+});
