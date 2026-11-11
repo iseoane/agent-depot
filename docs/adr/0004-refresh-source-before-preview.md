@@ -20,9 +20,10 @@ Whenever a preview leads to a write, refresh the Source first and build the prev
 
 The TUI keeps an in-memory refresh session per process (`src/source-refresh-session.ts`). At startup it refreshes the registered Git Sources in the background, two at a time, without credential prompts and with a 60 s limit per Git command.
 
-- A preview or an Updates check reuses a successful refresh this same process made less than one hour ago instead of refreshing again. A refresh still in flight is joined, not repeated.
+- A preview or an Updates check reuses a successful refresh this same process made less than one hour ago instead of refreshing again. Updates says how old the reused refresh is.
+- A user refresh already in flight is shared by the other user requests for that Source. A background refresh in flight is never joined: a user request waits for it to settle, then reuses its success (unless forced) or refreshes in the foreground, where prompts are allowed and there is no 60 s limit.
 - A Source that failed to refresh, or was never refreshed in this process, is always refreshed before the preview.
-- `r` in Sources and Updates always forces a new refresh.
+- `r` in Sources and Updates always forces a new foreground refresh; it only shares one that another user request already started.
 - A failed refresh still stops a preview before anything is written.
 - The CLI is unchanged: it refreshes every time.
 
