@@ -229,6 +229,8 @@ function footerColor(role: PreviewFooterRole, reachedEnd: boolean): { readonly c
     case "read": return { color: theme.success };
     case "reading": return { color: theme.warning };
     case "consequence": return { color: theme.warning };
+    case "yes": return { color: theme.success, bold: true };
+    case "no": return { color: theme.error };
     case "action": return reachedEnd ? { color: theme.success, bold: true } : { color: theme.muted };
     case "position":
     case "cancel": return { color: theme.legend };

@@ -15,7 +15,7 @@ export interface PreviewChrome {
   readonly reservedRows?: number;
 }
 
-export type PreviewFooterRole = "reading" | "read" | "position" | "consequence" | "action" | "cancel";
+export type PreviewFooterRole = "reading" | "read" | "position" | "consequence" | "yes" | "no" | "action" | "cancel";
 
 export interface PreviewFooterSpan {
   readonly text: string;
@@ -75,6 +75,19 @@ interface FooterState {
 
 type FooterRow = readonly PreviewFooterSpan[];
 
+/** The consequence with its `y/n` keys picked out, as in a one-screen confirmation. */
+function consequenceSpans(consequence: string): readonly PreviewFooterSpan[] {
+  const marker = consequence.indexOf("y/n");
+  if (marker < 0) return [{ text: consequence, role: "consequence" }];
+  return [
+    { text: consequence.slice(0, marker), role: "consequence" },
+    { text: "y", role: "yes" },
+    { text: "/", role: "position" },
+    { text: "n", role: "no" },
+    ...(marker + 3 < consequence.length ? [{ text: consequence.slice(marker + 3), role: "position" as const }] : []),
+  ];
+}
+
 /** The progress line and the action line, before wrapping. */
 function footerSpans(state: FooterState, chrome: PreviewChrome, width: number): readonly [FooterRow, FooterRow] {
   const range = (total: number, start: number, end: number) => ` · ${start}–${end} of ${total}`;
@@ -91,7 +104,7 @@ function footerSpans(state: FooterState, chrome: PreviewChrome, width: number): 
     : [{ text: `read ${bar}${Math.floor(read * 100)}%`, role: "reading" }];
   progress.push({ text: ` · ${position(state.cursor + 1, state.start + 1, state.end)}`, role: "position" });
   if (!state.reachedEnd) progress.push({ text: " · arrows/Pg page", role: "position" });
-  else if (chrome.consequence !== undefined) progress.push({ text: ` · ${chrome.consequence}`, role: "consequence" });
+  else if (chrome.consequence !== undefined) progress.push({ text: " · ", role: "position" }, ...consequenceSpans(chrome.consequence));
   const actions: PreviewFooterSpan[] = chrome.action === undefined ? [] : [{ text: `[y] ${chrome.action}`, role: "action" }, { text: "  ", role: "cancel" }];
   actions.push({ text: chrome.cancel ?? "[n] cancel", role: "cancel" });
   return [progress, actions];
