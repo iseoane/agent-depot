@@ -91,6 +91,10 @@ function successfulStdout(result: ProcessRunResult): string | undefined {
   return result.stdout.toString("utf8").trim();
 }
 
+function isNpmCli(target: string | undefined): target is string {
+  return target !== undefined && path.basename(target) === "npm-cli.js" && path.basename(path.dirname(target)) === "bin" && path.basename(path.dirname(path.dirname(target))) === "npm";
+}
+
 export function createSelfUpdateOperations(options: SelfUpdateOptions): SelfUpdateOperations {
   const resolveExecutable = options.resolveExecutable ?? createPortableExecutableResolver();
   const platform = options.platform ?? process.platform;
@@ -104,8 +108,12 @@ export function createSelfUpdateOperations(options: SelfUpdateOptions): SelfUpda
     const verifiedFile = platform === "win32" && path.basename(npm.executable).toLowerCase() === "npm.cmd"
       ? path.join(path.dirname(npm.executable), "node_modules", "npm", "bin", "npm-cli.js")
       : npm.executable;
-    const target = await realpath(verifiedFile).catch(() => undefined);
-    if (target === undefined || path.basename(target) !== "npm-cli.js" || path.basename(path.dirname(target)) !== "bin" || path.basename(path.dirname(path.dirname(target))) !== "npm") return undefined;
+    let target = await realpath(verifiedFile).catch(() => undefined);
+    // mise replaces `<prefix>/bin/npm` with a script that runs `<prefix>/lib/node_modules/npm/bin/npm-cli.js`.
+    if (!isNpmCli(target) && platform !== "win32" && target !== undefined && path.basename(npm.executable) === "npm") {
+      target = await realpath(path.join(path.dirname(target), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")).catch(() => undefined);
+    }
+    if (!isNpmCli(target)) return undefined;
     let rootResult: ProcessRunResult;
     try {
       rootResult = await run(npm.executable, ["root", "--global", "--silent", "--logs-max=0", "--no-update-notifier"], {
