@@ -379,7 +379,7 @@ for (const size of PREVIEW_SIZES) {
     view.stdin.write("1");
     await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
     view.stdin.write(ENTER);
-    await confirmAtEnd(view, size.rows, /\[y\] Add hosts to demo/, () => /needs separate confirmation/.test(view.lastFrame() ?? ""));
+    await confirmAtEnd(view, size.rows, /\[y\] Add hosts to demo/, () => /needs\s+separate\s+confirmation/.test(view.lastFrame() ?? ""));
     assert.equal(await exists(claude(f.home)), false);
   });
 
@@ -390,7 +390,7 @@ for (const size of PREVIEW_SIZES) {
     resizeTerminal(view, size);
     await revealSkill(view);
     view.stdin.write("u");
-    await waitForFrame(view.lastFrame, /1 all hosts.*2 choose hosts/s);
+    await waitForFrame(view.lastFrame, /1\s+all\s+hosts.*2\s+choose\s+hosts/s);
     view.stdin.write("2");
     await waitForFrame(view.lastFrame, /\[ \] 1 pi.*\[ \] 2 claude/s);
     view.stdin.write("2");
