@@ -633,6 +633,79 @@ test("one preview and confirmation applies project and user-global updates toget
   unmount();
 });
 
+test("reports each Skill, App and Package as it starts, numbered across the whole batch and across a manual pause", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [{ name: "proj", state: "outdated" }]);
+  await seedGlobal(f, { name: "glob", state: "outdated" });
+  const data = await loadUpdateRows(f.operations, f.environment, { refresh: false });
+  const skills = await prepareUpdates(data, data.rows);
+  const events: string[] = [];
+  const apps = {
+    async executeLifecycle() { return { status: "manual required", reason: "do it yourself" }; },
+    async completeManual() { return { status: "failed", reason: "still old" }; },
+  };
+  const packages = {
+    async executeLifecycle() { return { status: "failed", reason: "host refused" }; },
+  };
+  const prepared = {
+    ...skills,
+    apps: apps as unknown as NonNullable<typeof skills.apps>,
+    appPlans: [{ entry: { recipe: { name: "demo" } } }] as unknown as typeof skills.appPlans,
+    packages: packages as unknown as NonNullable<typeof skills.packages>,
+    packagePlans: [{ plan: { descriptor: { name: "pkg" }, selection: packageSelection }, approval: "approved" }] as unknown as NonNullable<typeof skills.packagePlans>,
+  };
+  const confirmManual = async () => { events.push("manual pause"); return true; };
+  const onProgress = (event: { readonly kind: string; readonly name: string; readonly position: number; readonly total: number }) => {
+    events.push(`${event.kind} ${event.name} ${event.position}/${event.total}`);
+  };
+  // The fourth argument does not exist before this feature, so the call goes through Reflect to compile.
+  const outcome = await Reflect.apply(runUpdates, undefined, [prepared, [], confirmManual, onProgress]) as Awaited<ReturnType<typeof runUpdates>>;
+  assert.equal(outcome.failed, 2);
+  assert.deepEqual(events, [
+    "skill portable/proj 1/4",
+    "skill portable/glob 2/4",
+    "app demo 3/4",
+    "manual pause",
+    "package pkg 4/4",
+  ]);
+});
+
+test("the busy line names the item being updated and the clock keeps running from item to item", async (t) => {
+  const f = await fixture(t);
+  await seedProject(f, [
+    { name: "one", state: "outdated", method: ["node", "--fake-update"] },
+    { name: "two", state: "outdated", method: ["node", "--fake-update"] },
+  ]);
+  const releases: (() => void)[] = [];
+  const execute = f.operations.executeInstallationMethod!;
+  f.operations.executeInstallationMethod = async (method, context) => {
+    await new Promise<void>((resolve) => { releases.push(resolve); });
+    return execute(method, context);
+  };
+  // The elapsed time only shows while animating, which the test environment turns off.
+  const previous = process.env.AGENT_DEPOT_NO_ANIMATION;
+  process.env.AGENT_DEPOT_NO_ANIMATION = "0";
+  deferCleanup(t, () => {
+    if (previous === undefined) delete process.env.AGENT_DEPOT_NO_ANIMATION;
+    else process.env.AGENT_DEPOT_NO_ANIMATION = previous;
+  });
+  let clock = 1_000_000;
+  const { lastFrame, stdin, unmount } = mount(f, { now: () => clock });
+  deferCleanup(t, unmount);
+  await expandList(lastFrame, stdin, /portable\/two/);
+  press(stdin, "a");
+  press(stdin, ENTER);
+  await reviewToEnd(lastFrame, stdin, /Apply 2 updates\?/);
+  press(stdin, "y");
+  await waitForFrame(lastFrame, /Updating Skill portable\/one \(1\/2\)…/);
+  clock += 4500;
+  await waitForFrame(lastFrame, /Updating Skill portable\/one \(1\/2\)… 4s/);
+  releases.shift()!();
+  await waitForFrame(lastFrame, /Updating Skill portable\/two \(2\/2\)… 4s/);
+  releases.shift()!();
+  await waitForFrame(lastFrame, /2 updated, 0 failed/);
+});
+
 test("the same Skill installed in both scopes is two separate selectable items", async (t) => {
   const f = await fixture(t);
   await seedProject(f, [{ name: "twin", state: "outdated" }]);
