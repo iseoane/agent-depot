@@ -17,3 +17,4 @@ Type: feature
 - Operador (2026-11-11): «al exportar si el fichero destino existe, da la posibilidad de sobrescribir»; autoriza completar I0032 y sacar release al acabar.
 - Código: src/profile-export.ts:267-269 (`wx`, EEXIST → error), src/tui/profile-view.tsx:418.
 - Operador (2026-11-11): «lo de sobrescribir no lo haces?» — se hará en esta tanda, antes de J002, e irá en la release.
+- Autorización del operador (2026-11-11): integrar sin preguntar salvo algo grave que requiera confirmación.

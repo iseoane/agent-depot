@@ -19,3 +19,4 @@ Type: feature
 - Decisiones del operador (2026-11-11): comandos como `$ cmd args` entrecomillando argumentos con espacios, comillas o metacaracteres; extender el pie a las confirmaciones sin paginación como trabajo aparte (J004); release 0.6.14 al terminar I0032.
 - Worker J001: RED 6aa0402, GREEN 7fef274, e2e 0d5b2d2, fix cf5eae4, cobertura 2055d08. Checks autoinformados: typecheck/lint, test 1355/0, e2e 17/17, audit OK; CLI sin cambios. Desviaciones: sin preview-model/preview-render (se introducen en J002); app-approve sin test renderizado (inalcanzable desde la UI); la pregunta y/n aparece solo al final; recuento e2e de Profile 7–8 → 6–9 of 41.
 - Autorización del operador (2026-11-11): «continúa, intenta completar el I0032… saca release cuando acabes» — integrar J001–J004 con revisión aprobada y CI verde, y publicar al final.
+- Autorización del operador (2026-11-11): integrar sin preguntar salvo algo grave que requiera confirmación.
