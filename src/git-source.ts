@@ -15,12 +15,20 @@ export interface GitSource {
   readonly ref?: string;
 }
 
+/** How a refresh runs; a background refresh cannot prompt for credentials and is time-limited. */
+export interface GitSourceRefreshOptions {
+  readonly background?: boolean;
+}
+
 export interface GitSourceAccess {
-  refresh(source: GitSource): Promise<void>;
+  refresh(source: GitSource, options?: GitSourceRefreshOptions): Promise<void>;
 }
 
 export interface GitCommandRunnerOptions {
   readonly cwd?: string;
+  /** Variables added to the inherited environment. */
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs?: number;
 }
 
 /** Runs one executable with an argument vector and never invokes a shell. */

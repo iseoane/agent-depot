@@ -19,6 +19,8 @@ export function withChildOutput<T>(sink: ChildOutputSink, work: () => Promise<T>
 
 export interface ProcessRunOptions {
   readonly cwd?: string;
+  /** Variables added to the inherited environment. */
+  readonly env?: Readonly<Record<string, string>>;
   /** Optional bounded input; all other commands retain stdin EOF. */
   readonly stdin?: Uint8Array;
   /** Collect stdout instead of discarding it. */
