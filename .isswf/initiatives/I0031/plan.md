@@ -3,10 +3,10 @@
 Type: feature
 
 ## J001
-- Status: pending
+- Status: in-progress
 - Objective: En la vista Sources, marcar cada Source como sin refrescar/refrescando/refrescada; al arrancar la TUI refrescar en background y actualizar la marca por Source.
 - Depends on: None
-- Blocker: en cola tras I0030.
+- Blocker: None
 - Next step: research del estado de refresco actual (sources.ts, git-source.ts, catalog-view stale) y diseño de concurrencia/errores (fallo de red, Source lenta).
 
 ### Acceptance
