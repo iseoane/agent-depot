@@ -3,12 +3,12 @@
 Type: bug
 
 ## J001
-- Status: in-progress
+- Status: done
 - Objective: Diagnosticar y corregir el rechazo de self update en una instalación npm global válida con Node gestionado por mise/Omarchy, preservando las verificaciones de seguridad.
 - Depends on: None
 - Brief: [brief-r2.md](jobs/J001/brief-r2.md)
 - Blocker: None
-- Next step: PR abierto; esperar CI ubuntu+windows y fusionar si verde (riesgo bajo).
+- Next step: None. Pendiente fuera de alcance: release que publique el arreglo.
 
 ### Acceptance
 - Una instalación npm global válida en el formato observado de mise/Omarchy puede comprobar y aplicar self update.
@@ -25,3 +25,4 @@ Type: bug
 - Reproducción del coordinador (local, Omarchy/mise, Node 26.13.0): `node/latest/bin/npm` → realpath `node/26.13.0/bin/npm`, script bash de mise que ejecuta `"$plugin_dir/bin/node" "$plugin_dir/lib/node_modules/npm/bin/npm-cli.js"` (y `mise reshim` tras installs globales). `npm root --global` = `…/node/26.13.0/lib/node_modules` completo (la salida aportada estaba truncada). Paquete presente en esa raíz; realpath del bin coincide. Causa confirmada: el guard de forma de realpath (src/self-update.ts:107) rechaza el wrapper.
 - Worker J001: commits e660dda (RED, tests) y d536804 (GREEN, src). Checks autoinformados: test:single 13/0/1 skip, typecheck/lint limpios, pnpm test 1287 pass/0 fail/7 skip; sonda local con npm real de mise → `available`. Coordinador observó test:single en verde.
 - Revisión independiente V001 (Agent-tool, no ligada): approve, sin hallazgos bloqueantes. Info: el fallback prueba que hay npm-cli.js junto al wrapper, no que el wrapper lo ejecute (misma confianza que npm.cmd; protegido por la igualdad de packageRoot). Sin test de carpeta enlazada (opcional).
+- Entrega: PR #102 fusionado en main con CI verde (check, windows, pack).
