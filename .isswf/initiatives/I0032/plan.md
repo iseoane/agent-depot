@@ -16,7 +16,7 @@ Type: feature
 - Brief J004d: [brief-r1.md](jobs/J004d/brief-r1.md)
 - Brief J005: [brief-r1.md](jobs/J005/brief-r1.md)
 - Blocker: None
-- Next step: awaiting-human (J005 F7); J006 y release después.
+- Next step: J005 ronda 2 (marcado por lectura), revisión, PR; luego J006 y release.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -48,3 +48,4 @@ Type: feature
 - J004d worker (sonnet; interrumpido por cuota y reanudado con SendMessage) 5e99044..f49a531. Revisión V001 (opus): 0 bloqueantes; coordinador: RED 2a2aff9 solo tests, CLI sin cambios, contenido del lote conservado (solo pierde color de grupo en etiquetas), tests 78/0. Seguimientos para J005: borrar PreviewConfirm/warnFirst sin uso en producción; devolver color de grupo a etiquetas del lote con líneas styled.
 - J004d entregado: PR #114 fusionado con CI verde (arreglo de tests frágiles en Windows 7df4c28).
 - J005: V001 fail (F1 `ry` en Sources); corrección 5a9d5df/17786b4; V002 changes required (F7 preexistente: `y` tras flechas/PgDn/escape en la misma lectura sigue confirmando). Presupuesto de corrección agotado → awaiting-human: ¿ronda extra con marcado por lectura de entrada, integrar lo actual y seguir F7 aparte, o descartar?
+- Operador (2026-11-12): una ronda más para J005 con marcado por lectura de entrada.
