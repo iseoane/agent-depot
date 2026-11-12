@@ -5,12 +5,12 @@ Type: improvement
 Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de la release; «✓ refreshed» sin tiempo y «… refreshing» con contador; nombres de pasos de recetas sin cambios; Updates «sources refreshed N min ago» sin cambios; recetas de Apps sin marca; los hallazgos de revisión se resuelven dentro de cada job (pedir rondas extra si hace falta); no perseguir casos extremos.
 
 ## J001
-- Status: in-progress
+- Status: done
 - Objective: Quitar el tiempo de la marca «✓ refreshed» en Sources y unificar los tres formateadores de progreso en uno.
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: worker sonnet; revisión; PR; integrar.
+- Next step: None.
 
 ### Acceptance
 - Sources muestra `✓ refreshed` sin tiempo; `… refreshing Ns` sin cambios.
@@ -20,12 +20,12 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Operador: «el temporizador en refreshed sobra». Revisión I0030: tres formateadores de progreso.
 
 ## J002
-- Status: pending
+- Status: in-progress
 - Objective: Pulido de previews: cabecera con 0 aplicables, «Review 1 of 0», sangría y `│` en líneas partidas del árbol de pasos, desbordes por título largo o panel de trabajo, versión de origen de Package como hash.
 - Depends on: J001
 - Brief: [brief-r1.md](jobs/J002/brief-r1.md)
-- Blocker: en cola tras J001.
-- Next step: brief detallado tras J001.
+- Blocker: None
+- Next step: J002a (textos) y luego J002b (geometría), por tamaño.
 
 ### Acceptance
 - Cada punto corregido con test.
@@ -74,3 +74,5 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 
 ### Evidence
 - Revisión I0033.
+- J001 (sonnet, 6 min, 35k) entregado en PR #123 con CI verde; revisión sin hallazgos.
+- J002 se parte por tamaño (regla S/M/L): J002a textos de cabecera/versión (S) y J002b geometría de líneas partidas y desbordes (M).
