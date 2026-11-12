@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, rename, rm, rmdir } from "node:fs/promises";
-import { homedir } from "node:os";
+import { lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { homedir, hostname } from "node:os";
 import path from "node:path";
-import { isLockContention } from "./atomic-file.js";
+import { isLockContention, renameWithWindowsRetry, writeFileAtomically } from "./atomic-file.js";
 import { assertNoSymlinkPath } from "./path-safety.js";
 import { runProcess, type ProcessRunResult } from "./process-runner.js";
 import { decodeSnapshotBatch, reuseSourceSnapshot, SOURCE_SNAPSHOT_LIMITS } from "./source-snapshot.js";
@@ -162,6 +162,10 @@ const BACKGROUND_REFRESH_OPTIONS: GitCommandRunnerOptions = Object.freeze({
   timeoutMs: 60_000,
 });
 const SOURCE_LOCK_RETRY_MS = 10;
+const SOURCE_LOCK_OWNER_FILE = "owner.json";
+const SOURCE_LOCK_OWNER_MAX_BYTES = 4096;
+/** Covers locks from versions without an owner record and an acquisition interrupted before writing it. */
+const SOURCE_LOCK_OWNERLESS_MAX_AGE_MS = 10 * 60_000;
 
 /**
  * Clones each Source into a local mirror and refreshes it from the registered
@@ -548,14 +552,20 @@ async function pathType(candidate: string): Promise<PathKind> {
   }
 }
 
+interface SourceLockOwner {
+  readonly pid: number;
+  readonly hostname: string;
+  readonly startedAt: string;
+  /** Random per acquisition, so a recovery can tell the lock it judged from a successor's. */
+  readonly id: string;
+}
+
 async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>> {
   const deadline = Date.now() + SOURCE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
       await mkdir(lockPath);
-      return async () => {
-        await rmdir(lockPath);
-      };
+      return await publishLockOwner(lockPath);
     } catch (error) {
       if (!isLockContention(error)) {
         throw error;
@@ -563,14 +573,105 @@ async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>>
       if ((await pathType(lockPath)) === "symlink") {
         throw new Error("the Source cache lock is a symbolic link");
       }
+      if (await recoverOrphanedLock(lockPath)) {
+        continue;
+      }
       if (Date.now() >= deadline) {
+        const owner = await readLockOwner(lockPath);
+        const holder = owner === undefined ? "" : ` (held by process ${owner.pid} on host ${owner.hostname})`;
         throw new Error(
-          `the Source cache lock directory is busy: ${lockPath}; another refresh might be active. Wait for it to finish before retrying`,
+          `the Source cache lock directory is busy: ${lockPath}${holder}; another refresh might be active. Wait for it to finish before retrying`,
         );
       }
       await new Promise<void>((resolve) => setTimeout(resolve, SOURCE_LOCK_RETRY_MS));
     }
   }
+}
+
+async function publishLockOwner(lockPath: string): Promise<() => Promise<void>> {
+  const owner: SourceLockOwner = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), id: randomUUID() };
+  const ownerPath = path.join(lockPath, SOURCE_LOCK_OWNER_FILE);
+  try {
+    await writeFileAtomically(ownerPath, JSON.stringify(owner));
+  } catch (error) {
+    await rm(lockPath, { recursive: true, force: true });
+    throw error;
+  }
+  return async () => {
+    // A recovery that mistook this lock for an orphan may have moved it; never remove a successor's.
+    if ((await readLockOwner(lockPath))?.id === owner.id) {
+      await rm(lockPath, { recursive: true, force: true });
+    }
+  };
+}
+
+/** Reads the owner record without following links; anything missing, oversized or malformed is "no owner". */
+async function readLockOwner(lockPath: string): Promise<SourceLockOwner | undefined> {
+  const ownerPath = path.join(lockPath, SOURCE_LOCK_OWNER_FILE);
+  try {
+    const information = await lstat(ownerPath);
+    if (!information.isFile() || information.size > SOURCE_LOCK_OWNER_MAX_BYTES) {
+      return undefined;
+    }
+    const parsed: unknown = JSON.parse(await readFile(ownerPath, "utf8"));
+    if (typeof parsed !== "object" || parsed === null) {
+      return undefined;
+    }
+    const { pid, hostname: host, startedAt, id } = parsed as Record<string, unknown>;
+    return Number.isInteger(pid) && (pid as number) > 0 && typeof host === "string" && typeof startedAt === "string" && typeof id === "string"
+      ? { pid: pid as number, hostname: host, startedAt, id }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function isOldOwnerlessLock(lockPath: string): Promise<boolean> {
+  try {
+    return Date.now() - (await lstat(lockPath)).mtimeMs > SOURCE_LOCK_OWNERLESS_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Removes a lock whose holder is provably gone: same host with a missing pid, or an owner-less lock
+ * older than any plausible acquisition. The lock is first renamed to a unique name (atomic, so only one
+ * recoverer wins) and re-checked there; if it turns out to be a successor's live lock it is put back.
+ * Returns true when the lock was removed or vanished, so the caller retries the acquisition at once.
+ */
+async function recoverOrphanedLock(lockPath: string): Promise<boolean> {
+  const judged = await readLockOwner(lockPath);
+  const orphaned = async (owner: SourceLockOwner | undefined, location: string): Promise<boolean> =>
+    owner === undefined ? isOldOwnerlessLock(location) : owner.hostname === hostname() && !isProcessAlive(owner.pid);
+  if (!(await orphaned(judged, lockPath))) {
+    return false;
+  }
+  const discarded = `${lockPath}.stale-${randomUUID()}`;
+  try {
+    await renameWithWindowsRetry(lockPath, discarded);
+  } catch {
+    // Another process recovered or released it first, or Windows still holds it; the caller keeps waiting.
+    return false;
+  }
+  const claimed = await readLockOwner(discarded);
+  if (claimed?.id !== judged?.id || !(await orphaned(claimed, discarded))) {
+    await renameWithWindowsRetry(discarded, lockPath).catch(() => undefined);
+    return false;
+  }
+  // rm unlinks links instead of following them, so nothing outside the lock is touched.
+  await rm(discarded, { recursive: true, force: true });
+  return true;
 }
 
 export function validateGitRef(candidate: string): string {

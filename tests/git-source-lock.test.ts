@@ -56,9 +56,9 @@ async function settleOnMockedClock(context: TestContext, ...pending: Array<Promi
   const results = Promise.allSettled(pending).finally(() => {
     settled = true;
   });
-  const realDeadline = Date.now() + 10_000;
+  const realDeadline = performance.now() + 20_000;
   while (!settled) {
-    if (Date.now() > realDeadline + 40_000) {
+    if (performance.now() > realDeadline) {
       throw new Error("lock test did not settle");
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -130,16 +130,16 @@ test("never recovers a lock owned by another host even when its pid does not exi
   });
 });
 
-test("serializes two concurrent refreshes that find the same orphaned lock", async (context) => {
+test("serializes two concurrent refreshes that find the same orphaned lock", async () => {
   await withSandbox(async (cachePath, lockPath) => {
     await writeOwner(lockPath, { pid: await deadPid(), hostname: hostname() });
     const runner = new OverlapRunner();
     const first = new GitSourceAccessAdapter({ cachePath, runner }).refresh(source);
     const second = new GitSourceAccessAdapter({ cachePath, runner }).refresh(source);
 
-    const errors = await settleOnMockedClock(context, first, second);
+    // Real timers: a mocked clock advances per event-loop turn, which would age the waiter's 30 s deadline under load.
+    await Promise.all([first, second]);
 
-    assert.deepEqual(errors, [undefined, undefined]);
     assert.equal(runner.commands.length, 2);
     assert.equal(runner.maxActive, 1);
     assert.equal(await exists(lockPath), false);
