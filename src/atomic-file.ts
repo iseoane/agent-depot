@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { rename, unlink, writeFile } from "node:fs/promises";
+import { open, rename, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 interface AtomicWriteOptions {
@@ -40,7 +41,21 @@ export async function renameWithWindowsRetry(
   }
 }
 
-/** Write a unique temporary sibling, then publish it with rename. */
+/** Persist a directory entry change; Windows cannot open a directory for fsync. */
+async function syncDirectory(directory: string): Promise<void> {
+  if (process.platform === "win32") return;
+  const handle = await open(directory, "r");
+  try {
+    await handle.sync();
+  } catch (error) {
+    // Some filesystems do not implement fsync on directories.
+    if (!["EINVAL", "ENOTSUP"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Write a unique temporary sibling, fsync it, publish it with rename, then fsync the directory. */
 export async function writeFileAtomically(
   file: string,
   contents: string,
@@ -48,7 +63,13 @@ export async function writeFileAtomically(
 ): Promise<void> {
   const temporaryPath = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporaryPath, contents, { encoding: "utf8", flag: "wx", mode: options.mode });
+    const handle = await open(temporaryPath, "wx", options.mode);
+    try {
+      await handle.writeFile(contents, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     try {
       await renameWithWindowsRetry(temporaryPath, file);
     } catch (error) {
@@ -59,6 +80,7 @@ export async function writeFileAtomically(
       // Source state holds its read-modify-write lock while using this Windows fallback.
       await writeFile(file, contents, "utf8");
     }
+    await syncDirectory(path.dirname(file));
   } finally {
     await unlink(temporaryPath).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
