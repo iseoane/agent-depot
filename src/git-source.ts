@@ -153,6 +153,15 @@ class NodeGitSnapshotCommandRunner implements GitSnapshotCommandRunner {
 export interface GitSourceAccessOptions {
   readonly cachePath?: string;
   readonly runner?: GitCommandRunner;
+  /** Test seam: lets a test interleave another process at the points where lock races can occur. */
+  readonly lockHooks?: SourceLockHooks;
+}
+
+export interface SourceLockHooks {
+  /** Runs after a recoverer judged a lock orphaned and before it acts on that judgment. */
+  readonly afterJudging?: () => Promise<void>;
+  /** Runs after this process created the lock directory and before it publishes its owner record. */
+  readonly afterLockCreated?: () => Promise<void>;
 }
 
 const SOURCE_LOCK_TIMEOUT_MS = 30_000;
@@ -174,8 +183,10 @@ const SOURCE_LOCK_OWNERLESS_MAX_AGE_MS = 10 * 60_000;
 export class GitSourceAccessAdapter implements GitSourceAccess {
   readonly cachePath: string;
   private readonly runner: GitCommandRunner;
+  private readonly lockHooks: SourceLockHooks;
 
   constructor(options: GitSourceAccessOptions = {}) {
+    this.lockHooks = options.lockHooks ?? {};
     this.cachePath = options.cachePath ?? defaultGitSourceCachePath();
     this.runner = options.runner ?? new NodeGitCommandRunner();
   }
@@ -192,7 +203,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
       await mkdir(this.cachePath, { recursive: true });
       await assertNoSymlinkPath(this.cachePath, "cache path");
 
-      const release = await acquireSourceLock(`${destination}.lock`);
+      const release = await acquireSourceLock(`${destination}.lock`, this.lockHooks);
       try {
         await this.refreshLocked(source, destination, options.background ? BACKGROUND_REFRESH_OPTIONS : undefined);
       } finally {
@@ -560,11 +571,12 @@ interface SourceLockOwner {
   readonly id: string;
 }
 
-async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>> {
+async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Promise<() => Promise<void>> {
   const deadline = Date.now() + SOURCE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
       await mkdir(lockPath);
+      await hooks.afterLockCreated?.();
       return await publishLockOwner(lockPath);
     } catch (error) {
       if (!isLockContention(error)) {
@@ -573,7 +585,7 @@ async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>>
       if ((await pathType(lockPath)) === "symlink") {
         throw new Error("the Source cache lock is a symbolic link");
       }
-      if (await recoverOrphanedLock(lockPath)) {
+      if (await recoverOrphanedLock(lockPath, hooks)) {
         continue;
       }
       if (Date.now() >= deadline) {
@@ -650,13 +662,14 @@ async function isOldOwnerlessLock(lockPath: string): Promise<boolean> {
  * recoverer wins) and re-checked there; if it turns out to be a successor's live lock it is put back.
  * Returns true when the lock was removed or vanished, so the caller retries the acquisition at once.
  */
-async function recoverOrphanedLock(lockPath: string): Promise<boolean> {
+async function recoverOrphanedLock(lockPath: string, hooks: SourceLockHooks): Promise<boolean> {
   const judged = await readLockOwner(lockPath);
   const orphaned = async (owner: SourceLockOwner | undefined, location: string): Promise<boolean> =>
     owner === undefined ? isOldOwnerlessLock(location) : owner.hostname === hostname() && !isProcessAlive(owner.pid);
   if (!(await orphaned(judged, lockPath))) {
     return false;
   }
+  await hooks.afterJudging?.();
   const discarded = `${lockPath}.stale-${randomUUID()}`;
   try {
     await renameWithWindowsRetry(lockPath, discarded);
