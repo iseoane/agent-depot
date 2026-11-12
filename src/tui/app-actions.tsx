@@ -5,6 +5,7 @@ import { commandLine } from "../preview-model.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import { errorText, runBatch } from "./batch.js";
 import type { ManageContext } from "./manage-actions.js";
+import { isYes } from "./keys.js";
 import { hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
 import { BorderPanel, HostChecklist, PagedPreview, Working } from "./panel-parts.js";
 import { usePreviewGeometry, type PreviewChrome, type PreviewGeometry } from "./preview-window.js";
@@ -258,7 +259,7 @@ export function handleAppKey(context: AppContext, mode: AppMode, input: string, 
       } else cancel();
       return;
     }
-    if (input !== "y" || !viewport.reachedEnd) return;
+    if (!isYes(input, key) || !viewport.reachedEnd) return;
     if (mode.kind !== "app-approve") {
       void execute(context, mode);
       return;

@@ -4,6 +4,7 @@ import { displayPackageSelection, type PackageAction, type PackageLifecyclePlan,
 import type { PackageOperations } from "../package-flow.js";
 import type { PackageApprovalStatus } from "../package-state.js";
 import { errorText } from "./batch.js";
+import { isYes } from "./keys.js";
 import { movePreviewCursor } from "./mode-keys.js";
 import { installedEvidenceLabel, packagePlanLines } from "./package-rows.js";
 import { PagedPreview } from "./panel-parts.js";
@@ -212,7 +213,7 @@ export function handlePackageKey(context: PackageContext, mode: PackageMode, inp
     cancel("Package action cancelled");
     return;
   }
-  if (input !== "y" || !viewport.reachedEnd) return;
+  if (!isYes(input, key) || !viewport.reachedEnd) return;
   switch (mode.kind) {
     case "package-approve":
       manage.setMode(busy(`Approving the install declaration of ${mode.target.name}…`));

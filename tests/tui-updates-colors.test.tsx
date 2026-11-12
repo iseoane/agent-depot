@@ -8,12 +8,13 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
   const script = `
     import React from "react";
     import { render } from "ink-testing-library";
-    import { DecisionPrompt, PagedPreview, PreviewConfirm } from "./dist/src/tui/panel-parts.js";
+    import { DecisionPrompt, PagedPreview } from "./dist/src/tui/panel-parts.js";
     import { previewViewport } from "./dist/src/tui/preview-window.js";
     import { Header } from "./dist/src/tui/app.js";
     import { CheckStatus, EntryLine, UpdatesFooter } from "./dist/src/tui/updates-panel.js";
     import { TreeRowLine } from "./dist/src/tui/installations-rows.js";
     const frame = element => { const view = render(element); const result = view.lastFrame() ?? ""; view.unmount(); return result; };
+    const paged = (lines, chrome) => frame(React.createElement(PagedPreview, { chrome, lines, viewport: previewViewport(lines, 0, 40, 200, chrome) }));
     const treeRow = data => ({ node: { id: data.kind, data }, depth: 0, expanded: false, expandable: false });
     const browse = frame(React.createElement(EntryLine, {
       entry: { kind: "update", line: treeRow({ kind: "update" }), row: { path: "skills/demo", scope: "user-global", policy: "latest", installed: "1.0.0", available: "2.0.0" } },
@@ -31,27 +32,19 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
       data: { results: [{ scope: "project", error: "manifest exploded" }], rows: [], refresh: { attempted: false, refreshed: [], failed: [], unreadable: [] }, checkedAt: 1000 },
       now: 1000,
     }));
-    const preview = frame(React.createElement(PreviewConfirm, {
-      lines: ["  target: skills/demo", "  proposed changes: replace 2 managed files"],
-      question: "Apply 1 update? y/n · note",
-    }));
-    const profilePreview = frame(React.createElement(PreviewConfirm, {
-      lines: ["Destination: /tmp/profile.json", "Preview: export portable user-global profile",
+    const preview = paged(["  target: skills/demo", "  proposed changes: replace 2 managed files"],
+      { title: "Confirmation", action: "Apply 1 update", consequence: "Apply 1 update? y/n" });
+    const profilePreview = paged(["Destination: /tmp/profile.json", "Preview: export portable user-global profile",
         "Source git:abc123 https://example.test/skills.git (included: true)",
         "Skill skills/demo [pi, codex] (latest)", "App recipe demo (linux; approval not transferred)",
         "Package pi plugins/demo from https://example.test/demo.git (latest; saved selection); no receipt or installed evidence",
         "Replica intent Installed Skill skills/demo from https://example.test/skills.git; no installed state or approval is transferred",
         "WARNING: profile Agent Depot 99.0.0 is newer than running 0.6.0"],
-      question: "Save/Export Profile? (y/n)",
-    }));
-    const importPreview = frame(React.createElement(PreviewConfirm, {
-      lines: ["Preview: import portable user-global profile", "add: Skill skills/demo",
+      { title: "Confirmation", action: "Save Profile", consequence: "Save Profile? y/n" });
+    const importPreview = paged(["Preview: import portable user-global profile", "add: Skill skills/demo",
         "  hosts: pi,codex; version policy: latest", "  Source https://example.test/skills.git", "WARNING: invalid recipe"],
-      question: "Apply Profile? (y/n)",
-    }));
-    const unmatchedPreview = frame(React.createElement(PreviewConfirm, {
-      lines: ["Skill command [shell command] (custom)"], question: "Review?",
-    }));
+      { title: "Confirmation", action: "Apply Profile", consequence: "Apply Profile? y/n" });
+    const unmatchedPreview = paged(["Skill command [shell command] (custom)"], { title: "Confirmation" });
     const longProfileLines = [
       "Source git:" + "0123456789abcdef".repeat(8) + " https://example.test/" + "source-segment/".repeat(12) + "skills.git (included: true)",
       "Skill skills/" + "long-skill-directory/".repeat(12) + "skill [pi, codex, claude] (latest)",
@@ -133,7 +126,6 @@ test("Updates and shared confirmation panels use semantic Xeo colors", () => {
   assert.ok(preview?.includes(`\u001b[1m${ansi(158, 206, 106, "y")}`), "affirmative key is bold green");
   assert.ok(preview?.includes(ansi(86, 95, 137, "/")), "separator remains gray");
   assert.ok(preview?.includes(ansi(247, 118, 142, "n")), "negative key remains red");
-  assert.ok(preview?.includes(ansi(86, 95, 137, " · note")), "question suffix remains gray");
   assert.ok(prompt?.includes(ansi(224, 175, 104, "Refresh these Sources?")), "shared DecisionPrompt text is warning yellow");
   assert.ok(header?.includes(ansi(255, 46, 154, "AGENT DEPOT")), "brand is bold fuchsia");
   assert.ok(header?.includes(ansi(255, 46, 154, "╭")), "header border is fuchsia");

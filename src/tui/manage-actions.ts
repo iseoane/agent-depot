@@ -24,6 +24,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { errorText } from "./batch.js";
 import { BULK_KINDS, bulkConfirmPreview, handleBulkKey, type BulkMode, type BulkPagedMode } from "./bulk-actions.js";
 import { answerYesNo, applyChecklistOutcome, hostChecklistKey, movePreviewCursor } from "./mode-keys.js";
+import type { StyledLine } from "./preview-render.js";
 import type { PreviewChrome, PreviewGeometry } from "./preview-window.js";
 import { handleUnmanagedKey, UNMANAGED_KINDS, unmanagedConfirmPreview, type UnmanagedMode } from "./unmanaged-actions.js";
 import { busy, type Busy } from "./working-model.js";
@@ -196,7 +197,11 @@ type SkillPagedMode = ModeOf<"confirm-host-add" | "confirm-host-remove" | "confi
 export type PagedConfirmMode = SkillPagedMode | ModeOf<"confirm-unmanaged"> | BulkPagedMode;
 
 /** What a paged confirmation shows, so the key handler and the panel page the same rows. */
-export function pagedConfirmPreview(mode: PagedConfirmMode): { readonly lines: readonly string[]; readonly chrome: PreviewChrome } {
+export function pagedConfirmPreview(mode: PagedConfirmMode): {
+  readonly lines: readonly string[];
+  readonly styled?: readonly (StyledLine | undefined)[];
+  readonly chrome: PreviewChrome;
+} {
   if (mode.kind === "confirm-unmanaged") return unmanagedConfirmPreview(mode);
   if (mode.kind === "confirm-bulk-uninstall" || mode.kind === "confirm-bulk-hosts") return bulkConfirmPreview(mode);
   const name = mode.skill.name;

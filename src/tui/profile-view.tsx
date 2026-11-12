@@ -23,7 +23,7 @@ import {
   resolveExportFileName, type PickerSelection,
 } from "./file-picker-model.js";
 import { FilePicker } from "./file-picker.js";
-import { useKeys } from "./keys.js";
+import { isYes, useKeys } from "./keys.js";
 import { usePreviewGeometry, type PreviewChrome } from "./preview-window.js";
 import { answerYesNo, moveCursor, movePreviewCursor, toggleChoice } from "./mode-keys.js";
 import { BorderPanel, PagedPreview, PreviewLines, Working } from "./panel-parts.js";
@@ -532,7 +532,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       const viewport = previewGeometry(lines, cursorRef.current, confirmChrome());
       const next = movePreviewCursor(cursorRef.current, viewport.total, input, key, viewport.height);
       if (next !== undefined) cursorTo(Math.max(0, next));
-      else if (input !== "y" || viewport.reachedEnd) {
+      else if (!isYes(input, key) || viewport.reachedEnd) {
         answerYesNo(input, key, confirmApply, () => setMode(confirmRequest.current?.kind === "import" ? "import-list" : "export-name"));
       }
       return;

@@ -414,6 +414,46 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
+test("a y pasted in the same block as the cursor moves does not confirm the uninstall", async (t) => {
+  const f = await fixture(t, ["pi"]);
+  const view = await mount(f);
+  deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, { columns: 40, rows: 17 });
+  await revealSkill(view);
+  view.stdin.write("u");
+  await waitForFrame(view.lastFrame, /read [█░]* ?\d+%|read ✓/u);
+  view.stdin.write(`${"j".repeat(200)}y`);
+  await waitForFrame(view.lastFrame, /read ✓|Removing demo…|Removed demo/u);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.doesNotMatch(view.lastFrame() ?? "", /Removing demo…|Removed demo/, "the y in the burst ran the uninstall");
+  assert.match(view.lastFrame() ?? "", /read ✓/u);
+  assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Removed demo/);
+  assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+});
+
+for (const [name, burst] of [["Down arrows", `${"\u001B[B".repeat(200)}y`], ["Page Down", `${"\u001B[6~".repeat(200)}y`]] as const) {
+  test(`a y read in the same chunk as ${name} does not confirm the uninstall`, async (t) => {
+    const f = await fixture(t, ["pi"]);
+    const view = await mount(f);
+    deferCleanup(t, () => view.unmount());
+    resizeTerminal(view, { columns: 40, rows: 17 });
+    await revealSkill(view);
+    view.stdin.write("u");
+    await waitForFrame(view.lastFrame, /read [█░]* ?\d+%|read ✓/u);
+    view.stdin.write(burst);
+    await waitForFrame(view.lastFrame, /read ✓|Removing demo…|Removed demo/u);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.doesNotMatch(view.lastFrame() ?? "", /Removing demo…|Removed demo/, "the y in the chunk ran the uninstall");
+    assert.match(view.lastFrame() ?? "", /read ✓/u);
+    assert.equal((await f.operations.listUserGlobalInstallations!()).length, 1);
+    view.stdin.write("y");
+    await waitForFrame(view.lastFrame, /Removed demo/);
+    assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
+  });
+}
+
 test("a preview longer than a page keeps y inert until the uninstall footer reads to the end", async (t) => {
   const f = await fixture(t, ["pi"]);
   const view = await mount(f);

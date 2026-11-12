@@ -393,6 +393,25 @@ test("y, then one exposure confirmation naming the items, adds the hosts to each
   view.unmount();
 });
 
+test("a y pasted in a block does not answer the host exposure confirmation, a lone y does", async (t) => {
+  const { f, view } = await markedForHosts(t);
+  view.stdin.write("h");
+  await waitForFrame(view.lastFrame, /\[ \] 1 claude/);
+  view.stdin.write("1");
+  await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
+  view.stdin.write(ENTER);
+  await waitForFrame(view.lastFrame, /Add hosts to 1 item\? y\/n/);
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
+  view.stdin.write("xy");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.match(view.lastFrame() ?? "", /needs\s+separate\s+confirmation/);
+  assert.equal(await exists(claudeDir(f.home, "alpha")), false, "the y in the block added the hosts");
+  view.stdin.write("y");
+  await waitForFrame(view.lastFrame, /Added hosts claude to portable\/alpha/);
+  view.unmount();
+});
+
 test("several items are applied one after another against the moving records", async (t) => {
   const f = await fixture(t);
   await install(f, "alpha", ["pi"]);

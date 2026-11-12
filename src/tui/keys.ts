@@ -1,4 +1,5 @@
 import { useInput, type Key } from "ink";
+import { useRef } from "react";
 
 export type KeyHandler = (input: string, key: Key) => void;
 
@@ -15,20 +16,44 @@ const PRINTABLE = /^[^\p{Cc}]+$/u;
 const ESCAPE_REMNANT = /^(?:\[[\d;<:?]*[A-DFHIMOPQRSZm~]|O[A-DFHPQRS])$/;
 const PASTE_MARKERS = new Set(["[200~", "[201~"]);
 
+/** Keys that did not arrive alone: split off a multi-character block, or read after another key in the same turn. */
+const groupedKeys = new WeakSet<Key>();
+
+/**
+ * Whether this key press is a `y` that answers a confirmation. A `y` that arrived together with other
+ * keys never does: they may have opened the question or moved the cursor to its end before it was drawn.
+ * Text fields read `input` directly, so pasted text still reaches them.
+ */
+export function isYes(input: string, key: Key): boolean {
+  return input === "y" && !groupedKeys.has(key);
+}
+
+function grouped(key: Key): Key {
+  const copy = { ...key };
+  groupedKeys.add(copy);
+  return copy;
+}
+
 /**
  * `useInput` that treats several plain characters delivered in one write (fast
- * typing, a paste) as the separate key presses they are, in order.
+ * typing, a paste) as the separate key presses they are, in order. Ink also hands
+ * the escape sequences of one read over as separate events within one turn; every key
+ * after the first of a turn counts as grouped, as do all characters of a split block.
  */
 export function useKeys(handler: KeyHandler): void {
+  const eventsThisTurn = useRef(0);
   useInput((input, key) => {
+    if (eventsThisTurn.current++ === 0) queueMicrotask(() => { eventsThisTurn.current = 0; });
+    const later = eventsThisTurn.current > 1;
     if (ESCAPE_REMNANT.test(input)) {
-      if (!PASTE_MARKERS.has(input)) handler(input, key);
+      if (!PASTE_MARKERS.has(input)) handler(input, later ? grouped(key) : key);
       return;
     }
     if (input.length > 1 && !key.ctrl && !key.meta && !key.escape && PRINTABLE.test(input)) {
-      for (const character of input) handler(character, key);
+      const blockKey = grouped(key);
+      for (const character of input) handler(character, blockKey);
       return;
     }
-    handler(input, key);
+    handler(input, later ? grouped(key) : key);
   });
 }

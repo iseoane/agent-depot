@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { Text } from "ink";
 import { render } from "ink-testing-library";
 
-import { useKeys } from "../src/tui/keys.js";
+import { isYes, useKeys } from "../src/tui/keys.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 /** Records every input the handler receives, joined by `|`. */
@@ -86,4 +86,23 @@ test("real terminal remnants are kept whole", async () => {
     const seen = await received([sequence]);
     assert.ok(!seen.some((input) => input.length === 1 && input !== ""), `${sequence} was split into ${JSON.stringify(seen)}`);
   }
+});
+
+function YesProbe({ seen }: { readonly seen: string[] }) {
+  useKeys((input, key) => {
+    seen.push(isYes(input, key) ? "yes" : input);
+  });
+  return <Text>probe</Text>;
+}
+
+test("a y split off a multi-character block never counts as a confirmation, a lone y does", async () => {
+  const seen: string[] = [];
+  const view = render(<YesProbe seen={seen} />);
+  await waitForFrame(view.lastFrame, /probe/);
+  view.stdin.write("ry");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  view.stdin.write("y");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  view.unmount();
+  assert.deepEqual(seen, ["r", "y", "yes"]);
 });
