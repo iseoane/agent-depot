@@ -52,12 +52,12 @@ Type: improvement
 - J002 (sonnet) 888d186..e31dabc. V001 fail (B1: mover el bloqueo por ruta podía dejar dos titulares); corrección con mutex .recovering y relectura in situ; V002 approve. Windows CI verde. Entregado en PR #120. Seguimientos → J004: S3 publicar owner.json sin sobrescribir (link/EEXIST) e id en el mutex antes del rm; S4 maxRetries en los rm de Windows. Límite aceptado: pausas >60 s / >10 min dentro de la recuperación (arrendamiento por edad).
 
 ## J004
-- Status: in-progress
+- Status: done
 - Objective: Endurecer el bloqueo de Sources: owner.json sin sobrescritura, id en el mutex de recuperación y reintentos en los borrados.
 - Depends on: J003 integrado.
 - Brief: [brief-r1.md](jobs/J004/brief-r1.md)
 - Blocker: None
-- Next step: worker sonnet; revisión; PR; integrar.
+- Next step: None.
 
 ### Acceptance
 - Un titular que reanuda tras perder su bloqueo no sobrescribe el owner.json de otro; un recuperador no borra si el mutex ya no es suyo; los `rm` de liberación y recuperación reintentan errores transitorios de Windows.
@@ -67,3 +67,4 @@ Type: improvement
 - Operador (2026-11-12): «no dejemos más deuda; se resuelve en el job y si no dan las rondas pides más». J004 recoge la deuda ya generada por J002 antes de la release; a partir de ahora los hallazgos se resuelven dentro de cada job.
 - J003 (sonnet; cortado por cuota y reanudado) entregado en PR #121 con CI verde: causa del test intermitente del selector (espera a la cabecera que ya sale en la carga); ~46 esperas de confirmación leen hasta el final con readPreview; revisión aprobada y su sugerencia resuelta. El fallo de Windows en el PR era del helper (altura fija de 24 filas), no del producto. Fuera de alcance por decisión del operador: 6 tests con filas exactas a 220 columnas fallan con un TMPDIR artificial de ~190 caracteres.
 - Incidente del coordinador: un primer dispatch de J004 arrancó sin brief ni rama porque falló la cadena de comandos; detenido de inmediato sin cambios.
+- J004 (sonnet) entregado en PR #122 con CI verde: owner.json por enlace duro, id en el mutex, comprobación antes de git, borrados con reintentos por identidad del directorio, rmdir seguro y mensajes claros. Revisión en 3 rondas (ronda extra autorizada por el operador), aprobada. Límites residuales documentados en el código. I0034 completa.
