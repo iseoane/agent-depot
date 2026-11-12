@@ -180,8 +180,8 @@ const SOURCE_LOCK_RETRY_MS = 10;
 const SOURCE_LOCK_OWNER_FILE = "owner.json";
 const SOURCE_LOCK_OWNER_MAX_BYTES = 4096;
 const SOURCE_RECOVERY_MUTEX_ID_FILE = "id";
-/** Windows can hold a just-closed file briefly, so removals retry instead of failing a refresh that already finished. */
-const LOCK_REMOVAL_OPTIONS = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
+const LOCK_REMOVAL_ATTEMPTS = 5;
+const LOCK_REMOVAL_RETRY_MS = 50;
 /** A recovery takes milliseconds, so a mutex this old was left by a process that died mid-recovery. */
 const SOURCE_RECOVERY_MUTEX_MAX_AGE_MS = 60_000;
 /** Covers locks from versions without an owner record and an acquisition interrupted before writing it. */
@@ -598,13 +598,41 @@ interface SourceLock {
 
 const LOCK_TAKEN_OVER_MESSAGE = "the Source cache lock was taken over by another process; this refresh stopped without touching the cache";
 
+/**
+ * Removes `directory` only while `stillOurs` holds, re-checked before every attempt. `rm`'s own retry
+ * option would repeat the removal on the same path blindly, and a retry that lands after a successor
+ * recreated the directory would delete the successor's lock. Windows reports EBUSY, EPERM or
+ * ENOTEMPTY while another process still holds a handle on something inside, so only those are retried.
+ * Residual limit: the check and the removal are separate calls (the filesystem has no atomic conditional
+ * remove), so a successor that takes the path inside that window, microseconds wide, is still removed;
+ * two reclaimers of an aged-out recovery mutex can race the same way.
+ */
+async function removeWhileOurs(directory: string, stillOurs: () => Promise<boolean>, hooks: SourceLockHooks): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    if (!(await stillOurs())) {
+      return;
+    }
+    try {
+      // rm unlinks links instead of following them, so nothing outside the directory is touched.
+      await (hooks.removeDirectory ?? ((target) => rm(target, { recursive: true, force: true })))(directory);
+      return;
+    } catch (error) {
+      const transient = ["EBUSY", "EPERM", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException).code ?? "");
+      if (!transient || attempt >= LOCK_REMOVAL_ATTEMPTS) {
+        throw error;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, LOCK_REMOVAL_RETRY_MS));
+    }
+  }
+}
+
 async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Promise<SourceLock> {
   const deadline = Date.now() + SOURCE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
       await mkdir(lockPath);
       await hooks.afterLockCreated?.();
-      return await publishLockOwner(lockPath);
+      return await publishLockOwner(lockPath, hooks);
     } catch (error) {
       if (!isLockContention(error)) {
         throw error;
@@ -634,7 +662,7 @@ async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Prom
  * create gives the same no-overwrite guarantee, but a reader can briefly see a partial record,
  * which it treats as unreadable and so never as a reason to remove the lock.
  */
-async function publishLockOwner(lockPath: string): Promise<SourceLock> {
+async function publishLockOwner(lockPath: string, hooks: SourceLockHooks): Promise<SourceLock> {
   const owner: SourceLockOwner = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), id: randomUUID() };
   const ownerPath = path.join(lockPath, SOURCE_LOCK_OWNER_FILE);
   const temporaryPath = `${ownerPath}.${owner.id}.tmp`;
@@ -654,8 +682,12 @@ async function publishLockOwner(lockPath: string): Promise<SourceLock> {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") {
       throw new Error(LOCK_TAKEN_OVER_MESSAGE);
     }
-    // Only an empty directory can still be the lock this call created; another holder's lock has an owner record.
-    await rmdir(lockPath).catch(() => undefined);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // The directory this call created is gone: the lock was recovered, and a successor may already hold a new one.
+      throw new Error(LOCK_TAKEN_OVER_MESSAGE);
+    }
+    // The lock is deliberately not removed here: it may already be a successor's, and an ownerless lock
+    // left by this failure is recovered once it is old enough.
     throw error;
   }
   await unlink(temporaryPath).catch(() => undefined);
@@ -667,10 +699,10 @@ async function publishLockOwner(lockPath: string): Promise<SourceLock> {
       }
     },
     async release() {
-      const record = await readLockOwner(lockPath);
-      if (record.kind === "owner" && record.owner.id === owner.id) {
-        await rm(lockPath, LOCK_REMOVAL_OPTIONS);
-      }
+      await removeWhileOurs(lockPath, async () => {
+        const record = await readLockOwner(lockPath);
+        return record.kind === "owner" && record.owner.id === owner.id;
+      }, hooks);
     },
   };
 }
@@ -746,7 +778,7 @@ async function recoverOrphanedLock(lockPath: string, hooks: SourceLockHooks): Pr
     }
     // A recoverer that died holding the mutex would otherwise block recovery for good.
     if (await isOldLock(mutexPath, SOURCE_RECOVERY_MUTEX_MAX_AGE_MS)) {
-      await rm(mutexPath, LOCK_REMOVAL_OPTIONS);
+      await removeWhileOurs(mutexPath, () => isOldLock(mutexPath, SOURCE_RECOVERY_MUTEX_MAX_AGE_MS), hooks);
       return true;
     }
     return false;
@@ -766,24 +798,21 @@ async function recoverOrphanedLock(lockPath: string, hooks: SourceLockHooks): Pr
     return false;
   }
   try {
-    const current = await judgeOrphan(lockPath);
-    const sameOrphan = current !== undefined && (current.kind === "owner"
-      ? judged.kind === "owner" && judged.owner.id === current.owner.id
-      : judged.kind === "none");
-    if (sameOrphan) {
+    const isJudgedOrphan = async (): Promise<boolean> => {
+      const current = await judgeOrphan(lockPath);
+      return current !== undefined && (current.kind === "owner"
+        ? judged.kind === "owner" && judged.owner.id === current.owner.id
+        : judged.kind === "none");
+    };
+    if (await isJudgedOrphan()) {
       await hooks.beforeOrphanRemoval?.();
-      // A recoverer paused past the mutex's age limit may have had the mutex reclaimed and the lock re-taken.
-      // The check-then-remove gap that remains is microseconds wide; the filesystem offers no atomic conditional remove.
-      if (await ownsMutex()) {
-        // rm unlinks links instead of following them, so nothing outside the lock is touched.
-        await rm(lockPath, LOCK_REMOVAL_OPTIONS);
-      }
+      // A recoverer paused past the mutex's age limit may have had the mutex reclaimed and the lock re-taken,
+      // so the mutex and the orphan are re-checked before every removal attempt.
+      await removeWhileOurs(lockPath, async () => await ownsMutex() && await isJudgedOrphan(), hooks);
     }
     return true;
   } finally {
-    if (await ownsMutex()) {
-      await rm(mutexPath, LOCK_REMOVAL_OPTIONS);
-    }
+    await removeWhileOurs(mutexPath, ownsMutex, hooks);
   }
 }
 
