@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { Box } from "ink";
 import { render } from "ink-testing-library";
 import { parseProjectManifest, ProjectManifestStore } from "../src/project-manifest.js";
-import { renderPreviewDocument, stepBlockLines } from "../src/tui/preview-render.js";
+import { renderPreviewDocument, stepBlockLines, lineText } from "../src/tui/preview-render.js";
+import { GitSourceAccessAdapter } from "../src/git-source.js";
+import { createSourceOperations } from "../src/sources.js";
+import { PagedPreview } from "../src/tui/panel-parts.js";
+import { previewViewport } from "../src/tui/preview-window.js";
+import { updateModePreviewLines } from "../src/tui/updates-preview.js";
+import type { UpdatesMode } from "../src/tui/updates-mode.js";
 import { parseSkillFrontmatter, type SkillCandidate } from "../src/skill-discovery.js";
 import { BUILT_IN_SOURCE, type SourceOperations } from "../src/sources.js";
 import type { PreviewDocument } from "../src/preview-model.js";
@@ -13,6 +22,7 @@ import { CatalogView } from "../src/tui/catalog-view.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { BorderPanel, DecisionPrompt, FieldLine, ListFooter, Working } from "../src/tui/panel-parts.js";
 import { escapeControlText } from "../src/tui/preview-window.js";
+import { deferCleanup } from "./test-cleanup.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
 import { renderExpanded } from "./render-expanded.js";
 import { waitForFrame } from "./wait-for-frame.js";
@@ -138,4 +148,75 @@ test("a Skill name or description with line breaks stays on one Catalog row", as
   const frame = await waitForFrame(view.lastFrame, /two/);
   view.unmount();
   assert.ok(frame.split("\n").some(row => row.includes("two lines  first second")), frame);
+});
+
+function previewFrame(lines: readonly string[]): string {
+  const chrome = { title: "Preview" };
+  const viewport = previewViewport(lines, 0, 200, 200, chrome);
+  const view = render(<PagedPreview chrome={chrome} lines={lines} viewport={viewport} />);
+  const frame = view.lastFrame() ?? "";
+  view.unmount();
+  return frame;
+}
+
+test("a command line shows each invisible character escaped once, and a typed backslash escape doubled", () => {
+  const document: PreviewDocument = {
+    action: "Update", summary: "1 App", context: [], warnings: [], failures: [],
+    sections: [{ heading: "Apps", items: [{ title: "demo", rows: [
+      { kind: "command", argv: ["\u202Erm", "-rf"] },
+      { kind: "command", argv: ["echo", "\\u202e typed", "ESC\u001Bend", "nb\u00A0sp"] },
+    ] }] }],
+  };
+  const frame = previewFrame(renderPreviewDocument(document).map(lineText));
+  assert.ok(!CONTROL.test(withoutNewlines(frame)), JSON.stringify(frame));
+  assert.ok(frame.includes('$ "\\u202erm" -rf'), frame);
+  assert.ok(frame.includes('"\\\\\\\\u202e typed"'), frame);
+  assert.ok(frame.includes('"ESC\\x1bend"'), frame);
+  assert.ok(frame.includes('"nb\\u00a0sp"'), frame);
+});
+
+test("quoted paths in the update confirmation show an ESC once escaped", () => {
+  const mode = { kind: "confirm-paths", cursor: 0, prepared: { nonCanonicalPaths: [{ scope: "project", path: "/tmp/\u001B/a\\u202e" }] } } as unknown as UpdatesMode;
+  const frame = previewFrame(updateModePreviewLines(mode).map(lineText));
+  assert.ok(frame.includes('"/tmp/\\x1b/a\\\\\\\\u202e"'), frame);
+});
+
+test("the lookalike rule is case-insensitive", () => {
+  assert.equal(escapeControlText("\\x1B and \\u202E"), "\\\\x1B and \\\\u202E");
+  assert.equal(escapeControlText("\\u00a0"), "\\u00a0");
+});
+
+async function localSkillSource(t: TestContext, skillMarkdown: string) {
+  const root = await mkdtemp(path.join(tmpdir(), "escape-source-"));
+  const repository = path.join(root, "repository");
+  const gitConfig = path.join(root, "gitconfig");
+  await mkdir(path.join(repository, "skills", "evil"), { recursive: true });
+  await writeFile(path.join(repository, "skills", "evil", "SKILL.md"), skillMarkdown);
+  const url = "https://example.test/evil/skills.git";
+  await writeFile(gitConfig, `[url "${pathToFileURL(repository).href}"]\n\tinsteadOf = ${url}\n[protocol "file"]\n\tallow = always\n[user]\n\tname = test\n\temail = test@example.test\n`);
+  const environment = { ...process.env, GIT_CONFIG_GLOBAL: gitConfig, GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
+  for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "evil"]]) {
+    execFileSync("git", args, { cwd: repository, stdio: "pipe", env: environment });
+  }
+  const previous = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = gitConfig;
+  deferCleanup(t, async () => {
+    if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = previous;
+    await rm(root, { recursive: true, force: true });
+  });
+  return { root, url };
+}
+
+test("a real local Source whose SKILL.md carries ESC, BEL, OSC 52 and U+202E is shown escaped in the Catalog", async t => {
+  const markdown = `---\nname: ${JSON.stringify(`evil${HOSTILE}`)}\ndescription: ${JSON.stringify(`desc${HOSTILE}`)}\n---\nbody\n`;
+  const { root, url } = await localSkillSource(t, markdown);
+  const operations = createSourceOperations({ homeDirectory: root, statePath: path.join(root, "state", "sources.json"), gitAccess: new GitSourceAccessAdapter({ cachePath: path.join(root, "cache") }) });
+  const source = await operations.addGitSource(url);
+  await operations.refreshSource(source.id);
+  const view = await renderExpanded(<CatalogView environment={ENVIRONMENT} operations={operations} sourceId={source.id} />);
+  const frame = await waitForFrame(view.lastFrame, /evil/);
+  view.unmount();
+  assert.ok(frame.includes(`evil${ESCAPED}`), frame);
+  const raw = view.frames.join("");
+  assert.ok(!raw.includes("\u001B") && !raw.includes("\u0007") && !raw.includes("\u202E"), JSON.stringify(raw));
 });
