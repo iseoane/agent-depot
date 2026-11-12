@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Box } from "ink";
 import { render } from "ink-testing-library";
 import stringWidth from "string-width";
 import { PagedPreview } from "../src/tui/panel-parts.js";
@@ -55,4 +56,30 @@ test("the working panel is not shown over a preview", () => {
   for (const kind of ["preview", "manual", "confirm-paths"] as const) {
     assert.equal(showsWorkingPanel({ status: "loading", label: "x", startedAt: 0 }, { kind } as never), false, kind);
   }
+});
+
+const WORDS = Array.from({ length: 14 }, (_, position) => `titleword-${String(position).padStart(9, "x")}`).join(" ");
+
+test("a multi-word title is drawn on the rows the layout counted, in a 40-column terminal", () => {
+  const chrome: PreviewChrome = { title: WORDS, action: "Apply", consequence: "Apply? y/n" };
+  const lines = Array.from({ length: 40 }, (_, position) => `line ${position}`);
+  const viewport = previewViewport(lines, 0, 17, WIDTH, chrome);
+  const view = render(<Box width={WIDTH}><PagedPreview lines={lines} viewport={viewport} /></Box>);
+  const frameRows = (view.lastFrame() ?? "").split("\n").length;
+  view.unmount();
+  const outside = headerTabRowCount(CONTENT) + 4;
+  assert.ok(frameRows + outside <= 17, `${frameRows} rows plus ${outside} outside the panel`);
+});
+
+test("a long title leaves the footer its question and its [y] action at 40x17", () => {
+  const chrome: PreviewChrome = { title: WORDS, action: "Apply it", consequence: "Apply the batch now? y/n" };
+  const lines = Array.from({ length: 40 }, (_, position) => `line ${position}`);
+  const viewport = previewViewport(lines, 39, 17, WIDTH, chrome);
+  assert.ok(viewport.reachedEnd);
+  const view = render(<Box width={WIDTH}><PagedPreview lines={lines} viewport={viewport} /></Box>);
+  const frame = (view.lastFrame() ?? "").replace(/[│\s]/gu, "");
+  view.unmount();
+  assert.ok(frame.includes("Applythebatchnow?y/n"), frame);
+  assert.ok(frame.includes("[y]Applyit"), frame);
+  assert.ok(viewport.rows.length >= 1);
 });
