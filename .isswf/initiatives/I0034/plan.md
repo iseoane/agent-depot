@@ -33,12 +33,12 @@ Type: improvement
 - I0031: si el proceso muere durante un refresco queda `<cache>.lock` y todos los refrescos de esa Source fallan tras 30 s (src/git-source.ts:551-570).
 
 ## J003
-- Status: in-progress
+- Status: done
 - Objective: Eliminar la dependencia del tamaño de terminal por defecto en los tests que esperan `y/n` y pulsan `y`.
 - Depends on: J002 integrado.
 - Brief: [brief-r1.md](jobs/J003/brief-r1.md)
 - Blocker: None
-- Next step: worker sonnet; luego J004 y release 0.6.15.
+- Next step: None.
 
 ### Acceptance
 - Los tests que confirman con `y` leen hasta `read ✓` (o fijan explícitamente un tamaño suficiente con motivo) en lugar de asumir que la preview cabe; sin debilitar aserciones.
@@ -52,15 +52,18 @@ Type: improvement
 - J002 (sonnet) 888d186..e31dabc. V001 fail (B1: mover el bloqueo por ruta podía dejar dos titulares); corrección con mutex .recovering y relectura in situ; V002 approve. Windows CI verde. Entregado en PR #120. Seguimientos → J004: S3 publicar owner.json sin sobrescribir (link/EEXIST) e id en el mutex antes del rm; S4 maxRetries en los rm de Windows. Límite aceptado: pausas >60 s / >10 min dentro de la recuperación (arrendamiento por edad).
 
 ## J004
-- Status: pending
+- Status: in-progress
 - Objective: Endurecer el bloqueo de Sources: owner.json sin sobrescritura, id en el mutex de recuperación y reintentos en los borrados.
 - Depends on: J003 integrado.
 - Brief: [brief-r1.md](jobs/J004/brief-r1.md)
-- Blocker: en cola tras J003.
-- Next step: worker sonnet tras J003.
+- Blocker: None
+- Next step: worker sonnet; revisión; PR; integrar.
 
 ### Acceptance
 - Un titular que reanuda tras perder su bloqueo no sobrescribe el owner.json de otro; un recuperador no borra si el mutex ya no es suyo; los `rm` de liberación y recuperación reintentan errores transitorios de Windows.
 
 ### Evidence
 - Revisión V002 de J002 (S3, S4, I1, I2).
+- Operador (2026-11-12): «no dejemos más deuda; se resuelve en el job y si no dan las rondas pides más». J004 recoge la deuda ya generada por J002 antes de la release; a partir de ahora los hallazgos se resuelven dentro de cada job.
+- J003 (sonnet; cortado por cuota y reanudado) entregado en PR #121 con CI verde: causa del test intermitente del selector (espera a la cabecera que ya sale en la carga); ~46 esperas de confirmación leen hasta el final con readPreview; revisión aprobada y su sugerencia resuelta. El fallo de Windows en el PR era del helper (altura fija de 24 filas), no del producto. Fuera de alcance por decisión del operador: 6 tests con filas exactas a 220 columnas fallan con un TMPDIR artificial de ~190 caracteres.
+- Incidente del coordinador: un primer dispatch de J004 arrancó sin brief ni rama porque falló la cadena de comandos; detenido de inmediato sin cambios.
