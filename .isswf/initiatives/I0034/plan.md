@@ -3,12 +3,12 @@
 Type: improvement
 
 ## J001
-- Status: in-progress
+- Status: done
 - Objective: Probar la espera al salir de la TUI y sustituir la variable de entorno AGENT_DEPOT_NO_BACKGROUND_REFRESH por una opción inyectada.
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
-- Next step: PR y CI.
+- Next step: None.
 
 ### Acceptance
 - Un test demuestra que `renderTui` espera a `settled()` tras salir y muestra el mensaje solo si hay refrescos en curso.
@@ -18,11 +18,11 @@ Type: improvement
 - Revisiones de I0031 (V001–V003): espera de render.tsx sin test; opt-out por variable de entorno leída en producción.
 
 ## J002
-- Status: pending
+- Status: in-progress
 - Objective: Recuperar el bloqueo huérfano de la caché de una Source cuando el proceso que lo tenía murió.
 - Depends on: J001 integrado (orden secuencial, mismo checkout).
 - Brief: [brief-r1.md](jobs/J002/brief-r1.md)
-- Blocker: en cola tras J001.
+- Blocker: None
 - Next step: worker sonnet tras J001.
 
 ### Acceptance
@@ -48,3 +48,4 @@ Type: improvement
 - Autorización del operador (2026-11-12): «ok hazlos, coordinador» tras la lista de seguimientos; integración sin preguntar salvo algo grave (vigente).
 - J001 worker (sonnet, 9 min, 51k) f5e3426..2999aaf. Revisión V001 (opus): 0 bloqueantes, inconcluso por evidencia no observada. Coordinador: RED e652a40 solo tests; tui-render 3/0, cli 83/0. Desviación aceptada: test de espera de caracterización (sin RED; mutación ad hoc no retenida); cableado renderTui→finishRunningRefreshes sin test (una línea).
 - Operador (2026-11-12): sacar release 0.6.15 al terminar I0034 y actualizar esta máquina.
+- J001 entregado: PR #119 fusionado con CI verde (Windows: test intermitente del selector de carpetas «the directory picker selects the current folder and descends into a subfolder» falló una vez y pasó al relanzar → añadir a J003).
