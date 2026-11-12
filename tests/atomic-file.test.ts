@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { type FileHandle, mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -60,4 +60,65 @@ test("non-transient codes and non-Windows platforms are not retried", async () =
   const linux = retryDeps("linux", Infinity);
   await assert.rejects(renameWithWindowsRetry("from", "to", linux.deps), { code: "EPERM" });
   assert.equal(linux.calls.rename, 1);
+});
+
+/** Record every fsync of a handle, tagged by what it was opened on and what the destination held then. */
+async function recordSyncs(file: string, run: () => Promise<void>, failOn?: "file" | "directory") {
+  const probe = await open(file, "r");
+  const prototype = Object.getPrototypeOf(probe) as { sync: () => Promise<void> };
+  await probe.close();
+  const original = prototype.sync;
+  const events: string[] = [];
+  prototype.sync = async function (this: FileHandle) {
+    const kind = (await this.stat()).isDirectory() ? "directory" : "file";
+    const destination = await readFile(file, "utf8").catch(() => "<missing>");
+    events.push(`${kind}:${destination}`);
+    if (kind === failOn) throw errno("EIO");
+    return original.call(this);
+  };
+  try {
+    await run();
+  } finally {
+    prototype.sync = original;
+  }
+  return events;
+}
+
+test("the temporary file is fsynced before the rename and the directory after it", { skip: process.platform === "win32" }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-atomic-"));
+  try {
+    const file = path.join(directory, "state.json");
+    await writeFile(file, "old");
+    const events = await recordSyncs(file, () => writeFileAtomically(file, "new"));
+    assert.deepEqual(events, ["file:old", "directory:new"]);
+    assert.equal(await readFile(file, "utf8"), "new");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a failed fsync of the temporary file keeps the original and leaves no temporary", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-atomic-"));
+  try {
+    const file = path.join(directory, "state.json");
+    await writeFile(file, "old");
+    await assert.rejects(recordSyncs(file, () => writeFileAtomically(file, "new"), "file"), { code: "EIO" });
+    assert.equal(await readFile(file, "utf8"), "old");
+    assert.deepEqual(await readdir(directory), ["state.json"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a failed write keeps the original and leaves no temporary", { skip: process.platform === "win32" }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "agent-depot-atomic-"));
+  try {
+    const target = path.join(directory, "target");
+    await mkdir(path.join(target, "inner"), { recursive: true });
+    await assert.rejects(writeFileAtomically(target, "new"));
+    assert.deepEqual(await readdir(directory), ["target"]);
+    assert.deepEqual(await readdir(target), ["inner"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

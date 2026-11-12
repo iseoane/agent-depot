@@ -972,7 +972,8 @@ independently. Unknown selections and combining a block's inclusion filter with 
 
 Stdout contains JSON only; stderr shows the preview and exclusion reasons.
 `--out` requires a new file unless `--overwrite` is given, which atomically replaces an
-existing regular file; directories and symlinks are never replaced.
+existing regular file; directories and symlinks are never replaced. Overwriting creates a
+new file, so it does not keep the original's permissions, owner or hard links.
 Profiles contain canonical Git URLs with discovery inclusion, individual Skill
 selections with recorded version policies, Hosts and user methods, complete App
 recipes (including recipes for other platforms), and Package selections as
