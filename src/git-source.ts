@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, rename, rm, rmdir } from "node:fs/promises";
-import { homedir } from "node:os";
+import { lstat, mkdir, readFile, rename, rm, rmdir } from "node:fs/promises";
+import { homedir, hostname } from "node:os";
 import path from "node:path";
-import { isLockContention } from "./atomic-file.js";
+import { isLockContention, writeFileAtomically } from "./atomic-file.js";
 import { assertNoSymlinkPath } from "./path-safety.js";
 import { runProcess, type ProcessRunResult } from "./process-runner.js";
 import { decodeSnapshotBatch, reuseSourceSnapshot, SOURCE_SNAPSHOT_LIMITS } from "./source-snapshot.js";
@@ -153,6 +153,15 @@ class NodeGitSnapshotCommandRunner implements GitSnapshotCommandRunner {
 export interface GitSourceAccessOptions {
   readonly cachePath?: string;
   readonly runner?: GitCommandRunner;
+  /** Test seam: lets a test interleave another process at the points where lock races can occur. */
+  readonly lockHooks?: SourceLockHooks;
+}
+
+export interface SourceLockHooks {
+  /** Runs after a recoverer judged a lock orphaned and before it acts on that judgment. */
+  readonly afterJudging?: () => Promise<void>;
+  /** Runs after this process created the lock directory and before it publishes its owner record. */
+  readonly afterLockCreated?: () => Promise<void>;
 }
 
 const SOURCE_LOCK_TIMEOUT_MS = 30_000;
@@ -162,6 +171,12 @@ const BACKGROUND_REFRESH_OPTIONS: GitCommandRunnerOptions = Object.freeze({
   timeoutMs: 60_000,
 });
 const SOURCE_LOCK_RETRY_MS = 10;
+const SOURCE_LOCK_OWNER_FILE = "owner.json";
+const SOURCE_LOCK_OWNER_MAX_BYTES = 4096;
+/** A recovery takes milliseconds, so a mutex this old was left by a process that died mid-recovery. */
+const SOURCE_RECOVERY_MUTEX_MAX_AGE_MS = 60_000;
+/** Covers locks from versions without an owner record and an acquisition interrupted before writing it. */
+const SOURCE_LOCK_OWNERLESS_MAX_AGE_MS = 10 * 60_000;
 
 /**
  * Clones each Source into a local mirror and refreshes it from the registered
@@ -170,8 +185,10 @@ const SOURCE_LOCK_RETRY_MS = 10;
 export class GitSourceAccessAdapter implements GitSourceAccess {
   readonly cachePath: string;
   private readonly runner: GitCommandRunner;
+  private readonly lockHooks: SourceLockHooks;
 
   constructor(options: GitSourceAccessOptions = {}) {
+    this.lockHooks = options.lockHooks ?? {};
     this.cachePath = options.cachePath ?? defaultGitSourceCachePath();
     this.runner = options.runner ?? new NodeGitCommandRunner();
   }
@@ -188,7 +205,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
       await mkdir(this.cachePath, { recursive: true });
       await assertNoSymlinkPath(this.cachePath, "cache path");
 
-      const release = await acquireSourceLock(`${destination}.lock`);
+      const release = await acquireSourceLock(`${destination}.lock`, this.lockHooks);
       try {
         await this.refreshLocked(source, destination, options.background ? BACKGROUND_REFRESH_OPTIONS : undefined);
       } finally {
@@ -548,14 +565,27 @@ async function pathType(candidate: string): Promise<PathKind> {
   }
 }
 
-async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>> {
+interface SourceLockOwner {
+  readonly pid: number;
+  readonly hostname: string;
+  readonly startedAt: string;
+  /** Random per acquisition, so a recovery can tell the lock it judged from a successor's. */
+  readonly id: string;
+}
+
+/** `none` is only a missing owner file; a record that exists but cannot be trusted must never justify a removal. */
+type LockOwnerRecord =
+  | { readonly kind: "owner"; readonly owner: SourceLockOwner }
+  | { readonly kind: "none" }
+  | { readonly kind: "unreadable" };
+
+async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Promise<() => Promise<void>> {
   const deadline = Date.now() + SOURCE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
       await mkdir(lockPath);
-      return async () => {
-        await rmdir(lockPath);
-      };
+      await hooks.afterLockCreated?.();
+      return await publishLockOwner(lockPath);
     } catch (error) {
       if (!isLockContention(error)) {
         throw error;
@@ -563,13 +593,126 @@ async function acquireSourceLock(lockPath: string): Promise<() => Promise<void>>
       if ((await pathType(lockPath)) === "symlink") {
         throw new Error("the Source cache lock is a symbolic link");
       }
+      if (await recoverOrphanedLock(lockPath, hooks)) {
+        continue;
+      }
       if (Date.now() >= deadline) {
+        const record = await readLockOwner(lockPath);
+        const holder = record.kind === "owner" ? ` (held by process ${record.owner.pid} on host ${record.owner.hostname})` : "";
         throw new Error(
-          `the Source cache lock directory is busy: ${lockPath}; another refresh might be active. Wait for it to finish before retrying`,
+          `the Source cache lock directory is busy: ${lockPath}${holder}; another refresh might be active. Wait for it to finish before retrying`,
         );
       }
       await new Promise<void>((resolve) => setTimeout(resolve, SOURCE_LOCK_RETRY_MS));
     }
+  }
+}
+
+async function publishLockOwner(lockPath: string): Promise<() => Promise<void>> {
+  const owner: SourceLockOwner = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), id: randomUUID() };
+  try {
+    await writeFileAtomically(path.join(lockPath, SOURCE_LOCK_OWNER_FILE), JSON.stringify(owner));
+  } catch (error) {
+    // Only an empty directory can still be the lock this call created; another holder's lock has an owner record.
+    await rmdir(lockPath).catch(() => undefined);
+    throw error;
+  }
+  return async () => {
+    const record = await readLockOwner(lockPath);
+    if (record.kind === "owner" && record.owner.id === owner.id) {
+      await rm(lockPath, { recursive: true, force: true });
+    }
+  };
+}
+
+/** Reads the owner record without following links. */
+async function readLockOwner(lockPath: string): Promise<LockOwnerRecord> {
+  const ownerPath = path.join(lockPath, SOURCE_LOCK_OWNER_FILE);
+  try {
+    const information = await lstat(ownerPath);
+    if (!information.isFile() || information.size > SOURCE_LOCK_OWNER_MAX_BYTES) {
+      return { kind: "unreadable" };
+    }
+    const parsed: unknown = JSON.parse(await readFile(ownerPath, "utf8"));
+    if (typeof parsed !== "object" || parsed === null) {
+      return { kind: "unreadable" };
+    }
+    const { pid, hostname: host, startedAt, id } = parsed as Record<string, unknown>;
+    return Number.isInteger(pid) && (pid as number) > 0 && typeof host === "string" && typeof startedAt === "string" && typeof id === "string"
+      ? { kind: "owner", owner: { pid: pid as number, hostname: host, startedAt, id } }
+      : { kind: "unreadable" };
+  } catch (error) {
+    return isMissing(error) ? { kind: "none" } : { kind: "unreadable" };
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function isOldLock(lockPath: string, maxAgeMs: number): Promise<boolean> {
+  try {
+    return Date.now() - (await lstat(lockPath)).mtimeMs > maxAgeMs;
+  } catch {
+    return false;
+  }
+}
+
+/** The orphan a recoverer judged: a dead owner on this host (by id) or an old lock with no owner record. */
+async function judgeOrphan(lockPath: string): Promise<LockOwnerRecord | undefined> {
+  const record = await readLockOwner(lockPath);
+  if (record.kind === "owner") {
+    return record.owner.hostname === hostname() && !isProcessAlive(record.owner.pid) ? record : undefined;
+  }
+  return record.kind === "none" && await isOldLock(lockPath, SOURCE_LOCK_OWNERLESS_MAX_AGE_MS) ? record : undefined;
+}
+
+/**
+ * Removes a lock whose holder is provably gone. Recoverers serialize on a short-lived `.recovering`
+ * mutex and re-judge the lock in place while holding it, so a judgment made before another process
+ * recovered and re-took the lock can never remove (or move) that live lock: nothing but a recoverer
+ * removes a lock whose owner is dead, and acquirers cannot replace a lock that still exists.
+ * Returns true when the caller should retry the acquisition at once.
+ */
+async function recoverOrphanedLock(lockPath: string, hooks: SourceLockHooks): Promise<boolean> {
+  const judged = await judgeOrphan(lockPath);
+  if (judged === undefined) {
+    return false;
+  }
+  await hooks.afterJudging?.();
+
+  const mutexPath = `${lockPath}.recovering`;
+  try {
+    await mkdir(mutexPath);
+  } catch (error) {
+    if (!isLockContention(error)) {
+      throw error;
+    }
+    // A recoverer that died holding the mutex would otherwise block recovery for good.
+    if (await isOldLock(mutexPath, SOURCE_RECOVERY_MUTEX_MAX_AGE_MS)) {
+      await rm(mutexPath, { recursive: true, force: true });
+      return true;
+    }
+    return false;
+  }
+  try {
+    const current = await judgeOrphan(lockPath);
+    const sameOrphan = current !== undefined && (current.kind === "owner"
+      ? judged.kind === "owner" && judged.owner.id === current.owner.id
+      : judged.kind === "none");
+    if (sameOrphan) {
+      // rm unlinks links instead of following them, so nothing outside the lock is touched.
+      await rm(lockPath, { recursive: true, force: true });
+    }
+    return true;
+  } finally {
+    await rm(mutexPath, { recursive: true, force: true });
   }
 }
 
