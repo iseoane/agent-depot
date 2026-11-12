@@ -48,12 +48,12 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Revisiones I0032 J002, J003a, J004a, J004c.
 
 ## J004
-- Status: pending
+- Status: in-progress
 - Objective: Restos del escapado: recorte en NameField, `\X`/`\U` en mayúsculas, espacios no ASCII en rutas entrecomilladas, contador de teclas por turno compartido.
 - Depends on: J003
 - Brief: [brief-r1.md](jobs/J004/brief-r1.md)
-- Blocker: en cola tras J003.
-- Next step: brief detallado tras J003.
+- Blocker: None
+- Next step: worker sonnet; revisión; PR; integrar.
 
 ### Acceptance
 - Cada punto corregido con test.
@@ -81,15 +81,16 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - J003 entregado en PR #126 con CI verde. Hallazgo del worker confirmado por la revisión: en Installations, una App seguida cuya receta cambió muestra «already approved» y no ofrece reaprobar (inspectEntry devuelve el resultado guardado antes de comprobar la aprobación); no ejecuta comandos (planLifecycle/executeLifecycle exigen aprobación). Se resuelve en J003b.
 
 ## J003b
-- Status: in-progress
+- Status: done
 - Objective: En Installations, una App cuya receta cambió muestra que necesita aprobación y Enter abre la revisión de la receta.
 - Depends on: J003
 - Brief: [brief-r1.md](jobs/J003b/brief-r1.md)
 - Blocker: None
-- Next step: worker sonnet; revisión; PR; integrar.
+- Next step: None.
 
 ### Acceptance
 - La fila indica «needs approval»; Enter abre la aprobación de la receta con el pie compartido (`confirmAtEnd` en tres tamaños); tras aprobar, la fila vuelve a su estado normal. Ningún comando se ejecuta sin aprobación.
 
 ### Evidence
 - Revisión J003 de I0035 (src/app-flow.ts:240-242, src/tui/installations-browse.ts:143-149).
+- J003b entregado en PR #127 con CI verde: «needs approval» y reaprobación desde Installations; también recetas inválidas con su motivo (hallazgo de la revisión resuelto en el job). Auditoría observada por el coordinador.
