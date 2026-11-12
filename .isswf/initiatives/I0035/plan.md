@@ -62,12 +62,12 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Revisiones I0032 J005, J007.
 
 ## J005
-- Status: in-progress
+- Status: done
 - Objective: Exportar y escritura atómica: aviso de permisos en README, test de fallo de escritura que conserva el original, fsync en atomic-file.ts.
 - Depends on: J004
 - Brief: [brief-r1.md](jobs/J005/brief-r1.md)
 - Blocker: None
-- Next step: worker sonnet; revisión; PR; integrar; luego release 0.6.15.
+- Next step: None.
 
 ### Acceptance
 - README actualizado; test de fallo; escritura con fsync del fichero y del directorio donde la plataforma lo permita.
@@ -95,3 +95,4 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Revisión J003 de I0035 (src/app-flow.ts:240-242, src/tui/installations-browse.ts:143-149).
 - J003b entregado en PR #127 con CI verde: «needs approval» y reaprobación desde Installations; también recetas inválidas con su motivo (hallazgo de la revisión resuelto en el job). Auditoría observada por el coordinador.
 - J004 (sonnet; cortado por cuota y reanudado) entregado en PR #128 con CI verde; revisión en 2 rondas (bloqueante de bloques sin límite resuelto). Fuera de alcance por decisión del operador (casos extremos): efectos en terminales de menos de ~29 columnas.
+- J005 entregado en PR #129 con CI verde (Linux y Windows). Descartado como decisión (condiciones artificiales): error de fsync de directorio tras un rename correcto (EACCES/EIO), fallback de Windows sin fsync, parche compartido de FileHandle.sync en tests secuenciales. I0035 completa; sigue release 0.6.15.
