@@ -943,7 +943,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
       const position = footerPosition(session.screen);
       assert.ok(position, `approval preview lost its physical-row position:\n${session.screen}`);
       const { first, last } = position;
-      const titleRow = screenRows.findIndex(row => row.includes("Recipe approval · does not install"));
+      const titleRow = screenRows.findIndex(row => row.includes("Recipe approval · does not inst"));
       const visible = screenRows.slice(titleRow + 1, position.footerRow)
         // A blank row separates the recipe's identity from its steps, so empty rows count.
         .map(row => row.match(/^\s*│ ?(.*?)\s*│?\s*$/u)?.[1] ?? "");
