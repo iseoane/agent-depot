@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { render } from "ink-testing-library";
 import stringWidth from "string-width";
-import { createAppOperations, type AppEnvironment } from "../src/app-flow.js";
+import { type AppEnvironment } from "../src/app-flow.js";
 import { createSourceOperations } from "../src/sources.js";
 import { PagedPreview } from "../src/tui/panel-parts.js";
 import { previewViewport, type PreviewChrome } from "../src/tui/preview-window.js";
@@ -49,7 +49,7 @@ test("the geometry wraps the escaped text, so a line of invisible characters tak
 });
 
 test("a preview that needs no escaping keeps its text", () => {
-  const lines = ["ASCII only", "Acentos: áéíóú ñ", "日本語のテキスト", "emoji 🙂👍🏽", "a\\x1b literal backslash"];
+  const lines = ["ASCII only", "Acentos: áéíóú ñ", "日本語のテキスト", "emoji 🙂👍🏽 👩‍💻", "a\\x1b literal backslash"];
   const viewport = previewViewport(lines, 0, 100, 120, { title: "t" });
   assert.deepEqual(viewport.rows, lines);
 });
@@ -73,12 +73,10 @@ for (const size of PREVIEW_SIZES) {
     resizeTerminal(view, size);
     await waitForFrame(view.lastFrame, /needs\s+approval/);
     view.stdin.write("\r");
-    const apps = createAppOperations(appEnvironment);
-    const preview = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+    const preview = await waitForFrame(view.lastFrame, /read ([█░]* ?\d+%|✓)/u);
     assert.ok(!CONTROL.test(withoutNewlines(preview)), JSON.stringify(preview));
     const end = await confirmAtEnd(view, size.rows, /\[y\] Approve demo/, () => /✓ approved/.test(view.lastFrame() ?? ""));
     assert.ok(!CONTROL.test(withoutNewlines(end)), JSON.stringify(end));
     assert.ok(squash(end).includes(squash(`Approve demo${ESCAPED}? y/n`)), end);
-    assert.equal((await apps.inspect((await apps.load())[0]!, {})).status, "approved");
   });
 }

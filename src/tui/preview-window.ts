@@ -40,6 +40,31 @@ export interface PreviewViewport {
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
+// Preview text comes from recipes, Sources and Hosts. Raw, an ESC or carriage return redraws the terminal over the lines
+// under review and a bidi override reorders them; both also change the width the `y` gate was computed for. The zero-width joiner
+// stays because emoji sequences such as a person at a laptop are made with it.
+const UNSAFE_CHARACTER = /(?!\u200D)[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+
+/** `text` with control, format and line-separator characters replaced by visible escapes (`\x1b`, `\u202e`); idempotent. */
+export function escapeControlText(text: string): string {
+  return text.replace(UNSAFE_CHARACTER, (character) => {
+    const code = character.codePointAt(0)!;
+    const hex = code.toString(16);
+    if (code <= 0xff) return `\\x${hex.padStart(2, "0")}`;
+    return code <= 0xffff ? `\\u${hex.padStart(4, "0")}` : `\\u{${hex}}`;
+  });
+}
+
+function escapeChrome(chrome: PreviewChrome): PreviewChrome {
+  return {
+    ...chrome,
+    title: escapeControlText(chrome.title),
+    ...(chrome.action === undefined ? {} : { action: escapeControlText(chrome.action) }),
+    ...(chrome.consequence === undefined ? {} : { consequence: escapeControlText(chrome.consequence) }),
+    ...(chrome.cancel === undefined ? {} : { cancel: escapeControlText(chrome.cancel) }),
+  };
+}
+
 function wrapLine(line: string, width: number): { readonly row: string; readonly offset: number }[] {
   const segments = [...graphemes.segment(line)];
   if (segments.length === 0) return [{ row: "", offset: 0 }];
@@ -160,12 +185,14 @@ function reservedFooterRows(total: number, windowed: boolean, chrome: PreviewChr
 }
 
 export function previewViewport(
-  lines: readonly string[],
+  rawLines: readonly string[],
   cursor: number,
   terminalRows: number,
   terminalColumns: number,
-  chrome: PreviewChrome,
+  rawChrome: PreviewChrome,
 ): PreviewViewport {
+  const lines = rawLines.map(escapeControlText);
+  const chrome = escapeChrome(rawChrome);
   const contentWidth = Math.max(terminalColumns - 8, 1);
   const wrapped = lines.flatMap((line, sourceLine) => wrapLine(line, contentWidth).map(({ row, offset }) => ({ row, sourceLine, offset })));
   const previewRows = wrapped.map(({ row }) => row);

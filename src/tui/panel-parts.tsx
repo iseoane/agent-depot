@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
 import type { StyledLine } from "./preview-render.js";
-import { sliceSpans, type PreviewChrome, type PreviewFooterRole, type PreviewViewport } from "./preview-window.js";
+import { escapeControlText, sliceSpans, type PreviewChrome, type PreviewFooterRole, type PreviewViewport } from "./preview-window.js";
 import { animationEnabled, formatElapsed, SPINNER_FRAMES, SPINNER_TICK_MS, STATIC_GLYPH } from "./working-model.js";
 
 /** A titled, color-independent boundary for a focused interaction or result. */
@@ -226,15 +226,18 @@ function footerColor(role: PreviewFooterRole, reachedEnd: boolean): { readonly c
  * A paged preview with the shared two-row footer: reading progress, then what `y` does. `[y]` stays
  * dimmed until `viewport` reaches the end; callers ignore `y` until then using the same viewport.
  */
-export function PagedPreview({ chrome, lines, styled, viewport }: {
+export function PagedPreview({ chrome, lines: rawLines, styled: rawStyled, viewport }: {
   readonly chrome: PreviewChrome;
   readonly lines: readonly string[];
   /** Colours of each line in `lines`; a line without them has its colours inferred from the text. */
   readonly styled?: readonly (StyledLine | undefined)[];
   readonly viewport: PreviewViewport;
 }) {
+  // The same escape `previewViewport` applied, so rows, offsets and spans describe the same text.
+  const lines = rawLines.map(escapeControlText);
+  const styled = rawStyled?.map((line) => line?.map((span) => ({ ...span, text: escapeControlText(span.text) })));
   return (
-    <BorderPanel title={chrome.title}>
+    <BorderPanel title={escapeControlText(chrome.title)}>
       {viewport.rows.map((line, position) => {
         const logical = viewport.sourceLines[position]!;
         const custom = styled?.[logical];
