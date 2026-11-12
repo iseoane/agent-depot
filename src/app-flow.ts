@@ -240,8 +240,14 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
     if (cached?.installedVersion) {
-      const needsApproval = (await approvalStatus(entry)).status === "needs approval";
-      return { status: "installed", installedVersion: cached.installedVersion, evidence: "recorded", ...(needsApproval ? { needsApproval } : {}) };
+      const approval = await approvalStatus(entry);
+      if (approval.status === "invalid") {
+        return { status: "invalid", installedVersion: cached.installedVersion, evidence: "recorded", reason: approval.reason };
+      }
+      return {
+        status: "installed", installedVersion: cached.installedVersion, evidence: "recorded",
+        ...(approval.status === "needs approval" ? { needsApproval: true as const } : {}),
+      };
     }
     const approval = await approvalProblem(entry);
     if (approval) return approval;
