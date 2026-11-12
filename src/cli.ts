@@ -276,6 +276,8 @@ const COMMANDS = new Map<string, CommandHandler>([
     // Loaded lazily so non-interactive commands never import Ink/React.
     const renderTui = dependencies.renderTui ?? (await import("./tui/render.js")).renderTui;
     await renderTui(operations, {
+      // The one place the opt-out is read: E2E tests start the real binary and cannot inject options.
+      refreshOnStart: process.env.AGENT_DEPOT_NO_BACKGROUND_REFRESH !== "1",
       homeDirectory: dependencies.homeDirectory,
       projectRoot,
       sourceAccess: dependencies.sourceAccess,
