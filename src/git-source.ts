@@ -162,6 +162,10 @@ export interface SourceLockHooks {
   readonly afterJudging?: () => Promise<void>;
   /** Runs after this process created the lock directory and before it publishes its owner record. */
   readonly afterLockCreated?: () => Promise<void>;
+  /** Runs once this process holds the lock and before it first uses it. */
+  readonly afterLockAcquired?: () => Promise<void>;
+  /** Runs after a recoverer confirmed the orphan while holding the recovery mutex, before it removes the lock. */
+  readonly beforeOrphanRemoval?: () => Promise<void>;
 }
 
 const SOURCE_LOCK_TIMEOUT_MS = 30_000;
@@ -207,6 +211,7 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
 
       const release = await acquireSourceLock(`${destination}.lock`, this.lockHooks);
       try {
+        await this.lockHooks.afterLockAcquired?.();
         await this.refreshLocked(source, destination, options.background ? BACKGROUND_REFRESH_OPTIONS : undefined);
       } finally {
         await release();
@@ -707,6 +712,7 @@ async function recoverOrphanedLock(lockPath: string, hooks: SourceLockHooks): Pr
       ? judged.kind === "owner" && judged.owner.id === current.owner.id
       : judged.kind === "none");
     if (sameOrphan) {
+      await hooks.beforeOrphanRemoval?.();
       // rm unlinks links instead of following them, so nothing outside the lock is touched.
       await rm(lockPath, { recursive: true, force: true });
     }
