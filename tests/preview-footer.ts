@@ -18,7 +18,8 @@ export const PREVIEW_SIZES: readonly TerminalSize[] = [
 interface PreviewView {
   readonly lastFrame: () => string | undefined;
   readonly stdin: { write(data: string): void };
-  readonly stdout: NodeJS.EventEmitter;
+  /** `rows` is set once `resizeTerminal` has resized the view. */
+  readonly stdout: NodeJS.EventEmitter & { readonly rows?: number };
 }
 
 /** The rows inside the open panel, without its border and padding. */
@@ -77,11 +78,12 @@ export async function confirmAtEnd(view: PreviewView, rows: number, action: RegE
  * pressed there is ignored once a longer terminal size or temporary path makes the preview page. Call it right
  * after the key that opens the preview, with no wait in between, or pass `alreadyOpen` for a preview the test has already seen open.
  */
-export async function readPreview(view: Pick<PreviewView, "lastFrame" | "stdin">, question: RegExp, alreadyOpen = false): Promise<string> {
+export async function readPreview(view: PreviewView, question: RegExp, alreadyOpen = false): Promise<string> {
   // Until the frame changes, the one on screen is the previous screen's; skip that wait for a preview the test already saw open.
   const previous = view.lastFrame();
   await waitForFrame(view.lastFrame, frame => (alreadyOpen || frame !== previous) && REVIEW.test(frame));
-  const pages = await pageToEnd(view.lastFrame, view.stdin);
+  // Pages must fit the view's own height, which a test may have raised above the 24-row default.
+  const pages = await pageToEnd(view.lastFrame, view.stdin, view.stdout.rows);
   assert.match(unwrapped(pages.at(-1)!), question, `the preview does not end on its question:\n${pages.at(-1)}`);
   return pages.join("\n");
 }
