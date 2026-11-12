@@ -47,3 +47,4 @@ Type: improvement
 - Fallos de Windows en PR #109, #114 y #115 por rutas largas; riesgo declarado en J004d.
 - Autorización del operador (2026-11-12): «ok hazlos, coordinador» tras la lista de seguimientos; integración sin preguntar salvo algo grave (vigente).
 - J001 worker (sonnet, 9 min, 51k) f5e3426..2999aaf. Revisión V001 (opus): 0 bloqueantes, inconcluso por evidencia no observada. Coordinador: RED e652a40 solo tests; tui-render 3/0, cli 83/0. Desviación aceptada: test de espera de caracterización (sin RED; mutación ad hoc no retenida); cableado renderTui→finishRunningRefreshes sin test (una línea).
+- Operador (2026-11-12): sacar release 0.6.15 al terminar I0034 y actualizar esta máquina.
