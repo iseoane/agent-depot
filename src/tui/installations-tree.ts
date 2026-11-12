@@ -92,7 +92,7 @@ export function describeNode(row: VisibleRow<NodeData>): string {
     if (inspection.status === "invalid" && inspection.evidence !== "recorded") return `${name}  invalid recipe: ${inspection.reason}`;
     const version = inspection.installedVersion ?? inspection.status;
     const invalid = inspection.status === "invalid" ? ` · invalid recipe: ${inspection.reason}` : "";
-    return `${name}  ${version}${inspection.evidence === "recorded" ? " (recorded)" : ""}${invalid}`;
+    return `${name}  ${version}${inspection.evidence === "recorded" ? " (recorded)" : ""}${inspection.needsApproval ? " · needs approval" : ""}${invalid}`;
   }
   return `${data.group.name} [${data.group.hosts.join(", ")}]`;
 }

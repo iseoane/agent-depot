@@ -634,7 +634,7 @@ for (const size of PREVIEW_SIZES) {
     resizeTerminal(fixture.view, size);
     fixture.view.stdin.write("\r");
     const [entry] = await fixture.apps.load();
-    await confirmAtEnd(fixture.view, size.rows, /\[y\] Approve demo/, () => /✓ approved/.test(fixture.view.lastFrame() ?? ""));
+    await confirmAtEnd(fixture.view, size.rows, /\[y\] Approve demo/, () => /Approved demo/.test(fixture.view.lastFrame() ?? ""));
     assert.equal((await fixture.apps.approvalStatus(entry!)).status, "approved");
     const after = await waitForFrame(fixture.view.lastFrame, /demo {2}1\.0\.0 \(recorded\)/);
     assert.doesNotMatch(after, /needs approval/);
