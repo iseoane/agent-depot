@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.15] - 2026-11-12
+
+### Changed
+
+- Sources marks a refreshed Source as `✓ refreshed` without the elapsed time;
+  `… refreshing Ns` keeps its counter (#123).
+- Progress lines share one format; a one-item batch no longer shows `(1/1)` (#123).
+- Update previews say "No updates can be applied" when nothing applies, empty
+  previews no longer show "Review 1 of 0", and commit-only Package versions read
+  `commit xxxxxxx` everywhere (#124).
+- Wrapped preview rows keep their indent and step guide; long titles are shortened
+  so the confirmation question always stays on screen (#125).
+
+### Fixed
+
+- Installations marks a tracked App whose recipe changed as needing approval and
+  Enter opens the recipe review; an invalid recipe shows its reason (#127).
+- A Source cache lock left by a process that died is recovered safely, and a busy
+  lock names its holder (#120, #122).
+- Escapes typed in text can no longer be cut so they look like real ones, uppercase
+  `\X`/`\U` are handled, and quoted paths mark invisible characters (#128).
+- State files are flushed to disk before and after replacing them, so a power cut
+  does not leave them empty (#129).
+
+### Changed (development)
+
+- The TUI start refresh is an injected option; confirmation and file-picker tests no
+  longer depend on terminal size, and review coverage gaps are closed (#119, #121, #126).
+
 ## [0.6.14] - 2026-11-12
 
 ### Added
