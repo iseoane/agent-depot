@@ -34,12 +34,12 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Revisiones I0032 J001, J002, J003a.
 
 ## J003
-- Status: in-progress
+- Status: done
 - Objective: Huecos de tests: golden de la CLI sin cwd y sin declaredChanges, Owned Skills, fila exacta de argv en e2e, `y` en aprobación desde Installations, paginación forzada y n/Esc en añadir/quitar hosts, Source removal sin filas encima.
 - Depends on: J002
 - Brief: [brief-r1.md](jobs/J003/brief-r1.md)
 - Blocker: None
-- Next step: worker sonnet; revisión; PR; integrar.
+- Next step: None.
 
 ### Acceptance
 - Cada hueco cubierto por un test que falla si se rompe lo que protege.
@@ -78,3 +78,18 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - J002 se parte por tamaño (regla S/M/L): J002a textos de cabecera/versión (S) y J002b geometría de líneas partidas y desbordes (M).
 - J002a (sonnet) entregado en PR #124 con CI verde: cabecera sin aplicables, pie de preview vacía, `commit xxxxxxx` coherente en todas las vistas (sugerencia de la revisión resuelta en el job).
 - J002b (sonnet; cortado por cuota y reanudado) entregado en PR #125: sangría colgante, título en filas calculadas con el pie reservado primero, panel working oculto en previews; revisión en 2 rondas, sugerencias resueltas. Además se arregló en el mismo PR el test intermitente de bloqueos de I0034 («a recent recovery mutex…»: mtime del mutex con reloj real frente a reloj simulado) que bloqueaba el CI.
+- J003 entregado en PR #126 con CI verde. Hallazgo del worker confirmado por la revisión: en Installations, una App seguida cuya receta cambió muestra «already approved» y no ofrece reaprobar (inspectEntry devuelve el resultado guardado antes de comprobar la aprobación); no ejecuta comandos (planLifecycle/executeLifecycle exigen aprobación). Se resuelve en J003b.
+
+## J003b
+- Status: in-progress
+- Objective: En Installations, una App cuya receta cambió muestra que necesita aprobación y Enter abre la revisión de la receta.
+- Depends on: J003
+- Brief: [brief-r1.md](jobs/J003b/brief-r1.md)
+- Blocker: None
+- Next step: worker sonnet; revisión; PR; integrar.
+
+### Acceptance
+- La fila indica «needs approval»; Enter abre la aprobación de la receta con el pie compartido (`confirmAtEnd` en tres tamaños); tras aprobar, la fila vuelve a su estado normal. Ningún comando se ejecuta sin aprobación.
+
+### Evidence
+- Revisión J003 de I0035 (src/app-flow.ts:240-242, src/tui/installations-browse.ts:143-149).
