@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { test, type TestContext } from "node:test";
 
 import {
@@ -185,5 +187,140 @@ test("recovering an orphaned lock does not follow links inside it", async (conte
 
     assert.equal(error, undefined);
     assert.equal(await readFile(path.join(outside, "keep.txt"), "utf8"), "keep");
+  });
+});
+
+function gate(): { readonly opened: Promise<void>; open: () => void } {
+  let open: () => void = () => undefined;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { opened, open };
+}
+
+/** Holds the lock inside its Git run until the test opens the release gate. */
+class GatedRunner extends OverlapRunner {
+  readonly running = gate();
+  readonly release = gate();
+
+  override async run(command: string, args: readonly string[]): Promise<void> {
+    this.running.open();
+    await this.release.opened;
+    await super.run(command, args);
+  }
+}
+
+test("a recoverer holding a stale judgment does not remove or move a lock another process took", async () => {
+  await withSandbox(async (cachePath, lockPath) => {
+    await writeOwner(lockPath, { pid: await deadPid(), hostname: hostname() });
+    const paused = gate();
+    const resume = gate();
+    const slow = new GitSourceAccessAdapter({
+      cachePath,
+      runner: new OverlapRunner(),
+      lockHooks: {
+        afterJudging: async () => {
+          paused.open();
+          await resume.opened;
+        },
+      },
+    }).refresh(source);
+    await paused.opened;
+
+    const holderRunner = new GatedRunner();
+    const holder = new GitSourceAccessAdapter({ cachePath, runner: holderRunner }).refresh(source);
+    await holderRunner.running.opened;
+    const liveOwner = await readFile(path.join(lockPath, "owner.json"), "utf8");
+
+    resume.open();
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+    assert.equal(await readFile(path.join(lockPath, "owner.json"), "utf8"), liveOwner);
+    holderRunner.release.open();
+    await Promise.all([slow, holder]);
+    assert.equal(await exists(lockPath), false);
+  });
+});
+
+test("a failed owner write never deletes a lock another process holds", async () => {
+  await withSandbox(async (cachePath, lockPath) => {
+    const otherHolder = path.join(lockPath, "owner.json");
+    const runner = new OverlapRunner();
+    const refresh = new GitSourceAccessAdapter({
+      cachePath,
+      runner,
+      lockHooks: {
+        afterLockCreated: async () => {
+          // Someone else now holds the lock; its owner record cannot be replaced by ours.
+          await rm(lockPath, { recursive: true, force: true });
+          await mkdir(path.join(otherHolder, "held"), { recursive: true });
+        },
+      },
+    }).refresh(source);
+
+    await assert.rejects(refresh, GitSourceAccessError);
+
+    assert.equal(await exists(path.join(otherHolder, "held")), true);
+    assert.deepEqual(runner.commands, []);
+  });
+});
+
+test("a recent recovery mutex held by another process keeps an orphaned lock in place", async (context) => {
+  await withSandbox(async (cachePath, lockPath) => {
+    await writeOwner(lockPath, { pid: await deadPid(), hostname: hostname() });
+    await mkdir(`${lockPath}.recovering`);
+    const runner = new OverlapRunner();
+
+    const [error] = await settleOnMockedClock(context, new GitSourceAccessAdapter({ cachePath, runner }).refresh(source));
+
+    assert.ok(error instanceof GitSourceAccessError);
+    assert.deepEqual(runner.commands, []);
+    assert.equal(await exists(lockPath), true);
+  });
+});
+
+test("reclaims an orphaned recovery mutex and then recovers the lock", async (context) => {
+  await withSandbox(async (cachePath, lockPath) => {
+    await writeOwner(lockPath, { pid: await deadPid(), hostname: hostname() });
+    await mkdir(`${lockPath}.recovering`);
+    const old = new Date(Date.now() - 5 * 60_000);
+    await utimes(`${lockPath}.recovering`, old, old);
+    const runner = new OverlapRunner();
+
+    const [error] = await settleOnMockedClock(context, new GitSourceAccessAdapter({ cachePath, runner }).refresh(source));
+
+    assert.equal(error, undefined);
+    assert.deepEqual(runner.commands, ["clone"]);
+    assert.equal(await exists(`${lockPath}.recovering`), false);
+  });
+});
+
+test("does not recover a lock whose owner record cannot be read", async (context) => {
+  await withSandbox(async (cachePath, lockPath) => {
+    await mkdir(path.join(lockPath, "owner.json"), { recursive: true });
+    const old = new Date(Date.now() - 11 * 60_000);
+    await utimes(lockPath, old, old);
+    const runner = new OverlapRunner();
+
+    const [error] = await settleOnMockedClock(context, new GitSourceAccessAdapter({ cachePath, runner }).refresh(source));
+
+    assert.ok(error instanceof GitSourceAccessError);
+    assert.deepEqual(runner.commands, []);
+    assert.equal(await exists(lockPath), true);
+  });
+});
+
+test("two real processes refreshing over an orphaned lock run one at a time", async () => {
+  await withSandbox(async (cachePath, lockPath) => {
+    await writeOwner(lockPath, { pid: await deadPid(), hostname: hostname() });
+    const logPath = path.join(path.dirname(cachePath), "child.log");
+    const child = fileURLToPath(new URL("./fixtures/source-lock-child.js", import.meta.url));
+    const run = promisify(execFile);
+
+    await Promise.all(["a", "b"].map((label) => run(process.execPath, [child, cachePath, logPath, label])));
+
+    const events = (await readFile(logPath, "utf8")).trim().split("\n").map((line) => line.split(" ")[1]);
+    assert.deepEqual(events, ["start", "end", "start", "end"]);
+    assert.equal(await exists(lockPath), false);
   });
 });
