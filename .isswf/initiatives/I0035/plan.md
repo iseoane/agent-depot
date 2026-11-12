@@ -20,12 +20,12 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Operador: «el temporizador en refreshed sobra». Revisión I0030: tres formateadores de progreso.
 
 ## J002
-- Status: in-progress
+- Status: done
 - Objective: Pulido de previews: cabecera con 0 aplicables, «Review 1 of 0», sangría y `│` en líneas partidas del árbol de pasos, desbordes por título largo o panel de trabajo, versión de origen de Package como hash.
 - Depends on: J001
 - Brief: [J002a brief-r1.md](jobs/J002/brief-r1.md); [J002b brief-r1.md](jobs/J002b/brief-r1.md)
 - Blocker: None
-- Next step: J002b (geometría): worker sonnet.
+- Next step: None.
 
 ### Acceptance
 - Cada punto corregido con test.
@@ -34,12 +34,12 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Revisiones I0032 J001, J002, J003a.
 
 ## J003
-- Status: pending
+- Status: in-progress
 - Objective: Huecos de tests: golden de la CLI sin cwd y sin declaredChanges, Owned Skills, fila exacta de argv en e2e, `y` en aprobación desde Installations, paginación forzada y n/Esc en añadir/quitar hosts, Source removal sin filas encima.
 - Depends on: J002
 - Brief: [brief-r1.md](jobs/J003/brief-r1.md)
-- Blocker: en cola tras J002.
-- Next step: brief detallado tras J002.
+- Blocker: None
+- Next step: worker sonnet; revisión; PR; integrar.
 
 ### Acceptance
 - Cada hueco cubierto por un test que falla si se rompe lo que protege.
@@ -77,3 +77,4 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - J001 (sonnet, 6 min, 35k) entregado en PR #123 con CI verde; revisión sin hallazgos.
 - J002 se parte por tamaño (regla S/M/L): J002a textos de cabecera/versión (S) y J002b geometría de líneas partidas y desbordes (M).
 - J002a (sonnet) entregado en PR #124 con CI verde: cabecera sin aplicables, pie de preview vacía, `commit xxxxxxx` coherente en todas las vistas (sugerencia de la revisión resuelta en el job).
+- J002b (sonnet; cortado por cuota y reanudado) entregado en PR #125: sangría colgante, título en filas calculadas con el pie reservado primero, panel working oculto en previews; revisión en 2 rondas, sugerencias resueltas. Además se arregló en el mismo PR el test intermitente de bloqueos de I0034 («a recent recovery mutex…»: mtime del mutex con reloj real frente a reloj simulado) que bloqueaba el CI.
