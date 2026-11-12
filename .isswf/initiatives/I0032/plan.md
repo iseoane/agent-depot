@@ -57,3 +57,5 @@ Type: feature
  del texto manual se ven como 
  (partir en líneas). S3: literal  indistinguible (mostrar \ como \).
 - J006 entregado: PR #116 fusionado con CI verde.
+- Operador (2026-11-12): tras la release, limpiar worktrees y ramas.
+- J007 worker (sonnet) 57bcffc..d135287. V001 fail (F1 doble escapado en aprobaciones; F2 sin Source real; F3 Profile mide sin escapar). Corrección 73c1869/d135287. V002 approve. Coordinador: RED solo tests, CLI sin cambios, golden 2/0, tests afectados 62/0. Tamaño: subestimado (1 corrección).
