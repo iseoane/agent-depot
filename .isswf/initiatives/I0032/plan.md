@@ -49,3 +49,4 @@ Type: feature
 - J004d entregado: PR #114 fusionado con CI verde (arreglo de tests frágiles en Windows 7df4c28).
 - J005: V001 fail (F1 `ry` en Sources); corrección 5a9d5df/17786b4; V002 changes required (F7 preexistente: `y` tras flechas/PgDn/escape en la misma lectura sigue confirmando). Presupuesto de corrección agotado → awaiting-human: ¿ronda extra con marcado por lectura de entrada, integrar lo actual y seguir F7 aparte, o descartar?
 - Operador (2026-11-12): una ronda más para J005 con marcado por lectura de entrada.
+- J005 V003: approve (F7 resuelto: marcado por turno de lectura). Coordinador: 4 commits RED solo tests, CLI sin cambios, tests afectados 164/0. Tamaño: subestimado (2 correcciones, 1 autorizada por el operador). Seguimiento informativo: contador compartido por turno si algún día un componente con confirmación se monta a mitad de lectura.
