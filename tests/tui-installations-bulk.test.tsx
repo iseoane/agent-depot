@@ -670,6 +670,33 @@ test("a bulk uninstall names each item with its position and counts the finished
   view.unmount();
 });
 
+test("a bulk uninstall of one item names it without a position", async (t) => {
+  const f = await fixture(t);
+  await install(f, "alpha", ["pi"]);
+  let holding = false;
+  let release = () => {};
+  const opened = new Promise<void>((resolve) => { release = () => { holding = false; resolve(); }; });
+  const operations: SourceOperations = {
+    ...f.operations,
+    listUserGlobalInstallations: async () => {
+      if (holding) await opened;
+      return f.operations.listUserGlobalInstallations!();
+    },
+  };
+  const view = await mount({ ...f, operations });
+  await open(view, [/builtin:agent-depot \(1\)/]);
+  await mark(view, /portable\/alpha/);
+  view.stdin.write("u");
+  await readPreview(view, /Uninstall 1 item\? y\/n/);
+  holding = true;
+  view.stdin.write("y");
+  const working = await waitForFrame(view.lastFrame, /Removing portable\/alpha…/);
+  assert.doesNotMatch(working, /\(1\/1\)/);
+  release();
+  await waitForFrame(view.lastFrame, /Removed portable\/alpha/);
+  view.unmount();
+});
+
 /** alpha and beta managed on pi, plus an unmanaged skill, all marked in a terminal of the given size. */
 async function markedAtSize(t: TestContext, size: TerminalSize) {
   const f = await fixture(t);

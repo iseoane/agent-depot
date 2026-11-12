@@ -80,7 +80,8 @@ test("each Git Source row carries a textual refresh mark that follows the sessio
   calls[1]!.reject(new Error("network down"));
   await assert.rejects(betaDone);
   frame = await waitForFrame(lastFrame, (next) => /✗ refresh failed/.test(rowOf(next, beta)));
-  assert.match(rowOf(frame, alpha), /✓ refreshed 2 min ago/);
+  assert.match(rowOf(frame, alpha), /✓ refreshed/);
+  assert.doesNotMatch(rowOf(frame, alpha), /ago|just now/);
   assert.doesNotMatch(frame, /network down/, "the error detail belongs to the selected row only");
 
   stdin.write("j");
