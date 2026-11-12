@@ -552,6 +552,6 @@ test("the busy message says when a lock has no owner record and when it will be 
     );
 
     assert.ok(error instanceof GitSourceAccessError);
-    assert.match(error.message, /held by an unknown process.*recovered after 10 minutes/);
+    assert.match(error.message, /held by an unknown process.*recovered once it is 10 minutes old/);
   });
 });

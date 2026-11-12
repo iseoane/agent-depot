@@ -666,7 +666,7 @@ async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Prom
         const holder = record.kind === "owner"
           ? ` (held by process ${record.owner.pid} on host ${record.owner.hostname})`
           : record.kind === "none"
-            ? ` (held by an unknown process: it has no owner record and will be recovered after ${SOURCE_LOCK_OWNERLESS_MAX_AGE_MS / 60_000} minutes)`
+            ? ` (held by an unknown process: it has no owner record and will be recovered once it is ${SOURCE_LOCK_OWNERLESS_MAX_AGE_MS / 60_000} minutes old)`
             : "";
         throw new Error(
           `the Source cache lock directory is busy: ${lockPath}${holder}; another refresh might be active. Wait for it to finish before retrying`,
