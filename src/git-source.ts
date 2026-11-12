@@ -598,20 +598,35 @@ interface SourceLock {
 
 const LOCK_TAKEN_OVER_MESSAGE = "the Source cache lock was taken over by another process; this refresh stopped without touching the cache";
 
+/** Identifies a directory across its lifetime; a recreated path gets a new inode or birth time. */
+async function directoryIdentity(directory: string): Promise<string | undefined> {
+  try {
+    const { dev, ino, birthtimeNs } = await lstat(directory, { bigint: true });
+    return `${dev}:${ino}:${birthtimeNs}`;
+  } catch (error) {
+    if (isMissing(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 /**
- * Removes `directory` only while `stillOurs` holds, re-checked before every attempt. `rm`'s own retry
- * option would repeat the removal on the same path blindly, and a retry that lands after a successor
- * recreated the directory would delete the successor's lock. Windows reports EBUSY, EPERM or
- * ENOTEMPTY while another process still holds a handle on something inside, so only those are retried.
- * Residual limit: the check and the removal are separate calls (the filesystem has no atomic conditional
+ * Removes `directory` if `stillOurs` holds, then retries a failed removal only on that same directory.
+ * `rm` deletes the owner record before the directory, so after a partial failure ownership can no longer
+ * be re-read; identity stands in for it, and a successor's directory recreated at the path never matches.
+ * `rm`'s own retry option would repeat the removal on the path blindly instead. Windows reports EBUSY,
+ * EPERM or ENOTEMPTY while another process still holds a handle on something inside, so only those are retried.
+ * Residual limit: the checks and the removal are separate calls (the filesystem has no atomic conditional
  * remove), so a successor that takes the path inside that window, microseconds wide, is still removed;
  * two reclaimers of an aged-out recovery mutex can race the same way.
  */
 async function removeWhileOurs(directory: string, stillOurs: () => Promise<boolean>, hooks: SourceLockHooks): Promise<void> {
+  if (!(await stillOurs())) {
+    return;
+  }
+  const identity = await directoryIdentity(directory);
   for (let attempt = 1; ; attempt += 1) {
-    if (!(await stillOurs())) {
-      return;
-    }
     try {
       // rm unlinks links instead of following them, so nothing outside the directory is touched.
       await (hooks.removeDirectory ?? ((target) => rm(target, { recursive: true, force: true })))(directory);
@@ -622,6 +637,9 @@ async function removeWhileOurs(directory: string, stillOurs: () => Promise<boole
         throw error;
       }
       await new Promise<void>((resolve) => setTimeout(resolve, LOCK_REMOVAL_RETRY_MS));
+      if (identity === undefined || (await directoryIdentity(directory)) !== identity) {
+        return;
+      }
     }
   }
 }
@@ -645,7 +663,11 @@ async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Prom
       }
       if (Date.now() >= deadline) {
         const record = await readLockOwner(lockPath);
-        const holder = record.kind === "owner" ? ` (held by process ${record.owner.pid} on host ${record.owner.hostname})` : "";
+        const holder = record.kind === "owner"
+          ? ` (held by process ${record.owner.pid} on host ${record.owner.hostname})`
+          : record.kind === "none"
+            ? ` (held by an unknown process: it has no owner record and will be recovered after ${SOURCE_LOCK_OWNERLESS_MAX_AGE_MS / 60_000} minutes)`
+            : "";
         throw new Error(
           `the Source cache lock directory is busy: ${lockPath}${holder}; another refresh might be active. Wait for it to finish before retrying`,
         );
@@ -686,9 +708,10 @@ async function publishLockOwner(lockPath: string, hooks: SourceLockHooks): Promi
       // The directory this call created is gone: the lock was recovered, and a successor may already hold a new one.
       throw new Error(LOCK_TAKEN_OVER_MESSAGE);
     }
-    // The lock is deliberately not removed here: it may already be a successor's, and an ownerless lock
-    // left by this failure is recovered once it is old enough.
-    throw error;
+    // rmdir only removes an empty directory: ours, or a successor's before it published, whose own write then
+    // reports the takeover. A successor with an owner record is never empty.
+    await rmdir(lockPath).catch(() => undefined);
+    throw new Error(`could not record the Source cache lock owner: ${error instanceof Error ? error.message : String(error)}`);
   }
   await unlink(temporaryPath).catch(() => undefined);
   return {
