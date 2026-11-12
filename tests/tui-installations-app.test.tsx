@@ -618,27 +618,29 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
-// The footer rule for `app-approve` is covered through Sources (tui-sources-recipes). Installations lists only Apps whose inspection is
-// installed or recorded, and a focus check only replaces a row once its recipe is approved, so a row never holds "needs approval":
-// the Enter branch that would open `app-approve` from here cannot be reached, and there is no `confirmAtEnd` path to pin.
-test("Enter on a tracked App whose recipe changed does not open recipe approval from Installations", async t => {
-  const fixture = await appFixture(t, true, async (_apps, recipeFile) => {
-    await writeFile(recipeFile, JSON.stringify({
-      name: "demo", install: { argv: ["demo", "install"] }, update: { argv: ["demo", "update"] },
-      uninstall: { argv: ["demo", "uninstall"] }, version: { argv: ["demo", "--version"], pattern: "(\\d+\\.\\d+\\.\\d+)" },
-      homepage: "https://changed.example",
-    }));
+for (const size of PREVIEW_SIZES) {
+  test(`Enter on a tracked App whose recipe changed reapproves it and accepts y exactly when its footer reads to the end at ${size.columns}x${size.rows}`, async t => {
+    const fixture = await appFixture(t, true, async (_apps, recipeFile) => {
+      await writeFile(recipeFile, JSON.stringify({
+        name: "demo", install: { argv: ["demo", "install"] }, update: { argv: ["demo", "update"] },
+        uninstall: { argv: ["demo", "uninstall"] }, version: { argv: ["demo", "--version"], pattern: "(\\d+\\.\\d+\\.\\d+)" },
+        homepage: "https://changed.example",
+      }));
+    });
+    const listed = await waitForFrame(fixture.view.lastFrame, /demo {2}1\.0\.0 \(recorded\)/);
+    assert.match(listed, /demo {2}1\.0\.0 \(recorded\) · needs approval/);
+    await selectInstalledApp(fixture.view);
+    await waitForSettled(fixture.view.lastFrame);
+    resizeTerminal(fixture.view, size);
+    fixture.view.stdin.write("\r");
+    const [entry] = await fixture.apps.load();
+    await confirmAtEnd(fixture.view, size.rows, /\[y\] Approve demo/, () => /Approved demo/.test(fixture.view.lastFrame() ?? ""));
+    assert.equal((await fixture.apps.approvalStatus(entry!)).status, "approved");
+    const after = await waitForFrame(fixture.view.lastFrame, /demo {2}1\.0\.0 \(recorded\)/);
+    assert.doesNotMatch(after, /needs approval/);
+    assert.deepEqual(fixture.commands, []);
   });
-  await waitForFrame(fixture.view.lastFrame, /demo {2}1\.0\.0 \(recorded\)/);
-  await selectInstalledApp(fixture.view);
-  await waitForSettled(fixture.view.lastFrame);
-  fixture.view.stdin.write("\r");
-  const frame = await waitForFrame(fixture.view.lastFrame, candidate => candidate.includes("Result ·"));
-  assert.doesNotMatch(frame, /Recipe approval|\[y\] Approve/);
-  const [entry] = await fixture.apps.load();
-  assert.equal((await fixture.apps.approvalStatus(entry!)).status, "needs approval");
-  assert.deepEqual(fixture.commands, []);
-});
+}
 
 for (const size of PREVIEW_SIZES) {
   test(`a manual App Host step names its check in the shared footer at ${size.columns}x${size.rows}`, async t => {

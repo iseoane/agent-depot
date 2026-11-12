@@ -95,6 +95,34 @@ test("a recorded App remains installed after recipe approval expires, but action
   }
 });
 
+test("a recorded App whose recipe turned invalid is reported invalid with its reason, keeping the recorded version", async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), "app-recorded-invalid-"));
+  try {
+    const file = path.join(fixture, "example.json");
+    await writeFile(file, JSON.stringify(recipe));
+    let commands = 0;
+    const apps = createAppOperations({
+      recipesDirectory: fixture,
+      homeDirectory: fixture,
+      resolveExecutable: async () => "/usr/bin/example",
+      runner: async () => {
+        commands += 1;
+        return { code: 0, signal: null, stdout: Buffer.from("1.2.3"), stderr: "", outputTooLarge: false };
+      },
+    });
+    const [entry] = await apps.load();
+    await writeFile(file, "{ malformed JSON");
+    const inspection = await apps.inspect(entry!, { installedVersion: "1.2.3" });
+    assert.equal(inspection.status, "invalid");
+    assert.equal(inspection.installedVersion, "1.2.3");
+    assert.equal(inspection.evidence, "recorded");
+    assert.match(inspection.reason ?? "", /JSON/u);
+    assert.equal(commands, 0);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 test("a live version probe reconciles only the tracked record for the same recipe file", async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), "app-reconcile-"));
   const root = path.join(fixture, "workspace");

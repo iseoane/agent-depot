@@ -140,7 +140,7 @@ function actOnRow(context: BrowseContext, snapshot: TreeSnapshot<NodeData>, row:
   else if (item.kind === "package") actOnPackage(context, item, input, key);
   else if (item.kind === "app") {
     if (input === "A") context.setMessage({ kind: "error", text: "Adoption applies to unmanaged Skills, not Apps" });
-    else if (key.return && item.row.inspection.status !== "needs approval") {
+    else if (key.return && item.row.inspection.status !== "needs approval" && !item.row.inspection.needsApproval) {
       const { entry, inspection } = item.row;
       const approved = inspection.status === "installed" || inspection.status === "not installed";
       context.setMessage({

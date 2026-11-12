@@ -33,6 +33,8 @@ export interface AppInspection {
   readonly reason?: string;
   /** `recorded` copies tracked state, `verified` came from this run's version command; absent otherwise. */
   readonly evidence?: "recorded" | "verified";
+  /** A recorded result whose recipe changed since it was approved; the version is kept but lifecycle commands stay blocked. */
+  readonly needsApproval?: true;
 }
 
 export interface AppUpdateCheck {
@@ -238,7 +240,14 @@ export function createAppOperations(environment: AppEnvironment = {}) {
     if (entry.error || !entry.recipe) return { status: "invalid", reason: entry.error };
     if (!entry.applicable) return { status: "not applicable here" };
     if (cached?.installedVersion) {
-      return { status: "installed", installedVersion: cached.installedVersion, evidence: "recorded" };
+      const approval = await approvalStatus(entry);
+      if (approval.status === "invalid") {
+        return { status: "invalid", installedVersion: cached.installedVersion, evidence: "recorded", reason: approval.reason };
+      }
+      return {
+        status: "installed", installedVersion: cached.installedVersion, evidence: "recorded",
+        ...(approval.status === "needs approval" ? { needsApproval: true as const } : {}),
+      };
     }
     const approval = await approvalProblem(entry);
     if (approval) return approval;

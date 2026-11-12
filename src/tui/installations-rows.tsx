@@ -13,6 +13,7 @@ function AppDetails({ row }: { readonly row: AppRow }) {
   return (
     <Text><Text color={theme.legend}>  </Text><Text color={version === undefined ? statusColor : theme.version}>{version ?? row.inspection.status}</Text>
       {row.inspection.evidence === "recorded" ? <Text color={theme.value}> (recorded)</Text> : null}
+      {row.inspection.needsApproval ? <Text color={theme.warning}> · needs approval</Text> : null}
       {invalid === "" ? null : <Text color={theme.error}>{invalid}</Text>}</Text>
   );
 }
