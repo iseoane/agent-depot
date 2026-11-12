@@ -18,3 +18,11 @@ test("a command line escapes invisible, format and control characters so one arg
   assert.equal(commandLine(["x", "tag\u{E0041}"]), 'x "tag\\u{e0041}"');
   assert.equal(commandLine(["\u202Erm", "-rf"]), '"\\u202erm" -rf');
 });
+
+test("a command line escapes non-ASCII spaces and default-ignorable characters so they cannot pass for a plain space or vanish", () => {
+  assert.notEqual(commandLine(["x", "a\u00A0b"]), commandLine(["x", "a b"]));
+  assert.equal(commandLine(["x", "a\u00A0b"]), 'x "a\\u00a0b"');
+  assert.equal(commandLine(["x", "a\u3000b", "c\u2003d"]), 'x "a\\u3000b" "c\\u2003d"');
+  assert.equal(commandLine(["x", "a\u00ADb", "c\u2800d", "e\u3164f", "g\uFE0Fh"]), 'x "a\\u00adb" "c\\u2800d" "e\\u3164f" "g\\ufe0fh"');
+  assert.equal(commandLine(["x", "café 日本 🙂"]), 'x "café 日本 🙂"');
+});
