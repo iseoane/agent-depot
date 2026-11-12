@@ -15,8 +15,9 @@ Type: feature
 - Brief J004c: [brief-r1.md](jobs/J004c/brief-r1.md)
 - Brief J004d: [brief-r1.md](jobs/J004d/brief-r1.md)
 - Brief J005: [brief-r1.md](jobs/J005/brief-r1.md)
+- Brief J006: [brief-r1.md](jobs/J006/brief-r1.md)
 - Blocker: None
-- Next step: J005 ronda 2 (marcado por lectura), revisión, PR; luego J006 y release.
+- Next step: J006 (worker sonnet), luego release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -50,3 +51,4 @@ Type: feature
 - J005: V001 fail (F1 `ry` en Sources); corrección 5a9d5df/17786b4; V002 changes required (F7 preexistente: `y` tras flechas/PgDn/escape en la misma lectura sigue confirmando). Presupuesto de corrección agotado → awaiting-human: ¿ronda extra con marcado por lectura de entrada, integrar lo actual y seguir F7 aparte, o descartar?
 - Operador (2026-11-12): una ronda más para J005 con marcado por lectura de entrada.
 - J005 V003: approve (F7 resuelto: marcado por turno de lectura). Coordinador: 4 commits RED solo tests, CLI sin cambios, tests afectados 164/0. Tamaño: subestimado (2 correcciones, 1 autorizada por el operador). Seguimiento informativo: contador compartido por turno si algún día un componente con confirmación se monta a mitad de lectura.
+- J005 entregado: PR #115 fusionado con CI verde (test PgDn robusto en Windows db948d7).
