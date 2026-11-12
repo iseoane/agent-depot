@@ -324,3 +324,99 @@ test("two real processes refreshing over an orphaned lock run one at a time", as
     assert.equal(await exists(lockPath), false);
   });
 });
+
+test("a holder that lost its lock before publishing its owner record leaves the successor's record and runs no Git", async () => {
+  await withSandbox(async (cachePath, lockPath) => {
+    const paused = gate();
+    const resume = gate();
+    const staleRunner = new OverlapRunner();
+    const stale = new GitSourceAccessAdapter({
+      cachePath,
+      runner: staleRunner,
+      lockHooks: {
+        afterLockCreated: async () => {
+          paused.open();
+          await resume.opened;
+        },
+      },
+    }).refresh(source);
+    await paused.opened;
+
+    // The paused holder's ownerless lock ages out, so a successor recovers it and takes the lock.
+    const old = new Date(Date.now() - 11 * 60_000);
+    await utimes(lockPath, old, old);
+    const successorRunner = new GatedRunner();
+    const successor = new GitSourceAccessAdapter({ cachePath, runner: successorRunner }).refresh(source);
+    await successorRunner.running.opened;
+    const liveOwner = await readFile(path.join(lockPath, "owner.json"), "utf8");
+
+    resume.open();
+    const error = await stale.then(() => undefined, (reason: unknown) => reason);
+
+    assert.ok(error instanceof GitSourceAccessError);
+    assert.match(error.message, /taken over/);
+    assert.deepEqual(staleRunner.commands, []);
+    assert.equal(await readFile(path.join(lockPath, "owner.json"), "utf8"), liveOwner);
+    successorRunner.release.open();
+    await successor;
+    assert.equal(await exists(lockPath), false);
+  });
+});
+
+test("a holder whose owner record was replaced before it runs Git stops without running it", async () => {
+  await withSandbox(async (cachePath, lockPath) => {
+    const runner = new OverlapRunner();
+    const otherOwner = JSON.stringify({ pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), id: "successor" });
+    const refresh = new GitSourceAccessAdapter({
+      cachePath,
+      runner,
+      lockHooks: {
+        afterLockAcquired: async () => {
+          await writeFile(path.join(lockPath, "owner.json"), otherOwner, "utf8");
+        },
+      },
+    }).refresh(source);
+
+    const error = await refresh.then(() => undefined, (reason: unknown) => reason);
+
+    assert.ok(error instanceof GitSourceAccessError);
+    assert.match(error.message, /taken over/);
+    assert.deepEqual(runner.commands, []);
+    assert.equal(await readFile(path.join(lockPath, "owner.json"), "utf8"), otherOwner);
+  });
+});
+
+test("a recoverer whose mutex was reclaimed by another does not remove the lock that process took", async () => {
+  await withSandbox(async (cachePath, lockPath) => {
+    await writeOwner(lockPath, { pid: await deadPid(), hostname: hostname() });
+    const paused = gate();
+    const resume = gate();
+    const slow = new GitSourceAccessAdapter({
+      cachePath,
+      runner: new OverlapRunner(),
+      lockHooks: {
+        beforeOrphanRemoval: async () => {
+          paused.open();
+          await resume.opened;
+        },
+      },
+    }).refresh(source);
+    await paused.opened;
+
+    // The paused recoverer looks dead: its mutex ages out and a second recoverer takes over and re-takes the lock.
+    const old = new Date(Date.now() - 5 * 60_000);
+    await utimes(`${lockPath}.recovering`, old, old);
+    const successorRunner = new GatedRunner();
+    const successor = new GitSourceAccessAdapter({ cachePath, runner: successorRunner }).refresh(source);
+    await successorRunner.running.opened;
+    const liveOwner = await readFile(path.join(lockPath, "owner.json"), "utf8");
+
+    resume.open();
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+    assert.equal(await readFile(path.join(lockPath, "owner.json"), "utf8"), liveOwner);
+    successorRunner.release.open();
+    await Promise.all([slow, successor]);
+    assert.equal(await exists(lockPath), false);
+  });
+});
