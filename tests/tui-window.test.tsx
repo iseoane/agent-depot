@@ -131,13 +131,14 @@ test("preview chrome wraps long approval names into the shared viewport geometry
   const narrow = previewViewport(lines, 19, 17, 40, chrome);
   assert.equal(wide.height, 11);
   assert.equal(narrow.height, 1);
-  // 40x17: header 6 rows, gap 1, borders 2, title 2 and the preview row leave 5 footer rows; the rest is cut.
+  // 40x17: header 6 rows, gap 1, borders 2, a title cut to one row and the preview row leave 6 footer rows; the rest is cut.
+  assert.deepEqual(narrow.titleRows, ["Recipe approval · does not inst…"]);
   const narrowFooter = narrow.footer.map(spans => spans.map(({ text }) => text).join(""));
-  assert.equal(narrowFooter.length, 5);
+  assert.equal(narrowFooter.length, 6);
   assert.ok(narrowFooter.every(row => row.length <= 32), narrowFooter.join("\n"));
   assert.match(narrowFooter[0]!, /^read ✓ · Review 20 of 20/);
-  assert.equal(narrowFooter[3]!.at(-1), "…", narrowFooter.join("\n"));
-  assert.match(narrowFooter[4]!, /^\[y\] Approve approved-long-recip.*…$/u);
+  assert.equal(narrowFooter[4]!.at(-1), "…", narrowFooter.join("\n"));
+  assert.match(narrowFooter[5]!, /^\[y\] Approve approved-long-recip.*…$/u);
   assert.equal(wide.rows.at(-1), "danger term 19");
   assert.equal(narrow.rows.at(-1), "danger term 19");
   assert.equal(wide.reachedEnd, true);

@@ -23,8 +23,11 @@ export interface PreviewFooterSpan {
 }
 
 export interface PreviewViewport {
-  /** The title to draw: the chrome title, shortened with an ellipsis when it would leave no row for content. */
-  readonly title: string;
+  /**
+   * The escaped title as the rows to draw, one per row so the panel cannot wrap it differently from this layout. A title that would
+   * leave no row for content or for the footer is cut with an ellipsis.
+   */
+  readonly titleRows: readonly string[];
   readonly rows: readonly string[];
   /** Source line index for each physically wrapped row. */
   readonly sourceLines: readonly number[];
@@ -263,11 +266,11 @@ export function previewViewport(
   const total = previewRows.length;
   const headerRows = headerTabRowCount(contentWidth) + 3;
   const reservedRows = chrome.reservedRows !== undefined && chrome.reservedRows > 0 ? Math.ceil(chrome.reservedRows) : 0;
-  // The title keeps a row of content and the two footer rows; a longer one is cut with an ellipsis.
-  const titleBudget = Math.max(terminalRows - headerRows - 1 - 2 - reservedRows - 1 - 2, 1);
-  const title = clipTitle(rawChrome.title, contentWidth, titleBudget);
-  const titleRows = wrapLine(escapeControlText(title), contentWidth).length;
-  const fixedRows = headerRows + 1 + 2 + titleRows + reservedRows;
+  // The footer, with its question and its action, is reserved first; the title takes what remains after a row of content.
+  const footerRows = Math.max(reservedFooterRows(total, false, chrome, contentWidth, Infinity), reservedFooterRows(total, true, chrome, contentWidth, Infinity));
+  const titleBudget = Math.max(terminalRows - headerRows - 1 - 2 - reservedRows - 1 - footerRows, 1);
+  const titleRows = wrapLine(escapeControlText(clipTitle(rawChrome.title, contentWidth, titleBudget)), contentWidth).map(({ row }) => row);
+  const fixedRows = headerRows + 1 + 2 + titleRows.length + reservedRows;
   // At least one preview row stays visible; the footer is cut to what remains.
   const maxFooterRows = Math.max(terminalRows - fixedRows - 1, 2);
   const rowsWithFooter = (windowed: boolean) =>
@@ -279,7 +282,7 @@ export function previewViewport(
   const end = Math.min(start + height, total);
   const reachedEnd = end === total;
   return {
-    title,
+    titleRows,
     rows: previewRows.slice(start, end),
     sourceLines: wrapped.slice(start, end).map(({ sourceLine }) => sourceLine),
     sourceOffsets: wrapped.slice(start, end).map(({ offset }) => offset),

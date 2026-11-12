@@ -9,10 +9,16 @@ import { escapeControlText, sliceSpans, type PreviewFooterRole, type PreviewView
 import { animationEnabled, formatElapsed, SPINNER_FRAMES, SPINNER_TICK_MS, STATIC_GLYPH } from "./working-model.js";
 
 /** A titled, color-independent boundary for a focused interaction or result. */
-export function BorderPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {
+export function BorderPanel({ title, children }: {
+  /** Text to escape and wrap, or rows already escaped and wrapped to fit, each drawn on exactly one row. */
+  readonly title: string | readonly string[];
+  readonly children: ReactNode;
+}) {
   return (
     <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
-      <Text color={theme.title} bold>{title}</Text>
+      {typeof title === "string"
+        ? <Text color={theme.title} bold>{title}</Text>
+        : title.map((row, position) => <PreEscapedText key={position} color={theme.title} bold wrap="truncate">{row}</PreEscapedText>)}
       {children}
     </Box>
   );
@@ -246,7 +252,7 @@ export function PagedPreview({ lines: rawLines, styled: rawStyled, viewport }: {
   const lines = rawLines.map(escapeControlText);
   const styled = rawStyled?.map((line) => line?.map((span) => ({ ...span, text: escapeControlText(span.text) })));
   return (
-    <BorderPanel title={viewport.title}>
+    <BorderPanel title={viewport.titleRows}>
       {viewport.rows.map((line, position) => {
         const logical = viewport.sourceLines[position]!;
         const custom = styled?.[logical];

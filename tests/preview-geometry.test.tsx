@@ -43,9 +43,9 @@ test("a title of over 200 characters leaves a row of content inside 40x17", () =
   const lines = Array.from({ length: 40 }, (_, position) => `line ${position}`);
   const viewport = previewViewport(lines, 0, 17, WIDTH, chrome);
   assert.ok(viewport.height >= 1 && viewport.rows.length >= 1);
-  assert.ok(viewport.title.endsWith("…"), viewport.title);
+  assert.ok(viewport.titleRows.at(-1)!.endsWith("…"), viewport.titleRows.join("\n"));
   // A terminal wraps the title at the content width: header, gap, borders, title, content and footer rows.
-  const titleRows = Math.ceil(stringWidth(viewport.title) / CONTENT);
+  const titleRows = viewport.titleRows.length;
   const total = headerTabRowCount(CONTENT) + 3 + 1 + 2 + titleRows + viewport.rows.length + viewport.footer.length;
   assert.ok(total <= 17, `${total} rows`);
 });
