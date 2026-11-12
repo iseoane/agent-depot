@@ -60,3 +60,4 @@ Type: feature
 - Operador (2026-11-12): tras la release, limpiar worktrees y ramas.
 - J007 worker (sonnet) 57bcffc..d135287. V001 fail (F1 doble escapado en aprobaciones; F2 sin Source real; F3 Profile mide sin escapar). Corrección 73c1869/d135287. V002 approve. Coordinador: RED solo tests, CLI sin cambios, golden 2/0, tests afectados 62/0. Tamaño: subestimado (1 corrección).
 - J007 entregado: PR #117 fusionado con CI verde. I0032 completa.
+- Release 0.6.14 publicada (PR #118, workflow 43165080558) y esta máquina actualizada con self update. Ramas y worktrees limpios.
