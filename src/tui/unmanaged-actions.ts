@@ -1,4 +1,5 @@
 import { realpath } from "node:fs/promises";
+import { quoteText } from "../preview-model.js";
 import path from "node:path";
 
 import type { Key } from "ink";
@@ -115,7 +116,7 @@ export async function prepareUnmanagedRemoval(
     for (const link of links) {
       if (planned.has(link.path)) continue;
       planned.set(link.path, link);
-      preview.push(`also removes link ${JSON.stringify(link.path)} → ${JSON.stringify(chosen.path)} (it would dangle)`);
+      preview.push(`also removes link ${quoteText(link.path)} → ${quoteText(chosen.path)} (it would dangle)`);
     }
   }
   for (const location of linksFirst([...planned.values()])) {

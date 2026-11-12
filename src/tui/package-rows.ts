@@ -1,4 +1,5 @@
 import { classifyUpdate } from "../package-host-plans.js";
+import { quoteText } from "../preview-model.js";
 import {
   displayPackageCoordinates,
   displayPackageSelection,
@@ -136,7 +137,7 @@ export function packagePlanLines(plan: PackageLifecyclePlan, approval: PackageAp
     ...(plan.commands.length === 0
       ? ["This action runs no host command."]
       : plan.commands.flatMap((command, position) => [
-          `Step ${position + 1} (${command.purpose}): ${JSON.stringify([command.executable, ...command.args])}`,
+          `Step ${position + 1} (${command.purpose}): [${[command.executable, ...command.args].map(quoteText).join(",")}]`,
           `Executable: ${command.resolvedPath ?? command.executable}`,
         ])),
     `Blast radius: ${plan.affects.map((coordinates) => displayPackageCoordinates(selection.source, coordinates)).join(", ")}`,

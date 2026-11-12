@@ -114,7 +114,7 @@ export function appRecipePreviewLines(entry: AppEntry, status: string, steps: re
       span(`  ● ${status}`, status === "approved" ? theme.success : theme.warning),
     ],
     [span(` ${[entry.file, ...(recipe?.homepage ? [recipe.homepage] : [])].join(" · ")}`, theme.legend)],
-    ...(recipe?.skills ? [fieldLine(" Owned Skills:", commandLine(recipe.skills))] : []),
+    ...(recipe?.skills ? [fieldLine(" Owned Skills:", commandLine(recipe.skills, { terminal: true }))] : []),
     textLine(" "),
     ...stepBlockLines(steps),
   ];

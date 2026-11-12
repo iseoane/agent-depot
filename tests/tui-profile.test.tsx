@@ -1049,5 +1049,5 @@ test("an export row with invisible characters is measured as shown, so it stays 
   const shown = await waitForFrame(view.lastFrame, next => next.includes("App recipe demo"));
   assert.ok(shown.split("\n").length <= rows, shown);
   assert.ok(!/[\p{Cf}]/u.test(view.frames.join("")), "no format character reaches the terminal");
-  assert.ok(squash(shown).includes("\\u202e".repeat(30) + "end"), shown);
+  assert.ok(squash(shown).includes("Apprecipedemo" + "\\u202e".repeat(3)), shown);
 });

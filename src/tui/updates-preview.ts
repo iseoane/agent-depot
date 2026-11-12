@@ -1,3 +1,4 @@
+import { quoteText } from "../preview-model.js";
 import { appPlanLines } from "./app-actions.js";
 import type { UpdatesMode } from "./updates-mode.js";
 import { fieldLine, renderPreviewDocument, textLine, type StyledLine } from "./preview-render.js";
@@ -13,7 +14,7 @@ export function updateModePreviewLines(mode: UpdatesMode): readonly StyledLine[]
     case "confirm-paths":
       return [
         textLine("Outside .agents/skills and .claude/skills:"),
-        ...mode.prepared.nonCanonicalPaths.map(({ scope, path }) => fieldLine("Path:", `[${scope}] ${JSON.stringify(path)}`)),
+        ...mode.prepared.nonCanonicalPaths.map(({ scope, path }) => fieldLine("Path:", `[${scope}] ${quoteText(path)}`)),
       ];
     default:
       return [];
