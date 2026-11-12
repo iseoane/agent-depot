@@ -1,4 +1,5 @@
-import { Box, Text, useWindowSize } from "ink";
+import { Box, useWindowSize } from "ink";
+import { Text } from "./safe-text.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";

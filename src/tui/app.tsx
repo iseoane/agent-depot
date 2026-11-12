@@ -1,4 +1,5 @@
-import { Box, Text, useApp, useWindowSize } from "ink";
+import { Box, useApp, useWindowSize } from "ink";
+import { Text } from "./safe-text.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AGENT_DEPOT_PACKAGE_VERSION } from "../project-manifest.js";

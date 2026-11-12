@@ -1,4 +1,5 @@
-import { Box, Text, type Key } from "ink";
+import { Box, type Key } from "ink";
+import { Text } from "./safe-text.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createAppOperations, type AppEntry, type AppLifecyclePlan } from "../app-flow.js";

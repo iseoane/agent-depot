@@ -1,4 +1,5 @@
-import { Box, Text, useWindowSize } from "ink";
+import { Box, useWindowSize } from "ink";
+import { Text } from "./safe-text.js";
 import path from "node:path";
 import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 

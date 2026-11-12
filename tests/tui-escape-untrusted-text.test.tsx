@@ -116,3 +116,26 @@ test("only the safe text module imports Ink's Text, so a new view cannot write u
   }
   assert.deepEqual(offenders, []);
 });
+
+test("a multi-line result keeps its line breaks while its control characters are escaped", () => {
+  const view = render(<ListFooter indicator={undefined} selectedCount={0} message={{ kind: "ok", text: `first\r\nsecond ${HOSTILE}\nthird` }} />);
+  const rows = (view.lastFrame() ?? "").split("\n");
+  view.unmount();
+  for (const text of ["first", `second ${ESCAPED}`, "third"]) assert.equal(rows.filter(row => row.includes(text)).length, 1, rows.join("\n"));
+  assert.ok(!rows.some(row => row.includes("\\x0a") || row.includes("\\x0d")), rows.join("\n"));
+});
+
+test("a Skill name or description with line breaks stays on one Catalog row", async () => {
+  const skill: SkillCandidate = { sourceId: "builtin:agent-depot", path: "skills/two-lines", name: "two\nlines", description: "first\nsecond" };
+  const operations: SourceOperations = {
+    async addGitSource() { throw new Error("unused"); },
+    async listSources() { return [BUILT_IN_SOURCE]; },
+    async refreshSource() { throw new Error("unused"); },
+    async selectSources() { return []; },
+    discoverSkills: async () => [skill],
+  };
+  const view = await renderExpanded(<CatalogView environment={ENVIRONMENT} operations={operations} sourceId="builtin:agent-depot" />);
+  const frame = await waitForFrame(view.lastFrame, /two/);
+  view.unmount();
+  assert.ok(frame.split("\n").some(row => row.includes("two lines  first second")), frame);
+});

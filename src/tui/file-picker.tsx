@@ -1,5 +1,6 @@
 import path from "node:path";
-import { Text, useWindowSize } from "ink";
+import { useWindowSize } from "ink";
+import { Text } from "./safe-text.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pickerEntries, readDirectoryListing, PROFILE_EXTENSION, type DirectoryListing, type DirectoryEntry, type PickerPurpose, type PickerSelection } from "./file-picker-model.js";
 import { useKeys } from "./keys.js";

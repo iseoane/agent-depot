@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { Box, Text, useWindowSize } from "ink";
+import { Box, useWindowSize } from "ink";
+import { Text } from "./safe-text.js";
 import stringWidth from "string-width";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { createAppOperations } from "../app-flow.js";

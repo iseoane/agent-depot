@@ -1,4 +1,5 @@
-import { Text, type Key } from "ink";
+import { type Key } from "ink";
+import { Text } from "./safe-text.js";
 
 import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
 import { commandLine } from "../preview-model.js";

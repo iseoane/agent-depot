@@ -40,15 +40,23 @@ export interface PreviewViewport {
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-// Preview text comes from recipes, Sources and Hosts. Raw, an ESC or carriage return redraws the terminal over the lines
-// under review and a bidi override reorders them; both also change the width the `y` gate was computed for. The zero-width joiner
+// Text shown in the TUI comes from recipes, Sources, Skills and Hosts. Raw, an ESC or carriage return redraws the terminal over the
+// lines under review and a bidi override reorders them; both also change the width the `y` gate was computed for. The zero-width joiner
 // stays because emoji sequences such as a person at a laptop are made with it.
-const UNSAFE_CHARACTER = /(?!\u200D)[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+const UNSAFE_CHARACTER = "(?!\\u200D)[\\p{Cc}\\p{Cf}\\u2028\\u2029]";
+// A backslash that would read as part of an escape we print (`\x1b`, `\u202e`, `\u{1f600}`).
+const ESCAPE_LOOKALIKE = "x[0-9a-f]{2}|u[0-9a-f]{4}|u\\{";
+const ESCAPABLE = new RegExp(`(\\\\+)(?=${ESCAPE_LOOKALIKE}|${UNSAFE_CHARACTER})|${UNSAFE_CHARACTER}`, "gu");
 
-/** `text` with control, format and line-separator characters replaced by visible escapes (`\x1b`, `\u202e`); idempotent. */
+/**
+ * `text` with control, format and line-separator characters replaced by visible escapes (`\x1b`, `\u202e`). Backslashes right before
+ * something that looks like one of those escapes are doubled, so a typed `\x1b` cannot pass for a real ESC. Not idempotent: escape
+ * text once, where it enters a view.
+ */
 export function escapeControlText(text: string): string {
-  return text.replace(UNSAFE_CHARACTER, (character) => {
-    const code = character.codePointAt(0)!;
+  return text.replace(ESCAPABLE, (match, backslashes: string | undefined) => {
+    if (backslashes !== undefined) return backslashes.repeat(2);
+    const code = match.codePointAt(0)!;
     const hex = code.toString(16);
     if (code <= 0xff) return `\\x${hex.padStart(2, "0")}`;
     return code <= 0xffff ? `\\u${hex.padStart(4, "0")}` : `\\u{${hex}}`;

@@ -1,4 +1,5 @@
-import { Box, Text } from "ink";
+import { Box } from "ink";
+import { Text } from "./safe-text.js";
 
 import { AppPanel } from "./app-actions.js";
 import { PackagePanel } from "./package-actions.js";

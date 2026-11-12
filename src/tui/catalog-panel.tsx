@@ -1,10 +1,11 @@
-import { Box, Text } from "ink";
+import { Box } from "ink";
+import { Text } from "./safe-text.js";
 
 import { describeSkills, HOST_CHOICES, installPreview, SCOPE_CHOICES, type ActionMode } from "./catalog-actions.js";
 import { packageOwnedSkillNotice, packageOwnerBadge } from "./catalog-ownership.js";
 import { hasUnmanagedCopy, type InstalledSkills } from "./catalog-installs.js";
 import type { FilterState } from "./catalog-filter.js";
-import { describeRow, truncateDescription, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
+import { describeRow, singleLine, truncateDescription, UNMANAGED_MARKER, type NodeData } from "./catalog-tree.js";
 import { isPackageMode, PackagePanel } from "./package-actions.js";
 import { BorderPanel, DecisionPrompt, HostChecklist, PagedPreview, Working } from "./panel-parts.js";
 import { usePreviewGeometry } from "./preview-window.js";
@@ -50,7 +51,7 @@ export function CatalogRowLine({ row, selected, marked, installed }: {
     <Text {...rowStyle(selected)} color={isGroup ? theme.group : undefined} wrap="truncate-end">
       {selected ? "> " : "  "}{"  ".repeat(row.depth)}{data.kind === "skill" ? marked ? "[x] " : "[ ] " : ""}
       {data.kind === "skill" && ownedBy !== undefined
-        ? <>{data.skill.name}<Text color={theme.marker}>{"  "}[{packageOwnerBadge(ownedBy)}]</Text>{"  "}{truncateDescription(data.skill.description)}{data.variant === true ? `  (${data.skill.path})` : ""}</>
+        ? <>{singleLine(data.skill.name)}<Text color={theme.marker}>{"  "}[{packageOwnerBadge(ownedBy)}]</Text>{"  "}{truncateDescription(data.skill.description)}{data.variant === true ? `  (${data.skill.path})` : ""}</>
         : data.kind === "app" ? `App ${data.row.entry.recipe?.name ?? data.row.entry.file}` : describeRow(row)}
       {data.kind === "app" ? (
         <><Text color={theme.legend}>{"  "}</Text><Text color={data.row.inspection.status === "not installed" ? theme.warning : theme.value}>{data.row.inspection.status}</Text></>
