@@ -23,6 +23,8 @@ export interface PreviewFooterSpan {
 }
 
 export interface PreviewViewport {
+  /** The title to draw: the chrome title, shortened with an ellipsis when it would leave no row for content. */
+  readonly title: string;
   readonly rows: readonly string[];
   /** Source line index for each physically wrapped row. */
   readonly sourceLines: readonly number[];
@@ -229,6 +231,7 @@ export function previewViewport(
   const end = Math.min(start + height, total);
   const reachedEnd = end === total;
   return {
+    title: rawChrome.title,
     rows: previewRows.slice(start, end),
     sourceLines: wrapped.slice(start, end).map(({ sourceLine }) => sourceLine),
     sourceOffsets: wrapped.slice(start, end).map(({ offset }) => offset),

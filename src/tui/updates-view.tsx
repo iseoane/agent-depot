@@ -12,7 +12,7 @@ import { defaultExpanded, type Expanded } from "./tree.js";
 import { useMirrored } from "./view-state.js";
 import { useUpdatesFlow } from "./updates-flow.js";
 import { handleUpdatesKey, type UpdatesKeyContext } from "./updates-keys.js";
-import { entryId, viewOf, type UpdatesMessage } from "./updates-model.js";
+import { entryId, viewOf, type LoadState, type UpdatesMessage } from "./updates-model.js";
 import { CheckStatus, EntryLine, ModePanel, UpdatesFooter } from "./updates-panel.js";
 import { type UpdateScopeFilter, type UpdatesData } from "./updates.js";
 import { lineText } from "./preview-render.js";
@@ -29,6 +29,11 @@ export interface UpdatesViewProps {
   readonly listHeight?: number;
   /** Clock for the age of the check; injectable for tests. */
   readonly now?: () => number;
+}
+
+/** The state or mode whose label the working panel shows, if any. */
+export function showsWorkingPanel(state: LoadState, mode: UpdatesMode): boolean {
+  return state.status === "loading" || mode.kind === "busy";
 }
 
 const NO_ENVIRONMENT: TuiEnvironment = {};
