@@ -1185,7 +1185,7 @@ test("a recorded Package joins the batch, previews its frozen plan and approves 
   const view = render(<UpdatesView operations={f.operations} environment={{ ...f.environment, packages }} />);
   deferCleanup(t, () => { view.unmount(); view.cleanup(); });
   const listed = await expandList(view.lastFrame, view.stdin, /Package: pstack {2}plugins\/pstack/);
-  assert.match(listed, /1\.0\.0 -> abcdef1/);
+  assert.match(listed, /1\.0\.0 -> commit abcdef1/);
   press(view.stdin, "a");
   await waitForFrame(view.lastFrame, /1 selected/);
   press(view.stdin, ENTER);
