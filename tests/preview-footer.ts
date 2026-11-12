@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { pageToEnd } from "./package-panel.js";
 import { waitForFrame } from "./wait-for-frame.js";
 
 export interface TerminalSize {
@@ -67,4 +68,20 @@ export async function confirmAtEnd(view: PreviewView, rows: number, action: RegE
   view.stdin.write("y");
   await waitUntil(acted, `y did nothing once the footer read ✓:\n${view.lastFrame()}`);
   return frame;
+}
+
+/**
+ * Reads the open preview to its last row and checks that the question the `y` answers is shown there,
+ * then returns every page read. The question sits in the footer, which shows `read ✓` only once the whole
+ * preview has been read; waiting for it on the first page assumes the preview fits one page, and `y`
+ * pressed there is ignored once a longer terminal size or temporary path makes the preview page. Call it right
+ * after the key that opens the preview, with no wait in between.
+ */
+export async function readPreview(view: Pick<PreviewView, "lastFrame" | "stdin">, question: RegExp): Promise<string> {
+  // Call it right after the key that opens the preview: until the frame changes, the one on screen is the previous screen's.
+  const previous = view.lastFrame();
+  await waitForFrame(view.lastFrame, frame => frame !== previous && REVIEW.test(frame));
+  const pages = await pageToEnd(view.lastFrame, view.stdin);
+  assert.match(unwrapped(pages.at(-1)!), question, `the preview does not end on its question:\n${pages.at(-1)}`);
+  return pages.join("\n");
 }

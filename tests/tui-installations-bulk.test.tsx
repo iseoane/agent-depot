@@ -21,7 +21,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
-import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal, type TerminalSize } from "./preview-footer.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal, type TerminalSize, readPreview } from "./preview-footer.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -233,7 +233,7 @@ test("bulk TUI uninstall previews, cancels and confirms record-only recovery tru
   assert.equal(await exists(agentsDir(f.home, "alpha")), false);
 
   view.stdin.write("u");
-  await waitForFrame(view.lastFrame, /Uninstall 1 item\? y\/n/);
+  await readPreview(view, /Uninstall 1 item\? y\/n/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Forgot missing installation record for portable\/alpha; no files were removed/);
 
@@ -262,7 +262,7 @@ test("u with marks shows ONE combined preview with every path, warnings and the 
 test("y removes every marked managed and unmanaged skill, skips the project one and keeps its mark", async (t) => {
   const { f, view, loose } = await markedEverything(t);
   view.stdin.write("u");
-  await waitForFrame(view.lastFrame, /Uninstall 4 items\? y\/n/);
+  await readPreview(view, /Uninstall 4 items\? y\/n/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Removed portable\/alpha/);
   assert.match(done, /Removed portable\/beta/);
@@ -296,7 +296,7 @@ test("n on the combined preview cancels everything and keeps the marks", async (
 test("one failing item does not stop the others and stays marked", async (t) => {
   const { f, view } = await markedEverything(t);
   view.stdin.write("u");
-  await waitForFrame(view.lastFrame, /Uninstall 4 items\? y\/n/);
+  await readPreview(view, /Uninstall 4 items\? y\/n/);
   // alpha changes after the preview, so its recheck refuses while the rest still apply.
   await writeFile(path.join(agentsDir(f.home, "alpha"), "SKILL.md"), "changed after the preview\n", "utf8");
   view.stdin.write("y");
@@ -376,7 +376,7 @@ test("y, then one exposure confirmation naming the items, adds the hosts to each
   view.stdin.write("1");
   await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Add hosts to 1 item\? y\/n/);
+  await readPreview(view, /Add hosts to 1 item\? y\/n/);
   view.stdin.write("y");
   const exposure = await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   assert.match(exposure, /portable\/alpha/);
@@ -400,7 +400,7 @@ test("a y pasted in a block does not answer the host exposure confirmation, a lo
   view.stdin.write("1");
   await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Add hosts to 1 item\? y\/n/);
+  await readPreview(view, /Add hosts to 1 item\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("xy");
@@ -426,7 +426,7 @@ test("several items are applied one after another against the moving records", a
   view.stdin.write("2");
   await waitForFrame(view.lastFrame, /\[x\] 2 codex/);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
+  await readPreview(view, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("y");
@@ -451,7 +451,7 @@ test("n on the exposure confirmation cancels every item", async (t) => {
   view.stdin.write("1");
   await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
+  await readPreview(view, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("n");
@@ -497,7 +497,7 @@ test("a host addition that fails does not stop the other items and stays marked"
   view.stdin.write("1");
   await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Add hosts to 2 items\? y\/n/);
+  await readPreview(view, /Add hosts to 2 items\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   // A real directory now occupies alpha's Claude location, so its recheck refuses.
@@ -577,7 +577,7 @@ test("an external record change between items fails the remaining uninstalls wit
   view.stdin.write("a");
   await waitForFrame(view.lastFrame, /3 selected/);
   view.stdin.write("u");
-  await waitForFrame(view.lastFrame, /Uninstall 3 items\? y\/n/);
+  await readPreview(view, /Uninstall 3 items\? y\/n/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Failed portable\/\w+: .*changed outside this batch/);
   assert.equal(done.match(/Removed portable\//g)?.length, 1, done);
@@ -615,7 +615,7 @@ test("an external record change between items fails the remaining host additions
   view.stdin.write("1");
   await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
   view.stdin.write(ENTER);
-  await waitForFrame(view.lastFrame, /Add hosts to 3 items\? y\/n/);
+  await readPreview(view, /Add hosts to 3 items\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /needs\s+separate\s+confirmation/);
   view.stdin.write("y");
@@ -655,7 +655,7 @@ test("a bulk uninstall names each item with its position and counts the finished
   await mark(view, /portable\/alpha/);
   await mark(view, /portable\/beta/);
   view.stdin.write("u");
-  await waitForFrame(view.lastFrame, /Uninstall 2 items\? y\/n/);
+  await readPreview(view, /Uninstall 2 items\? y\/n/);
   hold();
   view.stdin.write("y");
   const first = await waitForFrame(view.lastFrame, /Removing portable\/alpha \(1\/2\)…/);

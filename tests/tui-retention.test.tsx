@@ -13,6 +13,7 @@ import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "
 import { App } from "../src/tui/app.js";
 import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
+import { readPreview } from "./preview-footer.js";
 import { deferCleanup } from "./test-cleanup.js";
 
 const demo: SkillCandidate = { sourceId: BUILT_IN_SOURCE.id, path: "portable/demo", name: "demo", description: "Demo skill" };
@@ -228,7 +229,7 @@ for (const failing of [[], ["alpha"]] as const) {
     await markBothApps(fixture.view);
     const releaseAlpha = fixture.holdUninstall("alpha");
     fixture.view.stdin.write("u");
-    await waitForFrame(fixture.view.lastFrame, /uninstall alpha\? y\/n/);
+    await readPreview(fixture.view, /uninstall alpha\? y\/n/);
     fixture.view.stdin.write("y");
     await waitForFrame(fixture.view.lastFrame, /Running App step: alpha \(1\/2\)…/);
 
@@ -237,7 +238,7 @@ for (const failing of [[], ["alpha"]] as const) {
     const preparing = await waitForFrame(fixture.view.lastFrame, /Preparing App step: beta \(2\/2\)…/);
     assert.match(preparing, failing.length ? /alpha: failed/ : /alpha: \w+/, "the finished item stays visible");
     releaseBetaResolve();
-    await waitForFrame(fixture.view.lastFrame, /uninstall beta\? y\/n/);
+    await readPreview(fixture.view, /uninstall beta\? y\/n/);
 
     const releaseBeta = fixture.holdUninstall("beta");
     fixture.view.stdin.write("y");
@@ -327,9 +328,9 @@ test("an App uninstall in Installations drops the retained rows, so the revisit 
   }));
   await markBothApps(fixture.view);
   fixture.view.stdin.write("u");
-  await waitForFrame(fixture.view.lastFrame, /uninstall alpha\? y\/n/);
+  await readPreview(fixture.view, /uninstall alpha\? y\/n/);
   fixture.view.stdin.write("y");
-  await waitForFrame(fixture.view.lastFrame, /uninstall beta\? y\/n/);
+  await readPreview(fixture.view, /uninstall beta\? y\/n/);
   // The reload that follows the action fails, so nothing fresh replaces what the action invalidated.
   failReload = true;
   fixture.view.stdin.write("y");
@@ -405,7 +406,7 @@ test("an App install in Catalog drops the retained catalog, so the revisit does 
     }
   }
   view.stdin.write("i");
-  await waitForFrame(view.lastFrame, /install gentle\? y\/n/);
+  await readPreview(view, /install gentle\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /gentle: installed/);
   view.stdin.write("3");

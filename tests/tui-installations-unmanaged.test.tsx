@@ -15,7 +15,7 @@ import type { UnmanagedGroup } from "../src/tui/installations.js";
 import { prepareUnmanagedRemoval, runUnmanagedRemoval } from "../src/tui/unmanaged-actions.js";
 import { App } from "../src/tui/app.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
-import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal, readPreview } from "./preview-footer.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
 
@@ -140,7 +140,7 @@ test("u removes every location of an unmanaged skill after listing each exact pa
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all locations.*2 choose locations/s);
   view.stdin.write("1");
-  const preview = await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
+  const preview = await readPreview(view, /Remove no-mistakes\? y\/n/);
   assert.ok(preview.includes(JSON.stringify(agents)), preview);
   assert.ok(preview.includes(JSON.stringify(claude)), preview);
   assert.match(preview, /agent-depot did not create these files/);
@@ -184,7 +184,7 @@ test("the checklist removes only the chosen locations", async (t) => {
   view.stdin.write("2");
   await waitForFrame(view.lastFrame, /\[x\] 2 /);
   view.stdin.write(ENTER);
-  const preview = await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
+  const preview = await readPreview(view, /Remove no-mistakes\? y\/n/);
   assert.ok(preview.includes(JSON.stringify(claude)), preview);
   assert.ok(!preview.includes(JSON.stringify(agents)), preview);
   view.stdin.write("y");
@@ -202,7 +202,7 @@ test("removing a symlinked skill removes only the links and keeps the target", a
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all locations/);
   view.stdin.write("1");
-  const preview = await waitForFrame(view.lastFrame, /Remove doctor-md-agents\? y\/n/);
+  const preview = await readPreview(view, /Remove doctor-md-agents\? y\/n/);
   assert.match(preview, /only the link is removed/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(0\)/);
@@ -223,7 +223,7 @@ test("a Claude link to an unmanaged canonical skill is removed together with it"
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all locations/);
   view.stdin.write("1");
-  await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
+  await readPreview(view, /Remove no-mistakes\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Unmanaged \(user-global\) \(0\)/);
   assert.equal(await exists(agents), false);
@@ -240,7 +240,7 @@ test("a location that changed after the preview is kept and the others are still
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all locations/);
   view.stdin.write("1");
-  await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
+  await readPreview(view, /Remove no-mistakes\? y\/n/);
   await writeFile(path.join(agents, "SKILL.md"), `${SKILL_MD}edited after the preview\n`, "utf8");
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, frame => /Failed .*changed\s+before\s+deletion/s.test(frame.replaceAll("│", "")));
@@ -302,7 +302,7 @@ test("choosing only the canonical directory also removes the Claude link that wo
   view.stdin.write("1");
   await waitForFrame(view.lastFrame, /\[x\] 1 /);
   view.stdin.write(ENTER);
-  const preview = await waitForFrame(view.lastFrame, /Remove no-mistakes\? y\/n/);
+  const preview = await readPreview(view, /Remove no-mistakes\? y\/n/);
   assert.ok(squash(preview).includes(squash(`also removes link ${JSON.stringify(claude)}`)), preview); // long paths wrap
   assert.ok(squash(preview).includes("woulddangle"), preview); // a long path can wrap between the words
   view.stdin.write("y");

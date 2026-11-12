@@ -17,6 +17,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { pagedRows, pageToEnd } from "./package-panel.js";
 import { expandList } from "./expand-updates.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
+import { readPreview } from "./preview-footer.js";
 
 const PORTABLE_URL = "https://example.test/packages/pstack.git";
 const PI_IDENTITY = "git:example.test/packages/pstack";
@@ -246,7 +247,7 @@ test("n adds a Git Source, refresh discovers its Package, and i installs it thro
   ]) assert.ok(preview.includes(squash(line)), `paging never showed ${line}`);
   assert.equal(j.calls.length, 0, "the preview runs no host command");
   j.view.stdin.write("y");
-  await waitForFrame(j.view.lastFrame, /install pstack\? y\/n/u);
+  await readPreview(j.view, /install pstack\? y\/n/u);
   assert.equal(j.calls.length, 0, "the approval gate runs no host command");
   j.view.stdin.write("y");
   await waitForFrame(j.view.lastFrame, /pstack: installed/);

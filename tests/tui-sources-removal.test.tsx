@@ -11,7 +11,7 @@ import { App } from "../src/tui/app.js";
 import { SourcesView } from "../src/tui/sources-view.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { deferCleanup } from "./test-cleanup.js";
-import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal, readPreview } from "./preview-footer.js";
 
 async function fixture(t: TestContext, installed = false, failUninstall = false, manual = false) {
   const home = await mkdtemp(path.join(tmpdir(), "sources-removal-"));
@@ -55,7 +55,7 @@ test("d removes an uninstalled recipe only after preview and confirmation", asyn
   await waitForFrame(f.view.lastFrame, text => !text.includes("Remove recipe for demo?"));
   assert.ok(await readFile(f.file));
   f.view.stdin.write("d");
-  await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);
+  await readPreview(f.view, /Remove recipe for demo\? y\/n/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Removed App recipe:/);
   await assert.rejects(readFile(f.file), { code: "ENOENT" });
@@ -77,11 +77,11 @@ test("successful optional uninstall is followed by separate recipe removal confi
   f.view.stdin.write("d");
   await waitForFrame(f.view.lastFrame, /Uninstall it before/);
   f.view.stdin.write("y");
-  const preview = await waitForFrame(f.view.lastFrame, /Uninstall demo\? y\/n/);
+  const preview = await readPreview(f.view, /Uninstall demo\? y\/n/);
   assert.match(preview, /\$ demo remove/u);
   assert.ok(!f.commands.includes("remove"));
   f.view.stdin.write("y");
-  await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);
+  await readPreview(f.view, /Remove recipe for demo\? y\/n/);
   assert.ok(await readFile(f.file));
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Removed App recipe:/);
@@ -94,7 +94,7 @@ test("failed optional uninstall retains the recipe", async t => {
   f.view.stdin.write("d");
   await waitForFrame(f.view.lastFrame, /Uninstall it before/);
   f.view.stdin.write("y");
-  await waitForFrame(f.view.lastFrame, /Uninstall demo\? y\/n/);
+  await readPreview(f.view, /Uninstall demo\? y\/n/);
   f.view.stdin.write("y");
   const frame = await waitForFrame(f.view.lastFrame, /recipe retained/);
   assert.match(frame, /uninstall failed/u);
@@ -109,7 +109,7 @@ test("manual uninstall requires attestation and verified absence before recipe d
   await waitForFrame(f.view.lastFrame, /Uninstall demo in your terminal/);
   f.markUninstalled();
   f.view.stdin.write("y");
-  await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);
+  await readPreview(f.view, /Remove recipe for demo\? y\/n/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Removed App recipe:/);
   await assert.rejects(readFile(f.file), { code: "ENOENT" });
@@ -157,7 +157,7 @@ test("removal approval gates version checks before any uninstall or deletion", a
   f.view.stdin.write("d");
   await waitForFrame(f.view.lastFrame, /read [█░]* ?\d+%/u);
   f.view.stdin.write("j".repeat(100));
-  await waitForFrame(f.view.lastFrame, /Approve demo\? y\/n/);
+  await readPreview(f.view, /Approve demo\? y\/n/);
   assert.deepEqual(f.commands, []);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);
@@ -264,7 +264,7 @@ test("the recipe removal preview stands alone: no earlier notice sits above it i
   resizeTerminal(view, { columns: 80, rows: 24 });
   await waitForFrame(view.lastFrame, text => /demo/.test(text) && /other/.test(text));
   view.stdin.write("d");
-  await waitForFrame(view.lastFrame, /Remove recipe for \w+\? y\/n/u);
+  await readPreview(view, /Remove recipe for \w+\? y\/n/u);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Removed App recipe/);
   await waitForSettled(view.lastFrame);
@@ -290,7 +290,7 @@ async function removalAfterNotice(t: TestContext, kind: "approve" | "uninstall-c
   resizeTerminal(view, { columns: 80, rows: 24 });
   await waitForFrame(view.lastFrame, text => /alpha/.test(text) && /demo/.test(text));
   view.stdin.write("d");
-  await waitForFrame(view.lastFrame, /Remove recipe for alpha\? y\/n/u);
+  await readPreview(view, /Remove recipe for alpha\? y\/n/u);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Removed App recipe/);
   await waitForSettled(view.lastFrame);

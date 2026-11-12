@@ -20,7 +20,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { InstallationsView } from "../src/tui/installations-view.js";
 import { animatedClock } from "./animated-clock.js";
 import { fakePackageOperations } from "./fake-package-operations.js";
-import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal, readPreview } from "./preview-footer.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
@@ -134,7 +134,7 @@ test("u previews a missing record without deletion warnings, cancels, then forge
   assert.equal(await exists(canonical(f.home)), false);
 
   view.stdin.write("u");
-  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  await readPreview(view, /Uninstall demo\? y\/n/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Forgot missing installation record for portable\/demo; no files were removed/);
   assert.match(done, /Managed \(user-global\) \(0\)/);
@@ -172,7 +172,7 @@ test("u on a single-host installation previews, confirms and removes it without 
   const view = await mount(f);
   await revealSkill(view);
   view.stdin.write("u");
-  const preview = await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  const preview = await readPreview(view, /Uninstall demo\? y\/n/);
   assert.match(preview, /removes the whole user-global installation, from hosts: pi/);
   view.stdin.write("y");
   const done = await waitForFrame(view.lastFrame, /Removed demo/);
@@ -193,7 +193,7 @@ test("the reload after an action says it is refreshing and keeps a single indica
   deferCleanup(t, () => view.unmount());
   await revealSkill(view);
   view.stdin.write("u");
-  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  await readPreview(view, /Uninstall demo\? y\/n/);
   gateOpen = true;
   view.stdin.write("y");
   const refreshing = await waitForFrame(view.lastFrame, /Refreshing installations…/);
@@ -224,7 +224,7 @@ test("the refresh after an action keeps counting the action's elapsed time", asy
   deferCleanup(t, () => view.unmount());
   await revealSkill(view);
   view.stdin.write("u");
-  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  await readPreview(view, /Uninstall demo\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Removing demo…/);
   clock.advance(4500);
@@ -249,7 +249,7 @@ test("u on an installation with several hosts offers all hosts or a host checkli
   view.stdin.write("2");
   await waitForFrame(view.lastFrame, /\[x\] 2 claude/);
   view.stdin.write(ENTER);
-  const preview = await waitForFrame(view.lastFrame, /Remove hosts from demo\? y\/n/);
+  const preview = await readPreview(view, /Remove hosts from demo\? y\/n/);
   assert.match(preview, /remove hosts claude from "portable\/demo"; remaining hosts: pi/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Removed hosts claude/);
@@ -266,7 +266,7 @@ test("u with all hosts chosen removes the whole installation", async (t) => {
   view.stdin.write("u");
   await waitForFrame(view.lastFrame, /1 all hosts/);
   view.stdin.write("1");
-  await waitForFrame(view.lastFrame, /Uninstall demo\? y\/n/);
+  await readPreview(view, /Uninstall demo\? y\/n/);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Removed demo/);
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
@@ -284,7 +284,7 @@ for (const trigger of ["h", "i"]) {
     view.stdin.write("1");
     await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
     view.stdin.write(ENTER);
-    const preview = await waitForFrame(view.lastFrame, /Add hosts to demo\? y\/n/);
+    const preview = await readPreview(view, /Add hosts to demo\? y\/n/);
     assert.match(preview, /add hosts claude to "portable\/demo"/);
     assert.equal(await exists(claude(f.home)), false);
     view.stdin.write("y");
