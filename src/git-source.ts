@@ -166,6 +166,8 @@ export interface SourceLockHooks {
   readonly afterLockAcquired?: () => Promise<void>;
   /** Runs after a recoverer confirmed the orphan while holding the recovery mutex, before it removes the lock. */
   readonly beforeOrphanRemoval?: () => Promise<void>;
+  /** Replaces the directory removal, so a test can fail it or interleave a successor before a retry. */
+  readonly removeDirectory?: (directory: string) => Promise<void>;
 }
 
 const SOURCE_LOCK_TIMEOUT_MS = 30_000;
