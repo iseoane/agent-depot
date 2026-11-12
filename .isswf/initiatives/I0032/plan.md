@@ -16,8 +16,9 @@ Type: feature
 - Brief J004d: [brief-r1.md](jobs/J004d/brief-r1.md)
 - Brief J005: [brief-r1.md](jobs/J005/brief-r1.md)
 - Brief J006: [brief-r1.md](jobs/J006/brief-r1.md)
+- Brief J007: [brief-r1.md](jobs/J007/brief-r1.md)
 - Blocker: None
-- Next step: J006 (worker sonnet), luego release 0.6.14.
+- Next step: J007 (saneado fuera de previews; worker sonnet), luego release 0.6.14.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -55,3 +56,4 @@ Type: feature
 - J006 worker (sonnet) b8a2e51..272da76. Revisión V001 (opus): Spec pass, 0 bloqueantes; coordinador: RED fe421f4 solo tests, CLI sin cambios, tests 21/0. S1 (preexistente, grave): texto no confiable sigue llegando crudo fuera de PagedPreview — descripciones y nombres de Skills remotas en el Catalog (OSC 52/8 posibles vía SKILL.md), preguntas y/n, listas, Working labels → J007 antes de la release. S2: los 
  del texto manual se ven como 
  (partir en líneas). S3: literal  indistinguible (mostrar \ como \).
+- J006 entregado: PR #116 fusionado con CI verde.
