@@ -12,7 +12,7 @@ import { defaultExpanded, type Expanded } from "./tree.js";
 import { useMirrored } from "./view-state.js";
 import { useUpdatesFlow } from "./updates-flow.js";
 import { handleUpdatesKey, type UpdatesKeyContext } from "./updates-keys.js";
-import { entryId, viewOf, type UpdatesMessage } from "./updates-model.js";
+import { entryId, viewOf, type LoadState, type UpdatesMessage } from "./updates-model.js";
 import { CheckStatus, EntryLine, ModePanel, UpdatesFooter } from "./updates-panel.js";
 import { type UpdateScopeFilter, type UpdatesData } from "./updates.js";
 import { lineText } from "./preview-render.js";
@@ -29,6 +29,12 @@ export interface UpdatesViewProps {
   readonly listHeight?: number;
   /** Clock for the age of the check; injectable for tests. */
   readonly now?: () => number;
+}
+
+/** Whether the working panel is drawn. A preview owns the screen: its height was computed without the panel, so the two never share it. */
+export function showsWorkingPanel(state: LoadState, mode: UpdatesMode): boolean {
+  if (mode.kind === "preview" || mode.kind === "manual" || mode.kind === "confirm-paths") return false;
+  return state.status === "loading" || mode.kind === "busy";
 }
 
 const NO_ENVIRONMENT: TuiEnvironment = {};
@@ -144,7 +150,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const hasErrors = data?.appError !== undefined || (data?.results ?? []).some((result) => result.error !== undefined);
   const showingBrowse = mode.kind === "browse";
   // One indicator for the whole operation: a check's own phase label, else the busy mode's.
-  const working = state.status === "loading" ? state : mode.kind === "busy" ? mode : undefined;
+  const working = !showsWorkingPanel(state, mode) ? undefined : state.status === "loading" ? state : mode.kind === "busy" ? mode : undefined;
 
   return (
     <Box flexDirection="column">

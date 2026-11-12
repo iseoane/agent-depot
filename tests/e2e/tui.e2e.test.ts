@@ -943,7 +943,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
       const position = footerPosition(session.screen);
       assert.ok(position, `approval preview lost its physical-row position:\n${session.screen}`);
       const { first, last } = position;
-      const titleRow = screenRows.findIndex(row => row.includes("Recipe approval · does not install"));
+      const titleRow = screenRows.findIndex(row => row.includes("Recipe approval · does not inst"));
       const visible = screenRows.slice(titleRow + 1, position.footerRow)
         // A blank row separates the recipe's identity from its steps, so empty rows count.
         .map(row => row.match(/^\s*│ ?(.*?)\s*│?\s*$/u)?.[1] ?? "");
@@ -963,7 +963,7 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     assert.ok(approvalQuestion(), `wide preview never exposed its approval question:\n${session.screen}`);
     assert.ok(session.screen.replace(/[│\s]/gu, "").includes(approvalRecipe.name), `wide preview truncated the approved recipe name:\n${session.screen}`);
     assert.doesNotMatch(session.screen, /zzz-secondary/u, `wide preview left the Sources list visible below the panel:\n${session.screen}`);
-    assert.match(session.screen, /FINAL-DANGER-TERM-MUST-STAY-HIDDEN/u, `wide preview never exposed its final term:\n${session.screen}`);
+    assert.ok(session.screen.replace(/[│\s]/gu, "").includes("FINAL-DANGER-TERM-MUST-STAY-HIDDEN"), `wide preview never exposed its final term:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= 24, `wide final preview exceeded the 24-row PTY:\n${session.screen}`);
     preview += session.screen;
     while (/Review (\d+) of (\d+)/u.test(session.screen) && Number(/Review (\d+) of (\d+)/u.exec(session.screen)?.[1]) > 1) {
@@ -1008,7 +1008,8 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     assert.ok(session.screen.split("\n").length <= 17, `final preview exceeded the 17-row PTY:\n${session.screen}`);
     collectRows(narrowRows);
     const reviewed = [...wideRows, ...narrowRows].sort(([left], [right]) => left - right).map(([, line]) => line).join(" ");
-    const continuous = reviewed.replace(/\s/gu, "");
+    // Continuation rows start with the tree gutter, which is not part of the reviewed text.
+    const continuous = reviewed.replace(/[│\s]/gu, "");
     // Unquoted, the five arguments read as one command line; an argument holding a space would be shown quoted.
     assert.ok(continuous.includes("$depot-e2e-appinstallseparateargv--danger=host-setup-tail"), `approval omitted or reordered the install argv:\n${reviewed}`);
     assert.ok(continuous.includes("latest-selector-unchanged"));
@@ -1187,9 +1188,9 @@ test("wrapped Profile preview retains semantic colors while scrolling in a narro
     await session.send("\r", /Enter preview/u);
     const preview = await session.send("\r", /\[y\] Apply Profile/u);
     assert.ok(preview.split("\n").length <= 17, `wrapped Profile exceeded its 40x17 PTY:\n${preview}`);
-    const continuation = await session.send("j".repeat(7), /Review 8 of 41/u);
+    const continuation = await session.send("j".repeat(7), /Review 8 of 42/u);
     // The shared footer keeps the position and window on one wrapped row, leaving four preview rows here.
-    assert.ok(continuation.replace(/[│\s]/gu, "").includes("6–9of41"), `the narrow preview scrolls to wrapped continuation rows:\n${continuation}`);
+    assert.ok(continuation.replace(/[│\s]/gu, "").includes("6–9of42"), `the narrow preview scrolls to wrapped continuation rows:\n${continuation}`);
     assert.ok(session.terminalOutput.includes(ansiColor(192, 202, 245, "segment/source-segment/source-se")), "wrapped Source URL continuation retains its value color in a narrow PTY");
     await session.send("n", /Import Profile/u);
     await session.send("\u001b", /e export · i import/u);

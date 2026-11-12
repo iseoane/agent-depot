@@ -661,8 +661,8 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       {nameChecking === undefined ? null : <Working label="Checking name…" since={nameChecking} />}
       <Text color={theme.legend}>{NAME_HINT}</Text>
     </BorderPanel> : null}
-    {mode === "confirm" ? <PagedPreview chrome={confirmChrome()} lines={lines} viewport={previewGeometry(lines, cursor, confirmChrome())} /> : null}
-    {mode === "detail" ? <PagedPreview chrome={NOTE_CHROME} lines={lines} viewport={previewGeometry(lines, cursor, NOTE_CHROME)} /> : null}
+    {mode === "confirm" ? <PagedPreview lines={lines} viewport={previewGeometry(lines, cursor, confirmChrome())} /> : null}
+    {mode === "detail" ? <PagedPreview lines={lines} viewport={previewGeometry(lines, cursor, NOTE_CHROME)} /> : null}
     {mode === "results" ? <>
       <PreviewLines lines={lines.slice(window.start, window.end)} />
       <Text>j/k scroll</Text>

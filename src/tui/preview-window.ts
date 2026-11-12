@@ -23,11 +23,18 @@ export interface PreviewFooterSpan {
 }
 
 export interface PreviewViewport {
+  /**
+   * The escaped title as the rows to draw, one per row so the panel cannot wrap it differently from this layout. A title that would
+   * leave no row for content or for the footer is cut with an ellipsis.
+   */
+  readonly titleRows: readonly string[];
   readonly rows: readonly string[];
   /** Source line index for each physically wrapped row. */
   readonly sourceLines: readonly number[];
-  /** UTF-16 offset of each physical row within its logical source line. */
+  /** UTF-16 offset of each physical row within its logical source line, not counting the hanging prefix. */
   readonly sourceOffsets: readonly number[];
+  /** UTF-16 length of the hanging prefix that starts each continuation row (0 for the first row of a line). */
+  readonly prefixLengths: readonly number[];
   readonly start: number;
   readonly end: number;
   readonly total: number;
@@ -82,25 +89,53 @@ function escapeChrome(chrome: PreviewChrome): PreviewChrome {
   };
 }
 
-function wrapLine(line: string, width: number): { readonly row: string; readonly offset: number }[] {
+interface WrappedRow {
+  /** The row as drawn: the hanging prefix, for a continuation row, then its part of the line. */
+  readonly row: string;
+  /** Offset of the row's text within the line. */
+  readonly offset: number;
+  readonly prefixLength: number;
+}
+
+const TREE_GUTTER = /^( *)([│┌├└])?( *)/u;
+
+/**
+ * What continuation rows of a wrapped line start with: its indent and, in a step tree, the gutter that
+ * keeps running below its branch (`│` under `┌` and `├`, nothing under `└`). Empty when the prefix would
+ * leave less than half the width for text.
+ */
+function hangingPrefix(line: string, width: number): string {
+  const [, before = "", glyph = "", after = ""] = TREE_GUTTER.exec(line) ?? [];
+  const continued = glyph === "" ? "" : glyph === "└" ? " " : "│";
+  const prefix = `${before}${continued}${after}`;
+  return stringWidth(prefix) * 2 <= width ? prefix : "";
+}
+
+function wrapLine(line: string, width: number, hang = false): WrappedRow[] {
   const segments = [...graphemes.segment(line)];
-  if (segments.length === 0) return [{ row: "", offset: 0 }];
-  const wrapped: { row: string; offset: number }[] = [];
+  if (segments.length === 0) return [{ row: "", offset: 0, prefixLength: 0 }];
+  const prefix = hang ? hangingPrefix(line, width) : "";
+  const wrapped: WrappedRow[] = [];
   let row = "";
   let rowWidth = 0;
   let rowOffset = 0;
+  let prefixLength = 0;
+  let hasText = false;
   for (const { segment, index } of segments) {
     const segmentWidth = stringWidth(segment);
-    if (row !== "" && rowWidth + segmentWidth > width) {
-      wrapped.push({ row, offset: rowOffset });
-      row = "";
-      rowWidth = 0;
+    if (hasText && rowWidth + segmentWidth > width) {
+      wrapped.push({ row, offset: rowOffset, prefixLength });
+      row = prefix;
+      rowWidth = stringWidth(prefix);
+      prefixLength = prefix.length;
+      hasText = false;
       rowOffset = index;
     }
     row += segment;
     rowWidth += segmentWidth;
+    hasText = true;
   }
-  wrapped.push({ row, offset: rowOffset });
+  wrapped.push({ row, offset: rowOffset, prefixLength });
   return wrapped;
 }
 
@@ -201,6 +236,21 @@ function reservedFooterRows(total: number, windowed: boolean, chrome: PreviewChr
   );
 }
 
+/** `title` cut, with an ellipsis, to the longest start that wraps to at most `maxRows` once escaped. */
+function clipTitle(title: string, width: number, maxRows: number): string {
+  const fits = (text: string) => wrapLine(escapeControlText(text), width).length <= maxRows;
+  if (fits(title)) return title;
+  const parts = [...graphemes.segment(title)].map(({ segment }) => segment);
+  let low = 0;
+  let high = parts.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (fits(`${parts.slice(0, middle).join("")}…`)) low = middle;
+    else high = middle - 1;
+  }
+  return `${parts.slice(0, low).join("")}…`;
+}
+
 export function previewViewport(
   rawLines: readonly string[],
   cursor: number,
@@ -211,13 +261,16 @@ export function previewViewport(
   const lines = rawLines.map(escapeControlText);
   const chrome = escapeChrome(rawChrome);
   const contentWidth = Math.max(terminalColumns - 8, 1);
-  const wrapped = lines.flatMap((line, sourceLine) => wrapLine(line, contentWidth).map(({ row, offset }) => ({ row, sourceLine, offset })));
+  const wrapped = lines.flatMap((line, sourceLine) => wrapLine(line, contentWidth, true).map((wrappedRow) => ({ ...wrappedRow, sourceLine })));
   const previewRows = wrapped.map(({ row }) => row);
   const total = previewRows.length;
   const headerRows = headerTabRowCount(contentWidth) + 3;
-  const titleRows = wrapLine(chrome.title, contentWidth).length;
   const reservedRows = chrome.reservedRows !== undefined && chrome.reservedRows > 0 ? Math.ceil(chrome.reservedRows) : 0;
-  const fixedRows = headerRows + 1 + 2 + titleRows + reservedRows;
+  // The footer, with its question and its action, is reserved first; the title takes what remains after a row of content.
+  const footerRows = Math.max(reservedFooterRows(total, false, chrome, contentWidth, Infinity), reservedFooterRows(total, true, chrome, contentWidth, Infinity));
+  const titleBudget = Math.max(terminalRows - headerRows - 1 - 2 - reservedRows - 1 - footerRows, 1);
+  const titleRows = wrapLine(escapeControlText(clipTitle(rawChrome.title, contentWidth, titleBudget)), contentWidth).map(({ row }) => row);
+  const fixedRows = headerRows + 1 + 2 + titleRows.length + reservedRows;
   // At least one preview row stays visible; the footer is cut to what remains.
   const maxFooterRows = Math.max(terminalRows - fixedRows - 1, 2);
   const rowsWithFooter = (windowed: boolean) =>
@@ -229,9 +282,11 @@ export function previewViewport(
   const end = Math.min(start + height, total);
   const reachedEnd = end === total;
   return {
+    titleRows,
     rows: previewRows.slice(start, end),
     sourceLines: wrapped.slice(start, end).map(({ sourceLine }) => sourceLine),
     sourceOffsets: wrapped.slice(start, end).map(({ offset }) => offset),
+    prefixLengths: wrapped.slice(start, end).map(({ prefixLength }) => prefixLength),
     start,
     end,
     total,

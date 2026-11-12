@@ -434,7 +434,7 @@ test("recipe Skill installation shows no message row above the preview, which wo
   const f = await fixture(t);
   // At 20 columns the refusal wraps to two rows, more than the terminal leaves spare above the preview.
   const view = await openRecipeInstallPreview(f, { columns: 20, rows: 24 });
-  const frame = await waitForFrame(view.lastFrame, candidate => squash(candidate).includes("Skillinstallpreview"));
+  const frame = await waitForFrame(view.lastFrame, candidate => squash(candidate).includes("Skillinsta…"));
   assert.doesNotMatch(squash(frame), /Selectatleastonehost/);
   const lines = frame.split("\n");
   assert.equal(lines.filter(line => line.startsWith("╭")).length, lines.filter(line => line.startsWith("╰")).length, frame);

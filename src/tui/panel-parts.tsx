@@ -5,14 +5,20 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { ProjectHost } from "../project-manifest.js";
 import { theme } from "./theme.js";
 import type { StyledLine } from "./preview-render.js";
-import { escapeControlText, sliceSpans, type PreviewChrome, type PreviewFooterRole, type PreviewViewport } from "./preview-window.js";
+import { escapeControlText, sliceSpans, type PreviewFooterRole, type PreviewViewport } from "./preview-window.js";
 import { animationEnabled, formatElapsed, SPINNER_FRAMES, SPINNER_TICK_MS, STATIC_GLYPH } from "./working-model.js";
 
 /** A titled, color-independent boundary for a focused interaction or result. */
-export function BorderPanel({ title, children }: { readonly title: string; readonly children: ReactNode }) {
+export function BorderPanel({ title, children }: {
+  /** Text to escape and wrap, or rows already escaped and wrapped to fit, each drawn on exactly one row. */
+  readonly title: string | readonly string[];
+  readonly children: ReactNode;
+}) {
   return (
     <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
-      <Text color={theme.title} bold>{title}</Text>
+      {typeof title === "string"
+        ? <Text color={theme.title} bold>{title}</Text>
+        : title.map((row, position) => <PreEscapedText key={position} color={theme.title} bold wrap="truncate">{row}</PreEscapedText>)}
       {children}
     </Box>
   );
@@ -164,22 +170,30 @@ function noticeColor(line: string): string | undefined {
   return text.startsWith("Cannot install ") ? theme.error : undefined;
 }
 
-function PreviewLine({ line, position, logicalLine, offset = 0 }: {
+/** The hanging prefix of a continuation row, drawn in the gutter colour, then the part of the line's spans the row shows. */
+function rowSpans<T extends PreviewSpan>(spans: readonly T[], prefix: string, offset: number, length: number): readonly PreviewSpan[] {
+  return [...(prefix === "" ? [] : [previewSpan(prefix, theme.field)]), ...sliceSpans(spans, offset, length)];
+}
+
+function PreviewLine({ line, position, logicalLine, offset = 0, prefixLength = 0 }: {
   readonly line: string;
   readonly position: number;
   readonly logicalLine?: string;
   readonly offset?: number;
+  readonly prefixLength?: number;
 }) {
+  const prefix = line.slice(0, prefixLength);
+  const textLength = line.length - prefixLength;
   const profileSpans = logicalLine === undefined ? profilePreviewSpans(line) : profilePreviewSpans(logicalLine);
   if (profileSpans) {
-    const spans = logicalLine === undefined ? profileSpans : sliceSpans(profileSpans, offset, line.length);
+    const spans = logicalLine === undefined ? profileSpans : rowSpans(profileSpans, prefix, offset, textLength);
     return <PreEscapedText key={position}>{spans.map((span, index) =>
       <PreEscapedText key={index} color={span.color} bold={span.bold}>{span.text}</PreEscapedText>)}</PreEscapedText>;
   }
   const field = previewField(logicalLine ?? line);
   if (field) {
     const fieldSpans = [previewSpan(field.label, theme.field), previewSpan(field.value, theme.value)];
-    const spans = logicalLine === undefined ? fieldSpans : sliceSpans(fieldSpans, offset, line.length);
+    const spans = logicalLine === undefined ? fieldSpans : rowSpans(fieldSpans, prefix, offset, textLength);
     return <PreEscapedText key={position}>{spans.map((span, index) =>
       <PreEscapedText key={index} color={span.color}>{span.text}</PreEscapedText>)}</PreEscapedText>;
   }
@@ -227,8 +241,7 @@ function footerColor(role: PreviewFooterRole, reachedEnd: boolean): { readonly c
  * A paged preview with the shared two-row footer: reading progress, then what `y` does. `[y]` stays
  * dimmed until `viewport` reaches the end; callers ignore `y` until then using the same viewport.
  */
-export function PagedPreview({ chrome, lines: rawLines, styled: rawStyled, viewport }: {
-  readonly chrome: PreviewChrome;
+export function PagedPreview({ lines: rawLines, styled: rawStyled, viewport }: {
   readonly lines: readonly string[];
   /** Colours of each line in `lines`; a line without them has its colours inferred from the text. */
   readonly styled?: readonly (StyledLine | undefined)[];
@@ -239,15 +252,16 @@ export function PagedPreview({ chrome, lines: rawLines, styled: rawStyled, viewp
   const lines = rawLines.map(escapeControlText);
   const styled = rawStyled?.map((line) => line?.map((span) => ({ ...span, text: escapeControlText(span.text) })));
   return (
-    <BorderPanel title={chrome.title}>
+    <BorderPanel title={viewport.titleRows}>
       {viewport.rows.map((line, position) => {
         const logical = viewport.sourceLines[position]!;
         const custom = styled?.[logical];
         return custom === undefined
           ? <PreviewLine key={position} line={line} position={position}
             logicalLine={lines[logical]!}
-            offset={viewport.sourceOffsets[position]!} />
-          : <PreEscapedText key={position}>{sliceSpans(custom, viewport.sourceOffsets[position]!, line.length).map((span, index) =>
+            offset={viewport.sourceOffsets[position]!}
+            prefixLength={viewport.prefixLengths[position]!} />
+          : <PreEscapedText key={position}>{rowSpans(custom, line.slice(0, viewport.prefixLengths[position]!), viewport.sourceOffsets[position]!, line.length - viewport.prefixLengths[position]!).map((span, index) =>
             <PreEscapedText key={index} color={span.color} bold={span.bold}>{span.text}</PreEscapedText>)}</PreEscapedText>;
       })}
       {viewport.footer.map((spans, row) => <PreEscapedText key={`footer-${row}`}>{spans.map((span, index) =>

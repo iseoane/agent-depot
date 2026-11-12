@@ -153,7 +153,7 @@ test("a Skill name or description with line breaks stays on one Catalog row", as
 function previewFrame(lines: readonly string[]): string {
   const chrome = { title: "Preview" };
   const viewport = previewViewport(lines, 0, 200, 200, chrome);
-  const view = render(<PagedPreview chrome={chrome} lines={lines} viewport={viewport} />);
+  const view = render(<PagedPreview lines={lines} viewport={viewport} />);
   const frame = view.lastFrame() ?? "";
   view.unmount();
   return frame;

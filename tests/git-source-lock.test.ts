@@ -269,6 +269,10 @@ test("a recent recovery mutex held by another process keeps an orphaned lock in 
   await withSandbox(async (cachePath, lockPath) => {
     await writeOwner(lockPath, { pid: await deadPid(), hostname: hostname() });
     await mkdir(`${lockPath}.recovering`);
+    // The mocked clock advances 100 ms per event-loop turn, so a slow filesystem call can move it past the
+    // mutex age limit; a mutex dated ahead of the clock stays recent however far it runs.
+    const ahead = new Date(Date.now() + 60 * 60_000);
+    await utimes(`${lockPath}.recovering`, ahead, ahead);
     const runner = new OverlapRunner();
 
     const [error] = await settleOnMockedClock(context, new GitSourceAccessAdapter({ cachePath, runner }).refresh(source));
