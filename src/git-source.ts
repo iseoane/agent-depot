@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, rename, rm, rmdir } from "node:fs/promises";
+import { link, lstat, mkdir, readFile, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import path from "node:path";
-import { isLockContention, writeFileAtomically } from "./atomic-file.js";
+import { isLockContention } from "./atomic-file.js";
 import { assertNoSymlinkPath } from "./path-safety.js";
 import { runProcess, type ProcessRunResult } from "./process-runner.js";
 import { decodeSnapshotBatch, reuseSourceSnapshot, SOURCE_SNAPSHOT_LIMITS } from "./source-snapshot.js";
@@ -162,6 +162,12 @@ export interface SourceLockHooks {
   readonly afterJudging?: () => Promise<void>;
   /** Runs after this process created the lock directory and before it publishes its owner record. */
   readonly afterLockCreated?: () => Promise<void>;
+  /** Runs once this process holds the lock and before it first uses it. */
+  readonly afterLockAcquired?: () => Promise<void>;
+  /** Runs after a recoverer confirmed the orphan while holding the recovery mutex, before it removes the lock. */
+  readonly beforeOrphanRemoval?: () => Promise<void>;
+  /** Replaces the directory removal, so a test can fail it or interleave a successor before a retry. */
+  readonly removeDirectory?: (directory: string) => Promise<void>;
 }
 
 const SOURCE_LOCK_TIMEOUT_MS = 30_000;
@@ -173,6 +179,9 @@ const BACKGROUND_REFRESH_OPTIONS: GitCommandRunnerOptions = Object.freeze({
 const SOURCE_LOCK_RETRY_MS = 10;
 const SOURCE_LOCK_OWNER_FILE = "owner.json";
 const SOURCE_LOCK_OWNER_MAX_BYTES = 4096;
+const SOURCE_RECOVERY_MUTEX_ID_FILE = "id";
+const LOCK_REMOVAL_ATTEMPTS = 5;
+const LOCK_REMOVAL_RETRY_MS = 50;
 /** A recovery takes milliseconds, so a mutex this old was left by a process that died mid-recovery. */
 const SOURCE_RECOVERY_MUTEX_MAX_AGE_MS = 60_000;
 /** Covers locks from versions without an owner record and an acquisition interrupted before writing it. */
@@ -205,11 +214,13 @@ export class GitSourceAccessAdapter implements GitSourceAccess {
       await mkdir(this.cachePath, { recursive: true });
       await assertNoSymlinkPath(this.cachePath, "cache path");
 
-      const release = await acquireSourceLock(`${destination}.lock`, this.lockHooks);
+      const lock = await acquireSourceLock(`${destination}.lock`, this.lockHooks);
       try {
+        await this.lockHooks.afterLockAcquired?.();
+        await lock.assertHeld();
         await this.refreshLocked(source, destination, options.background ? BACKGROUND_REFRESH_OPTIONS : undefined);
       } finally {
-        await release();
+        await lock.release();
       }
     } catch (error) {
       if (error instanceof GitSourceAccessError) {
@@ -579,13 +590,67 @@ type LockOwnerRecord =
   | { readonly kind: "none" }
   | { readonly kind: "unreadable" };
 
-async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Promise<() => Promise<void>> {
+interface SourceLock {
+  /** Throws unless the lock's owner record is still this acquisition's. */
+  assertHeld(): Promise<void>;
+  release(): Promise<void>;
+}
+
+const LOCK_TAKEN_OVER_MESSAGE = "the Source cache lock was taken over by another process; this refresh stopped without touching the cache";
+
+/** Identifies a directory across its lifetime; a recreated path gets a new inode or birth time. */
+async function directoryIdentity(directory: string): Promise<string | undefined> {
+  try {
+    const { dev, ino, birthtimeNs } = await lstat(directory, { bigint: true });
+    return `${dev}:${ino}:${birthtimeNs}`;
+  } catch (error) {
+    if (isMissing(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Removes `directory` if `stillOurs` holds, then retries a failed removal only on that same directory.
+ * `rm` deletes the owner record before the directory, so after a partial failure ownership can no longer
+ * be re-read; identity stands in for it, and a successor's directory recreated at the path never matches.
+ * `rm`'s own retry option would repeat the removal on the path blindly instead. Windows reports EBUSY,
+ * EPERM or ENOTEMPTY while another process still holds a handle on something inside, so only those are retried.
+ * Residual limit: the checks and the removal are separate calls (the filesystem has no atomic conditional
+ * remove), so a successor that takes the path inside that window, microseconds wide, is still removed;
+ * two reclaimers of an aged-out recovery mutex can race the same way.
+ */
+async function removeWhileOurs(directory: string, stillOurs: () => Promise<boolean>, hooks: SourceLockHooks): Promise<void> {
+  if (!(await stillOurs())) {
+    return;
+  }
+  const identity = await directoryIdentity(directory);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // rm unlinks links instead of following them, so nothing outside the directory is touched.
+      await (hooks.removeDirectory ?? ((target) => rm(target, { recursive: true, force: true })))(directory);
+      return;
+    } catch (error) {
+      const transient = ["EBUSY", "EPERM", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException).code ?? "");
+      if (!transient || attempt >= LOCK_REMOVAL_ATTEMPTS) {
+        throw error;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, LOCK_REMOVAL_RETRY_MS));
+      if (identity === undefined || (await directoryIdentity(directory)) !== identity) {
+        return;
+      }
+    }
+  }
+}
+
+async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Promise<SourceLock> {
   const deadline = Date.now() + SOURCE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
       await mkdir(lockPath);
       await hooks.afterLockCreated?.();
-      return await publishLockOwner(lockPath);
+      return await publishLockOwner(lockPath, hooks);
     } catch (error) {
       if (!isLockContention(error)) {
         throw error;
@@ -598,7 +663,11 @@ async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Prom
       }
       if (Date.now() >= deadline) {
         const record = await readLockOwner(lockPath);
-        const holder = record.kind === "owner" ? ` (held by process ${record.owner.pid} on host ${record.owner.hostname})` : "";
+        const holder = record.kind === "owner"
+          ? ` (held by process ${record.owner.pid} on host ${record.owner.hostname})`
+          : record.kind === "none"
+            ? ` (held by an unknown process: it has no owner record and will be recovered once it is ${SOURCE_LOCK_OWNERLESS_MAX_AGE_MS / 60_000} minutes old)`
+            : "";
         throw new Error(
           `the Source cache lock directory is busy: ${lockPath}${holder}; another refresh might be active. Wait for it to finish before retrying`,
         );
@@ -608,20 +677,56 @@ async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Prom
   }
 }
 
-async function publishLockOwner(lockPath: string): Promise<() => Promise<void>> {
+/**
+ * Publishes the owner record without ever replacing one: a holder that stalled and lost its lock
+ * would otherwise overwrite its successor's record and let both believe they hold it.
+ * A hard link fails with EEXIST when the record exists. Where links are unsupported, an exclusive
+ * create gives the same no-overwrite guarantee, but a reader can briefly see a partial record,
+ * which it treats as unreadable and so never as a reason to remove the lock.
+ */
+async function publishLockOwner(lockPath: string, hooks: SourceLockHooks): Promise<SourceLock> {
   const owner: SourceLockOwner = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), id: randomUUID() };
+  const ownerPath = path.join(lockPath, SOURCE_LOCK_OWNER_FILE);
+  const temporaryPath = `${ownerPath}.${owner.id}.tmp`;
+  const contents = JSON.stringify(owner);
   try {
-    await writeFileAtomically(path.join(lockPath, SOURCE_LOCK_OWNER_FILE), JSON.stringify(owner));
-  } catch (error) {
-    // Only an empty directory can still be the lock this call created; another holder's lock has an owner record.
-    await rmdir(lockPath).catch(() => undefined);
-    throw error;
-  }
-  return async () => {
-    const record = await readLockOwner(lockPath);
-    if (record.kind === "owner" && record.owner.id === owner.id) {
-      await rm(lockPath, { recursive: true, force: true });
+    await writeFile(temporaryPath, contents, { encoding: "utf8", flag: "wx" });
+    try {
+      await link(temporaryPath, ownerPath);
+    } catch (error) {
+      if (!["ENOSYS", "ENOTSUP", "EOPNOTSUPP", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+        throw error;
+      }
+      await writeFile(ownerPath, contents, { encoding: "utf8", flag: "wx" });
     }
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(LOCK_TAKEN_OVER_MESSAGE);
+    }
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // The directory this call created is gone: the lock was recovered, and a successor may already hold a new one.
+      throw new Error(LOCK_TAKEN_OVER_MESSAGE);
+    }
+    // rmdir only removes an empty directory: ours, or a successor's before it published, whose own write then
+    // reports the takeover. A successor with an owner record is never empty.
+    await rmdir(lockPath).catch(() => undefined);
+    throw new Error(`could not record the Source cache lock owner: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  await unlink(temporaryPath).catch(() => undefined);
+  return {
+    async assertHeld() {
+      const record = await readLockOwner(lockPath);
+      if (record.kind !== "owner" || record.owner.id !== owner.id) {
+        throw new Error(LOCK_TAKEN_OVER_MESSAGE);
+      }
+    },
+    async release() {
+      await removeWhileOurs(lockPath, async () => {
+        const record = await readLockOwner(lockPath);
+        return record.kind === "owner" && record.owner.id === owner.id;
+      }, hooks);
+    },
   };
 }
 
@@ -696,23 +801,41 @@ async function recoverOrphanedLock(lockPath: string, hooks: SourceLockHooks): Pr
     }
     // A recoverer that died holding the mutex would otherwise block recovery for good.
     if (await isOldLock(mutexPath, SOURCE_RECOVERY_MUTEX_MAX_AGE_MS)) {
-      await rm(mutexPath, { recursive: true, force: true });
+      await removeWhileOurs(mutexPath, () => isOldLock(mutexPath, SOURCE_RECOVERY_MUTEX_MAX_AGE_MS), hooks);
       return true;
     }
     return false;
   }
+
+  const mutexId = randomUUID();
+  const mutexIdPath = path.join(mutexPath, SOURCE_RECOVERY_MUTEX_ID_FILE);
+  const ownsMutex = async (): Promise<boolean> => (await readFile(mutexIdPath, "utf8").catch(() => undefined)) === mutexId;
   try {
-    const current = await judgeOrphan(lockPath);
-    const sameOrphan = current !== undefined && (current.kind === "owner"
-      ? judged.kind === "owner" && judged.owner.id === current.owner.id
-      : judged.kind === "none");
-    if (sameOrphan) {
-      // rm unlinks links instead of following them, so nothing outside the lock is touched.
-      await rm(lockPath, { recursive: true, force: true });
+    await writeFile(mutexIdPath, mutexId, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    // The mutex was reclaimed before it was identified; give up this recovery attempt.
+    if (!["EEXIST", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+      await rmdir(mutexPath).catch(() => undefined);
+      throw error;
+    }
+    return false;
+  }
+  try {
+    const isJudgedOrphan = async (): Promise<boolean> => {
+      const current = await judgeOrphan(lockPath);
+      return current !== undefined && (current.kind === "owner"
+        ? judged.kind === "owner" && judged.owner.id === current.owner.id
+        : judged.kind === "none");
+    };
+    if (await isJudgedOrphan()) {
+      await hooks.beforeOrphanRemoval?.();
+      // A recoverer paused past the mutex's age limit may have had the mutex reclaimed and the lock re-taken,
+      // so the mutex and the orphan are re-checked before every removal attempt.
+      await removeWhileOurs(lockPath, async () => await ownsMutex() && await isJudgedOrphan(), hooks);
     }
     return true;
   } finally {
-    await rm(mutexPath, { recursive: true, force: true });
+    await removeWhileOurs(mutexPath, ownsMutex, hooks);
   }
 }
 
