@@ -9,6 +9,7 @@ import {
   type PackageInspection,
   type PackageLifecyclePlan,
   type PackageSelection,
+  type PackageUpdateCheck,
   type PackageVersionEvidence,
 } from "../package-model.js";
 import type { PackageApprovalStatus } from "../package-state.js";
@@ -56,9 +57,15 @@ export function packageStatusLabel(status: "unknown" | "current" | "update avail
 
 /** What a selection record itself remembers, for lists that do not read host evidence. */
 export function recordedVersionLabel(record: InstalledPackage): string {
+  if (record.verified?.kind === "git-commit") return `commit ${record.verified.commit.slice(0, 7)}`;
   if (record.verified !== undefined) return packageVersionLabel(record.verified);
-  if (record.lastDelegatedCommit !== undefined) return record.lastDelegatedCommit.slice(0, 7);
+  if (record.lastDelegatedCommit !== undefined) return `commit ${record.lastDelegatedCommit.slice(0, 7)}`;
   return "unknown";
+}
+
+/** The version the host reports when it states one, else what the selection record remembers. */
+export function installedVersionLabel({ installed, observed }: Pick<PackageUpdateCheck, "installed" | "observed">): string {
+  return observed?.kind === "installed" && observed.version !== undefined ? observed.version : recordedVersionLabel(installed);
 }
 
 export type PackageRowStatus =
