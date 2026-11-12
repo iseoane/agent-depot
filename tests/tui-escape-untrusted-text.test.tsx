@@ -220,3 +220,10 @@ test("a real local Source whose SKILL.md carries ESC, BEL, OSC 52 and U+202E is 
   const raw = view.frames.join("");
   assert.ok(!raw.includes("\u001B") && !raw.includes("\u0007") && !raw.includes("\u202E"), JSON.stringify(raw));
 });
+
+test("an uppercase typed escape is doubled like a lowercase one", () => {
+  assert.equal(escapeControlText("\\X1b"), "\\\\X1b");
+  assert.equal(escapeControlText("\\U202E"), "\\\\U202E");
+  assert.equal(escapeControlText("\\u{1F600}"), "\\u{1F600}");
+  assert.equal(escapeControlText("\\X41"), "\\X41");
+});

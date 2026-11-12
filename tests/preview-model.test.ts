@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { commandLine } from "../src/preview-model.js";
+import { commandLine, quoteText } from "../src/preview-model.js";
 
 test("a command line quotes only the arguments a shell could read differently", () => {
   assert.equal(commandLine(["pacman", "-Syu", "ripgrep", "--root=/usr/local", "user@host:1.2"]), "pacman -Syu ripgrep --root=/usr/local user@host:1.2");
@@ -25,4 +25,11 @@ test("a command line escapes non-ASCII spaces and default-ignorable characters s
   assert.equal(commandLine(["x", "a\u3000b", "c\u2003d"]), 'x "a\\u3000b" "c\\u2003d"');
   assert.equal(commandLine(["x", "a\u00ADb", "c\u034Fd", "e\u3164f", "g\uFE0Fh"]), 'x "a\\u00adb" "c\\u034fd" "e\\u3164f" "g\\ufe0fh"');
   assert.equal(commandLine(["x", "café 日本 🙂"]), 'x "café 日本 🙂"');
+});
+
+test("quoted text marks non-ASCII spaces and default-ignorable characters like a command line does", () => {
+  assert.equal(quoteText("a b"), '"a\\u00a0b"');
+  assert.equal(quoteText("a　b"), '"a\\u3000b"');
+  assert.equal(quoteText("c͏d"), '"c\\u034fd"');
+  assert.equal(quoteText('say "hi" \\ café 日本'), '"say \\"hi\\" \\\\ café 日本"');
 });

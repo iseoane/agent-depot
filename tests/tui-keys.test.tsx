@@ -106,3 +106,24 @@ test("a y split off a multi-character block never counts as a confirmation, a lo
   view.unmount();
   assert.deepEqual(seen, ["r", "y", "yes"]);
 });
+
+test("a y read in the same turn as the keys that mounted its confirmation never answers it", async () => {
+  const seen: string[] = [];
+  let mounted = false;
+  const reopen: { show?: () => void } = {};
+  function Opener() {
+    useKeys((input) => {
+      if (input !== "y" && !mounted) { mounted = true; reopen.show?.(); }
+    });
+    return <Text>probe</Text>;
+  }
+  const tree = () => <><Opener />{mounted ? <YesProbe seen={seen} /> : null}</>;
+  const view = render(tree());
+  reopen.show = () => view.rerender(tree());
+  await waitForFrame(view.lastFrame, /probe/);
+  view.stdin.write("\u001B[By");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  view.unmount();
+  assert.ok(mounted);
+  assert.deepEqual(seen, ["y"]);
+});

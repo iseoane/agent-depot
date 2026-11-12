@@ -28,7 +28,7 @@ import { isYes, useKeys } from "./keys.js";
 import { escapeControlText, usePreviewGeometry, type PreviewChrome } from "./preview-window.js";
 import { answerYesNo, moveCursor, movePreviewCursor, toggleChoice } from "./mode-keys.js";
 import { BorderPanel, PagedPreview, PreviewLines, Working } from "./panel-parts.js";
-import { clipText, elideMiddle, fitLines, wrapText } from "./text-wrap.js";
+import { clipText, elideMiddle, fitLines, textUnits, wrapText } from "./text-wrap.js";
 import { theme } from "./theme.js";
 import { useMirrored, useMounted } from "./view-state.js";
 import { computeWindow, useListHeight } from "./window.js";
@@ -197,7 +197,7 @@ const NOTE_CHROME: PreviewChrome = { title: "Export note", cancel: "[Esc] close"
  * what matter, so with fewer than three rows the field keeps its label and its tail behind a `…`; with
  * three or more a path keeps its first row too, around a count of the rows left out.
  */
-function NameField({ label, value, rows, width, tail = false }: {
+export function NameField({ label, value, rows, width, tail = false }: {
   readonly label: string;
   readonly value: string;
   readonly rows: number;
@@ -212,9 +212,10 @@ function NameField({ label, value, rows, width, tail = false }: {
   let shown = wrapped;
   if (keepsMiddleCount) shown = elideMiddle(wrapped, rows, width);
   else if (cut) {
-    const characters = Array.from(escapedValue);
-    for (let dropped = 1; dropped <= characters.length; dropped += 1) {
-      shown = wrapText(`${label}…${characters.slice(dropped).join("")}`, width);
+    // Dropped by units, so the cut cannot leave half of a doubled backslash that would read as a real escape.
+    const units = textUnits(escapedValue).map(({ segment }) => segment);
+    for (let dropped = 1; dropped <= units.length; dropped += 1) {
+      shown = wrapText(`${label}…${units.slice(dropped).join("")}`, width);
       if (shown.length <= rows) break;
     }
   }
