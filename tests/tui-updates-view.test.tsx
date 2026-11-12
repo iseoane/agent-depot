@@ -1501,7 +1501,7 @@ test("a y pasted in the same block as the cursor moves does not confirm the upda
   assert.equal(f.methodCalls.length, 1);
 });
 
-for (const [name, burst] of [["Down arrows", `${"\u001B[B".repeat(200)}y`], ["Page Down", `${"\u001B[6~".repeat(10)}y`]] as const) {
+for (const [name, burst] of [["Down arrows", `${"\u001B[B".repeat(200)}y`], ["Page Down", `${"\u001B[6~".repeat(200)}y`]] as const) {
   test(`a y read in the same chunk as ${name} does not confirm the update batch`, async (t) => {
     const f = await fixture(t);
     await seedProject(f, [{ name: "one", state: "outdated", method: ["node", "--fake-update"] }]);

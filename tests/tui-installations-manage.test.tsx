@@ -433,7 +433,7 @@ test("a y pasted in the same block as the cursor moves does not confirm the unin
   assert.deepEqual(await f.operations.listUserGlobalInstallations!(), []);
 });
 
-for (const [name, burst] of [["Down arrows", `${"\u001B[B".repeat(200)}y`], ["Page Down", `${"\u001B[6~".repeat(10)}y`]] as const) {
+for (const [name, burst] of [["Down arrows", `${"\u001B[B".repeat(200)}y`], ["Page Down", `${"\u001B[6~".repeat(200)}y`]] as const) {
   test(`a y read in the same chunk as ${name} does not confirm the uninstall`, async (t) => {
     const f = await fixture(t, ["pi"]);
     const view = await mount(f);
