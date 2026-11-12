@@ -1,4 +1,4 @@
-import { Text } from "ink";
+import { Text } from "./safe-text.js";
 
 import { describeLinks, describeNode, markersOf, type NodeData } from "./installations-tree.js";
 import { rowStyle, theme } from "./theme.js";

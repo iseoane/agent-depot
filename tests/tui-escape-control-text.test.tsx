@@ -49,7 +49,7 @@ test("the geometry wraps the escaped text, so a line of invisible characters tak
 });
 
 test("a preview that needs no escaping keeps its text", () => {
-  const lines = ["ASCII only", "Acentos: áéíóú ñ", "日本語のテキスト", "emoji 🙂👍🏽 👩‍💻", "a\\x1b literal backslash"];
+  const lines = ["ASCII only", "Acentos: áéíóú ñ", "日本語のテキスト", "emoji 🙂👍🏽 👩‍💻", "C:\\Users\\me literal backslash"];
   const viewport = previewViewport(lines, 0, 100, 120, { title: "t" });
   assert.deepEqual(viewport.rows, lines);
 });

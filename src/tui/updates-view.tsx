@@ -1,4 +1,5 @@
-import { Box, Text } from "ink";
+import { Box } from "ink";
+import { Text } from "./safe-text.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SourceOperations } from "../sources.js";

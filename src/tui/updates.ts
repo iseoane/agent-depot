@@ -23,7 +23,7 @@ import type { TuiEnvironment } from "./environment.js";
 import { packageOperationsOf } from "./environment.js";
 import { formatVersionEvidence } from "./installations.js";
 import { describePackageComponent, installedEvidenceLabel, packageStatusLabel, packageVersionLabel, recordedVersionLabel } from "./package-rows.js";
-import type { PreviewDocument, PreviewItem, PreviewRow } from "../preview-model.js";
+import { quoteText, type PreviewDocument, type PreviewItem, type PreviewRow } from "../preview-model.js";
 
 export type { UpdateScope };
 
@@ -360,7 +360,7 @@ function appPreviewItem(plan: AppLifecyclePlan): PreviewItem {
   const rows: PreviewRow[] = [];
   if (plan.argv) {
     rows.push({ kind: "command", argv: plan.argv, cwd: plan.cwd, ...(plan.executable === undefined ? {} : { executable: plan.executable }) });
-    if (plan.executable === undefined) rows.push({ kind: "warning", text: `${JSON.stringify(plan.argv[0])} not found in PATH` });
+    if (plan.executable === undefined) rows.push({ kind: "warning", text: `${quoteText(plan.argv[0]!)} not found in PATH` });
   } else {
     rows.push({ kind: "field", label: "Working directory", value: plan.cwd });
   }

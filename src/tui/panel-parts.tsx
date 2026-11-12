@@ -1,4 +1,5 @@
-import { Box, Text } from "ink";
+import { Box } from "ink";
+import { PreEscapedText, Text } from "./safe-text.js";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { ProjectHost } from "../project-manifest.js";
@@ -172,22 +173,22 @@ function PreviewLine({ line, position, logicalLine, offset = 0 }: {
   const profileSpans = logicalLine === undefined ? profilePreviewSpans(line) : profilePreviewSpans(logicalLine);
   if (profileSpans) {
     const spans = logicalLine === undefined ? profileSpans : sliceSpans(profileSpans, offset, line.length);
-    return <Text key={position}>{spans.map((span, index) =>
-      <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>;
+    return <PreEscapedText key={position}>{spans.map((span, index) =>
+      <PreEscapedText key={index} color={span.color} bold={span.bold}>{span.text}</PreEscapedText>)}</PreEscapedText>;
   }
   const field = previewField(logicalLine ?? line);
   if (field) {
     const fieldSpans = [previewSpan(field.label, theme.field), previewSpan(field.value, theme.value)];
     const spans = logicalLine === undefined ? fieldSpans : sliceSpans(fieldSpans, offset, line.length);
-    return <Text key={position}>{spans.map((span, index) =>
-      <Text key={index} color={span.color}>{span.text}</Text>)}</Text>;
+    return <PreEscapedText key={position}>{spans.map((span, index) =>
+      <PreEscapedText key={index} color={span.color}>{span.text}</PreEscapedText>)}</PreEscapedText>;
   }
-  return <Text key={position} color={noticeColor(logicalLine ?? line) ?? theme.value}>{line}</Text>;
+  return <PreEscapedText key={position} color={noticeColor(logicalLine ?? line) ?? theme.value}>{line}</PreEscapedText>;
 }
 
 export function PreviewLines({ lines }: { readonly lines: readonly string[] }) {
   return <>{lines.map((line, position) =>
-    <PreviewLine key={position} line={line} position={position} />)}</>;
+    <PreviewLine key={position} line={escapeControlText(line)} position={position} />)}</>;
 }
 
 /** Under a list: the window indicator, how many items are marked, and the last result. */
@@ -233,11 +234,12 @@ export function PagedPreview({ chrome, lines: rawLines, styled: rawStyled, viewp
   readonly styled?: readonly (StyledLine | undefined)[];
   readonly viewport: PreviewViewport;
 }) {
-  // The same escape `previewViewport` applied, so rows, offsets and spans describe the same text.
+  // The same escape `previewViewport` applied, so rows, offsets and spans describe the same text. The rows themselves are already
+  // escaped, hence `PreEscapedText`; only the title goes through `BorderPanel`.
   const lines = rawLines.map(escapeControlText);
   const styled = rawStyled?.map((line) => line?.map((span) => ({ ...span, text: escapeControlText(span.text) })));
   return (
-    <BorderPanel title={escapeControlText(chrome.title)}>
+    <BorderPanel title={chrome.title}>
       {viewport.rows.map((line, position) => {
         const logical = viewport.sourceLines[position]!;
         const custom = styled?.[logical];
@@ -245,11 +247,11 @@ export function PagedPreview({ chrome, lines: rawLines, styled: rawStyled, viewp
           ? <PreviewLine key={position} line={line} position={position}
             logicalLine={lines[logical]!}
             offset={viewport.sourceOffsets[position]!} />
-          : <Text key={position}>{sliceSpans(custom, viewport.sourceOffsets[position]!, line.length).map((span, index) =>
-            <Text key={index} color={span.color} bold={span.bold}>{span.text}</Text>)}</Text>;
+          : <PreEscapedText key={position}>{sliceSpans(custom, viewport.sourceOffsets[position]!, line.length).map((span, index) =>
+            <PreEscapedText key={index} color={span.color} bold={span.bold}>{span.text}</PreEscapedText>)}</PreEscapedText>;
       })}
-      {viewport.footer.map((spans, row) => <Text key={`footer-${row}`}>{spans.map((span, index) =>
-        <Text key={index} {...footerColor(span.role, viewport.reachedEnd)}>{span.text}</Text>)}</Text>)}
+      {viewport.footer.map((spans, row) => <PreEscapedText key={`footer-${row}`}>{spans.map((span, index) =>
+        <PreEscapedText key={index} {...footerColor(span.role, viewport.reachedEnd)}>{span.text}</PreEscapedText>)}</PreEscapedText>)}
     </BorderPanel>
   );
 }

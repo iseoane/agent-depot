@@ -1,4 +1,5 @@
-import { Box, Text } from "ink";
+import { Box } from "ink";
+import { Text } from "./safe-text.js";
 
 import { adoptionPreview } from "./adoption-actions.js";
 import { HOST_CHOICES } from "./catalog-actions.js";

@@ -29,10 +29,21 @@ export function fieldLine(label: string, value: string): StyledLine {
 
 const ROW_INDENT = "   ";
 
+// The views escape control characters once, as they draw.
+const TERMINAL = { terminal: true } as const;
+
+// A recipe's manual text can span lines; escaped inside one line, its breaks would show as `\x0a`.
+const LINE_BREAK = /\r\n|\r|\n/u;
+
 function rowLines(row: PreviewRow): readonly StyledLine[] {
   switch (row.kind) {
-    case "field":
-      return [[span(`${ROW_INDENT}${row.label}:`, theme.field), ...(row.value === "" ? [] : [span(` ${row.value}`, theme.value)])]];
+    case "field": {
+      const [first = "", ...rest] = row.value.split(LINE_BREAK);
+      return [
+        [span(`${ROW_INDENT}${row.label}:`, theme.field), ...(first === "" ? [] : [span(` ${first}`, theme.value)])],
+        ...rest.map((line): StyledLine => [span(`${ROW_INDENT}${line}`, theme.value)]),
+      ];
+    }
     case "text":
       return [[span(`${ROW_INDENT}${"  ".repeat(row.indent ?? 0)}${row.text}`, theme.value)]];
     case "warning":
@@ -40,7 +51,7 @@ function rowLines(row: PreviewRow): readonly StyledLine[] {
     case "command": {
       const where = [row.executable, row.cwd === undefined ? undefined : `in ${row.cwd}`].filter((part) => part !== undefined);
       return [
-        [span(`${ROW_INDENT}$ ${commandLine(row.argv)}`, theme.value)],
+        [span(`${ROW_INDENT}$ ${commandLine(row.argv, TERMINAL)}`, theme.value)],
         ...(where.length === 0 ? [] : [[span(`${ROW_INDENT}${where.join(" · ")}`, theme.legend)]]),
       ];
     }
@@ -77,12 +88,12 @@ export function stepBlockLines(steps: readonly StepPreview[]): readonly StyledLi
     const where = [`in ${step.cwd}`, ...(step.environment ? [`on ${step.environment}`] : [])].join(" · ");
     return [
       [span(` ${branch} ${step.step}`, theme.field)],
-      ...(step.argv ? [row(span(`$ ${commandLine(step.argv)}`, theme.value))] : []),
-      ...(step.manual ? [row(span(`Manual: ${step.manual}`, theme.value))] : []),
+      ...(step.argv ? [row(span(`$ ${commandLine(step.argv, TERMINAL)}`, theme.value))] : []),
+      ...(step.manual ? step.manual.split(LINE_BREAK).map((line, position) => row(span(position === 0 ? `Manual: ${line}` : line, theme.value))) : []),
       ...(step.declaration ? [row(span(step.declaration, theme.value))] : []),
       ...(step.pattern ? [row(span(`Version pattern: ${step.pattern}`, theme.value))] : []),
       step.argv && step.executable === undefined
-        ? row(span(`${commandLine(step.argv.slice(0, 1))} not found in PATH`, theme.warning), span(` · ${where}`, theme.legend))
+        ? row(span(`${commandLine(step.argv.slice(0, 1), TERMINAL)} not found in PATH`, theme.warning), span(` · ${where}`, theme.legend))
         : row(span(step.executable ? `${step.executable} · ${where}` : where, theme.legend)),
       ...(step.warning ? [row(span(`⚠ ${step.warning}`, theme.warning))] : []),
     ];

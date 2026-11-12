@@ -40,15 +40,32 @@ export interface PreviewViewport {
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-// Preview text comes from recipes, Sources and Hosts. Raw, an ESC or carriage return redraws the terminal over the lines
-// under review and a bidi override reorders them; both also change the width the `y` gate was computed for. The zero-width joiner
+// Text shown in the TUI comes from recipes, Sources, Skills and Hosts. Raw, an ESC or carriage return redraws the terminal over the
+// lines under review and a bidi override reorders them; both also change the width the `y` gate was computed for. The zero-width joiner
 // stays because emoji sequences such as a person at a laptop are made with it.
-const UNSAFE_CHARACTER = /(?!\u200D)[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+const UNSAFE_PATTERN = "(?!\\u200D)[\\p{Cc}\\p{Cf}\\u2028\\u2029]";
+const UNSAFE_CHARACTER = new RegExp(UNSAFE_PATTERN, "u");
+// A backslash run before text shaped like an escape we print (`\x1b`, `\u202e`, `\u{1f600}`), or before a character we escape.
+const ESCAPE_TEXT = "x[0-9a-f]{2}|u[0-9a-f]{4}|u\\{[0-9a-f]{1,6}\\}";
+const ESCAPABLE = new RegExp(`(\\\\+)(?:(${ESCAPE_TEXT})|(?=${UNSAFE_PATTERN}))|${UNSAFE_PATTERN}`, "giu");
 
-/** `text` with control, format and line-separator characters replaced by visible escapes (`\x1b`, `\u202e`); idempotent. */
+/** Whether `escape` (`x1b`, `u202e`, `u{1f600}`) names a character this module would print as an escape. */
+function namesEscapedCharacter(escape: string): boolean {
+  const code = Number.parseInt(escape.replace(/^[xu]\{?|\}$/gu, ""), 16);
+  return code <= 0x10ffff && UNSAFE_CHARACTER.test(String.fromCodePoint(code));
+}
+
+/**
+ * `text` with control, format and line-separator characters replaced by visible escapes (`\x1b`, `\u202e`). A backslash run right
+ * before text that looks like one of those escapes is doubled, so a typed `\x1b` cannot pass for a real ESC; other backslashes,
+ * such as those of a Windows path, are left alone. Not idempotent: escape text once, where it enters a view.
+ */
 export function escapeControlText(text: string): string {
-  return text.replace(UNSAFE_CHARACTER, (character) => {
-    const code = character.codePointAt(0)!;
+  return text.replace(ESCAPABLE, (match, backslashes: string | undefined, typed: string | undefined) => {
+    if (backslashes !== undefined) {
+      return typed !== undefined && !namesEscapedCharacter(typed) ? match : backslashes.repeat(2) + (typed ?? "");
+    }
+    const code = match.codePointAt(0)!;
     const hex = code.toString(16);
     if (code <= 0xff) return `\\x${hex.padStart(2, "0")}`;
     return code <= 0xffff ? `\\u${hex.padStart(4, "0")}` : `\\u{${hex}}`;

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { Box, Text, useWindowSize } from "ink";
+import { Box, useWindowSize } from "ink";
+import { PreEscapedText, Text } from "./safe-text.js";
 import stringWidth from "string-width";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { createAppOperations } from "../app-flow.js";
@@ -24,7 +25,7 @@ import {
 } from "./file-picker-model.js";
 import { FilePicker } from "./file-picker.js";
 import { isYes, useKeys } from "./keys.js";
-import { usePreviewGeometry, type PreviewChrome } from "./preview-window.js";
+import { escapeControlText, usePreviewGeometry, type PreviewChrome } from "./preview-window.js";
 import { answerYesNo, moveCursor, movePreviewCursor, toggleChoice } from "./mode-keys.js";
 import { BorderPanel, PagedPreview, PreviewLines, Working } from "./panel-parts.js";
 import { clipText, elideMiddle, fitLines, wrapText } from "./text-wrap.js";
@@ -203,13 +204,15 @@ function NameField({ label, value, rows, width, tail = false }: {
   readonly width: number;
   readonly tail?: boolean;
 }) {
-  const wrapped = wrapText(`${label}${value}`, width);
+  // Measured and drawn as escaped, so a hostile path or name takes the rows it is shown on.
+  const escapedValue = escapeControlText(value);
+  const wrapped = wrapText(`${label}${escapedValue}`, width);
   const cut = wrapped.length > rows;
   const keepsMiddleCount = cut && !tail && rows > 2;
   let shown = wrapped;
   if (keepsMiddleCount) shown = elideMiddle(wrapped, rows, width);
   else if (cut) {
-    const characters = Array.from(value);
+    const characters = Array.from(escapedValue);
     for (let dropped = 1; dropped <= characters.length; dropped += 1) {
       shown = wrapText(`${label}…${characters.slice(dropped).join("")}`, width);
       if (shown.length <= rows) break;
@@ -217,9 +220,9 @@ function NameField({ label, value, rows, width, tail = false }: {
   }
   return <>{shown.map((line, index) => {
     if (index === 0 && line.startsWith(label)) {
-      return <Text key={index}><Text color={theme.field}>{label}</Text><Text color={theme.value}>{line.slice(label.length)}</Text></Text>;
+      return <PreEscapedText key={index}><PreEscapedText color={theme.field}>{label}</PreEscapedText><PreEscapedText color={theme.value}>{line.slice(label.length)}</PreEscapedText></PreEscapedText>;
     }
-    return <Text key={index} color={keepsMiddleCount && index === 1 ? theme.muted : theme.value}>{line}</Text>;
+    return <PreEscapedText key={index} color={keepsMiddleCount && index === 1 ? theme.muted : theme.value}>{line}</PreEscapedText>;
   })}</>;
 }
 
@@ -575,7 +578,7 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
     // A group header is one row, so the sticky header the window repeats costs exactly the row it reserves.
     if ("kind" in row) return 1;
     const prefixWidth = row.block === "excluded" ? 2 : stringWidth(`> [ ] ${row.ordinal ?? row.index + 1} `);
-    return wrapText(row.label, Math.max(panelWidth - prefixWidth, 1)).length;
+    return wrapText(escapeControlText(row.label), Math.max(panelWidth - prefixWidth, 1)).length;
   });
   const listWindow = physicalListWindow(displayRows, rowHeights, cursor, height);
   const window = listing ? listWindow : computeWindow(lines.length, cursor, height);
@@ -593,24 +596,24 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       const prefix = `${marker}${" ".repeat(row.depth * 2)}${open ? "▾" : "▸"} `;
       const width = Math.max(panelWidth - stringWidth(prefix), 1);
       remainingRows -= 1;
-      return <Text key={row.id} color={theme.group} bold>{prefix}{clipText(row.label, width)}</Text>;
+      return <PreEscapedText key={row.id} color={theme.group} bold>{prefix}{clipText(escapeControlText(row.label), width)}</PreEscapedText>;
     }
     if (row.block === "excluded") {
       const width = Math.max(panelWidth - stringWidth(marker), 1);
-      const label = fitLines(wrapText(row.label, width), remainingRows, width)
+      const label = fitLines(wrapText(escapeControlText(row.label), width), remainingRows, width)
         .join(`\n${" ".repeat(stringWidth(marker))}`);
       remainingRows -= label.split("\n").length;
-      return <Text key={row.id} color={theme.value}>{marker}{label}</Text>;
+      return <PreEscapedText key={row.id} color={theme.value}>{marker}{label}</PreEscapedText>;
     }
     // A row the import never changes has no checkbox: unchanged items rest, conflicts warn.
     const box = row.selectable ? `[${selected.some(choice => choice.id === row.id) ? "x" : " "}]` : "   ";
     const prefix = `${marker}${box} ${row.ordinal ?? row.index + 1} `;
     const width = Math.max(panelWidth - stringWidth(prefix), 1);
-    const label = fitLines(wrapText(row.label, width), remainingRows, width)
+    const label = fitLines(wrapText(escapeControlText(row.label), width), remainingRows, width)
       .join(`\n${" ".repeat(stringWidth(prefix))}`);
     remainingRows -= label.split("\n").length;
     const color = row.status === "conflict" ? theme.warning : row.status === "same" ? theme.muted : theme.value;
-    return <Text key={row.id}><Text color={theme.field}>{prefix}</Text><Text color={color}>{label}</Text></Text>;
+    return <PreEscapedText key={row.id}><PreEscapedText color={theme.field}>{prefix}</PreEscapedText><PreEscapedText color={color}>{label}</PreEscapedText></PreEscapedText>;
   });
   const nameOutcome = resolveExportFileName(text);
   const liveDestination = nameOutcome.kind === "ok"
@@ -618,8 +621,8 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
   const nameNote = nameOutcome.kind === "ok" ? fileNameNotice(nameOutcome.fileName) : undefined;
   const extensionNote = nameOutcome.kind === "ok" && nameOutcome.appendedExtension
     ? `A name without an extension is saved as ${nameOutcome.fileName}.` : undefined;
-  const textRows = (value: string | undefined) => value === undefined ? 0 : wrapText(value, panelWidth).length;
-  const nameErrorLines = nameError === undefined ? [] : wrapText(nameError, panelWidth);
+  const textRows = (value: string | undefined) => value === undefined ? 0 : wrapText(escapeControlText(value), panelWidth).length;
+  const nameErrorLines = nameError === undefined ? [] : wrapText(escapeControlText(nameError), panelWidth);
   // Keys type into the name, so the stage cannot scroll; instead each long field keeps its end (and, given
   // three rows or more, its first row) within a share of the terminal. The confirmation pages the full destination.
   const nameFixedRows = 3 + textRows(nameNote) + textRows(extensionNote) + Math.min(nameErrorLines.length, NAME_ERROR_ROWS)
@@ -650,11 +653,11 @@ export function ProfileView({ operations, environment = {}, onCapturingChange, l
       <NameField label="Folder: " value={exportDirectory ?? startDirectory} rows={folderRows} width={panelWidth} />
       <NameField label="Name: " value={`${text}_`} rows={nameRows} width={panelWidth} tail />
       {liveDestination === undefined ? null : <NameField label="Destination: " value={liveDestination} rows={destinationRows} width={panelWidth} />}
-      {nameNote === undefined ? null : <Text color={theme.warning}>{nameNote}</Text>}
-      {extensionNote === undefined ? null : <Text color={theme.muted}>{extensionNote}</Text>}
+      {nameNote === undefined ? null : <PreEscapedText color={theme.warning}>{escapeControlText(nameNote)}</PreEscapedText>}
+      {extensionNote === undefined ? null : <PreEscapedText color={theme.muted}>{escapeControlText(extensionNote)}</PreEscapedText>}
       {nameError === undefined ? null : nameErrorLines.length <= NAME_ERROR_ROWS
-        ? <Text color={theme.error}>{nameError}</Text>
-        : elideMiddle(nameErrorLines, NAME_ERROR_ROWS, panelWidth).map((line, index) => <Text key={index} color={theme.error}>{line}</Text>)}
+        ? <PreEscapedText color={theme.error}>{escapeControlText(nameError)}</PreEscapedText>
+        : elideMiddle(nameErrorLines, NAME_ERROR_ROWS, panelWidth).map((line, index) => <PreEscapedText key={index} color={theme.error}>{line}</PreEscapedText>)}
       {nameChecking === undefined ? null : <Working label="Checking name…" since={nameChecking} />}
       <Text color={theme.legend}>{NAME_HINT}</Text>
     </BorderPanel> : null}

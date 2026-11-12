@@ -1032,3 +1032,22 @@ for (const size of PREVIEW_SIZES) {
     await waitForFrame(f.view.lastFrame, /Export notes/);
   });
 }
+
+test("an export row with invisible characters is measured as shown, so it stays within the reserved rows", async t => {
+  const f = await fixture(t);
+  const name = `demo${"‮".repeat(30)}end`;
+  await writeFile(path.join(f.directory, "demo.json"), JSON.stringify({ ...recipe, name }));
+  const view = f.view;
+  const rows = 17;
+  Object.defineProperty(view.stdout, "rows", { configurable: true, value: rows });
+  Object.defineProperty(view.stdout, "columns", { configurable: true, value: 40 });
+  view.stdout.emit("resize");
+  view.stdin.write("e");
+  await waitForFrame(view.lastFrame, /Export Profile/);
+  await expandExportGroup(view, "App recipes");
+  view.stdin.write("j");
+  const shown = await waitForFrame(view.lastFrame, next => next.includes("App recipe demo"));
+  assert.ok(shown.split("\n").length <= rows, shown);
+  assert.ok(!/[\p{Cf}]/u.test(view.frames.join("")), "no format character reaches the terminal");
+  assert.ok(squash(shown).includes("Apprecipedemo" + "\\u202e".repeat(3)), shown);
+});

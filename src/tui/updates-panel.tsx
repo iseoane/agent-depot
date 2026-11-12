@@ -1,4 +1,5 @@
-import { Box, Text } from "ink";
+import { Box } from "ink";
+import { Text } from "./safe-text.js";
 
 import { rowStyle, theme } from "./theme.js";
 import { BorderPanel, FieldLine, PagedPreview } from "./panel-parts.js";

@@ -34,8 +34,14 @@ export const skillKey = (skill: SkillCandidate): string => `skill:${skill.source
 /** Keyed on the full selection, so two plugins of one marketplace root stay distinct nodes. */
 export const bundleKey = (entry: BundleEntry): string => `bundle:${entry.sourceId}:${selectionKey(entry.selection)}`;
 
+/** A Skill's name or description on one row; a line break from a remote SKILL.md would add rows to the list window. */
+export function singleLine(text: string): string {
+  return text.replace(/[\r\n]+/gu, " ");
+}
+
 export function truncateDescription(text: string): string {
-  return text.length > DESCRIPTION_LIMIT ? `${text.slice(0, DESCRIPTION_LIMIT - 3)}...` : text;
+  const line = singleLine(text);
+  return line.length > DESCRIPTION_LIMIT ? `${line.slice(0, DESCRIPTION_LIMIT - 3)}...` : line;
 }
 
 /** A repository name, with directory and ref for scoped GitHub Sources. */
@@ -136,7 +142,7 @@ export function describeRow(row: VisibleRow<NodeData>): string {
     return `Package ${data.entry.descriptor.name} (${data.entry.descriptor.host})  ${packageVersionLabel(data.entry.descriptor.version)}`;
   }
   if (data.kind === "app") return `App ${data.row.entry.recipe?.name ?? data.row.entry.file}  ${data.row.inspection.status}`;
-  return `${data.skill.name}  ${truncateDescription(data.skill.description)}${data.variant === true ? `  (${data.skill.path})` : ""}`;
+  return `${singleLine(data.skill.name)}  ${truncateDescription(data.skill.description)}${data.variant === true ? `  (${data.skill.path})` : ""}`;
 }
 
 /** Skill nodes inside a Source's Skills group, directly or within one of its variant groups. */

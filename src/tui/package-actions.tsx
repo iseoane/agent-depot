@@ -1,5 +1,6 @@
 import type { Key } from "ink";
 
+import { quoteText } from "../preview-model.js";
 import { displayPackageSelection, type PackageAction, type PackageLifecyclePlan, type PackageLifecycleResult, type PackageSelection } from "../package-model.js";
 import type { PackageOperations } from "../package-flow.js";
 import type { PackageApprovalStatus } from "../package-state.js";
@@ -95,7 +96,7 @@ export async function startPackageAction(context: Pick<PackageContext, "packages
       if (manage.isMounted()) manage.setMode({ kind: "package-confirm", plan, approval, cursor: 0 });
       return;
     }
-    await manage.finish({ kind: "error", text: `The action ${JSON.stringify(input)} is not available for Packages` });
+    await manage.finish({ kind: "error", text: `The action ${quoteText(input)} is not available for Packages` });
   } catch (error) {
     await manage.finish({ kind: "error", text: errorText(error) });
   }
