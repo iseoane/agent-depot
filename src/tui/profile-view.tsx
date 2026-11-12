@@ -197,7 +197,7 @@ const NOTE_CHROME: PreviewChrome = { title: "Export note", cancel: "[Esc] close"
  * what matter, so with fewer than three rows the field keeps its label and its tail behind a `…`; with
  * three or more a path keeps its first row too, around a count of the rows left out.
  */
-function NameField({ label, value, rows, width, tail = false }: {
+export function NameField({ label, value, rows, width, tail = false }: {
   readonly label: string;
   readonly value: string;
   readonly rows: number;
