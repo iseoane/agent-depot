@@ -23,9 +23,9 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Status: in-progress
 - Objective: Pulido de previews: cabecera con 0 aplicables, «Review 1 of 0», sangría y `│` en líneas partidas del árbol de pasos, desbordes por título largo o panel de trabajo, versión de origen de Package como hash.
 - Depends on: J001
-- Brief: [brief-r1.md](jobs/J002/brief-r1.md)
+- Brief: [J002a brief-r1.md](jobs/J002/brief-r1.md); [J002b brief-r1.md](jobs/J002b/brief-r1.md)
 - Blocker: None
-- Next step: J002a (textos) y luego J002b (geometría), por tamaño.
+- Next step: J002b (geometría): worker sonnet.
 
 ### Acceptance
 - Cada punto corregido con test.
@@ -76,3 +76,4 @@ Decisiones del operador (2026-11-12): cerrar los seguimientos antiguos antes de 
 - Revisión I0033.
 - J001 (sonnet, 6 min, 35k) entregado en PR #123 con CI verde; revisión sin hallazgos.
 - J002 se parte por tamaño (regla S/M/L): J002a textos de cabecera/versión (S) y J002b geometría de líneas partidas y desbordes (M).
+- J002a (sonnet) entregado en PR #124 con CI verde: cabecera sin aplicables, pie de preview vacía, `commit xxxxxxx` coherente en todas las vistas (sugerencia de la revisión resuelta en el job).
