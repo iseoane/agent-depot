@@ -15,7 +15,6 @@ import { groupRecipeRows, useSourcesRecipes, type RecipeGroup } from "./sources-
 import { BorderPanel, PagedPreview, Working } from "./panel-parts.js";
 import { usePreviewGeometry, type PreviewChrome, type PreviewGeometry } from "./preview-window.js";
 import { movePreviewCursor } from "./mode-keys.js";
-import { formatAgo } from "./updates.js";
 import { animationEnabled, formatElapsed } from "./working-model.js";
 
 export interface SourcesViewProps {
@@ -108,7 +107,7 @@ function RefreshMark({ state, now }: { readonly state: SourceRefreshState | unde
     case "refreshing":
       return <Text color={theme.warning}>… refreshing {formatElapsed(now - (state.startedAt ?? now))}</Text>;
     case "refreshed":
-      return <Text color={theme.success}>✓ refreshed {formatAgo(now - (state.finishedAt ?? now))}</Text>;
+      return <Text color={theme.success}>✓ refreshed</Text>;
     case "failed":
       return <Text color={theme.error}>✗ refresh failed</Text>;
   }

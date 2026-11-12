@@ -2,6 +2,7 @@ import type { Key } from "ink";
 
 import { PROJECT_HOSTS, type ProjectHost, type ProjectSkillSelection } from "../project-manifest.js";
 import { assertManagedInstallationRecordsUnchanged } from "../skill-removal.js";
+import { formatStepLabel } from "../flow-progress.js";
 import type { SkillCandidate } from "../skill-discovery.js";
 import type { SourceOperations } from "../sources.js";
 import { errorText, runBatch, type BatchOutcome, type BatchStart } from "./batch.js";
@@ -202,11 +203,11 @@ function resultOf<T extends { readonly id: string }>(
 /** Reports which item of a batch runs now: the busy label and the result lines finished so far. */
 export type BulkProgress = (label: string, done: readonly string[]) => void;
 
-/** `Removing name (2/5)…` for each item as it starts. */
+/** `Removing name (2/5)…` (no position for one item) for each item as it starts. */
 function startOf<T extends { readonly label: string }>(verb: string, progress: BulkProgress | undefined): BatchStart<T> | undefined {
   if (!progress) return undefined;
   return (item, position, total, finished: readonly BatchOutcome<T>[]) => {
-    progress(`${verb} ${item.label} (${position}/${total})…`, finished.map(outcome => outcome.line));
+    progress(formatStepLabel(`${verb} ${item.label}`, position, total), finished.map(outcome => outcome.line));
   };
 }
 
