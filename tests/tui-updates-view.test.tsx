@@ -15,7 +15,7 @@ import {
   type ProjectSkillSelection,
 } from "../src/project-manifest.js";
 import { skillTreeBaseline, type SkillTreeFile } from "../src/skill-discovery.js";
-import type { BundleDescriptor, InstalledPackage, PackageLifecyclePlan, PackageSelection } from "../src/package-model.js";
+import type { BundleDescriptor, InstalledPackage, PackageLifecyclePlan, PackageSelection, PackageUpdateCheck } from "../src/package-model.js";
 import { BUILT_IN_SOURCE, createSourceOperations, type SourceOperations } from "../src/sources.js";
 import { createSourceRefreshSession, withRefreshSession } from "../src/source-refresh-session.js";
 import { formatAgo, loadUpdateRows, prepareUpdates, runUpdates } from "../src/tui/updates.js";
@@ -1616,4 +1616,39 @@ test("at 40x17 the batch footer still asks its question when several Skills lose
   press(view.stdin, ENTER);
   const end = await confirmAtEnd(view, 17, /\[y\] Apply 3 updates/, () => squash(view.lastFrame() ?? "").includes("3updated,0failed"));
   assert.match(squash(end), /Apply3updates\?y\/n/u);
+});
+
+async function preparePackageBatch(t: TestContext, check: PackageUpdateCheck, planFails = false) {
+  const f = await fixture(t);
+  const packages = fakePackageOperations({
+    checkUpdates: async () => [check],
+    planLifecycle: async () => {
+      if (planFails) throw new Error("plan refused");
+      return packagePlan;
+    },
+    approvalStatus: async () => "needs approval",
+  });
+  const data = await loadUpdateRows(f.operations, { ...f.environment, packages }, { refresh: false });
+  return prepareUpdates(data, data.rows.filter(row => row.kind === "package"));
+}
+
+test("a batch where nothing can be applied is headed so, not as 'Apply 0 updates'", async t => {
+  const prepared = await preparePackageBatch(t, {
+    installed: packageRecord, observed: { kind: "installed", version: "1.0.0" }, status: "update available",
+    available: { kind: "manifest-version", version: "1.1.0", declaredBy: "bundle" },
+  }, true);
+  assert.equal(prepared.applicable.length, 0);
+  assert.equal(prepared.document.action, "No updates can be applied");
+  assert.ok(prepared.document.failures.some(failure => failure.includes("plan refused")), "the failure stays visible");
+});
+
+test("a Package preview names a recorded commit as a commit instead of a bare hash", async t => {
+  const commitOnly: InstalledPackage = { ...packageRecord, verified: undefined, lastDelegatedCommit: "45e0761".padEnd(40, "0") };
+  const available = { kind: "manifest-version", version: "0.9.69", declaredBy: "bundle" } as const;
+  const recorded = await preparePackageBatch(t, { installed: commitOnly, status: "update available", available });
+  assert.equal(recorded.document.sections[0]?.items[0]?.version?.from, "commit 45e0761");
+  const observed = await preparePackageBatch(t, { installed: commitOnly, observed: { kind: "installed", version: "0.9.60" }, status: "update available", available });
+  assert.equal(observed.document.sections[0]?.items[0]?.version?.from, "0.9.60", "a readable installed version wins over the remembered commit");
+  const verifiedCommit = await preparePackageBatch(t, { installed: { ...packageRecord, verified: { kind: "git-commit", commit: "45e0761".padEnd(40, "0") } }, status: "update available", available });
+  assert.equal(verifiedCommit.document.sections[0]?.items[0]?.version?.from, "commit 45e0761");
 });
