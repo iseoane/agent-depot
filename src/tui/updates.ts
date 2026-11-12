@@ -22,7 +22,7 @@ import {
 import type { TuiEnvironment } from "./environment.js";
 import { packageOperationsOf } from "./environment.js";
 import { formatVersionEvidence } from "./installations.js";
-import { describePackageComponent, installedEvidenceLabel, packageStatusLabel, packageVersionLabel, recordedVersionLabel } from "./package-rows.js";
+import { describePackageComponent, installedEvidenceLabel, packageStatusLabel, packageVersionLabel, installedVersionLabel, recordedVersionLabel } from "./package-rows.js";
 import { quoteText, type PreviewDocument, type PreviewItem, type PreviewRow } from "../preview-model.js";
 
 export type { UpdateScope };
@@ -398,7 +398,7 @@ function packagePreviewItem(row: PackageUpdateRow, { plan, approval }: PreparedP
   return {
     title: descriptor.name,
     detail: selection.host,
-    version: { from: recordedVersionLabel(row.check.installed), to: packageVersionLabel(descriptor.version) },
+    version: { from: installedVersionLabel(row.check), to: packageVersionLabel(descriptor.version) },
     rows,
   };
 }
@@ -473,7 +473,7 @@ export async function prepareUpdates(
     groups, apps: data.apps, appPlans, appFailures,
     packages: data.packages, packagePlans, packageFailures,
     document: {
-      action: `Apply ${counted(applicable.length, "update")}`,
+      action: applicable.length === 0 ? "No updates can be applied" : `Apply ${counted(applicable.length, "update")}`,
       summary: sections.map(({ items, noun }) => counted(items.length, noun)).join(" · "),
       context: [...context, ...[...environments].map((environment) => `Environment: ${environment}`)],
       warnings,

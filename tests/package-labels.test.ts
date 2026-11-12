@@ -39,3 +39,17 @@ test("the row name falls back to the Source-qualified label while the bundle doe
   const row = packageRow(record, { installed: { kind: "not installed" }, approval: "approved" } as never);
   assert.equal(row.name, "https://example.test/demo.git::claude#demo");
 });
+
+test("a commit-only version is labelled as a commit in the list row and in the plan", () => {
+  const commit = "45e0761".padEnd(40, "0");
+  const row = packageRow(record, {
+    descriptor: { ...descriptor, version: { kind: "git-commit", commit } },
+    installed: { kind: "installed", commit },
+    available: { kind: "git-commit", commit },
+    approval: "approved",
+  } as never);
+  assert.equal(row.installedVersion, "commit 45e0761");
+  assert.equal(row.available, "commit 45e0761");
+  const lines = packagePlanLines({ ...plan, descriptor: { ...descriptor, version: { kind: "git-commit", commit } } }, "approved");
+  assert.ok(lines.includes("Available: commit 45e0761"));
+});

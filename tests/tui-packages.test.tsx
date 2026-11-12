@@ -189,7 +189,7 @@ test("an unversioned Package row reports the host evidence and never guesses the
   await waitForFrame(f.view.lastFrame, /Packages \(user-global\) \(1\)/);
   await revealPackage(f.view);
   const frame = await waitForFrame(f.view.lastFrame, /installed with no version evidence/);
-  assert.match(frame, /pi {2}installed with no version evidence {2}available abcdef1 {2}cannot assess/);
+  assert.match(frame, /pi {2}installed with no version evidence {2}available commit abcdef1 {2}cannot assess/);
 });
 
 test("a Package row shows the drift when the bundle no longer resolves", async (t) => {

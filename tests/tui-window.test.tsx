@@ -207,3 +207,10 @@ test("SourcesView renders only the rows that fit and keeps the highlighted row v
   await waitForFrame(lastFrame, (frame) => /git:0+24\b/.test(selectedLine(frame)));
   unmount();
 });
+
+test("an empty preview shows no 'Review 1 of 0' position", () => {
+  const empty = previewViewport([], 0, 15, 80, CONFIRM);
+  const footer = empty.footer.map(spans => spans.map(({ text }) => text).join(""));
+  assert.doesNotMatch(footer.join("\n"), /Review/u);
+  assert.match(footer[0] ?? "", /Confirm\? y\/n/u, "the consequence still reaches the footer");
+});

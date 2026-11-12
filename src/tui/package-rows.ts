@@ -9,6 +9,7 @@ import {
   type PackageInspection,
   type PackageLifecyclePlan,
   type PackageSelection,
+  type PackageUpdateCheck,
   type PackageVersionEvidence,
 } from "../package-model.js";
 import type { PackageApprovalStatus } from "../package-state.js";
@@ -16,7 +17,7 @@ import type { PackageApprovalStatus } from "../package-state.js";
 /** Version evidence as a short label; `unknown` when the host or the bundle states none. */
 export function packageVersionLabel(evidence: PackageVersionEvidence | undefined, commit?: string): string {
   if (evidence === undefined) return "unknown";
-  return evidence.kind === "manifest-version" ? versionWithCommit(evidence.version, commit) : evidence.commit.slice(0, 7);
+  return evidence.kind === "manifest-version" ? versionWithCommit(evidence.version, commit) : `commit ${evidence.commit.slice(0, 7)}`;
 }
 
 function versionWithCommit(version: string, commit?: string): string {
@@ -57,8 +58,13 @@ export function packageStatusLabel(status: "unknown" | "current" | "update avail
 /** What a selection record itself remembers, for lists that do not read host evidence. */
 export function recordedVersionLabel(record: InstalledPackage): string {
   if (record.verified !== undefined) return packageVersionLabel(record.verified);
-  if (record.lastDelegatedCommit !== undefined) return record.lastDelegatedCommit.slice(0, 7);
+  if (record.lastDelegatedCommit !== undefined) return `commit ${record.lastDelegatedCommit.slice(0, 7)}`;
   return "unknown";
+}
+
+/** The version the host reports when it states one, else what the selection record remembers. */
+export function installedVersionLabel({ installed, observed }: Pick<PackageUpdateCheck, "installed" | "observed">): string {
+  return observed?.kind === "installed" && observed.version !== undefined ? observed.version : recordedVersionLabel(installed);
 }
 
 export type PackageRowStatus =
@@ -87,7 +93,7 @@ export function packageRow(record: InstalledPackage, inspection: PackageInspecti
     ...(inspection.installed.kind === "installed" && inspection.installed.version !== undefined
       ? { installedVersion: versionWithCommit(inspection.installed.version, inspection.installed.commit) }
       : inspection.installed.kind === "installed" && inspection.installed.commit !== undefined
-        ? { installedVersion: inspection.installed.commit.slice(0, 7) }
+        ? { installedVersion: `commit ${inspection.installed.commit.slice(0, 7)}` }
         : {}),
     available: packageVersionLabel(inspection.available, inspection.availableCommit),
     status: packageRowStatus(record.selection, inspection),

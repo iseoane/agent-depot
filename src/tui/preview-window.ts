@@ -144,7 +144,7 @@ function footerSpans(state: FooterState, chrome: PreviewChrome, width: number): 
   const progress: PreviewFooterSpan[] = state.reachedEnd
     ? [{ text: "read ✓", role: "read" }]
     : [{ text: `read ${bar}${Math.floor(read * 100)}%`, role: "reading" }];
-  progress.push({ text: ` · ${position(state.cursor + 1, state.start + 1, state.end)}`, role: "position" });
+  if (state.total > 0) progress.push({ text: ` · ${position(state.cursor + 1, state.start + 1, state.end)}`, role: "position" });
   if (!state.reachedEnd) progress.push({ text: " · arrows/Pg page", role: "position" });
   else if (chrome.consequence !== undefined) progress.push({ text: " · ", role: "position" }, ...consequenceSpans(chrome.consequence));
   const actions: PreviewFooterSpan[] = chrome.action === undefined ? [] : [{ text: `[y] ${chrome.action}`, role: "action" }, { text: "  ", role: "cancel" }];
