@@ -52,3 +52,6 @@ Type: feature
 - Operador (2026-11-12): una ronda más para J005 con marcado por lectura de entrada.
 - J005 V003: approve (F7 resuelto: marcado por turno de lectura). Coordinador: 4 commits RED solo tests, CLI sin cambios, tests afectados 164/0. Tamaño: subestimado (2 correcciones, 1 autorizada por el operador). Seguimiento informativo: contador compartido por turno si algún día un componente con confirmación se monta a mitad de lectura.
 - J005 entregado: PR #115 fusionado con CI verde (test PgDn robusto en Windows db948d7).
+- J006 worker (sonnet) b8a2e51..272da76. Revisión V001 (opus): Spec pass, 0 bloqueantes; coordinador: RED fe421f4 solo tests, CLI sin cambios, tests 21/0. S1 (preexistente, grave): texto no confiable sigue llegando crudo fuera de PagedPreview — descripciones y nombres de Skills remotas en el Catalog (OSC 52/8 posibles vía SKILL.md), preguntas y/n, listas, Working labels → J007 antes de la release. S2: los 
+ del texto manual se ven como 
+ (partir en líneas). S3: literal  indistinguible (mostrar \ como \).

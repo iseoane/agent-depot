@@ -41,8 +41,9 @@ export interface PreviewDocument {
 // Anything outside this set could be read differently by a shell, so the argument is shown quoted.
 const PLAIN_ARGUMENT = /^[\w@%+=:,./-]+$/u;
 
-// JSON.stringify leaves these raw; shown as is, a right-to-left override or zero-width space can make one argument look like another.
-const INVISIBLE = /[\p{Cc}\p{Cf}\u2028\u2029]/gu;
+// JSON.stringify leaves these raw; shown as is, a right-to-left override, zero-width space or no-break space can make one argument
+// look like another. A plain space stays: inside the quotes it is what it looks like.
+const INVISIBLE = /(?! )[\p{Cc}\p{Cf}\p{Zs}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu;
 
 function quoted(argument: string): string {
   return JSON.stringify(argument).replace(INVISIBLE, (character) => {
