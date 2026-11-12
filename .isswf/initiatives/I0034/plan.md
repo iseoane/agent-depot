@@ -46,3 +46,4 @@ Type: improvement
 ### Evidence
 - Fallos de Windows en PR #109, #114 y #115 por rutas largas; riesgo declarado en J004d.
 - Autorización del operador (2026-11-12): «ok hazlos, coordinador» tras la lista de seguimientos; integración sin preguntar salvo algo grave (vigente).
+- Operador (2026-11-12): sacar release 0.6.15 al terminar I0034 y actualizar esta máquina.
