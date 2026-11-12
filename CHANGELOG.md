@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.14] - 2026-11-12
+
+### Added
+
+- The TUI names the item being installed or updated, with its position in the
+  batch (for example `Updating Skill tdd (2/5)…`); the elapsed time keeps running
+  across items and manual App steps (#104).
+- The Sources view marks each Source as not refreshed, refreshing, refreshed or
+  failed. On start the TUI refreshes registered Git Sources in the background
+  (no prompts, 60 s limit), and previews reuse a successful refresh from the last
+  hour; `r` always refreshes again (#105).
+- Exporting a Profile to an existing file offers to overwrite it after an explicit
+  confirmation; the CLI needs `profile export --out <file> --overwrite` (#107).
+
+### Changed
+
+- Every TUI confirmation uses a shared footer that shows reading progress and what
+  `y` will do; `y` is ignored until the preview has been read to the end
+  (#106, #111, #112, #113, #114).
+- The update batch preview starts with a summary and the collected warnings, then
+  groups Skills, Apps and Packages with version arrows and `$ command` lines (#108).
+- App recipe reviews and App confirmations show a header and one block per step
+  (#109, #110).
+
+### Security
+
+- A `y` that arrives together with other keys (pasted text, held arrows or Page
+  Down) never confirms; it must be pressed on its own (#115).
+- The TUI escapes control and format characters from recipes, Sources, Packages and
+  Host output in every view, so a remote `SKILL.md` or recipe can no longer send
+  terminal escape sequences or disguise a command (#116, #117).
+
 ## [0.6.13] - 2026-11-11
 
 ### Fixed
