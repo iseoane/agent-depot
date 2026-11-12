@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, readFile, rename, rm, rmdir } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import path from "node:path";
-import { isLockContention, renameWithWindowsRetry, writeFileAtomically } from "./atomic-file.js";
+import { isLockContention, writeFileAtomically } from "./atomic-file.js";
 import { assertNoSymlinkPath } from "./path-safety.js";
 import { runProcess, type ProcessRunResult } from "./process-runner.js";
 import { decodeSnapshotBatch, reuseSourceSnapshot, SOURCE_SNAPSHOT_LIMITS } from "./source-snapshot.js";
@@ -173,6 +173,8 @@ const BACKGROUND_REFRESH_OPTIONS: GitCommandRunnerOptions = Object.freeze({
 const SOURCE_LOCK_RETRY_MS = 10;
 const SOURCE_LOCK_OWNER_FILE = "owner.json";
 const SOURCE_LOCK_OWNER_MAX_BYTES = 4096;
+/** A recovery takes milliseconds, so a mutex this old was left by a process that died mid-recovery. */
+const SOURCE_RECOVERY_MUTEX_MAX_AGE_MS = 60_000;
 /** Covers locks from versions without an owner record and an acquisition interrupted before writing it. */
 const SOURCE_LOCK_OWNERLESS_MAX_AGE_MS = 10 * 60_000;
 
@@ -571,6 +573,12 @@ interface SourceLockOwner {
   readonly id: string;
 }
 
+/** `none` is only a missing owner file; a record that exists but cannot be trusted must never justify a removal. */
+type LockOwnerRecord =
+  | { readonly kind: "owner"; readonly owner: SourceLockOwner }
+  | { readonly kind: "none" }
+  | { readonly kind: "unreadable" };
+
 async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Promise<() => Promise<void>> {
   const deadline = Date.now() + SOURCE_LOCK_TIMEOUT_MS;
   while (true) {
@@ -589,8 +597,8 @@ async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Prom
         continue;
       }
       if (Date.now() >= deadline) {
-        const owner = await readLockOwner(lockPath);
-        const holder = owner === undefined ? "" : ` (held by process ${owner.pid} on host ${owner.hostname})`;
+        const record = await readLockOwner(lockPath);
+        const holder = record.kind === "owner" ? ` (held by process ${record.owner.pid} on host ${record.owner.hostname})` : "";
         throw new Error(
           `the Source cache lock directory is busy: ${lockPath}${holder}; another refresh might be active. Wait for it to finish before retrying`,
         );
@@ -602,39 +610,39 @@ async function acquireSourceLock(lockPath: string, hooks: SourceLockHooks): Prom
 
 async function publishLockOwner(lockPath: string): Promise<() => Promise<void>> {
   const owner: SourceLockOwner = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString(), id: randomUUID() };
-  const ownerPath = path.join(lockPath, SOURCE_LOCK_OWNER_FILE);
   try {
-    await writeFileAtomically(ownerPath, JSON.stringify(owner));
+    await writeFileAtomically(path.join(lockPath, SOURCE_LOCK_OWNER_FILE), JSON.stringify(owner));
   } catch (error) {
-    await rm(lockPath, { recursive: true, force: true });
+    // Only an empty directory can still be the lock this call created; another holder's lock has an owner record.
+    await rmdir(lockPath).catch(() => undefined);
     throw error;
   }
   return async () => {
-    // A recovery that mistook this lock for an orphan may have moved it; never remove a successor's.
-    if ((await readLockOwner(lockPath))?.id === owner.id) {
+    const record = await readLockOwner(lockPath);
+    if (record.kind === "owner" && record.owner.id === owner.id) {
       await rm(lockPath, { recursive: true, force: true });
     }
   };
 }
 
-/** Reads the owner record without following links; anything missing, oversized or malformed is "no owner". */
-async function readLockOwner(lockPath: string): Promise<SourceLockOwner | undefined> {
+/** Reads the owner record without following links. */
+async function readLockOwner(lockPath: string): Promise<LockOwnerRecord> {
   const ownerPath = path.join(lockPath, SOURCE_LOCK_OWNER_FILE);
   try {
     const information = await lstat(ownerPath);
     if (!information.isFile() || information.size > SOURCE_LOCK_OWNER_MAX_BYTES) {
-      return undefined;
+      return { kind: "unreadable" };
     }
     const parsed: unknown = JSON.parse(await readFile(ownerPath, "utf8"));
     if (typeof parsed !== "object" || parsed === null) {
-      return undefined;
+      return { kind: "unreadable" };
     }
     const { pid, hostname: host, startedAt, id } = parsed as Record<string, unknown>;
     return Number.isInteger(pid) && (pid as number) > 0 && typeof host === "string" && typeof startedAt === "string" && typeof id === "string"
-      ? { pid: pid as number, hostname: host, startedAt, id }
-      : undefined;
-  } catch {
-    return undefined;
+      ? { kind: "owner", owner: { pid: pid as number, hostname: host, startedAt, id } }
+      : { kind: "unreadable" };
+  } catch (error) {
+    return isMissing(error) ? { kind: "none" } : { kind: "unreadable" };
   }
 }
 
@@ -648,43 +656,64 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-async function isOldOwnerlessLock(lockPath: string): Promise<boolean> {
+async function isOldLock(lockPath: string, maxAgeMs: number): Promise<boolean> {
   try {
-    return Date.now() - (await lstat(lockPath)).mtimeMs > SOURCE_LOCK_OWNERLESS_MAX_AGE_MS;
+    return Date.now() - (await lstat(lockPath)).mtimeMs > maxAgeMs;
   } catch {
     return false;
   }
 }
 
+/** The orphan a recoverer judged: a dead owner on this host (by id) or an old lock with no owner record. */
+async function judgeOrphan(lockPath: string): Promise<LockOwnerRecord | undefined> {
+  const record = await readLockOwner(lockPath);
+  if (record.kind === "owner") {
+    return record.owner.hostname === hostname() && !isProcessAlive(record.owner.pid) ? record : undefined;
+  }
+  return record.kind === "none" && await isOldLock(lockPath, SOURCE_LOCK_OWNERLESS_MAX_AGE_MS) ? record : undefined;
+}
+
 /**
- * Removes a lock whose holder is provably gone: same host with a missing pid, or an owner-less lock
- * older than any plausible acquisition. The lock is first renamed to a unique name (atomic, so only one
- * recoverer wins) and re-checked there; if it turns out to be a successor's live lock it is put back.
- * Returns true when the lock was removed or vanished, so the caller retries the acquisition at once.
+ * Removes a lock whose holder is provably gone. Recoverers serialize on a short-lived `.recovering`
+ * mutex and re-judge the lock in place while holding it, so a judgment made before another process
+ * recovered and re-took the lock can never remove (or move) that live lock: nothing but a recoverer
+ * removes a lock whose owner is dead, and acquirers cannot replace a lock that still exists.
+ * Returns true when the caller should retry the acquisition at once.
  */
 async function recoverOrphanedLock(lockPath: string, hooks: SourceLockHooks): Promise<boolean> {
-  const judged = await readLockOwner(lockPath);
-  const orphaned = async (owner: SourceLockOwner | undefined, location: string): Promise<boolean> =>
-    owner === undefined ? isOldOwnerlessLock(location) : owner.hostname === hostname() && !isProcessAlive(owner.pid);
-  if (!(await orphaned(judged, lockPath))) {
+  const judged = await judgeOrphan(lockPath);
+  if (judged === undefined) {
     return false;
   }
   await hooks.afterJudging?.();
-  const discarded = `${lockPath}.stale-${randomUUID()}`;
+
+  const mutexPath = `${lockPath}.recovering`;
   try {
-    await renameWithWindowsRetry(lockPath, discarded);
-  } catch {
-    // Another process recovered or released it first, or Windows still holds it; the caller keeps waiting.
+    await mkdir(mutexPath);
+  } catch (error) {
+    if (!isLockContention(error)) {
+      throw error;
+    }
+    // A recoverer that died holding the mutex would otherwise block recovery for good.
+    if (await isOldLock(mutexPath, SOURCE_RECOVERY_MUTEX_MAX_AGE_MS)) {
+      await rm(mutexPath, { recursive: true, force: true });
+      return true;
+    }
     return false;
   }
-  const claimed = await readLockOwner(discarded);
-  if (claimed?.id !== judged?.id || !(await orphaned(claimed, discarded))) {
-    await renameWithWindowsRetry(discarded, lockPath).catch(() => undefined);
-    return false;
+  try {
+    const current = await judgeOrphan(lockPath);
+    const sameOrphan = current !== undefined && (current.kind === "owner"
+      ? judged.kind === "owner" && judged.owner.id === current.owner.id
+      : judged.kind === "none");
+    if (sameOrphan) {
+      // rm unlinks links instead of following them, so nothing outside the lock is touched.
+      await rm(lockPath, { recursive: true, force: true });
+    }
+    return true;
+  } finally {
+    await rm(mutexPath, { recursive: true, force: true });
   }
-  // rm unlinks links instead of following them, so nothing outside the lock is touched.
-  await rm(discarded, { recursive: true, force: true });
-  return true;
 }
 
 export function validateGitRef(candidate: string): string {
