@@ -156,8 +156,7 @@ test("removal approval gates version checks before any uninstall or deletion", a
   assert.ok(await readFile(f.file));
   f.view.stdin.write("d");
   await waitForFrame(f.view.lastFrame, /read [█░]* ?\d+%/u);
-  f.view.stdin.write("j".repeat(100));
-  await readPreview(f.view, /Approve demo\? y\/n/);
+  await readPreview(f.view, /Approve demo\? y\/n/, true);
   assert.deepEqual(f.commands, []);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Remove recipe for demo\? y\/n/);

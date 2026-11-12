@@ -75,12 +75,12 @@ export async function confirmAtEnd(view: PreviewView, rows: number, action: RegE
  * then returns every page read. The question sits in the footer, which shows `read ✓` only once the whole
  * preview has been read; waiting for it on the first page assumes the preview fits one page, and `y`
  * pressed there is ignored once a longer terminal size or temporary path makes the preview page. Call it right
- * after the key that opens the preview, with no wait in between.
+ * after the key that opens the preview, with no wait in between, or pass `alreadyOpen` for a preview the test has already seen open.
  */
-export async function readPreview(view: Pick<PreviewView, "lastFrame" | "stdin">, question: RegExp): Promise<string> {
-  // Call it right after the key that opens the preview: until the frame changes, the one on screen is the previous screen's.
+export async function readPreview(view: Pick<PreviewView, "lastFrame" | "stdin">, question: RegExp, alreadyOpen = false): Promise<string> {
+  // Until the frame changes, the one on screen is the previous screen's; skip that wait for a preview the test already saw open.
   const previous = view.lastFrame();
-  await waitForFrame(view.lastFrame, frame => frame !== previous && REVIEW.test(frame));
+  await waitForFrame(view.lastFrame, frame => (alreadyOpen || frame !== previous) && REVIEW.test(frame));
   const pages = await pageToEnd(view.lastFrame, view.stdin);
   assert.match(unwrapped(pages.at(-1)!), question, `the preview does not end on its question:\n${pages.at(-1)}`);
   return pages.join("\n");
