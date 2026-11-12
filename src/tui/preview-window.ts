@@ -2,6 +2,7 @@ import { useWindowSize } from "ink";
 import stringWidth from "string-width";
 
 import { headerTabRowCount } from "./header-layout.js";
+import { ESCAPE_TEXT, textUnits } from "./text-wrap.js";
 
 export interface PreviewChrome {
   readonly title: string;
@@ -53,12 +54,11 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const UNSAFE_PATTERN = "(?!\\u200D)[\\p{Cc}\\p{Cf}\\u2028\\u2029]";
 const UNSAFE_CHARACTER = new RegExp(UNSAFE_PATTERN, "u");
 // A backslash run before text shaped like an escape we print (`\x1b`, `\u202e`, `\u{1f600}`), or before a character we escape.
-const ESCAPE_TEXT = "x[0-9a-f]{2}|u[0-9a-f]{4}|u\\{[0-9a-f]{1,6}\\}";
 const ESCAPABLE = new RegExp(`(\\\\+)(?:(${ESCAPE_TEXT})|(?=${UNSAFE_PATTERN}))|${UNSAFE_PATTERN}`, "giu");
 
 /** Whether `escape` (`x1b`, `u202e`, `u{1f600}`) names a character this module would print as an escape. */
 function namesEscapedCharacter(escape: string): boolean {
-  const code = Number.parseInt(escape.replace(/^[xu]\{?|\}$/gu, ""), 16);
+  const code = Number.parseInt(escape.replace(/^[xu]\{?|\}$/giu, ""), 16);
   return code <= 0x10ffff && UNSAFE_CHARACTER.test(String.fromCodePoint(code));
 }
 
@@ -112,7 +112,7 @@ function hangingPrefix(line: string, width: number): string {
 }
 
 function wrapLine(line: string, width: number, hang = false): WrappedRow[] {
-  const segments = [...graphemes.segment(line)];
+  const segments = textUnits(line);
   if (segments.length === 0) return [{ row: "", offset: 0, prefixLength: 0 }];
   const prefix = hang ? hangingPrefix(line, width) : "";
   const wrapped: WrappedRow[] = [];

@@ -50,7 +50,7 @@ const INVISIBLE = /(?! )[\p{Cc}\p{Cf}\p{Zs}\p{Default_Ignorable_Code_Point}\u202
 
 function quoted(argument: string, terminal: boolean): string {
   // The TUI escapes control and format characters once, when it draws; escaping them here too would show a real RLO as typed text.
-  if (terminal) return quoteText(argument).replace(NOT_ESCAPED_BY_TUI, escapeCharacter);
+  if (terminal) return quoteText(argument);
   return JSON.stringify(argument).replace(INVISIBLE, escapeCharacter);
 }
 
@@ -59,9 +59,12 @@ function escapeCharacter(character: string): string {
   return code.length > 4 ? `\\u{${code}}` : `\\u${code.padStart(4, "0")}`;
 }
 
-/** `text` in double quotes with quotes and backslashes escaped; control characters stay as they are for the TUI to escape. */
+/**
+ * `text` in double quotes with quotes and backslashes escaped. Control and format characters stay as they are for the TUI to escape;
+ * spaces other than U+0020 and ignorable characters are written out, as in `commandLine`.
+ */
 export function quoteText(text: string): string {
-  return `"${text.replace(/[\\"]/gu, "\\$&")}"`;
+  return `"${text.replace(/[\\"]/gu, "\\$&").replace(NOT_ESCAPED_BY_TUI, escapeCharacter)}"`;
 }
 
 /**
