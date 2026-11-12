@@ -2946,6 +2946,30 @@ test("tui command renders the TUI with the injected Source operations", async ()
   assert.deepEqual(rendered, [operations]);
 });
 
+test("tui command disables the refresh on start only when AGENT_DEPOT_NO_BACKGROUND_REFRESH is 1", async () => {
+  const previous = process.env.AGENT_DEPOT_NO_BACKGROUND_REFRESH;
+  const refreshOnStartFor = async (value: string | undefined): Promise<unknown> => {
+    if (value === undefined) delete process.env.AGENT_DEPOT_NO_BACKGROUND_REFRESH;
+    else process.env.AGENT_DEPOT_NO_BACKGROUND_REFRESH = value;
+    let received: unknown;
+    await runCli(["tui"], {
+      operations: fakeOperations(),
+      isInteractive: () => true,
+      renderTui: async (_operations, environment) => {
+        received = Reflect.get(environment ?? {}, "refreshOnStart");
+      },
+    });
+    return received;
+  };
+  try {
+    assert.equal(await refreshOnStartFor("1"), false);
+    assert.equal(await refreshOnStartFor(undefined), true);
+  } finally {
+    if (previous === undefined) delete process.env.AGENT_DEPOT_NO_BACKGROUND_REFRESH;
+    else process.env.AGENT_DEPOT_NO_BACKGROUND_REFRESH = previous;
+  }
+});
+
 test("tui command fails with a clear error when the terminal is not interactive", async () => {
   const errors: string[] = [];
   let rendered = false;

@@ -26,6 +26,8 @@ export interface TuiEnvironment extends TuiPackagesEnvironment {
   readonly projectManifestStore?: ProjectManifestStore;
   /** Lets Updates tell a reused recent refresh from a new one. */
   readonly refreshSession?: SourceRefreshSession;
+  /** Refreshes the registered Git Sources in the background on start; defaults to true. */
+  readonly refreshOnStart?: boolean;
 }
 
 /** The Package operations a view uses: the injected fake, or the real flow over this environment. */
