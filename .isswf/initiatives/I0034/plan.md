@@ -1,9 +1,9 @@
 # I0034: Seguimientos de I0031 e I0032
 
-Type: improvement
+Type: maintenance
 
 ## J001
-- Status: done
+- Status: completed
 - Objective: Probar la espera al salir de la TUI y sustituir la variable de entorno AGENT_DEPOT_NO_BACKGROUND_REFRESH por una opción inyectada.
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
@@ -18,9 +18,9 @@ Type: improvement
 - Revisiones de I0031 (V001–V003): espera de render.tsx sin test; opt-out por variable de entorno leída en producción.
 
 ## J002
-- Status: done
+- Status: completed
 - Objective: Recuperar el bloqueo huérfano de la caché de una Source cuando el proceso que lo tenía murió.
-- Depends on: J001 integrado (orden secuencial, mismo checkout).
+- Depends on: J001
 - Brief: [brief-r1.md](jobs/J002/brief-r1.md)
 - Blocker: None
 - Next step: None.
@@ -33,9 +33,9 @@ Type: improvement
 - I0031: si el proceso muere durante un refresco queda `<cache>.lock` y todos los refrescos de esa Source fallan tras 30 s (src/git-source.ts:551-570).
 
 ## J003
-- Status: done
+- Status: completed
 - Objective: Eliminar la dependencia del tamaño de terminal por defecto en los tests que esperan `y/n` y pulsan `y`.
-- Depends on: J002 integrado.
+- Depends on: J002
 - Brief: [brief-r1.md](jobs/J003/brief-r1.md)
 - Blocker: None
 - Next step: None.
@@ -52,9 +52,9 @@ Type: improvement
 - J002 (sonnet) 888d186..e31dabc. V001 fail (B1: mover el bloqueo por ruta podía dejar dos titulares); corrección con mutex .recovering y relectura in situ; V002 approve. Windows CI verde. Entregado en PR #120. Seguimientos → J004: S3 publicar owner.json sin sobrescribir (link/EEXIST) e id en el mutex antes del rm; S4 maxRetries en los rm de Windows. Límite aceptado: pausas >60 s / >10 min dentro de la recuperación (arrendamiento por edad).
 
 ## J004
-- Status: done
+- Status: completed
 - Objective: Endurecer el bloqueo de Sources: owner.json sin sobrescritura, id en el mutex de recuperación y reintentos en los borrados.
-- Depends on: J003 integrado.
+- Depends on: J003
 - Brief: [brief-r1.md](jobs/J004/brief-r1.md)
 - Blocker: None
 - Next step: None.

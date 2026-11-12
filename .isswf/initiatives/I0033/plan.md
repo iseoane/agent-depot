@@ -1,11 +1,11 @@
 # I0033: Sobrescribir al exportar un Profile
 
-Type: feature
+Type: enhancement
 
 ## J001
-- Status: done
+- Status: completed
 - Objective: Al exportar un Profile a un fichero que ya existe, ofrecer sobrescribirlo (con confirmación explícita) en vez de solo pedir otro nombre.
-- Depends on: I0032 J001 (pie de confirmación).
+- Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Blocker: None
 - Next step: None (seguimientos en Evidence).
@@ -15,6 +15,7 @@ Type: feature
 - Sin confirmación nunca se sobrescribe; la CLI conserva el rechazo salvo flag explícito.
 
 ### Evidence
+- Dependía de I0032 J001 (pie de confirmación), ya integrado en PR #106.
 - Operador (2026-11-11): «al exportar si el fichero destino existe, da la posibilidad de sobrescribir»; autoriza completar I0032 y sacar release al acabar.
 - Código: src/profile-export.ts:267-269 (`wx`, EEXIST → error), src/tui/profile-view.tsx:418.
 - Operador (2026-11-11): «lo de sobrescribir no lo haces?» — se hará en esta tanda, antes de J002, e irá en la release.

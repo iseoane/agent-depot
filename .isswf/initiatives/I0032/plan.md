@@ -1,12 +1,12 @@
 # I0032: Claridad de recetas, previews y confirmaciones en la TUI
 
-Type: feature
+Type: enhancement
 
 ## J001
-- Status: done
+- Status: completed
 - Objective: Rediseñar la presentación de la revisión de recetas, la preview de lotes de actualización y la confirmación para que se distinga qué pertenece a qué.
 - Depends on: None
-- Brief: [J001 brief-r1.md](jobs/J001/brief-r1.md)
+- Brief: [brief-r1.md](jobs/J001/brief-r1.md)
 - Brief J002: [brief-r1.md](jobs/J002/brief-r1.md)
 - Brief J003a: [brief-r1.md](jobs/J003a/brief-r1.md)
 - Brief J003b: [brief-r1.md](jobs/J003b/brief-r1.md)
@@ -19,6 +19,9 @@ Type: feature
 - Brief J007: [brief-r1.md](jobs/J007/brief-r1.md)
 - Blocker: None
 - Next step: None. Release 0.6.14 en curso.
+
+### Acceptance
+- Recetas, preview de lote y confirmaciones con las propuestas A elegidas por el operador; compuerta `y` hasta leer el final en todas las confirmaciones; texto no confiable escapado.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».

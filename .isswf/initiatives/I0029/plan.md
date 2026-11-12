@@ -3,7 +3,7 @@
 Type: bug
 
 ## J001
-- Status: done
+- Status: completed
 - Objective: Diagnosticar y corregir el rechazo de self update en una instalación npm global válida con Node gestionado por mise/Omarchy, preservando las verificaciones de seguridad.
 - Depends on: None
 - Brief: [brief-r2.md](jobs/J001/brief-r2.md)

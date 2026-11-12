@@ -1,9 +1,9 @@
 # I0031: Marca de frescura de Sources y refresco en background al arrancar
 
-Type: feature
+Type: enhancement
 
 ## J001
-- Status: done
+- Status: completed
 - Objective: En la vista Sources, marcar cada Source como sin refrescar/refrescando/refrescada; al arrancar la TUI refrescar en background y actualizar la marca por Source.
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)

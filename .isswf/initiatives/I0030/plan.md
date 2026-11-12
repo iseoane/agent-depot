@@ -1,9 +1,9 @@
 # I0030: Progreso visible durante instalar/actualizar en la TUI
 
-Type: feature
+Type: enhancement
 
 ## J001
-- Status: done
+- Status: completed
 - Objective: Durante install/update en la TUI, mostrar junto al contador una línea con el recurso (Skill/App/Package) y paso en curso, en lugar de una vista estática.
 - Depends on: None
 - Brief: [brief-r1.md](jobs/J001/brief-r1.md)
