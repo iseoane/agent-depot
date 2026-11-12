@@ -3,7 +3,7 @@
 Type: feature
 
 ## J001
-- Status: in-progress
+- Status: done
 - Objective: Rediseñar la presentación de la revisión de recetas, la preview de lotes de actualización y la confirmación para que se distinga qué pertenece a qué.
 - Depends on: None
 - Brief: [J001 brief-r1.md](jobs/J001/brief-r1.md)
@@ -18,7 +18,7 @@ Type: feature
 - Brief J006: [brief-r1.md](jobs/J006/brief-r1.md)
 - Brief J007: [brief-r1.md](jobs/J007/brief-r1.md)
 - Blocker: None
-- Next step: J007 (saneado fuera de previews; worker sonnet), luego release 0.6.14.
+- Next step: None. Release 0.6.14 en curso.
 
 ### Evidence
 - Operador (2026-11-11): «las recetas, las confirmaciones, los preview… son poco claros para un humano, salen todo a batiburrillo… ¿2 propuestas por cada uno?».
@@ -59,3 +59,4 @@ Type: feature
 - J006 entregado: PR #116 fusionado con CI verde.
 - Operador (2026-11-12): tras la release, limpiar worktrees y ramas.
 - J007 worker (sonnet) 57bcffc..d135287. V001 fail (F1 doble escapado en aprobaciones; F2 sin Source real; F3 Profile mide sin escapar). Corrección 73c1869/d135287. V002 approve. Coordinador: RED solo tests, CLI sin cambios, golden 2/0, tests afectados 62/0. Tamaño: subestimado (1 corrección).
+- J007 entregado: PR #117 fusionado con CI verde. I0032 completa.
