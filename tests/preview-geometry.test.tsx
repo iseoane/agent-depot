@@ -20,7 +20,7 @@ test("a step line that wraps keeps the tree gutter and its indent on every conti
   const lines = styled.map(lineText);
   const chrome: PreviewChrome = { title: "Steps" };
   const viewport = previewViewport(lines, 0, 60, WIDTH, chrome);
-  const view = render(<PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={viewport} />);
+  const view = render(<PagedPreview lines={lines} styled={styled} viewport={viewport} />);
   const rows = panelRows(view.lastFrame() ?? "");
   view.unmount();
   const continuations = viewport.rows.flatMap((row, position) => viewport.sourceOffsets[position]! > 0 ? [{ row, source: viewport.sourceLines[position]! }] : []);
@@ -29,7 +29,7 @@ test("a step line that wraps keeps the tree gutter and its indent on every conti
     const expected = lines[source]!.startsWith(" │") ? " │ " : "   ";
     assert.ok(row.startsWith(expected) && !row.startsWith(`${expected} `), JSON.stringify(row));
     assert.ok(stringWidth(row) <= CONTENT, JSON.stringify(row));
-    assert.ok(rows.includes(row), `${JSON.stringify(row)} is drawn`);
+    assert.ok(rows.map(drawn => drawn.trimEnd()).includes(row.trimEnd()), `${JSON.stringify(row)} is drawn`);
   }
   // Nothing is lost: the joined continuation text reproduces each logical line.
   const rebuilt = lines.map((_, source) => viewport.rows.filter((__, position) => viewport.sourceLines[position] === source)

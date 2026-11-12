@@ -377,7 +377,7 @@ export function useSourcesRecipes({
       {mode.kind === "approve" ? (() => {
         const chrome = recipeApprovalChrome(mode.entry);
         const lines = mode.lines.map(lineText);
-        return <PagedPreview chrome={chrome} lines={lines} styled={mode.lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
+        return <PagedPreview lines={lines} styled={mode.lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
       })() : null}
       {mode.kind === "pick" ? (
         <BorderPanel title="Remove which recipe?">
@@ -395,12 +395,12 @@ export function useSourcesRecipes({
         const chrome = uninstallChrome(mode);
         const styled = appPlanLines(mode.plan);
         const lines = styled.map(lineText);
-        return <PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
+        return <PagedPreview lines={lines} styled={styled} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
       })() : null}
       {mode.kind === "remove" ? (() => {
         const chrome = removeChrome(mode.removal);
         const lines = removeLines(mode.removal);
-        return <PagedPreview chrome={chrome} lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
+        return <PagedPreview lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
       })() : null}
     </Box>
   );

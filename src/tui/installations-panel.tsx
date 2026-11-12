@@ -12,7 +12,7 @@ import { theme } from "./theme.js";
 /** An adoptable preview with the shared footer; the view shows it alone so no tree rows count against its height. */
 export function AdoptionConfirmPanel({ mode }: { readonly mode: Extract<InstallationsMode, { readonly kind: "confirm" }> }) {
   const { lines, chrome } = adoptionPreview(mode);
-  return <PagedPreview chrome={chrome} lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
+  return <PagedPreview lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
 }
 
 /** The prompt of the adoption and manage modes; browsing shows nothing. */

@@ -31,8 +31,9 @@ export interface UpdatesViewProps {
   readonly now?: () => number;
 }
 
-/** The state or mode whose label the working panel shows, if any. */
+/** Whether the working panel is drawn. A preview owns the screen: its height was computed without the panel, so the two never share it. */
 export function showsWorkingPanel(state: LoadState, mode: UpdatesMode): boolean {
+  if (mode.kind === "preview" || mode.kind === "manual" || mode.kind === "confirm-paths") return false;
   return state.status === "loading" || mode.kind === "busy";
 }
 
@@ -149,7 +150,7 @@ export function UpdatesView({ operations, environment, onCapturingChange, listHe
   const hasErrors = data?.appError !== undefined || (data?.results ?? []).some((result) => result.error !== undefined);
   const showingBrowse = mode.kind === "browse";
   // One indicator for the whole operation: a check's own phase label, else the busy mode's.
-  const working = state.status === "loading" ? state : mode.kind === "busy" ? mode : undefined;
+  const working = !showsWorkingPanel(state, mode) ? undefined : state.status === "loading" ? state : mode.kind === "busy" ? mode : undefined;
 
   return (
     <Box flexDirection="column">

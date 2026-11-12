@@ -459,7 +459,7 @@ function Prompt({ mode, previewGeometry }: { readonly mode: Mode; readonly previ
   if (mode.kind === "busy") return <BorderPanel title="Sources"><Working label={mode.label} since={mode.startedAt} /></BorderPanel>;
   if (mode.kind === "confirm" && previewGeometry !== undefined) {
     const { lines, chrome } = confirmPreview(mode);
-    return <PagedPreview chrome={chrome} lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
+    return <PagedPreview lines={lines} viewport={previewGeometry(lines, mode.cursor, chrome)} />;
   }
   return null;
 }

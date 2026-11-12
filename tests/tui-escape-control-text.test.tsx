@@ -25,7 +25,7 @@ test("a preview shows control and format characters escaped, in plain lines, sty
   const lines = [`plain ${HOSTILE}`, `styled ${HOSTILE}`, "Café 日本語 🙂 ok"];
   const styled = [undefined, [span("styled ", "white"), span(HOSTILE, "red", true)], undefined];
   const viewport = previewViewport(lines, 0, 40, 200, chrome);
-  const view = render(<PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={viewport} />);
+  const view = render(<PagedPreview lines={lines} styled={styled} viewport={viewport} />);
   const frame = view.lastFrame() ?? "";
   view.unmount();
   assert.ok(!CONTROL.test(withoutNewlines(frame)), JSON.stringify(frame));

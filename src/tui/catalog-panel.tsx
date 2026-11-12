@@ -79,7 +79,7 @@ export function CatalogSelectionHelp({ row, height }: {
 /** The install confirmation with the shared footer; the view shows it alone so no tree rows count against its height. */
 export function InstallConfirmPanel({ mode }: { readonly mode: Extract<ActionMode, { readonly kind: "confirm-install" }> }) {
   const { lines, chrome } = installPreview(mode.items);
-  return <PagedPreview chrome={chrome} lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
+  return <PagedPreview lines={lines} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
 }
 
 /** The prompt of the install flow; browsing shows nothing. */

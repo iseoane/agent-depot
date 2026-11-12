@@ -237,5 +237,5 @@ export function handlePackageKey(context: PackageContext, mode: PackageMode, inp
 export function PackagePanel({ mode }: { readonly mode: PackageMode }) {
   const { lines, chrome } = packagePreview(mode);
   const viewport = usePreviewGeometry()(lines, mode.cursor, chrome);
-  return <PagedPreview chrome={chrome} lines={lines} viewport={viewport} />;
+  return <PagedPreview lines={lines} viewport={viewport} />;
 }

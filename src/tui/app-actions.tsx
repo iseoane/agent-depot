@@ -299,5 +299,5 @@ export function AppPanel({ mode }: { readonly mode: AppMode }) {
   const styled = appPreviewLines(mode);
   const lines = styled.map(lineText);
   const chrome = appPreviewChrome(mode);
-  return <PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={geometry(lines, mode.cursor, chrome)} />;
+  return <PagedPreview lines={lines} styled={styled} viewport={geometry(lines, mode.cursor, chrome)} />;
 }

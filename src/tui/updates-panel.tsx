@@ -121,7 +121,7 @@ function CapturedUpdatePreview({ mode }: { readonly mode: CapturedUpdateMode }) 
   const styled = updateModePreviewLines(mode);
   const lines = styled.map(lineText);
   const chrome = updateModePreviewChrome(mode);
-  return <PagedPreview chrome={chrome} lines={lines} styled={styled} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
+  return <PagedPreview lines={lines} styled={styled} viewport={usePreviewGeometry()(lines, mode.cursor, chrome)} />;
 }
 
 export function ModePanel({ mode }: { readonly mode: UpdatesMode }) {
