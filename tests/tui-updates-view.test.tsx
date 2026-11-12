@@ -1618,13 +1618,13 @@ test("at 40x17 the batch footer still asks its question when several Skills lose
   assert.match(squash(end), /Apply3updates\?y\/n/u);
 });
 
-async function preparePackageBatch(t: TestContext, check: PackageUpdateCheck, planFails = false) {
+async function preparePackageBatch(t: TestContext, check: PackageUpdateCheck, planFails = false, version?: BundleDescriptor["version"]) {
   const f = await fixture(t);
   const packages = fakePackageOperations({
     checkUpdates: async () => [check],
     planLifecycle: async () => {
       if (planFails) throw new Error("plan refused");
-      return packagePlan;
+      return version === undefined ? packagePlan : { ...packagePlan, descriptor: { ...packageDescriptor, version } };
     },
     approvalStatus: async () => "needs approval",
   });
@@ -1649,6 +1649,8 @@ test("a Package preview names a recorded commit as a commit instead of a bare ha
   assert.equal(recorded.document.sections[0]?.items[0]?.version?.from, "commit 45e0761");
   const observed = await preparePackageBatch(t, { installed: commitOnly, observed: { kind: "installed", version: "0.9.60" }, status: "update available", available });
   assert.equal(observed.document.sections[0]?.items[0]?.version?.from, "0.9.60", "a readable installed version wins over the remembered commit");
+  const commitAvailable = await preparePackageBatch(t, { installed: commitOnly, status: "update available", available }, false, { kind: "git-commit", commit: "abcdef1234567890" });
+  assert.equal(commitAvailable.document.sections[0]?.items[0]?.version?.to, "commit abcdef1");
   const verifiedCommit = await preparePackageBatch(t, { installed: { ...packageRecord, verified: { kind: "git-commit", commit: "45e0761".padEnd(40, "0") } }, status: "update available", available });
   assert.equal(verifiedCommit.document.sections[0]?.items[0]?.version?.from, "commit 45e0761");
 });
