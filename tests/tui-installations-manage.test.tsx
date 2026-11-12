@@ -414,6 +414,45 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
+// 40x12 forces the preview onto several pages whatever the temporary paths look like, so the reading state is always reached.
+for (const flow of ["add", "remove"] as const) {
+  for (const [answer, key] of [["n", "n"], ["Esc", ESC]] as const) {
+    test(`a host ${flow} preview forced onto several pages ignores y mid-read and ${answer} cancels it`, async (t) => {
+      const f = await fixture(t, flow === "add" ? ["pi"] : ["pi", "claude"]);
+      const view = await mount(f);
+      deferCleanup(t, () => view.unmount());
+      resizeTerminal(view, { columns: 40, rows: 12 });
+      await revealSkill(view);
+      if (flow === "add") {
+        view.stdin.write("h");
+        await waitForFrame(view.lastFrame, /\[ \] 1 claude/);
+        view.stdin.write("1");
+        await waitForFrame(view.lastFrame, /\[x\] 1 claude/);
+      } else {
+        view.stdin.write("u");
+        await waitForFrame(view.lastFrame, /1\s+all\s+hosts.*2\s+choose\s+hosts/s);
+        view.stdin.write("2");
+        await waitForFrame(view.lastFrame, /\[ \] 1 pi.*\[ \] 2 claude/s);
+        view.stdin.write("2");
+        await waitForFrame(view.lastFrame, /\[x\] 2 claude/);
+      }
+      view.stdin.write(ENTER);
+      const first = await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
+      assert.match(first, /Review 1 of (?!1\b)\d+/u, `the preview should span several pages:\n${first}`);
+      view.stdin.write("y");
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const afterY = view.lastFrame() ?? "";
+      assert.match(afterY, /read [█░]* ?\d+%/u, `y left the preview before the footer read ✓:\n${afterY}`);
+      assert.doesNotMatch(afterY, /needs\s+separate\s+confirmation|Changing hosts|Removed hosts/u);
+      assert.deepEqual(await hostsOf(f.operations), flow === "add" ? ["pi"] : ["pi", "claude"]);
+      view.stdin.write(key);
+      await waitForFrame(view.lastFrame, flow === "add" ? /Install cancelled/ : /Uninstall cancelled/);
+      assert.deepEqual(await hostsOf(f.operations), flow === "add" ? ["pi"] : ["pi", "claude"]);
+      assert.equal(await exists(claude(f.home)), flow === "remove");
+    });
+  }
+}
+
 test("a y pasted in the same block as the cursor moves does not confirm the uninstall", async (t) => {
   const f = await fixture(t, ["pi"]);
   const view = await mount(f);

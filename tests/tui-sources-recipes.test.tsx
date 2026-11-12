@@ -98,6 +98,18 @@ test("Enter previews every step; only y approves and changed content needs appro
   assert.match(frame, /ID\s+KIND/);
 });
 
+test("the recipe review shows Owned Skills with a space or an invisible character unambiguously", async t => {
+  const f = await fixture(t);
+  await writeFile(f.file, JSON.stringify({ ...recipe, skills: ["two words", "hang\u3164ul", "plain-skill"] }));
+  const view = f.mount();
+  resizeTerminal(view, { columns: 220, rows: 80 });
+  await waitForFrame(view.lastFrame, /needs\s+approval/);
+  view.stdin.write("\r");
+  const rows = panelRows(await waitForFrame(view.lastFrame, /Owned Skills/u));
+  // A name with a space is quoted as one name; the invisible filler is spelled out instead of drawn as nothing.
+  assert.ok(rows.includes(' Owned Skills: "two words" "hang\\u3164ul" plain-skill'), rows.join("\n"));
+});
+
 test("the recipe review shows the App's identity, then one block per step with its command and where it runs", async t => {
   const f = await fixture(t, async name => name === "missing-tool" ? undefined : `/usr/bin/${name}`);
   await writeFile(f.file, JSON.stringify({ ...recipe, platform: "linux", homepage: "https://example.com/demo", skills: ["demo-skill"],

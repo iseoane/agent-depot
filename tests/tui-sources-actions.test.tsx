@@ -386,6 +386,26 @@ for (const size of PREVIEW_SIZES) {
   });
 }
 
+for (const size of PREVIEW_SIZES) {
+  test(`Source removal after a refresh message shows neither the message nor the list header in the whole App at ${size.columns}x${size.rows}`, async () => {
+    const h = harness();
+    const view = render(<App operations={h.operations} />);
+    resizeTerminal(view, size);
+    await waitForFrame(view.lastFrame, /builtin:agent-depot/);
+    view.stdin.write(DOWN);
+    await highlights(view.lastFrame, /git:1234/);
+    view.stdin.write("r");
+    await confirmAtEnd(view, size.rows, /\[y\] Refresh/, () => h.calls.includes(`refresh ${external.id}`));
+    await waitForFrame(view.lastFrame, (frame) => /Refreshed\s+Git\s+Source/u.test(frame));
+    view.stdin.write("d");
+    const preview = await waitForFrame(view.lastFrame, (frame) => /read [█░]* ?\d+%|read ✓/u.test(frame));
+    assert.doesNotMatch(preview, /Refreshed\s+Git\s+Source|Source\s+action/u, `the earlier message is still on screen:\n${preview}`);
+    assert.doesNotMatch(preview, /LOCATION \/ STATUS/, `the list header is still on screen:\n${preview}`);
+    assert.ok(preview.split("\n").length <= size.rows, `the preview exceeded ${size.rows} rows:\n${preview}`);
+    view.unmount();
+  });
+}
+
 for (const [label, cancelKey] of [["n", "n"], ["Esc", ESC]] as const) {
   test(`Source removal ignores y mid-read and ${label} cancels it`, async () => {
     const h = harness();
