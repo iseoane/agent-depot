@@ -966,6 +966,9 @@ test("narrow recipe approval keeps all execution terms reachable before consent"
     assert.ok(session.screen.replace(/[│\s]/gu, "").includes("FINAL-DANGER-TERM-MUST-STAY-HIDDEN"), `wide preview never exposed its final term:\n${session.screen}`);
     assert.ok(session.screen.split("\n").length <= 24, `wide final preview exceeded the 24-row PTY:\n${session.screen}`);
     preview += session.screen;
+    // At 80 columns the command fits on one row, so the argument boundaries are visible exactly as the recipe declares them.
+    const wideCommand = [...wideRows.values()].filter(row => row.includes("depot-e2e-app install"));
+    assert.deepEqual(wideCommand, [" │ $ depot-e2e-app install separate argv --danger=host-setup-tail"], `wide approval did not show the install argv on one exact row:\n${session.screen}`);
     while (/Review (\d+) of (\d+)/u.test(session.screen) && Number(/Review (\d+) of (\d+)/u.exec(session.screen)?.[1]) > 1) {
       session.press("\u001b[5~");
       await new Promise(resolve => setTimeout(resolve, 20));

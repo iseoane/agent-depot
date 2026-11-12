@@ -66,3 +66,23 @@ test("the interactive update preview text names the prompts instead of the flags
     "  WARNING: runs a repository-controlled command",
   ]);
 });
+
+test("an external method without cwd and without declared changes prints no cwd line and an empty declared-changes header", () => {
+  const bare = plan({
+    methodPreview: {
+      argv: ["make", "install skill"],
+      target: "/repo/.agents/skills/tdd",
+      declaredChanges: [],
+      warning: "runs a repository-controlled command",
+    } as unknown as SkillUpdatePlan["methodPreview"], // the type always carries cwd; the renderer still omits the line without one
+  });
+  assert.deepEqual(describeUpdatePreview(bare, "user-global", "/repo"), [
+    'Preview: update Skill "skills/tdd" from git:acme (scope: user-global)',
+    "  target: /repo/.agents/skills/tdd",
+    "  proposed changes: replace 4 managed files and persist the new version/content baseline",
+    '  external command: argv=["make","install skill"]',
+    '  external target: "/repo/.agents/skills/tdd"',
+    "  declared changes:",
+    "  WARNING: runs a repository-controlled command",
+  ]);
+});
