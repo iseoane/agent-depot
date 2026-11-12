@@ -15,6 +15,7 @@ import { fakePackageOperations } from "./fake-package-operations.js";
 import { renderExpanded } from "./render-expanded.js";
 import { pageToEnd } from "./package-panel.js";
 import { squash, waitForFrame } from "./wait-for-frame.js";
+import { readPreview } from "./preview-footer.js";
 
 const ENTER = "\r";
 const ESC = "\u001B";
@@ -192,7 +193,7 @@ test("i on a Catalog bundle previews the frozen plan, approves the missing recei
   assert.match(preview, /Approval: needs approval/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install"]);
   f.view.stdin.write("y");
-  await waitForFrame(f.view.lastFrame, /install pstack\? y\/n/);
+  await readPreview(f.view, /install pstack\? y\/n/);
   const approved = (await pageToEnd(f.view.lastFrame, f.view.stdin)).join("\n");
   assert.match(approved, /Approval: approved/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install", "approve:install"]);
@@ -210,7 +211,7 @@ test("an approved Catalog bundle runs on the first y with no second gate", async
   const f = await fixture(t, { approval: "approved" });
   await revealBundle(f.view);
   f.view.stdin.write("i");
-  await waitForFrame(f.view.lastFrame, /install pstack\? y\/n/);
+  await readPreview(f.view, /install pstack\? y\/n/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /pstack: installed \(installed 1\.2\.0\)/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install", "execute:install"]);
@@ -223,7 +224,7 @@ test("the Catalog reload after a Package action keeps counting the action's elap
   const f = await fixture(t, { approval: "approved", executeGate, discoverGate });
   await revealBundle(f.view);
   f.view.stdin.write("i");
-  await waitForFrame(f.view.lastFrame, /install pstack\? y\/n/);
+  await readPreview(f.view, /install pstack\? y\/n/);
   let releaseExecute = () => {};
   let releaseDiscover = () => {};
   executeGate.promise = new Promise<void>((resolve) => { releaseExecute = resolve; });
@@ -244,13 +245,13 @@ test("n and Esc at either Catalog bundle gate write and run nothing", async (t) 
   const f = await fixture(t);
   await revealBundle(f.view);
   f.view.stdin.write("i");
-  await waitForFrame(f.view.lastFrame, /Approve this declaration and continue\? y\/n/);
+  await readPreview(f.view, /Approve this declaration and continue\? y\/n/);
   f.view.stdin.write("n");
   await waitForFrame(f.view.lastFrame, /Package action cancelled/);
   assert.deepEqual(f.calls, ["plan:install", "approval:install"]);
 
   f.view.stdin.write("i");
-  await waitForFrame(f.view.lastFrame, /Approve this declaration and continue\? y\/n/);
+  await readPreview(f.view, /Approve this declaration and continue\? y\/n/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /install pstack\? y\/n/);
   f.view.stdin.write(ESC);
@@ -265,9 +266,9 @@ test("a stale Catalog bundle plan is reported and never executed again", async (
   });
   await revealBundle(f.view);
   f.view.stdin.write("i");
-  await waitForFrame(f.view.lastFrame, /Approve this declaration and continue\? y\/n/);
+  await readPreview(f.view, /Approve this declaration and continue\? y\/n/);
   f.view.stdin.write("y");
-  await waitForFrame(f.view.lastFrame, /install pstack\? y\/n/);
+  await readPreview(f.view, /install pstack\? y\/n/);
   f.view.stdin.write("y");
   const frame = await waitForFrame(f.view.lastFrame, /not run:/);
   assert.match(frame, /pstack: install not run: the install declaration changed/);

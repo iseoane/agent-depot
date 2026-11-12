@@ -22,7 +22,7 @@ import type { TuiEnvironment } from "../src/tui/environment.js";
 import { waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { directoryLink } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
-import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal, readPreview } from "./preview-footer.js";
 
 const SKILL_MD = "---\nname: demo\ndescription: Demo skill\n---\n\nBody\n";
 const tree: readonly SkillTreeFile[] = [
@@ -224,7 +224,7 @@ test("manual App setup and teardown remain separate confirmed Host actions", asy
   fixture.view.stdin.write("h");
   await waitForFrame(fixture.view.lastFrame, /Checked = setup/i);
   fixture.view.stdin.write("\r");
-  const setup = await waitForFrame(fixture.view.lastFrame, /setup demo\? y\/n/);
+  const setup = await readPreview(fixture.view, /setup demo\? y\/n/);
   assert.match(setup, /\$ demo setup/);
   fixture.view.stdin.write("y");
   await waitForFrame(fixture.view.lastFrame, /demo: completed/);
@@ -235,7 +235,7 @@ test("manual App setup and teardown remain separate confirmed Host actions", asy
   fixture.view.stdin.write(" ");
   await waitForFrame(fixture.view.lastFrame, /\[ \] 1 pi/);
   fixture.view.stdin.write("\r");
-  const teardown = await waitForFrame(fixture.view.lastFrame, /demo teardown manually[\s\S]*done, check now\? y\/n/);
+  const teardown = await readPreview(fixture.view, /demo teardown manually[\s\S]*done, check now\? y\/n/);
   assert.match(teardown, /Manual:/);
   const before = fixture.commands.length;
   fixture.view.stdin.write("y");

@@ -11,7 +11,7 @@ import { SourcesView, type SourcesViewProps } from "../src/tui/sources-view.js";
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { readToEnd } from "./package-panel.js";
 import { deferCleanup } from "./test-cleanup.js";
-import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, panelRows, PREVIEW_SIZES, resizeTerminal, readPreview } from "./preview-footer.js";
 
 const recipe = { name: "demo", install: { argv: ["demo", "install"] }, update: { manual: "update demo" },
   uninstall: { argv: ["demo", "remove"] }, version: { argv: ["demo", "version"], pattern: "(.*)" },
@@ -88,8 +88,7 @@ test("Enter previews every step; only y approves and changed content needs appro
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "needs approval");
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
-  view.stdin.write("j".repeat(100));
-  await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
+  await readPreview(view, /Approve demo\? y\/n/, true);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /approved/);
   await writeFile(f.file, JSON.stringify({ ...recipe, homepage: "https://example.com" }));
@@ -199,8 +198,7 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   await waitForFrame(view.lastFrame, /needs\s+approval/);
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /read [█░]* ?\d+%/u);
-  view.stdin.write("j".repeat(100));
-  await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
+  await readPreview(view, /Approve demo\? y\/n/, true);
   await writeFile(f.file, JSON.stringify({ ...recipe, platform: "windows" }));
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, /Recipe changed, invalid or not applicable/);
@@ -208,8 +206,7 @@ test("recipe changes after preview and foreign-platform recipes cannot be approv
   await waitForFrame(view.lastFrame, /not\s+applicable\s+here/);
   view.stdin.write("\r");
   await waitForFrame(view.lastFrame, /demo {2}windows {2}● not applicable here/);
-  view.stdin.write("j".repeat(100));
-  await waitForFrame(view.lastFrame, /Approve demo\? y\/n/);
+  await readPreview(view, /Approve demo\? y\/n/, true);
   view.stdin.write("y");
   await waitForFrame(view.lastFrame, frame => frame.includes("Recipe changed, invalid or not applicable") && !frame.includes("Approve demo?"));
   assert.equal((await f.apps.inspect((await f.apps.load())[0]!, {})).status, "not applicable here");

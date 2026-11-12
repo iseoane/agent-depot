@@ -15,7 +15,7 @@ import { fakePackageOperations, installedPackage, piPackage } from "./profile-pa
 import { squash, waitForFrame, waitForSettled } from "./wait-for-frame.js";
 import { skipWithoutFileSymlinks } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
-import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal } from "./preview-footer.js";
+import { confirmAtEnd, PREVIEW_SIZES, resizeTerminal, readPreview } from "./preview-footer.js";
 
 const recipe = { name: "demo", install: { manual: "Install demo" }, update: { manual: "Update demo" },
   uninstall: { manual: "Remove demo" }, version: { argv: ["demo", "version"], pattern: "(.*)" } };
@@ -155,12 +155,12 @@ test("export shows grouped choices and exclusions, confirms a new file and overw
   await waitForFrame(f.view.lastFrame, frame => frame.includes("Name: out.json_") && !frame.includes("Overwrite out.json"));
   assert.equal(await readFile(file, "utf8"), "stale");
   f.view.stdin.write("\r");
-  await waitForFrame(f.view.lastFrame, /Overwrite out\.json\? \(y\/n\)/);
+  await readPreview(f.view, /Overwrite out\.json\? \(y\/n\)/);
   f.view.stdin.write("\u001b");
   await waitForFrame(f.view.lastFrame, frame => frame.includes("Name: out.json_") && !frame.includes("Overwrite out.json"));
   assert.equal(await readFile(file, "utf8"), "stale");
   f.view.stdin.write("\r");
-  await waitForFrame(f.view.lastFrame, /Overwrite out\.json\? \(y\/n\)/);
+  await readPreview(f.view, /Overwrite out\.json\? \(y\/n\)/);
   f.view.stdin.write("y");
   await waitForFrame(f.view.lastFrame, /Exported profile to/);
   assert.equal(parseProfile(JSON.parse(await readFile(file, "utf8"))).apps[0]?.name, "demo");

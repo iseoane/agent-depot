@@ -6,12 +6,16 @@ import { test } from "node:test";
 import { render } from "ink-testing-library";
 import {
   DEFAULT_PROFILE_FILE_NAME, exportDestination, fileNameNotice, pathExists, pickerEntries, pickerStartDirectory,
-  resolveExportFileName, sortDirectoryEntries, type DirectoryListing, type PickerSelection,
+  resolveExportFileName, sortDirectoryEntries, readDirectoryListing, type DirectoryListing, type PickerSelection,
 } from "../src/tui/file-picker-model.js";
 import { FilePicker } from "../src/tui/file-picker.js";
 import { waitForFrame } from "./wait-for-frame.js";
 import { directoryLink, fileSymlinksSupported } from "./link-helpers.js";
 import { deferCleanup } from "./test-cleanup.js";
+import { resizeTerminal } from "./preview-footer.js";
+
+/** Wide enough that a long temporary directory neither wraps nor gets clipped, so path assertions do not depend on where the test runs. */
+const WIDE = { columns: 400, rows: 24 };
 
 test("export file names gain .json only when they have no extension, and unsafe names are refused", () => {
   assert.deepEqual(resolveExportFileName("agent-depot-profile"), { kind: "ok", fileName: "agent-depot-profile.json", appendedExtension: true });
@@ -60,8 +64,12 @@ test("the directory picker selects the current folder and descends into a subfol
   await mkdir(sub);
   await writeFile(path.join(root, "a.json"), "{}");
   const chosen: PickerSelection[] = [];
-  const view = render(<FilePicker purpose="directory" startDirectory={root} onCancel={() => {}} onChoose={selection => chosen.push(selection)} />);
+  // The real listing, delayed: the loading frame already shows `Directory: <sub>` before its rows, so a
+  // wait on the header alone reads a frame with no parent row whenever the read is slower than a render.
+  const slowRead = async (directory: string) => { await new Promise(resolve => setTimeout(resolve, 60)); return readDirectoryListing(directory); };
+  const view = render(<FilePicker purpose="directory" startDirectory={root} readDirectory={slowRead} onCancel={() => {}} onChoose={selection => chosen.push(selection)} />);
   deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, WIDE);
   const first = await waitForFrame(view.lastFrame, frame => frame.includes(`Use this folder: ${root}`));
   assert.match(first, /> Use this folder/);
   view.stdin.write("\r");
@@ -74,7 +82,7 @@ test("the directory picker selects the current folder and descends into a subfol
   view.stdin.write("j");
   await waitForFrame(view.lastFrame, frame => frame.split("\n").some(line => line.includes("> ") && line.includes("sub/")));
   view.stdin.write("\r");
-  const inside = await waitForFrame(view.lastFrame, frame => frame.includes(`Directory: ${sub}`));
+  const inside = await waitForFrame(view.lastFrame, frame => frame.includes(`Directory: ${sub}`) && frame.includes(".. (parent folder)"));
   assert.match(inside, /\.\. \(parent folder\)/);
 });
 
@@ -122,6 +130,7 @@ test("a slow earlier read never replaces a newer directory", async t => {
   };
   const view = render(<FilePicker purpose="directory" startDirectory={slow} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
   deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, WIDE);
   view.rerender(<FilePicker purpose="directory" startDirectory={fast} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
   await waitForFrame(view.lastFrame, frame => frame.includes(`Directory: ${fast}`));
   await new Promise(resolve => setTimeout(resolve, 200));
@@ -199,6 +208,7 @@ test("a symlink to a directory is classified as a directory and navigated into",
   if (fileLinked) await symlink(path.join(root, "file.json"), path.join(root, "file-link.json"));
   const view = render(<FilePicker purpose="file" startDirectory={root} onCancel={() => {}} onChoose={() => {}} />);
   deferCleanup(t, () => view.unmount());
+  resizeTerminal(view, WIDE);
   const frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("dir-link/"));
   assert.match(frame, /dir-link\//);
   if (!fileLinked) t.diagnostic("file symlinks unavailable (EPERM); file-link assertions skipped");
@@ -209,7 +219,8 @@ test("a symlink to a directory is classified as a directory and navigated into",
   view.stdin.write("j");
   await waitForFrame(view.lastFrame, candidate => candidate.split("\n").some(line => line.includes("> ") && line.includes("dir-link/")));
   view.stdin.write("\r");
-  const inside = await waitForFrame(view.lastFrame, candidate => candidate.includes(`Directory: ${path.join(root, "dir-link")}`));
+  // The header shows while the folder is still loading, so wait for its rows too.
+  const inside = await waitForFrame(view.lastFrame, candidate => candidate.includes(`Directory: ${path.join(root, "dir-link")}`) && candidate.includes("inside/"));
   assert.match(inside, /inside\//);
 });
 
@@ -220,6 +231,7 @@ test("a failed read recovers through parent navigation, and loading allows leavi
   const failing = path.join(root, "missing");
   const failingView = render(<FilePicker purpose="directory" startDirectory={failing} onCancel={() => {}} onChoose={() => {}} />);
   deferCleanup(t, () => failingView.unmount());
+  resizeTerminal(failingView, WIDE);
   const error = await waitForFrame(failingView.lastFrame, candidate => /Error:.*ENOENT/.test(candidate));
   assert.match(error, /Loading|Error/);
   failingView.stdin.write("\u001b[D");
@@ -237,6 +249,7 @@ test("a failed read recovers through parent navigation, and loading allows leavi
   };
   const slowView = render(<FilePicker purpose="directory" startDirectory={blocked} readDirectory={readDirectory} onCancel={() => {}} onChoose={() => {}} />);
   deferCleanup(t, () => slowView.unmount());
+  resizeTerminal(slowView, WIDE);
   await waitForFrame(slowView.lastFrame, candidate => candidate.includes("Loading"));
   slowView.stdin.write("\u001b[D");
   const left = await waitForFrame(slowView.lastFrame, candidate => candidate.includes(`Use this folder: ${root}`));
