@@ -2,6 +2,7 @@ import { type Key } from "ink";
 import { Text } from "./safe-text.js";
 
 import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
+import { formatStepLabel } from "../flow-progress.js";
 import { commandLine } from "../preview-model.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
 import { errorText, runBatch } from "./batch.js";
@@ -129,9 +130,9 @@ function appBusy(label: string, previous?: AppMode, done?: readonly string[]): A
   return { kind: "app-busy", label, startedAt: operationStart(previous), ...(done?.length ? { done } : {}) };
 }
 
-/** `Running App step: name (2/5)…`; the position is left out for a batch of one. */
+/** `Running App step: name (2/5)…`; `finished` counts the steps already done. */
 function stepLabel(verb: string, entry: AppEntry, finished: number, total: number): string {
-  return `${verb} App step: ${appName(entry)}${total > 1 ? ` (${finished + 1}/${total})` : ""}…`;
+  return formatStepLabel(`${verb} App step: ${appName(entry)}`, finished + 1, total);
 }
 
 async function prepareNext(
