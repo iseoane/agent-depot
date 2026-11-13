@@ -103,7 +103,6 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
   await writeFile(path.join(recipesDirectory, "gentle-shell.json"), JSON.stringify({
     ...RECIPE,
     install: { ...RECIPE.install, manual: `${"Manual installation details remain reviewable. ".repeat(24)}FINAL-MANUAL-TERM` },
-    setup: { claude: { manual: "wire claude" }, pi: { manual: "wire pi" } },
   }));
   await writeFile(path.join(recipesDirectory, "missing-app.json"), JSON.stringify({
     ...RECIPE,
@@ -169,7 +168,6 @@ test("Catalog installs an approved App recipe only after preview confirmation", 
     view.stdin.write("y");
     frame = await waitForFrame(view.lastFrame, candidate => candidate.includes("gentle-shell: installed 1.2.3") && !/gentle-shell\s+not installed/.test(candidate));
     assert.match(frame, /Result · complete/);
-    assert.match(frame, /gentle-shell: installed 1\.2\.3; Host setup not run: pi, claude \(h\)/);
     assert.equal((await apps.trackedApps()).find(record => record.name === "gentle-shell")?.installedVersion, "1.2.3");
     assert.ok(commands.some(command => command === "npm install -g gentle-shell"));
     assert.doesNotMatch(frame, /gentle-shell\s+not installed/);

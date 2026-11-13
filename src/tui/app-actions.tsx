@@ -1,7 +1,7 @@
 import { type Key } from "ink";
 import { Text } from "./safe-text.js";
 
-import { declaredSetupHosts, type AppEntry, type AppLifecyclePlan, type AppOperations } from "../app-flow.js";
+import type { AppEntry, AppLifecyclePlan, AppOperations } from "../app-flow.js";
 import { formatStepLabel } from "../flow-progress.js";
 import { commandLine } from "../preview-model.js";
 import { PROJECT_HOSTS, type ProjectHost } from "../project-manifest.js";
@@ -220,10 +220,7 @@ async function execute(context: AppContext, mode: Extract<AppMode, { kind: "app-
     }
     if (result.status === "failed") throw new Error(result.reason);
     manage.unmark([`app:${plan.entry.file}`]);
-    const setupHosts = plan.action === "install" && result.status === "installed" ? declaredSetupHosts(plan.entry.recipe!) : [];
-    // Install never runs Host setup and wiring is not tracked, so name what is still to do.
-    const setupHint = setupHosts.length ? `; Host setup not run: ${setupHosts.join(", ")} (h)` : "";
-    return `${appName(plan.entry)}: ${result.status}${result.installedVersion ? ` ${result.installedVersion}` : ""}${setupHint}`;
+    return `${appName(plan.entry)}: ${result.status}${result.installedVersion ? ` ${result.installedVersion}` : ""}`;
   }, (plan, error) => `${appName(plan.entry)}: failed: ${errorText(error)}`);
   if (manage.isMounted() && outcome && !manualRequired) {
     await prepareNext(context, mode.remaining, [...mode.results, outcome.line], mode.failures + (outcome.ok ? 0 : 1), running);
