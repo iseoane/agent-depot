@@ -636,9 +636,9 @@ for (const size of PREVIEW_SIZES) {
     const [entry] = await fixture.apps.load();
     await confirmAtEnd(fixture.view, size.rows, /\[y\] Approve demo/, () => /Approved demo/.test(fixture.view.lastFrame() ?? ""));
     assert.equal((await fixture.apps.approvalStatus(entry!)).status, "approved");
-    // At narrow sizes the " (recorded)" suffix can wrap past the list viewport; the approval outcome is what matters.
     await waitForFrame(fixture.view.lastFrame, frame => /demo {2}1\.0\.0/.test(frame) && !/needs approval/.test(frame));
-    assert.deepEqual(fixture.commands, []);
+    // Approval runs no recipe step; once approved, the focused App may get its read-only version check.
+    assert.deepEqual(fixture.commands.filter(command => command !== "--version"), []);
   });
 }
 
