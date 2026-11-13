@@ -8,7 +8,7 @@ import { fetchAppLatest } from "./app-latest.js";
 import { writeFileAtomically } from "./atomic-file.js";
 import { parseAppRecipe, type AppRecipe, type AppStep } from "./app-recipes.js";
 import { createPortableExecutableResolver } from "./executable-resolution.js";
-import { type ProjectHost } from "./project-manifest.js";
+import { PROJECT_HOSTS, type ProjectHost } from "./project-manifest.js";
 import { runProcess } from "./process-runner.js";
 import { defaultSourceStatePath } from "./source-state.js";
 
@@ -556,6 +556,11 @@ export function createAppOperations(environment: AppEnvironment = {}) {
 }
 
 export type AppOperations = ReturnType<typeof createAppOperations>;
+
+/** Hosts whose user-global setup the recipe declares; install never runs them and wiring is not tracked. */
+export function declaredSetupHosts(recipe: AppRecipe): readonly ProjectHost[] {
+  return PROJECT_HOSTS.filter(host => recipe.setup?.[host] !== undefined);
+}
 
 /** Concurrent independent checks; one broken App must not hide the rest of a batch. */
 export async function checkAppUpdates(apps: AppOperations): Promise<readonly AppUpdateCheck[]> {

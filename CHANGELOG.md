@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `app install` names the Hosts whose setup the recipe declares and the `app setup` command to run, since install never runs Host setup and wiring is not tracked.
+- The built-in `agent-depot-apprecipe` Skill (1.3) checks Host wiring in its preflight (unattended setup per Host, conflicting MCP entries, plugins and packages), prefers `argv` setup when possible, rechecks manual setup on repair and hands off the pending `app setup` command per Host.
+
 ## [0.6.15] - 2026-11-12
 
 ### Changed
