@@ -429,3 +429,31 @@ test("App lifecycle steps show progress and stdout is unchanged", async () => {
     assert.deepEqual(done.labels, ["Checking App example", "Checking App updates"]);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
+
+test("CLI install names the recipe's Host setups, which it never runs", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-setup-hint-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  try {
+    await writeFile(path.join(directory, "recipe.json"), JSON.stringify({ name: "example",
+      install: { argv: ["example", "install"] }, update: { manual: "update" }, uninstall: { manual: "remove" },
+      version: { argv: ["example", "--version"], pattern: "(v1)" },
+      setup: { claude: { manual: "wire claude" }, pi: { argv: ["example", "pi"] } },
+    }));
+    const calls: string[] = [];
+    const apps = createAppOperations({ recipesDirectory: directory, homeDirectory: home, isWsl: false,
+      resolveExecutable: async () => "/usr/bin/example", runner: async (_command, args) => {
+        calls.push(args[0]!);
+        return { code: 0, signal: null, stdout: Buffer.from("v1"), stderr: "", outputTooLarge: false };
+      } });
+    await apps.approve((await apps.load())[0]!);
+    const lines: string[] = [];
+    const deps = { appOperations: apps, stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) };
+    assert.equal(await runCli(["app", "install", "example", "--yes"], deps), 0);
+    assert.deepEqual(calls, ["install", "--version"]);
+    assert.ok(lines.includes("Host setup is separate and not tracked; this recipe declares it for: pi, claude."));
+    assert.ok(lines.includes("Run app setup 'example' --host <host> --yes for each Host you use."));
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

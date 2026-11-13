@@ -1,6 +1,6 @@
 import { PROJECT_HOSTS, type ProjectHost } from "./project-manifest.js";
 import { APP_RECIPE_SCHEMA } from "./app-schema.js";
-import { checkAppUpdates, type AppUpdateCheck, type AppOperations, type AppEntry, type AppLifecyclePlan, type AppLifecycleResult } from "./app-flow.js";
+import { checkAppUpdates, declaredSetupHosts, type AppUpdateCheck, type AppOperations, type AppEntry, type AppLifecyclePlan, type AppLifecycleResult } from "./app-flow.js";
 import { NO_PROGRESS, type Progress } from "./progress.js";
 import { CliUsageError } from "./usage-error.js";
 
@@ -157,16 +157,28 @@ async function runLifecycle(
       output(`Manual (never executed): ${result.manual}`);
       output(describeManualCompletion(plan));
     }
+    if (action === "install" && result.status === "installed") showSetupHosts(plan);
     return result.status === "installed" || result.status === "untracked" || result.status === "completed" ? 0 : 1;
   }
+
+  function showSetupHosts(plan: AppLifecyclePlan) {
+    const hosts = declaredSetupHosts(plan.entry.recipe!);
+    if (!hosts.length) return;
+    output(`Host setup is separate and not tracked; this recipe declares it for: ${hosts.join(", ")}.`);
+    output(`Run app setup ${quoteAppName(name)} --host <host> --yes for each Host you use.`);
+  }
+}
+
+function quoteAppName(name: string): string {
+  return process.platform === "win32"
+    ? "'" + name.replaceAll("'", "''") + "'"
+    : "'" + name.replaceAll("'", "'\\''") + "'";
 }
 
 /** Copyable completion command for the platform's documented shell. */
 export function describeManualCompletion(plan: AppLifecyclePlan): string {
   const name = plan.entry.recipe!.name;
-  const quotedName = process.platform === "win32"
-    ? "'" + name.replaceAll("'", "''") + "'"
-    : "'" + name.replaceAll("'", "'\\''") + "'";
+  const quotedName = quoteAppName(name);
   const shell = process.platform === "win32" ? "PowerShell" : "POSIX shell";
   return `After completing it, run app ${plan.action} ${quotedName}${plan.host ? ` --host ${plan.host}` : ""} --manual-done --yes to check version (${shell}).`;
 }
