@@ -457,3 +457,30 @@ test("CLI install names the recipe's Host setups, which it never runs", async ()
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test("CLI manual install completion also names the declared Host setups", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "app-cli-setup-hint-manual-"));
+  const directory = path.join(home, "apps");
+  await mkdir(directory);
+  try {
+    await writeFile(path.join(directory, "recipe.json"), JSON.stringify({ name: "example",
+      install: { manual: "install yourself" }, update: { manual: "update" }, uninstall: { manual: "remove" },
+      version: { argv: ["example", "--version"], pattern: "(v1)" },
+      setup: { opencode: { manual: "wire opencode" } },
+    }));
+    const calls: string[] = [];
+    const apps = createAppOperations({ recipesDirectory: directory, homeDirectory: home, isWsl: false,
+      resolveExecutable: async () => "/usr/bin/example", runner: async (_command, args) => {
+        calls.push(args[0]!);
+        return { code: 0, signal: null, stdout: Buffer.from("v1"), stderr: "", outputTooLarge: false };
+      } });
+    await apps.approve((await apps.load())[0]!);
+    const lines: string[] = [];
+    const deps = { appOperations: apps, stdout: (line: string) => lines.push(line), stderr: (line: string) => lines.push(line) };
+    assert.equal(await runCli(["app", "install", "example", "--manual-done", "--yes"], deps), 0);
+    assert.deepEqual(calls, ["--version"]);
+    assert.ok(lines.includes("Host setup is separate and not tracked; this recipe declares it for: opencode."));
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
